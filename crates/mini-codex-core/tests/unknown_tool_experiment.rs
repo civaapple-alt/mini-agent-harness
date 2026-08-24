@@ -42,6 +42,7 @@ impl Model for RecoveringModel {
             .any(|message| matches!(message, Message::Tool { is_error: true, .. }));
         if saw_tool_error {
             return Ok(ModelResponse {
+                reasoning: String::new(),
                 text: RECOVERY_EVIDENCE.to_string(),
                 tool_calls: Vec::new(),
                 usage: None,
@@ -49,6 +50,7 @@ impl Model for RecoveringModel {
         }
 
         Ok(ModelResponse {
+            reasoning: String::new(),
             text: "Trying the workspace_search tool.".to_string(),
             tool_calls: vec![ToolCall {
                 id: "call-1".to_string(),

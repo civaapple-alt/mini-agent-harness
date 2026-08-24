@@ -11,6 +11,7 @@ pub enum Message {
         text: String,
     },
     Assistant {
+        reasoning: String,
         text: String,
         tool_calls: Vec<ToolCall>,
     },
@@ -31,6 +32,7 @@ pub struct ToolCall {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelResponse {
+    pub reasoning: String,
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
     pub usage: Option<ModelUsage>,
@@ -45,6 +47,7 @@ pub struct ModelUsage {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ModelEvent {
+    ReasoningDelta(String),
     TextDelta(String),
 }
 

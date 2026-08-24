@@ -59,7 +59,10 @@ half of the hard context ceiling.
 The deterministic demo proves the complete model -> tool -> model -> answer
 path without network or credentials. The default command opens a small
 multi-turn terminal using a streaming OpenAI Responses adapter at the CLI
-edge. It keeps history only for the life of the process; `/new` clears it.
+edge. Reasoning and final-answer deltas use separate `thinking>` and
+`assistant>` lanes. Input entered while a turn is running is accepted into a
+bounded FIFO queue; `/queue` reports how much work is pending. History and
+queued work live only for the life of the process, and `/new` clears history.
 
 ## Run
 
@@ -78,24 +81,28 @@ cargo run -p mini-codex-cli -- --trace trace.jsonl
 python scripts/line_budget.py
 ```
 
-The real modes expose `read_file`, `edit_file`, `write_file`, and `shell`.
-Reads and direct file writes are confined to the current workspace; `.git` is
-protected. `edit_file` makes one exact unique replacement; `write_file` creates
-new files and refuses to replace existing ones. Interactive and `run` modes ask
-before writes and every shell command. `auto` without a prompt starts an
-interactive auto session; `/auto` enables automatic execution in any
-interactive session and `/auto off` restores per-action approval. `auto` with a
-prompt remains a one-shot copilot. Auto mode runs up to 128 model steps,
-performs writes and shell commands without per-step approval, and compacts
-context between settled tool batches so work can continue. It prints a warning
-because shell execution is not sandboxed and can escape the workspace even
-though direct file tools cannot.
+The real modes expose `read_file`, `edit_file`, `write_file`, `shell`,
+`read_tool_result`, and managed-process tools. Reads and direct file writes are
+confined to the current workspace; `.git` is protected. `edit_file` makes one
+exact unique replacement; `write_file` creates new files and refuses to replace
+existing ones. Interactive and `run` modes ask before writes, shell commands,
+and process starts. `auto` without a prompt starts an interactive auto session;
+`/auto` enables automatic execution in any interactive session and `/auto off`
+restores per-action approval. `auto` with a prompt remains a one-shot copilot.
+Auto mode runs up to 128 model steps, performs effects without per-step
+approval, and compacts context between settled tool batches so work can
+continue. It prints a warning because process execution is not sandboxed and
+can escape the workspace even though direct file tools cannot.
 
-Oversized tool results retain their beginning and end inside a hard byte budget,
-with truncation explicit in the event trace. Shell processes have a 120-second
-deadline and bounded concurrent stdout/stderr capture; timeout terminates the
-process tree. Conversation persistence and resume remain deliberately absent:
-auto mode survives long context growth, not process termination.
+Foreground `shell` commands have a 120-second deadline and bounded concurrent
+stdout/stderr capture; timeout terminates the process tree. A large result is
+returned as a short head/tail preview plus a process-local handle that
+`read_tool_result` can inspect by byte range or literal query. Long-lived
+services should use `process_start`, `process_read`, `process_list`, and
+`process_stop`; their logs and process count are bounded, and remaining process
+trees are stopped when the CLI exits. Conversation, result handles, queued
+input, and managed processes deliberately remain non-durable: auto mode
+survives long context growth, not process termination.
 
 See [the experiment protocol](docs/experiments.md), the
 [unknown-tool comparison](docs/experiments/unknown-tool.md), the

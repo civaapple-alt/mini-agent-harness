@@ -9,6 +9,7 @@ without turning the experiment platform into the product being studied?
 
 The model owns proposals:
 
+- reasoning text, streamed separately from user-facing text;
 - assistant text;
 - zero or more named tool calls;
 - arguments for each call.
@@ -23,6 +24,12 @@ Tools own one capability each:
 - a result or an explicit error.
 
 Tools do not append conversation state or call the model.
+
+The provider adapter preserves reasoning and assistant text as distinct
+bounded streams. The harness observes each delta without interpreting it and
+retains settled reasoning with its assistant turn so a later Responses API
+request can replay the same item order. This remains conversation mechanics,
+not a second control lane or hidden scheduler.
 
 ## HOW
 
@@ -75,10 +82,13 @@ only when a concrete experiment needs to compare one.
 
 ## Deliberate omissions
 
-The default harness has no durable storage, tree, lanes, queues, hooks, memory,
-MCP, plugins, background work, telemetry framework, or schema migration. It
-also has no generic scheduler or state-machine framework. Context compaction is
-present as one direct loop branch but remains disabled by default.
+The default harness has no durable storage, tree, control lanes, queues, hooks,
+memory, MCP, plugins, background work, telemetry framework, or schema
+migration. It also has no generic scheduler or state-machine framework.
+Reasoning display, the terminal input queue, result handles, and managed
+processes stay in the CLI/provider host rather than becoming core scheduling or
+persistence concepts. Context compaction is present as one direct loop branch
+but remains disabled by default.
 
 Each omission is reversible. Adding all of them preemptively is not.
 

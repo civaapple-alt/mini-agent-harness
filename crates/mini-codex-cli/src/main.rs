@@ -1,13 +1,14 @@
 mod env_file;
 mod openai;
+mod processes;
+mod repl;
+mod result_store;
 mod workspace;
 
 use mini_codex_core::ContextLimitBehavior;
 use mini_codex_core::Event;
 use mini_codex_core::Harness;
 use mini_codex_core::HarnessConfig;
-use mini_codex_core::HarnessError;
-use mini_codex_core::LimitKind;
 use mini_codex_core::Message;
 use mini_codex_core::Model;
 use mini_codex_core::ModelEventSink;
@@ -142,106 +143,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
 }
 
 async fn run_interactive(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode {
-    let approval = ApprovalController::new(initial_mode);
-    let mut harness = match build_openai_harness(approval.clone(), harness_config(initial_mode)) {
-        Ok(harness) => harness,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(2);
-        }
-    };
-    let mut observer = match RunObserver::new(trace) {
-        Ok(observer) => observer,
-        Err(error) => {
-            eprintln!("error: cannot create trace: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    println!("mini-codex — /auto /new /help /exit");
-    if initial_mode == ApprovalMode::Automatic {
-        print_auto_warning();
-        println!("auto mode on");
-    }
-    loop {
-        print!("> ");
-        if let Err(error) = io::stdout().flush() {
-            eprintln!("error: cannot write prompt: {error}");
-            return ExitCode::FAILURE;
-        }
-
-        let mut input = String::new();
-        match io::stdin().read_line(&mut input) {
-            Ok(0) => {
-                println!();
-                return ExitCode::SUCCESS;
-            }
-            Ok(_) => {}
-            Err(error) => {
-                eprintln!("error: cannot read input: {error}");
-                return ExitCode::FAILURE;
-            }
-        }
-
-        let input = input.trim();
-        if input.is_empty() {
-            continue;
-        }
-        match input {
-            "/exit" => return ExitCode::SUCCESS,
-            "/new" => {
-                harness.clear_history();
-                println!("new conversation");
-                continue;
-            }
-            "/help" => {
-                println!("/auto      enable automatic execution");
-                println!("/auto off  require approval for writes and shell commands");
-                println!("/new       clear this in-memory conversation");
-                println!("/help      show local commands");
-                println!("/exit      quit");
-                continue;
-            }
-            "/auto" | "/auto on" => {
-                approval.set_mode(ApprovalMode::Automatic);
-                harness.replace_config(harness_config(ApprovalMode::Automatic));
-                print_auto_warning();
-                println!("auto mode on");
-                continue;
-            }
-            "/auto off" => {
-                approval.set_mode(ApprovalMode::Interactive);
-                harness.replace_config(harness_config(ApprovalMode::Interactive));
-                println!("auto mode off; writes and shell commands require approval");
-                continue;
-            }
-            command if command.starts_with('/') => {
-                eprintln!("unknown local command: {command}");
-                continue;
-            }
-            _ => {}
-        }
-
-        match harness.run(input, &mut observer).await {
-            Ok(outcome) => {
-                observer.finish();
-                if outcome.stop_reason == StopReason::StepLimit {
-                    eprintln!("warning: stopped after {} model steps", outcome.steps);
-                }
-            }
-            Err(error) => {
-                let context_limit = matches!(
-                    &error,
-                    HarnessError::Limit(limit) if limit.kind == LimitKind::ContextBytes
-                );
-                observer.finish();
-                eprintln!("error: {error}");
-                if context_limit {
-                    eprintln!("hint: use /new to clear this conversation");
-                }
-            }
-        }
-    }
+    repl::run(trace, initial_mode).await
 }
 
 async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
@@ -405,6 +307,7 @@ impl Model for DemoModel {
                 })
                 .unwrap_or_default();
             return Ok(ModelResponse {
+                reasoning: String::new(),
                 text: "I will run one tool.".to_string(),
                 tool_calls: vec![ToolCall {
                     id: "demo-call".to_string(),
@@ -425,6 +328,7 @@ impl Model for DemoModel {
             })
             .unwrap_or("no tool result");
         Ok(ModelResponse {
+            reasoning: String::new(),
             text: format!("The tool returned: {result}"),
             tool_calls: Vec::new(),
             usage: None,
@@ -457,9 +361,18 @@ impl Tool for Uppercase {
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum StreamLane {
+    #[default]
+    None,
+    Reasoning,
+    Text,
+}
+
 #[derive(Default)]
 struct TerminalObserver {
-    streaming: bool,
+    lane: StreamLane,
+    text_streamed: bool,
 }
 
 struct RunObserver {
@@ -512,25 +425,39 @@ impl Observer for RunObserver {
 
 impl TerminalObserver {
     fn end_stream(&mut self) {
-        if self.streaming {
+        if self.lane != StreamLane::None {
             println!();
-            self.streaming = false;
+            self.lane = StreamLane::None;
         }
+    }
+
+    fn write_delta(&mut self, lane: StreamLane, label: &str, delta: &str) {
+        if self.lane != lane {
+            self.end_stream();
+            print!("{label}> ");
+            self.lane = lane;
+        }
+        print!("{delta}");
+        let _ = io::stdout().flush();
     }
 }
 
 impl Observer for TerminalObserver {
     fn observe(&mut self, event: &Event) {
         match event {
-            Event::AssistantTextDelta { delta } => {
-                if !self.streaming {
-                    print!("assistant> ");
-                    self.streaming = true;
-                }
-                print!("{delta}");
-                let _ = io::stdout().flush();
+            Event::ModelStarted { .. } => {
+                self.end_stream();
+                self.text_streamed = false;
             }
-            Event::ModelResponded { text, .. } if !text.is_empty() && !self.streaming => {
+            Event::AssistantReasoningDelta { delta } => {
+                self.write_delta(StreamLane::Reasoning, "thinking", delta);
+            }
+            Event::AssistantTextDelta { delta } => {
+                self.text_streamed = true;
+                self.write_delta(StreamLane::Text, "assistant", delta);
+            }
+            Event::ModelResponded { text, .. } if !text.is_empty() && !self.text_streamed => {
+                self.end_stream();
                 println!("assistant> {text}");
             }
             Event::ToolStarted { call } => {
@@ -555,10 +482,7 @@ impl Observer for TerminalObserver {
                 println!("context> compacted {before_bytes} -> {after_bytes} bytes");
             }
             Event::RunFinished { .. } => self.end_stream(),
-            Event::RunStarted { .. }
-            | Event::ModelStarted { .. }
-            | Event::ModelResponded { .. }
-            | Event::RunFailed { .. } => {}
+            Event::RunStarted { .. } | Event::ModelResponded { .. } | Event::RunFailed { .. } => {}
         }
     }
 }

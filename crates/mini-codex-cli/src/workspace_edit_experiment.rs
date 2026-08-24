@@ -66,6 +66,7 @@ impl Model for EditingModel {
             .count();
         if tool_results == 0 {
             return Ok(ModelResponse {
+                reasoning: String::new(),
                 text: "Reading the file first.".to_string(),
                 tool_calls: vec![ToolCall {
                     id: "read-1".to_string(),
@@ -93,6 +94,7 @@ impl Model for EditingModel {
                 )
             };
             return Ok(ModelResponse {
+                reasoning: String::new(),
                 text: "Applying the requested change.".to_string(),
                 tool_calls: vec![ToolCall {
                     id: "edit-1".to_string(),
@@ -104,6 +106,7 @@ impl Model for EditingModel {
         }
 
         Ok(ModelResponse {
+            reasoning: String::new(),
             text: "Done.".to_string(),
             tool_calls: Vec::new(),
             usage: None,

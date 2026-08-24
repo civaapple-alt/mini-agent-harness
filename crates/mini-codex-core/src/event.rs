@@ -14,10 +14,14 @@ pub enum Event {
     ModelStarted {
         step: usize,
     },
+    AssistantReasoningDelta {
+        delta: String,
+    },
     AssistantTextDelta {
         delta: String,
     },
     ModelResponded {
+        reasoning: String,
         text: String,
         tool_calls: Vec<ToolCall>,
         usage: Option<ModelUsage>,

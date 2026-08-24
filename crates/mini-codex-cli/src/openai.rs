@@ -102,6 +102,7 @@ impl Model for OpenAiModel {
             ));
         }
         Ok(ModelResponse {
+            reasoning: state.reasoning,
             text: state.text,
             tool_calls: state.tool_calls,
             usage: state.usage,
@@ -168,8 +169,18 @@ fn message_items(message: &Message) -> Vec<Value> {
             "role": "user",
             "content": [{ "type": "input_text", "text": text }]
         })],
-        Message::Assistant { text, tool_calls } => {
+        Message::Assistant {
+            reasoning,
+            text,
+            tool_calls,
+        } => {
             let mut items = Vec::new();
+            if !reasoning.is_empty() {
+                items.push(json!({
+                    "type": "reasoning",
+                    "content": [{ "type": "reasoning_text", "text": reasoning }]
+                }));
+            }
             if !text.is_empty() {
                 items.push(json!({
                     "type": "message",
@@ -198,6 +209,7 @@ fn message_items(message: &Message) -> Vec<Value> {
 }
 
 struct StreamState {
+    reasoning: String,
     text: String,
     tool_calls: Vec<ToolCall>,
     usage: Option<ModelUsage>,
@@ -209,6 +221,7 @@ struct StreamState {
 impl StreamState {
     fn new(max_response_bytes: usize) -> Self {
         Self {
+            reasoning: String::new(),
             text: String::new(),
             tool_calls: Vec::new(),
             usage: None,
@@ -224,6 +237,14 @@ impl StreamState {
         events: &mut (dyn ModelEventSink + Send),
     ) -> Result<(), OpenAiError> {
         match event.get("type").and_then(Value::as_str) {
+            Some("response.reasoning_text.delta") => {
+                let delta = event.get("delta").and_then(Value::as_str).ok_or_else(|| {
+                    OpenAiError::Protocol("reasoning delta missing delta field".to_string())
+                })?;
+                self.retain(delta.len())?;
+                self.reasoning.push_str(delta);
+                events.emit(ModelEvent::ReasoningDelta(delta.to_string()));
+            }
             Some("response.output_text.delta") => {
                 let delta = event.get("delta").and_then(Value::as_str).ok_or_else(|| {
                     OpenAiError::Protocol("text delta missing delta field".to_string())
@@ -377,12 +398,16 @@ mod tests {
     use mini_codex_core::ToolSpec;
 
     #[derive(Default)]
-    struct Deltas(Vec<String>);
+    struct Deltas {
+        reasoning: Vec<String>,
+        text: Vec<String>,
+    }
 
     impl ModelEventSink for Deltas {
         fn emit(&mut self, event: ModelEvent) {
             match event {
-                ModelEvent::TextDelta(delta) => self.0.push(delta),
+                ModelEvent::ReasoningDelta(delta) => self.reasoning.push(delta),
+                ModelEvent::TextDelta(delta) => self.text.push(delta),
             }
         }
     }
@@ -394,6 +419,7 @@ mod tests {
                 text: "hello".to_string(),
             },
             Message::Assistant {
+                reasoning: "thinking".to_string(),
                 text: String::new(),
                 tool_calls: vec![ToolCall {
                     id: "call-1".to_string(),
@@ -425,8 +451,9 @@ mod tests {
         );
 
         assert_eq!(body["model"], "test-model");
-        assert_eq!(body["input"][1]["type"], "function_call");
-        assert_eq!(body["input"][2]["type"], "function_call_output");
+        assert_eq!(body["input"][1]["type"], "reasoning");
+        assert_eq!(body["input"][2]["type"], "function_call");
+        assert_eq!(body["input"][3]["type"], "function_call_output");
         assert_eq!(body["tools"][0]["name"], "lookup");
         assert_eq!(body["parallel_tool_calls"], false);
     }
@@ -436,6 +463,12 @@ mod tests {
         let mut state = StreamState::new(1024);
         let mut deltas = Deltas::default();
 
+        state
+            .apply(
+                json!({"type": "response.reasoning_text.delta", "delta": "think"}),
+                &mut deltas,
+            )
+            .unwrap();
         state
             .apply(
                 json!({"type": "response.output_text.delta", "delta": "hello"}),
@@ -472,8 +505,10 @@ mod tests {
             )
             .unwrap();
 
+        assert_eq!(state.reasoning, "think");
         assert_eq!(state.text, "hello");
-        assert_eq!(deltas.0, vec!["hello"]);
+        assert_eq!(deltas.reasoning, vec!["think"]);
+        assert_eq!(deltas.text, vec!["hello"]);
         assert_eq!(
             state.usage,
             Some(ModelUsage {
@@ -498,9 +533,16 @@ mod tests {
         let mut state = StreamState::new(4);
         let mut deltas = Deltas::default();
 
+        state
+            .apply(
+                json!({"type": "response.reasoning_text.delta", "delta": "why"}),
+                &mut deltas,
+            )
+            .unwrap();
+
         let error = state
             .apply(
-                json!({"type": "response.output_text.delta", "delta": "hello"}),
+                json!({"type": "response.output_text.delta", "delta": "ok"}),
                 &mut deltas,
             )
             .unwrap_err();
@@ -509,7 +551,9 @@ mod tests {
             error.to_string(),
             "protocol error: model response exceeds 4 byte limit"
         );
+        assert_eq!(state.reasoning, "why");
         assert!(state.text.is_empty());
-        assert!(deltas.0.is_empty());
+        assert_eq!(deltas.reasoning, vec!["why"]);
+        assert!(deltas.text.is_empty());
     }
 }

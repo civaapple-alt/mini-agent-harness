@@ -1,3 +1,7 @@
+use crate::processes::ProcessManager;
+use crate::processes::process_tools;
+use crate::result_store::ReadToolResult;
+use crate::result_store::ResultStore;
 use mini_codex_core::Tool;
 use mini_codex_core::ToolError;
 use mini_codex_core::ToolSpec;
@@ -26,7 +30,8 @@ use std::time::Instant;
 const MAX_READ_BYTES: u64 = 64 * 1024;
 const MAX_WRITE_BYTES: usize = 1024 * 1024;
 const MAX_COMMAND_BYTES: usize = 16 * 1024;
-const MAX_COMMAND_OUTPUT_BYTES: usize = 64 * 1024;
+const MAX_COMMAND_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
+const INLINE_COMMAND_OUTPUT_BYTES: usize = 16 * 1024;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,19 +40,31 @@ pub enum ApprovalMode {
     Automatic,
 }
 
+type ApprovalCallback = dyn Fn(&str) -> Result<bool, ToolError> + Send + Sync;
+
 #[derive(Clone)]
-pub struct ApprovalController(Arc<AtomicBool>);
+pub struct ApprovalController {
+    automatic: Arc<AtomicBool>,
+    callback: Arc<ApprovalCallback>,
+}
 
 impl ApprovalController {
     pub fn new(mode: ApprovalMode) -> Self {
-        Self(Arc::new(AtomicBool::new(matches!(
-            mode,
-            ApprovalMode::Automatic
-        ))))
+        Self::with_callback(mode, terminal_approval)
+    }
+
+    pub(crate) fn with_callback(
+        mode: ApprovalMode,
+        callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            automatic: Arc::new(AtomicBool::new(matches!(mode, ApprovalMode::Automatic))),
+            callback: Arc::new(callback),
+        }
     }
 
     pub fn mode(&self) -> ApprovalMode {
-        if self.0.load(Ordering::Relaxed) {
+        if self.automatic.load(Ordering::Relaxed) {
             ApprovalMode::Automatic
         } else {
             ApprovalMode::Interactive
@@ -55,9 +72,41 @@ impl ApprovalController {
     }
 
     pub fn set_mode(&self, mode: ApprovalMode) {
-        self.0
+        self.automatic
             .store(matches!(mode, ApprovalMode::Automatic), Ordering::Relaxed);
     }
+
+    pub(crate) fn approve(&self, action: &str) -> Result<(), ToolError> {
+        match self.mode() {
+            ApprovalMode::Automatic => return Ok(()),
+            ApprovalMode::Interactive => {}
+        }
+        if (self.callback)(action)? {
+            Ok(())
+        } else {
+            Err(ToolError(format!("user denied: {action}")))
+        }
+    }
+}
+
+fn terminal_approval(action: &str) -> Result<bool, ToolError> {
+    if !io::stdin().is_terminal() {
+        return Err(ToolError(format!(
+            "denied non-interactive action: {action}"
+        )));
+    }
+    eprint!("approve {action}? [y/N] ");
+    io::stderr()
+        .flush()
+        .map_err(|error| ToolError(error.to_string()))?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| ToolError(error.to_string()))?;
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 pub fn workspace_tools(
@@ -65,12 +114,21 @@ pub fn workspace_tools(
     approval: ApprovalController,
 ) -> Result<Vec<Box<dyn Tool>>, ToolError> {
     let workspace = Arc::new(Workspace::new(root, approval)?);
-    Ok(vec![
+    let results = ResultStore::default();
+    let processes = ProcessManager::new(
+        workspace.root.clone(),
+        workspace.approval.clone(),
+        results.clone(),
+    );
+    let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(ReadFile(Arc::clone(&workspace))),
         Box::new(EditFile(Arc::clone(&workspace))),
         Box::new(WriteFile(Arc::clone(&workspace))),
-        Box::new(Shell(workspace)),
-    ])
+        Box::new(Shell(Arc::clone(&workspace), results.clone())),
+        Box::new(ReadToolResult(results)),
+    ];
+    tools.extend(process_tools(processes));
+    Ok(tools)
 }
 
 struct Workspace {
@@ -145,29 +203,8 @@ impl Workspace {
         }
     }
 
-    fn approve(&self, action: &str) -> Result<(), ToolError> {
-        match self.approval.mode() {
-            ApprovalMode::Automatic => return Ok(()),
-            ApprovalMode::Interactive => {}
-        }
-        if !io::stdin().is_terminal() {
-            return Err(ToolError(format!(
-                "denied non-interactive action: {action}"
-            )));
-        }
-        eprint!("approve {action}? [y/N] ");
-        io::stderr()
-            .flush()
-            .map_err(|error| ToolError(error.to_string()))?;
-        let mut answer = String::new();
-        io::stdin()
-            .read_line(&mut answer)
-            .map_err(|error| ToolError(error.to_string()))?;
-        if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-            Ok(())
-        } else {
-            Err(ToolError(format!("user denied: {action}")))
-        }
+    pub(crate) fn approve(&self, action: &str) -> Result<(), ToolError> {
+        self.approval.approve(action)
     }
 }
 
@@ -281,7 +318,7 @@ impl Tool for WriteFile {
     }
 }
 
-struct Shell(Arc<Workspace>);
+struct Shell(Arc<Workspace>, ResultStore);
 
 impl Tool for Shell {
     fn spec(&self) -> ToolSpec {
@@ -305,7 +342,21 @@ impl Tool for Shell {
             )));
         }
         self.0.approve(&format!("shell command `{command}`"))?;
-        run_shell(command, &self.0.root, COMMAND_TIMEOUT)
+        let output = run_shell(command, &self.0.root, COMMAND_TIMEOUT)?;
+        if output.text.len() <= INLINE_COMMAND_OUTPUT_BYTES {
+            return Ok(output.text);
+        }
+        let stored = self
+            .1
+            .store(output.text, output.source_bytes, output.source_truncated);
+        Ok(format!(
+            "<tool_result_preview handle=\"{}\" stored_bytes=\"{}\" source_bytes=\"{}\" source_truncated=\"{}\">\n{}\n</tool_result_preview>\nUse read_tool_result with this handle to inspect a byte range or literal query.",
+            stored.handle,
+            stored.stored_bytes,
+            stored.source_bytes,
+            stored.source_truncated,
+            stored.preview
+        ))
     }
 }
 
@@ -323,7 +374,7 @@ fn shell_description(approval: ApprovalMode) -> String {
     }
 }
 
-fn shell_command(command: &str) -> Command {
+pub(crate) fn shell_command(command: &str) -> Command {
     if cfg!(windows) {
         let mut process = Command::new("pwsh");
         process.args([
@@ -346,7 +397,7 @@ fn shell_command(command: &str) -> Command {
     }
 }
 
-fn terminate_process_tree(child: &mut std::process::Child) -> io::Result<ExitStatus> {
+pub(crate) fn terminate_process_tree(child: &mut std::process::Child) -> io::Result<ExitStatus> {
     let process_id = child.id().to_string();
     let killed = if cfg!(windows) {
         Command::new("taskkill")
@@ -369,7 +420,13 @@ fn terminate_process_tree(child: &mut std::process::Child) -> io::Result<ExitSta
     child.wait()
 }
 
-fn run_shell(command: &str, root: &Path, timeout: Duration) -> Result<String, ToolError> {
+struct CommandOutput {
+    text: String,
+    source_bytes: usize,
+    source_truncated: bool,
+}
+
+fn run_shell(command: &str, root: &Path, timeout: Duration) -> Result<CommandOutput, ToolError> {
     let mut child = shell_command(command)
         .current_dir(root)
         .stdout(Stdio::piped())
@@ -384,7 +441,7 @@ fn run_shell(command: &str, root: &Path, timeout: Duration) -> Result<String, To
         .stderr
         .take()
         .ok_or_else(|| ToolError("cannot capture command stderr".to_string()))?;
-    let stream_limit = MAX_COMMAND_OUTPUT_BYTES / 2;
+    let stream_limit = MAX_COMMAND_CAPTURE_BYTES / 2;
     let stdout = thread::spawn(move || capture_bounded(stdout, stream_limit));
     let stderr = thread::spawn(move || capture_bounded(stderr, stream_limit));
     let started = Instant::now();
@@ -413,11 +470,17 @@ fn run_shell(command: &str, root: &Path, timeout: Duration) -> Result<String, To
             |code| code.to_string(),
         )
     };
-    Ok(format!(
-        "exit: {status}\nstdout:\n{}\nstderr:\n{}",
-        stdout.render(),
-        stderr.render()
-    ))
+    let source_bytes = stdout.total_bytes.saturating_add(stderr.total_bytes);
+    let source_truncated = stdout.truncated || stderr.truncated;
+    Ok(CommandOutput {
+        text: format!(
+            "exit: {status}\nstdout:\n{}\nstderr:\n{}",
+            stdout.render(),
+            stderr.render()
+        ),
+        source_bytes,
+        source_truncated,
+    })
 }
 
 struct CapturedOutput {
@@ -633,7 +696,7 @@ mod tests {
 
         let output = run_shell(command, &root, Duration::from_millis(50)).unwrap();
 
-        assert!(output.contains("timed out"));
+        assert!(output.text.contains("timed out"));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -647,7 +710,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let spec = Shell(workspace).spec();
+        let spec = Shell(workspace, ResultStore::default()).spec();
         let command = shell_command("echo ready");
 
         if cfg!(windows) {
@@ -659,6 +722,35 @@ mod tests {
             assert!(spec.description.contains("POSIX sh"));
         }
         assert!(spec.description.contains("without per-command approval"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn large_shell_output_is_available_through_a_result_handle() {
+        let root = test_root();
+        let workspace = Arc::new(
+            Workspace::new(
+                root.clone(),
+                ApprovalController::new(ApprovalMode::Automatic),
+            )
+            .unwrap(),
+        );
+        let results = ResultStore::default();
+        let shell = Shell(workspace, results.clone());
+        let command = if cfg!(windows) {
+            "Write-Output ('x' * 20000)"
+        } else {
+            "printf '%020000d' 0"
+        };
+
+        let output = shell.execute(&json!({"command": command})).unwrap();
+        assert!(output.contains("handle=\"result-1\""), "{output}");
+        let read = ReadToolResult(results)
+            .execute(&json!({"handle": "result-1", "start_byte": 1, "byte_count": 128}))
+            .unwrap();
+        assert!(read.contains("stored_bytes="));
+        assert!(read.len() >= 128);
 
         fs::remove_dir_all(root).unwrap();
     }

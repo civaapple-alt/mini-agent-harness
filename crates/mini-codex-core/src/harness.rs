@@ -4,6 +4,7 @@ use crate::Model;
 use crate::ModelEvent;
 use crate::ModelEventSink;
 use crate::ModelRequest;
+use crate::ModelResponse;
 use crate::Observer;
 use crate::ToolRegistry;
 use serde::Deserialize;
@@ -186,8 +187,8 @@ impl<M: Model> Harness<M> {
             observer.observe(&Event::ModelStarted { step });
             let mut model_events = ModelEventForwarder {
                 observer,
-                emitted_text_bytes: 0,
-                max_text_bytes: self.config.max_model_response_bytes,
+                emitted_bytes: 0,
+                max_bytes: self.config.max_model_response_bytes,
             };
             let response = match self
                 .model
@@ -211,10 +212,7 @@ impl<M: Model> Harness<M> {
                 }
             };
 
-            let response_bytes = response.text.len()
-                + serde_json::to_vec(&response.tool_calls)
-                    .expect("tool calls must serialize")
-                    .len();
+            let response_bytes = model_response_bytes(&response);
             if response_bytes > self.config.max_model_response_bytes {
                 return Err(fail_limit(
                     LimitExceeded {
@@ -237,12 +235,14 @@ impl<M: Model> Harness<M> {
             }
 
             observer.observe(&Event::ModelResponded {
+                reasoning: response.reasoning.clone(),
                 text: response.text.clone(),
                 tool_calls: response.tool_calls.clone(),
                 usage: response.usage,
             });
             final_text = response.text.clone();
             self.messages.push(Message::Assistant {
+                reasoning: response.reasoning,
                 text: response.text,
                 tool_calls: response.tool_calls.clone(),
             });
@@ -370,6 +370,17 @@ impl<M: Model> Harness<M> {
                 });
                 HarnessError::Model(error)
             })?;
+        let response_bytes = model_response_bytes(&response);
+        if response_bytes > self.config.max_model_response_bytes {
+            return Err(fail_limit(
+                LimitExceeded {
+                    kind: LimitKind::ModelResponseBytes,
+                    limit: self.config.max_model_response_bytes,
+                    actual: response_bytes,
+                },
+                observer,
+            ));
+        }
         if !response.tool_calls.is_empty() {
             return Err(fail_compaction(
                 "model returned tool calls while compacting".to_string(),
@@ -383,17 +394,6 @@ impl<M: Model> Harness<M> {
                 observer,
             ));
         }
-        if summary.len() > self.config.max_model_response_bytes {
-            return Err(fail_limit(
-                LimitExceeded {
-                    kind: LimitKind::ModelResponseBytes,
-                    limit: self.config.max_model_response_bytes,
-                    actual: summary.len(),
-                },
-                observer,
-            ));
-        }
-
         let compacted_messages = vec![Message::User {
             text: format!("{COMPACTION_PREFIX}\n{summary}"),
         }];
@@ -439,6 +439,14 @@ fn context_bytes_for(
             .len()
 }
 
+fn model_response_bytes(response: &ModelResponse) -> usize {
+    response.reasoning.len()
+        + response.text.len()
+        + serde_json::to_vec(&response.tool_calls)
+            .expect("tool calls must serialize")
+            .len()
+}
+
 struct SilentModelEvents;
 
 impl ModelEventSink for SilentModelEvents {
@@ -447,16 +455,23 @@ impl ModelEventSink for SilentModelEvents {
 
 struct ModelEventForwarder<'a, O> {
     observer: &'a mut O,
-    emitted_text_bytes: usize,
-    max_text_bytes: usize,
+    emitted_bytes: usize,
+    max_bytes: usize,
 }
 
 impl<O: Observer> ModelEventSink for ModelEventForwarder<'_, O> {
     fn emit(&mut self, event: ModelEvent) {
         match event {
+            ModelEvent::ReasoningDelta(delta) => {
+                self.emitted_bytes = self.emitted_bytes.saturating_add(delta.len());
+                if self.emitted_bytes <= self.max_bytes {
+                    self.observer
+                        .observe(&Event::AssistantReasoningDelta { delta });
+                }
+            }
             ModelEvent::TextDelta(delta) => {
-                self.emitted_text_bytes = self.emitted_text_bytes.saturating_add(delta.len());
-                if self.emitted_text_bytes <= self.max_text_bytes {
+                self.emitted_bytes = self.emitted_bytes.saturating_add(delta.len());
+                if self.emitted_bytes <= self.max_bytes {
                     self.observer.observe(&Event::AssistantTextDelta { delta });
                 }
             }

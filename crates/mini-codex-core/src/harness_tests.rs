@@ -93,6 +93,7 @@ async fn runs_model_tool_model_path() {
     let model = ScriptedModel {
         responses: VecDeque::from([
             ModelResponse {
+                reasoning: String::new(),
                 text: String::new(),
                 tool_calls: vec![ToolCall {
                     id: "call-1".to_string(),
@@ -106,6 +107,7 @@ async fn runs_model_tool_model_path() {
                 }),
             },
             ModelResponse {
+                reasoning: String::new(),
                 text: "The result is QUIET.".to_string(),
                 tool_calls: Vec::new(),
                 usage: None,
@@ -165,6 +167,7 @@ async fn returns_unknown_tool_failure_to_model() {
     let model = ScriptedModel {
         responses: VecDeque::from([
             ModelResponse {
+                reasoning: String::new(),
                 text: String::new(),
                 tool_calls: vec![ToolCall {
                     id: "call-1".to_string(),
@@ -174,6 +177,7 @@ async fn returns_unknown_tool_failure_to_model() {
                 usage: None,
             },
             ModelResponse {
+                reasoning: String::new(),
                 text: "I could not run that tool.".to_string(),
                 tool_calls: Vec::new(),
                 usage: None,
@@ -200,6 +204,7 @@ async fn records_tool_output_truncation_explicitly() {
     let model = ScriptedModel {
         responses: VecDeque::from([
             ModelResponse {
+                reasoning: String::new(),
                 text: String::new(),
                 tool_calls: vec![ToolCall {
                     id: "call-1".to_string(),
@@ -209,6 +214,7 @@ async fn records_tool_output_truncation_explicitly() {
                 usage: None,
             },
             ModelResponse {
+                reasoning: String::new(),
                 text: "done".to_string(),
                 tool_calls: Vec::new(),
                 usage: None,
@@ -248,6 +254,7 @@ async fn records_tool_output_truncation_explicitly() {
 async fn stops_at_step_limit() {
     let model = ScriptedModel {
         responses: VecDeque::from([ModelResponse {
+            reasoning: String::new(),
             text: "still working".to_string(),
             tool_calls: vec![ToolCall {
                 id: "call-1".to_string(),
@@ -275,11 +282,13 @@ async fn preserves_history_across_runs_and_can_clear_it() {
     let model = ScriptedModel {
         responses: VecDeque::from([
             ModelResponse {
+                reasoning: String::new(),
                 text: "first answer".to_string(),
                 tool_calls: Vec::new(),
                 usage: None,
             },
             ModelResponse {
+                reasoning: String::new(),
                 text: "second answer".to_string(),
                 tool_calls: Vec::new(),
                 usage: None,
@@ -300,6 +309,7 @@ async fn preserves_history_across_runs_and_can_clear_it() {
                 text: "first question".to_string(),
             },
             Message::Assistant {
+                reasoning: String::new(),
                 text: "first answer".to_string(),
                 tool_calls: Vec::new(),
             },
@@ -307,6 +317,7 @@ async fn preserves_history_across_runs_and_can_clear_it() {
                 text: "second question".to_string(),
             },
             Message::Assistant {
+                reasoning: String::new(),
                 text: "second answer".to_string(),
                 tool_calls: Vec::new(),
             },
@@ -324,6 +335,7 @@ async fn compacts_context_and_continues_the_tool_loop() {
     let model = RecordingModel {
         responses: VecDeque::from([
             ModelResponse {
+                reasoning: String::new(),
                 text: String::new(),
                 tool_calls: vec![ToolCall {
                     id: "call-1".to_string(),
@@ -333,6 +345,7 @@ async fn compacts_context_and_continues_the_tool_loop() {
                 usage: None,
             },
             ModelResponse {
+                reasoning: String::new(),
                 text: "The user asked for a long operation. The uppercase tool completed successfully. Continue by reporting completion.".to_string(),
                 tool_calls: Vec::new(),
                 usage: Some(ModelUsage {
@@ -342,6 +355,7 @@ async fn compacts_context_and_continues_the_tool_loop() {
                 }),
             },
             ModelResponse {
+                reasoning: String::new(),
                 text: "Long operation completed.".to_string(),
                 tool_calls: Vec::new(),
                 usage: None,
@@ -371,7 +385,11 @@ async fn compacts_context_and_continues_the_tool_loop() {
         outcome.messages.as_slice(),
         [
             Message::User { text },
-            Message::Assistant { text: answer, tool_calls }
+            Message::Assistant {
+                text: answer,
+                tool_calls,
+                ..
+            }
         ] if text.starts_with(COMPACTION_PREFIX)
             && answer == "Long operation completed."
             && tool_calls.is_empty()
@@ -409,6 +427,7 @@ async fn failed_compaction_preserves_existing_history() {
     let model = ScriptedModel {
         responses: VecDeque::from([
             ModelResponse {
+                reasoning: String::new(),
                 text: String::new(),
                 tool_calls: vec![ToolCall {
                     id: "call-1".to_string(),
@@ -418,6 +437,7 @@ async fn failed_compaction_preserves_existing_history() {
                 usage: None,
             },
             ModelResponse {
+                reasoning: String::new(),
                 text: "   ".to_string(),
                 tool_calls: Vec::new(),
                 usage: None,
@@ -470,6 +490,7 @@ fn truncates_utf8_within_hard_byte_limit() {
 async fn rejects_oversized_user_input_without_retaining_it() {
     let model = ScriptedModel {
         responses: VecDeque::from([ModelResponse {
+            reasoning: String::new(),
             text: "unused".to_string(),
             tool_calls: Vec::new(),
             usage: None,
@@ -519,6 +540,7 @@ async fn rejects_oversized_user_input_without_retaining_it() {
 async fn rejects_context_before_calling_the_model() {
     let model = ScriptedModel {
         responses: VecDeque::from([ModelResponse {
+            reasoning: String::new(),
             text: "unused".to_string(),
             tool_calls: Vec::new(),
             usage: None,
@@ -552,6 +574,7 @@ async fn rejects_excess_tool_calls_before_executing_any() {
     };
     let model = ScriptedModel {
         responses: VecDeque::from([ModelResponse {
+            reasoning: String::new(),
             text: String::new(),
             tool_calls: vec![call("call-1"), call("call-2")],
             usage: None,
@@ -586,7 +609,8 @@ async fn rejects_excess_tool_calls_before_executing_any() {
 async fn rejects_oversized_model_response_before_retaining_it() {
     let model = ScriptedModel {
         responses: VecDeque::from([ModelResponse {
-            text: "too long".to_string(),
+            reasoning: "why".to_string(),
+            text: "x".to_string(),
             tool_calls: Vec::new(),
             usage: None,
         }]),

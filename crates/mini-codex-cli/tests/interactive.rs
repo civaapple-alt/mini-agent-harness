@@ -20,13 +20,21 @@ fn interactive_terminal_keeps_history_until_new() {
     let address = listener.local_addr().unwrap();
     let (requests_tx, requests_rx) = mpsc::channel();
     let server = thread::spawn(move || {
-        for reply in ["reply-one", "reply-two", "reply-three"] {
+        for (index, reply) in ["reply-one", "reply-two", "reply-three"]
+            .into_iter()
+            .enumerate()
+        {
             let (mut stream, _) = listener.accept().unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();
             requests_tx.send(read_request_body(&mut stream)).unwrap();
-            write_sse_response(&mut stream, reply);
+            if index == 0 {
+                thread::sleep(Duration::from_millis(100));
+                write_reasoning_sse_response(&mut stream, "inspect carefully", reply);
+            } else {
+                write_sse_response(&mut stream, reply);
+            }
         }
     });
     let root = test_root();
@@ -73,8 +81,10 @@ fn interactive_terminal_keeps_history_until_new() {
     fs::remove_dir_all(root).unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-codex — /auto /new /help /exit"));
+    assert!(stdout.contains("mini-codex — /auto /queue /new /help /exit"));
     assert!(stdout.contains("assistant> reply-one"));
+    assert!(stdout.contains("thinking> inspect carefully"));
+    assert!(stdout.contains("queued ("));
     assert!(stdout.contains("assistant> reply-two"));
     assert!(stdout.contains("new conversation"));
     assert!(stdout.contains("assistant> reply-three"));
@@ -83,6 +93,8 @@ fn interactive_terminal_keeps_history_until_new() {
     let third: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
     assert!(first["input"].to_string().contains("hello"));
     assert!(second["input"].to_string().contains("hello"));
+    assert!(second["input"].to_string().contains("inspect carefully"));
+    assert!(second["input"].to_string().contains("reasoning"));
     assert!(second["input"].to_string().contains("again"));
     assert!(third["input"].to_string().contains("world"));
     assert!(!third["input"].to_string().contains("hello"));
@@ -252,7 +264,7 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     server.join().unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-codex — /auto /new /help /exit"));
+    assert!(stdout.contains("mini-codex — /auto /queue /new /help /exit"));
     assert!(stdout.contains("auto mode on"));
     assert!(stdout.contains("auto-started"));
     assert!(stdout.contains("auto mode off; writes and shell commands require approval"));
@@ -327,6 +339,31 @@ fn write_sse_response(stream: &mut TcpStream, reply: &str) {
                     "input_tokens": 10,
                     "input_tokens_details": {"cached_tokens": 0},
                     "output_tokens": 2
+                }
+            }
+        })
+    );
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    stream.flush().unwrap();
+}
+
+fn write_reasoning_sse_response(stream: &mut TcpStream, reasoning: &str, reply: &str) {
+    let body = format!(
+        "data: {}\n\ndata: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+        json!({"type": "response.reasoning_text.delta", "delta": reasoning}),
+        json!({"type": "response.output_text.delta", "delta": reply}),
+        json!({
+            "type": "response.completed",
+            "response": {
+                "usage": {
+                    "input_tokens": 10,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 4
                 }
             }
         })
