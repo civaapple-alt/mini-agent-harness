@@ -11,6 +11,7 @@ All notable changes to mini-codex are documented here. The project follows
 
 - Release automation and cross-platform verification.
 - `ask`, `status`, `doctor`, and `--version` CLI contracts.
+- Per-command help and `--` option delimiters for prompts beginning with `-`.
 - Machine-readable output for `ask`, `status`, and `doctor`.
 - Bounded portable model/tool harness with explicit event traces.
 - Streaming OpenAI Responses adapter, including DeepSeek reasoning events.

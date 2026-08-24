@@ -37,7 +37,16 @@ use workspace::ApprovalController;
 use workspace::ApprovalMode;
 use workspace::workspace_tools;
 
-const HELP: &str = "mini-codex\n\nUSAGE:\n    mini-codex [--trace PATH]\n    mini-codex ask [--auto] [--json] [--trace PATH] [PROMPT]\n    mini-codex run [--trace PATH] <PROMPT>\n    mini-codex auto [--trace PATH] [PROMPT]\n    mini-codex demo [--trace PATH] <PROMPT>\n    mini-codex status [--json]\n    mini-codex doctor [--json]\n    mini-codex --version\n\n`ask` is the script-facing one-shot command and also accepts a prompt on stdin.\n`auto` without a prompt starts an interactive session in auto mode.\n\nENVIRONMENT:\n    OPENAI_API_KEY    Required except by demo\n    OPENAI_MODEL      Required except by demo\n    OPENAI_BASE_URL   Optional; defaults to https://api.openai.com/v1";
+const HELP: &str = "mini-codex\n\nUSAGE:\n    mini-codex [--trace PATH]\n    mini-codex ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-codex run [--trace PATH] [--] <PROMPT>\n    mini-codex auto [--trace PATH] [--] [PROMPT]\n    mini-codex demo [--trace PATH] [--] <PROMPT>\n    mini-codex status [--json]\n    mini-codex doctor [--json]\n    mini-codex help [COMMAND]\n    mini-codex --version\n\nRun `mini-codex help COMMAND` or `mini-codex COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY    Required except by demo\n    OPENAI_MODEL      Required except by demo\n    OPENAI_BASE_URL   Optional; defaults to https://api.openai.com/v1";
+const INTERACTIVE_HELP: &str = "mini-codex interactive\n\nUSAGE:\n    mini-codex [--trace PATH]\n\nStarts the approval-gated interactive REPL.";
+const ASK_HELP: &str = "mini-codex ask\n\nUSAGE:\n    mini-codex ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn. If PROMPT is omitted, reads at most 32 KiB from stdin.\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto        Run tools without approval\n    --json        Emit a machine-readable final result\n    --trace PATH  Write JSONL observation events";
+const RUN_HELP: &str = "mini-codex run\n\nUSAGE:\n    mini-codex run [--trace PATH] [--] <PROMPT>\n\nRuns one approval-gated model turn.";
+const AUTO_HELP: &str = "mini-codex auto\n\nUSAGE:\n    mini-codex auto [--trace PATH] [--] [PROMPT]\n\nRuns an automatic turn, or starts the REPL in automatic mode when PROMPT is omitted.";
+const DEMO_HELP: &str = "mini-codex demo\n\nUSAGE:\n    mini-codex demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
+const STATUS_HELP: &str = "mini-codex status\n\nUSAGE:\n    mini-codex status [--json]\n\nPrints effective non-secret startup configuration.";
+const DOCTOR_HELP: &str = "mini-codex doctor\n\nUSAGE:\n    mini-codex doctor [--json]\n\nChecks local configuration without contacting the model provider.";
+const VERSION_HELP: &str =
+    "mini-codex version\n\nUSAGE:\n    mini-codex version\n    mini-codex --version";
 const AUTO_SYSTEM_PROMPT: &str = "You are an autonomous coding agent. Work continuously toward the user's goal. Inspect the workspace before editing, use tools as needed, keep changes scoped to the request, and run relevant checks. Do not stop at intermediate progress or ask for confirmation unless you are blocked by missing information or an unsafe action outside the workspace. When the work is complete, report the result plainly.";
 const AUTO_MAX_STEPS: usize = 128;
 
@@ -68,7 +77,7 @@ async fn main() -> ExitCode {
         }
         Command::Auto => run_auto(invocation.prompt, invocation.trace).await,
         Command::Help => {
-            println!("{HELP}");
+            println!("{}", help_text(invocation.help_topic));
             ExitCode::SUCCESS
         }
         Command::Version => {
@@ -100,15 +109,43 @@ struct Invocation {
     trace: Option<PathBuf>,
     json: bool,
     automatic: bool,
+    help_topic: HelpTopic,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HelpTopic {
+    Root,
+    Interactive,
+    Ask,
+    Run,
+    Auto,
+    Demo,
+    Status,
+    Doctor,
+    Version,
 }
 
 fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut args = args.into_iter().peekable();
     let command = match args.peek().map(String::as_str) {
         None | Some("--trace") => Command::Interactive,
-        Some("help" | "--help" | "-h") => {
+        Some("help") => {
             args.next();
-            Command::Help
+            let topic = match args.next() {
+                Some(name) => help_topic(&name)?,
+                None => HelpTopic::Root,
+            };
+            if let Some(argument) = args.next() {
+                return Err(format!("unexpected argument after help topic: {argument}"));
+            }
+            return Ok(help_invocation(topic));
+        }
+        Some("--help" | "-h") => {
+            args.next();
+            if let Some(argument) = args.next() {
+                return Err(format!("unexpected argument after --help: {argument}"));
+            }
+            return Ok(help_invocation(HelpTopic::Root));
         }
         Some("version" | "--version" | "-V") => {
             args.next();
@@ -140,22 +177,42 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         }
         Some(other) => return Err(format!("unknown command: {other}")),
     };
-    if matches!(command, Command::Help | Command::Version) {
+    let remaining = args.collect::<Vec<_>>();
+    let delimiter = remaining.iter().position(|argument| argument == "--");
+    if let Some(position) = remaining
+        .iter()
+        .position(|argument| argument == "--help" || argument == "-h")
+        && delimiter.is_none_or(|delimiter| position < delimiter)
+    {
+        if remaining.len() != 1 {
+            return Err("--help cannot be combined with other arguments".to_string());
+        }
+        return Ok(help_invocation(help_topic_for(command)));
+    }
+    if command == Command::Version {
+        if let Some(argument) = remaining.first() {
+            return Err(format!("version does not accept arguments: {argument}"));
+        }
         return Ok(Invocation {
             command,
             prompt: String::new(),
             trace: None,
             json: false,
             automatic: false,
+            help_topic: HelpTopic::Root,
         });
     }
 
+    let mut args = remaining.into_iter();
     let mut prompt = Vec::new();
     let mut trace = None;
     let mut json = false;
     let mut automatic = false;
+    let mut options = true;
     while let Some(argument) = args.next() {
-        if argument == "--trace" {
+        if options && argument == "--" {
+            options = false;
+        } else if options && argument == "--trace" {
             if trace.is_some() {
                 return Err("--trace may be provided only once".to_string());
             }
@@ -163,17 +220,17 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 args.next()
                     .ok_or_else(|| "--trace requires a path".to_string())?,
             ));
-        } else if argument == "--json" {
+        } else if options && argument == "--json" {
             if json {
                 return Err("--json may be provided only once".to_string());
             }
             json = true;
-        } else if argument == "--auto" {
+        } else if options && argument == "--auto" {
             if automatic {
                 return Err("--auto may be provided only once".to_string());
             }
             automatic = true;
-        } else if argument.starts_with('-') {
+        } else if options && argument.starts_with('-') {
             return Err(format!("unknown option: {argument}"));
         } else {
             prompt.push(argument);
@@ -194,13 +251,70 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if automatic && command != Command::Ask {
         return Err("--auto is supported only by ask".to_string());
     }
+    if trace.is_some() && matches!(command, Command::Status | Command::Doctor) {
+        return Err("--trace is not supported by status or doctor".to_string());
+    }
     Ok(Invocation {
         command,
         prompt: prompt.join(" "),
         trace,
         json,
         automatic,
+        help_topic: HelpTopic::Root,
     })
+}
+
+fn help_invocation(help_topic: HelpTopic) -> Invocation {
+    Invocation {
+        command: Command::Help,
+        prompt: String::new(),
+        trace: None,
+        json: false,
+        automatic: false,
+        help_topic,
+    }
+}
+
+fn help_topic(name: &str) -> Result<HelpTopic, String> {
+    match name {
+        "interactive" | "repl" => Ok(HelpTopic::Interactive),
+        "ask" => Ok(HelpTopic::Ask),
+        "run" => Ok(HelpTopic::Run),
+        "auto" => Ok(HelpTopic::Auto),
+        "demo" => Ok(HelpTopic::Demo),
+        "status" => Ok(HelpTopic::Status),
+        "doctor" => Ok(HelpTopic::Doctor),
+        "version" => Ok(HelpTopic::Version),
+        _ => Err(format!("unknown help topic: {name}")),
+    }
+}
+
+fn help_topic_for(command: Command) -> HelpTopic {
+    match command {
+        Command::Interactive => HelpTopic::Interactive,
+        Command::Ask => HelpTopic::Ask,
+        Command::Run => HelpTopic::Run,
+        Command::Auto => HelpTopic::Auto,
+        Command::Demo => HelpTopic::Demo,
+        Command::Status => HelpTopic::Status,
+        Command::Doctor => HelpTopic::Doctor,
+        Command::Version => HelpTopic::Version,
+        Command::Help => HelpTopic::Root,
+    }
+}
+
+fn help_text(topic: HelpTopic) -> &'static str {
+    match topic {
+        HelpTopic::Root => HELP,
+        HelpTopic::Interactive => INTERACTIVE_HELP,
+        HelpTopic::Ask => ASK_HELP,
+        HelpTopic::Run => RUN_HELP,
+        HelpTopic::Auto => AUTO_HELP,
+        HelpTopic::Demo => DEMO_HELP,
+        HelpTopic::Status => STATUS_HELP,
+        HelpTopic::Doctor => DOCTOR_HELP,
+        HelpTopic::Version => VERSION_HELP,
+    }
 }
 
 fn run_status(json: bool) -> ExitCode {
@@ -535,6 +649,51 @@ mod tests {
         let invocation = parse_args(vec!["--version".to_string()]).unwrap();
 
         assert_eq!(invocation.command, Command::Version);
+    }
+
+    #[test]
+    fn parses_subcommand_help_forms() {
+        let option = parse_args(vec!["ask".to_string(), "--help".to_string()]).unwrap();
+        let command = parse_args(vec!["help".to_string(), "ask".to_string()]).unwrap();
+        let version = parse_args(vec!["version".to_string(), "--help".to_string()]).unwrap();
+
+        assert_eq!(option.command, Command::Help);
+        assert_eq!(option.help_topic, HelpTopic::Ask);
+        assert_eq!(command.command, Command::Help);
+        assert_eq!(command.help_topic, HelpTopic::Ask);
+        assert_eq!(version.command, Command::Help);
+        assert_eq!(version.help_topic, HelpTopic::Version);
+    }
+
+    #[test]
+    fn option_delimiter_allows_prompt_starting_with_dash() {
+        let invocation = parse_args(vec![
+            "ask".to_string(),
+            "--".to_string(),
+            "--explain".to_string(),
+            "this".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(invocation.command, Command::Ask);
+        assert_eq!(invocation.prompt, "--explain this");
+    }
+
+    #[test]
+    fn rejects_options_unsupported_by_a_command() {
+        assert_eq!(
+            parse_args(vec![
+                "status".to_string(),
+                "--trace".to_string(),
+                "events.jsonl".to_string(),
+            ])
+            .unwrap_err(),
+            "--trace is not supported by status or doctor"
+        );
+        assert_eq!(
+            parse_args(vec!["--version".to_string(), "extra".to_string()]).unwrap_err(),
+            "version does not accept arguments: extra"
+        );
     }
 
     #[test]

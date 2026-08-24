@@ -100,9 +100,13 @@ mini-codex status
 mini-codex
 mini-codex ask "summarize this repository"
 mini-codex ask --json "summarize the current changes"
+mini-codex help ask
 mini-codex auto "inspect this repository, improve it, and run the tests"
 mini-codex --trace trace.jsonl
 ```
+
+Use `--` before a prompt that begins with `-`, for example
+`mini-codex ask -- --explain-this`.
 
 `ask` writes final assistant Markdown to stdout and progress to stderr, so it
 composes with shell pipelines. It also accepts a bounded prompt from stdin.

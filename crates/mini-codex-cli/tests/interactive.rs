@@ -119,6 +119,27 @@ fn status_json_remains_structured_when_env_file_is_invalid() {
 }
 
 #[test]
+fn subcommand_help_succeeds_without_configuration() {
+    let root = test_root();
+    let output = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+        .current_dir(&root)
+        .args(["ask", "--help"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .output()
+        .unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("mini-codex ask"));
+    assert!(stdout.contains("--auto"));
+    assert!(stdout.contains("32 KiB"));
+}
+
+#[test]
 fn interactive_terminal_keeps_history_until_new() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
