@@ -1,0 +1,27 @@
+mod event;
+mod harness;
+mod model;
+mod tool;
+
+pub use event::Event;
+pub use event::Observer;
+pub use event::RunFailure;
+pub use harness::Harness;
+pub use harness::HarnessConfig;
+pub use harness::HarnessError;
+pub use harness::LimitExceeded;
+pub use harness::LimitKind;
+pub use harness::RunOutcome;
+pub use harness::StopReason;
+pub use model::Message;
+pub use model::Model;
+pub use model::ModelEvent;
+pub use model::ModelEventSink;
+pub use model::ModelRequest;
+pub use model::ModelResponse;
+pub use model::ModelUsage;
+pub use model::ToolCall;
+pub use tool::Tool;
+pub use tool::ToolError;
+pub use tool::ToolRegistry;
+pub use tool::ToolSpec;
