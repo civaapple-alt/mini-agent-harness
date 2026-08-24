@@ -1,7 +1,6 @@
 use crate::build_openai_harness_with;
 use crate::config::RuntimeConfig;
 use crate::harness_config;
-use crate::observer::OutputTarget;
 use crate::observer::RunObserver;
 use crate::print_auto_warning;
 use crate::workspace::ApprovalController;
@@ -43,7 +42,7 @@ pub async fn run(
             Ok(harness) => harness,
             Err(error) => return preflight_error(json_output, &error),
         };
-    let mut observer = match RunObserver::with_target(trace, OutputTarget::Stderr) {
+    let mut observer = match RunObserver::for_script(trace) {
         Ok(observer) => observer,
         Err(error) => {
             return preflight_error(json_output, &format!("cannot create trace: {error}"));

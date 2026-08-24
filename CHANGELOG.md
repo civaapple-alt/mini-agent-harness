@@ -5,6 +5,16 @@ All notable changes to mini-codex are documented here. The project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `ask` no longer echoes streamed assistant text before printing its final
+  stdout result.
+
+### Changed
+
+- Interactive reasoning, assistant, tool, and context tags use distinct colors
+  on terminals while redirected output remains plain text.
+
 ## [0.1.0] - 2026-08-24
 
 ### Added

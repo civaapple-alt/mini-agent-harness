@@ -79,7 +79,7 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
     assert_eq!(output["model"], "test-model");
     assert_eq!(output["usage"]["requests"], 1);
     assert!(stderr.contains("thinking> checking"));
-    assert!(stderr.contains("assistant> script answer"));
+    assert!(!stderr.contains("assistant>"));
     let request: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
     assert!(
         request["input"]
@@ -92,6 +92,47 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
             .unwrap()
             .contains("Use the release contract.")
     );
+}
+
+#[test]
+fn ask_prints_the_final_answer_once() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let _ = read_request_body(&mut stream);
+        write_reasoning_sse_response(&mut stream, "checking", "one final answer");
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+        .current_dir(&root)
+        .args(["ask", "answer once"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "one final answer\n"
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("thinking> checking"));
+    assert!(!stderr.contains("assistant>"));
 }
 
 #[test]

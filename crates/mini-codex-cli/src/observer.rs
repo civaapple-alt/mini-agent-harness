@@ -5,6 +5,7 @@ use serde_json::json;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::BufWriter;
+use std::io::IsTerminal;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -20,6 +21,8 @@ struct TerminalObserver {
     lane: StreamLane,
     text_streamed: bool,
     target: OutputTarget,
+    assistant: AssistantDisplay,
+    color: bool,
 }
 
 pub struct RunObserver {
@@ -30,10 +33,27 @@ pub struct RunObserver {
 }
 
 #[derive(Clone, Copy, Default)]
-pub enum OutputTarget {
+enum OutputTarget {
     #[default]
     Stdout,
     Stderr,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum AssistantDisplay {
+    #[default]
+    Stream,
+    Hidden,
+}
+
+#[derive(Clone, Copy)]
+enum TagColor {
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
 }
 
 #[derive(Default)]
@@ -47,10 +67,18 @@ struct RunStats {
 
 impl RunObserver {
     pub fn new(trace: Option<PathBuf>) -> io::Result<Self> {
-        Self::with_target(trace, OutputTarget::Stdout)
+        Self::with_terminal(trace, OutputTarget::Stdout, AssistantDisplay::Stream)
     }
 
-    pub fn with_target(trace: Option<PathBuf>, target: OutputTarget) -> io::Result<Self> {
+    pub fn for_script(trace: Option<PathBuf>) -> io::Result<Self> {
+        Self::with_terminal(trace, OutputTarget::Stderr, AssistantDisplay::Hidden)
+    }
+
+    fn with_terminal(
+        trace: Option<PathBuf>,
+        target: OutputTarget,
+        assistant: AssistantDisplay,
+    ) -> io::Result<Self> {
         let trace = trace
             .map(|path| {
                 OpenOptions::new()
@@ -65,6 +93,8 @@ impl RunObserver {
                 lane: StreamLane::None,
                 text_streamed: false,
                 target,
+                assistant,
+                color: target.color_enabled(),
             },
             trace,
             trace_error: None,
@@ -147,10 +177,11 @@ impl TerminalObserver {
         }
     }
 
-    fn write_delta(&mut self, lane: StreamLane, label: &str, delta: &str) {
+    fn write_delta(&mut self, lane: StreamLane, tag: &str, color: TagColor, delta: &str) {
         if self.lane != lane {
             self.end_stream();
-            self.target.write(&format!("{label}> "));
+            self.target.write(&styled_tag(tag, color, self.color));
+            self.target.write(" ");
             self.lane = lane;
         }
         self.target.write(delta);
@@ -179,6 +210,31 @@ impl OutputTarget {
             Self::Stderr => io::stderr().flush(),
         };
     }
+
+    fn color_enabled(self) -> bool {
+        if std::env::var_os("NO_COLOR").is_some() {
+            return false;
+        }
+        match self {
+            Self::Stdout => io::stdout().is_terminal(),
+            Self::Stderr => io::stderr().is_terminal(),
+        }
+    }
+}
+
+fn styled_tag(tag: &str, color: TagColor, enabled: bool) -> String {
+    if !enabled {
+        return tag.to_string();
+    }
+    let code = match color {
+        TagColor::Red => 31,
+        TagColor::Green => 32,
+        TagColor::Yellow => 33,
+        TagColor::Blue => 34,
+        TagColor::Magenta => 35,
+        TagColor::Cyan => 36,
+    };
+    format!("\u{1b}[{code}m{tag}\u{1b}[0m")
 }
 
 impl Observer for TerminalObserver {
@@ -189,30 +245,49 @@ impl Observer for TerminalObserver {
                 self.text_streamed = false;
             }
             Event::AssistantReasoningDelta { delta } => {
-                self.write_delta(StreamLane::Reasoning, "thinking", delta);
+                self.write_delta(StreamLane::Reasoning, "thinking>", TagColor::Magenta, delta);
             }
-            Event::AssistantTextDelta { delta } => {
+            Event::AssistantTextDelta { delta } if self.assistant == AssistantDisplay::Stream => {
                 self.text_streamed = true;
-                self.write_delta(StreamLane::Text, "assistant", delta);
+                self.write_delta(StreamLane::Text, "assistant>", TagColor::Blue, delta);
             }
-            Event::ModelResponded { text, .. } if !text.is_empty() && !self.text_streamed => {
+            Event::AssistantTextDelta { .. } => {}
+            Event::ModelResponded { text, .. }
+                if self.assistant == AssistantDisplay::Stream
+                    && !text.is_empty()
+                    && !self.text_streamed =>
+            {
                 self.end_stream();
-                self.target.line(&format!("assistant> {text}"));
+                self.target.line(&format!(
+                    "{} {text}",
+                    styled_tag("assistant>", TagColor::Blue, self.color)
+                ));
             }
             Event::ToolStarted { call } => {
                 self.end_stream();
-                self.target.line(&format!("tool> {}", call.name));
+                self.target.line(&format!(
+                    "{} {}",
+                    styled_tag("tool>", TagColor::Yellow, self.color),
+                    call.name
+                ));
             }
             Event::ToolFinished {
                 content, is_error, ..
             } => {
-                let status = if *is_error { "error" } else { "ok" };
-                self.target.line(&format!("tool[{status}]> {content}"));
+                let (tag, color) = if *is_error {
+                    ("tool[error]>", TagColor::Red)
+                } else {
+                    ("tool[ok]>", TagColor::Green)
+                };
+                self.target
+                    .line(&format!("{} {content}", styled_tag(tag, color, self.color)));
             }
             Event::ContextCompactionStarted { before_bytes } => {
                 self.end_stream();
-                self.target
-                    .line(&format!("context> compacting {before_bytes} bytes"));
+                self.target.line(&format!(
+                    "{} compacting {before_bytes} bytes",
+                    styled_tag("context>", TagColor::Cyan, self.color)
+                ));
             }
             Event::ContextCompactionFinished {
                 before_bytes,
@@ -220,7 +295,8 @@ impl Observer for TerminalObserver {
                 ..
             } => {
                 self.target.line(&format!(
-                    "context> compacted {before_bytes} -> {after_bytes} bytes"
+                    "{} compacted {before_bytes} -> {after_bytes} bytes",
+                    styled_tag("context>", TagColor::Cyan, self.color)
                 ));
             }
             Event::RunFinished { .. } => self.end_stream(),
@@ -228,3 +304,7 @@ impl Observer for TerminalObserver {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "observer_tests.rs"]
+mod tests;

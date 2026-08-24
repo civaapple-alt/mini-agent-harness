@@ -65,9 +65,11 @@ The deterministic demo proves the complete model -> tool -> model -> answer
 path without network or credentials. The default command opens a small
 multi-turn terminal using a streaming OpenAI Responses adapter at the CLI
 edge. Reasoning and final-answer deltas use separate `thinking>` and
-`assistant>` lanes. Input entered while a turn is running is accepted into a
-bounded FIFO queue; `/queue` reports how much work is pending. History and
-queued work live only for the life of the process, and `/new` clears history.
+`assistant>` lanes. Terminal tags use distinct colors; redirected output and
+`NO_COLOR` sessions stay plain. Input entered while a turn is running is
+accepted into a bounded FIFO queue; `/queue` reports how much work is pending.
+History and queued work live only for the life of the process, and `/new`
+clears history.
 
 ## Install
 
@@ -108,8 +110,9 @@ mini-codex --trace trace.jsonl
 Use `--` before a prompt that begins with `-`, for example
 `mini-codex ask -- --explain-this`.
 
-`ask` writes final assistant Markdown to stdout and progress to stderr, so it
-composes with shell pipelines. It also accepts a bounded prompt from stdin.
+`ask` writes final assistant Markdown exactly once to stdout and streams only
+reasoning/tool progress to stderr, so it composes with shell pipelines. It also
+accepts a bounded prompt from stdin.
 `ask --json` emits one JSON object containing output, exit code, model, steps,
 usage, and tool-call statuses. Noninteractive sensitive tool calls fail closed;
 `ask --auto` permits them without approval and should be used only in a trusted
