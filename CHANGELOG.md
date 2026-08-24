@@ -10,6 +10,7 @@ All notable changes to mini-codex are documented here. The project follows
 ### Added
 
 - Release automation and cross-platform verification.
+- Post-build verification of every release archive checksum.
 - `ask`, `status`, `doctor`, and `--version` CLI contracts.
 - Per-command help and `--` option delimiters for prompts beginning with `-`.
 - Machine-readable output for `ask`, `status`, and `doctor`.

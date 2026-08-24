@@ -89,6 +89,8 @@ jobs:
         with:
           pattern: mini-codex-*
           merge-multiple: true
+      - name: Verify downloaded checksums
+        run: sha256sum --check mini-codex-*.sha256
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.verify.outputs.tag }}

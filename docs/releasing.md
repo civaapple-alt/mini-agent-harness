@@ -5,8 +5,8 @@
 2. Run the complete local verification contract from `AGENTS.md`.
 3. Commit with a clean working tree and create an annotated `v<version>` tag.
 4. Push the tag. The release workflow verifies that the tag matches Cargo,
-   builds native archives, generates SHA-256 files, and publishes a GitHub
-   Release.
+   builds native archives, generates SHA-256 files, verifies every downloaded
+   artifact again, and publishes a GitHub Release.
 5. Download at least one archive, verify its checksum, and run
    `mini-codex --version` and `mini-codex doctor` from the extracted binary.
 
