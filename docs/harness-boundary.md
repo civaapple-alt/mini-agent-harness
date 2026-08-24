@@ -32,6 +32,7 @@ The harness owns mechanics:
 - the model/tool/model loop;
 - step and output limits;
 - hard user-input, response, tool-call, and request-context bounds;
+- opt-in model-generated context compaction between settled steps;
 - unknown-tool and tool-failure projection;
 - stop classification;
 - an ordered observation trace.
@@ -74,9 +75,10 @@ only when a concrete experiment needs to compare one.
 
 ## Deliberate omissions
 
-The default harness has no durable storage, tree, lanes, queues, hooks,
-compaction, memory, MCP, plugins, background work, telemetry framework, or
-schema migration. It also has no generic scheduler or state-machine framework.
+The default harness has no durable storage, tree, lanes, queues, hooks, memory,
+MCP, plugins, background work, telemetry framework, or schema migration. It
+also has no generic scheduler or state-machine framework. Context compaction is
+present as one direct loop branch but remains disabled by default.
 
 Each omission is reversible. Adding all of them preemptively is not.
 
@@ -90,3 +92,12 @@ A proposed core feature must answer all four questions:
 4. Which existing concept can be removed or kept unchanged to pay for it?
 
 If those answers are missing, the feature stays outside core.
+
+The auto-copilot experiment admits compaction under this test: its hypothesis
+is that bounded summaries let an unattended tool loop continue past raw-history
+growth; `context_compaction_started` and `context_compaction_finished` make the
+intervention observable; it must live in core because it replaces the exact
+message sequence used by the next model request; and it adds no persistence,
+queue, hook, or generic policy layer. Its auxiliary request keeps the normal
+system prompt, tool catalog, and message prefix byte-stable, then appends the
+compaction instruction as the final user message so prefix caches remain useful.

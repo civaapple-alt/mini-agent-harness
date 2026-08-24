@@ -49,9 +49,12 @@ scope. mini-codex keeps only three lessons at the foundation:
 2. the current run state is explicit rather than inferred from missing data;
 3. passive events observe execution but cannot alter it.
 
-Durable storage, conversation trees, lanes, queues, hooks, compaction, schema
-migration, and crash recovery are separate experiments. None enters core until
-an experiment demonstrates that its benefit justifies its permanent cost.
+Durable storage, conversation trees, lanes, queues, hooks, schema migration,
+and crash recovery are separate experiments. None enters core until an
+experiment demonstrates that its benefit justifies its permanent cost. The
+explicit auto mode is that experiment for context compaction: it summarizes a
+settled conversation before the next sampling request when history reaches
+half of the hard context ceiling.
 
 The deterministic demo proves the complete model -> tool -> model -> answer
 path without network or credentials. The default command opens a small
@@ -69,22 +72,30 @@ cargo test
 cargo run -p mini-codex-cli -- demo "make this loud"
 OPENAI_API_KEY=... OPENAI_MODEL=... cargo run -p mini-codex-cli
 OPENAI_API_KEY=... OPENAI_MODEL=... cargo run -p mini-codex-cli -- run "say hello"
+cargo run -p mini-codex-cli -- auto
+cargo run -p mini-codex-cli -- auto "inspect this repository, improve it, and run the tests"
 cargo run -p mini-codex-cli -- --trace trace.jsonl
 python scripts/line_budget.py
 ```
 
-The real `run` command exposes `read_file`, `edit_file`, `write_file`, and
-`shell`. Reads are confined to the current workspace. `.git` is protected.
-`edit_file` makes one exact unique replacement; `write_file` creates new files
-and refuses to replace existing ones. Writes and shell commands ask for
-approval every time and fail closed when stdin is not an interactive terminal.
-Shell execution is not sandboxed yet; the approval boundary is explicit rather
-than presented as isolation. Oversized tool results retain their beginning and
-end inside a hard byte budget, with truncation explicit in the event trace.
-Shell processes have a 120-second deadline and bounded concurrent stdout/stderr
-capture; timeout terminates the process tree.
-Conversation persistence, resume, and compaction are deliberately absent from
-this first terminal slice.
+The real modes expose `read_file`, `edit_file`, `write_file`, and `shell`.
+Reads and direct file writes are confined to the current workspace; `.git` is
+protected. `edit_file` makes one exact unique replacement; `write_file` creates
+new files and refuses to replace existing ones. Interactive and `run` modes ask
+before writes and every shell command. `auto` without a prompt starts an
+interactive auto session; `/auto` enables automatic execution in any
+interactive session and `/auto off` restores per-action approval. `auto` with a
+prompt remains a one-shot copilot. Auto mode runs up to 128 model steps,
+performs writes and shell commands without per-step approval, and compacts
+context between settled tool batches so work can continue. It prints a warning
+because shell execution is not sandboxed and can escape the workspace even
+though direct file tools cannot.
+
+Oversized tool results retain their beginning and end inside a hard byte budget,
+with truncation explicit in the event trace. Shell processes have a 120-second
+deadline and bounded concurrent stdout/stderr capture; timeout terminates the
+process tree. Conversation persistence and resume remain deliberately absent:
+auto mode survives long context growth, not process termination.
 
 See [the experiment protocol](docs/experiments.md), the
 [unknown-tool comparison](docs/experiments/unknown-tool.md), the

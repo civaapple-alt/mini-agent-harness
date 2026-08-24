@@ -6,6 +6,7 @@ mod tool;
 pub use event::Event;
 pub use event::Observer;
 pub use event::RunFailure;
+pub use harness::ContextLimitBehavior;
 pub use harness::Harness;
 pub use harness::HarnessConfig;
 pub use harness::HarnessError;

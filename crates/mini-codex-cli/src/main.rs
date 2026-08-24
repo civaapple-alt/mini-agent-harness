@@ -2,6 +2,7 @@ mod env_file;
 mod openai;
 mod workspace;
 
+use mini_codex_core::ContextLimitBehavior;
 use mini_codex_core::Event;
 use mini_codex_core::Harness;
 use mini_codex_core::HarnessConfig;
@@ -32,10 +33,13 @@ use std::process::ExitCode;
 
 use env_file::Environment;
 use openai::OpenAiModel;
+use workspace::ApprovalController;
 use workspace::ApprovalMode;
 use workspace::workspace_tools;
 
-const HELP: &str = "mini-codex\n\nUSAGE:\n    mini-codex [--trace PATH]\n    mini-codex run [--trace PATH] <PROMPT>\n    mini-codex demo [--trace PATH] <PROMPT>\n\nENVIRONMENT:\n    OPENAI_API_KEY    Required except by demo\n    OPENAI_MODEL      Required except by demo\n    OPENAI_BASE_URL   Optional; defaults to https://api.openai.com/v1";
+const HELP: &str = "mini-codex\n\nUSAGE:\n    mini-codex [--trace PATH]\n    mini-codex run [--trace PATH] <PROMPT>\n    mini-codex auto [--trace PATH] [PROMPT]\n    mini-codex demo [--trace PATH] <PROMPT>\n\n`auto` without a prompt starts an interactive session in auto mode.\n\nENVIRONMENT:\n    OPENAI_API_KEY    Required except by demo\n    OPENAI_MODEL      Required except by demo\n    OPENAI_BASE_URL   Optional; defaults to https://api.openai.com/v1";
+const AUTO_SYSTEM_PROMPT: &str = "You are an autonomous coding agent. Work continuously toward the user's goal. Inspect the workspace before editing, use tools as needed, keep changes scoped to the request, and run relevant checks. Do not stop at intermediate progress or ask for confirmation unless you are blocked by missing information or an unsafe action outside the workspace. When the work is complete, report the result plainly.";
+const AUTO_MAX_STEPS: usize = 128;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
@@ -47,9 +51,13 @@ async fn main() -> ExitCode {
         }
     };
     match invocation.command {
-        Command::Interactive => run_interactive(invocation.trace).await,
+        Command::Interactive => run_interactive(invocation.trace, ApprovalMode::Interactive).await,
         Command::Demo => run_demo(invocation.prompt, invocation.trace).await,
         Command::Run => run_openai(invocation.prompt, invocation.trace).await,
+        Command::Auto if invocation.prompt.is_empty() => {
+            run_interactive(invocation.trace, ApprovalMode::Automatic).await
+        }
+        Command::Auto => run_auto(invocation.prompt, invocation.trace).await,
         Command::Help => {
             println!("{HELP}");
             ExitCode::SUCCESS
@@ -62,6 +70,7 @@ enum Command {
     Interactive,
     Demo,
     Run,
+    Auto,
     Help,
 }
 
@@ -87,6 +96,10 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         Some("run") => {
             args.next();
             Command::Run
+        }
+        Some("auto") => {
+            args.next();
+            Command::Auto
         }
         Some(other) => return Err(format!("unknown command: {other}")),
     };
@@ -128,8 +141,9 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     })
 }
 
-async fn run_interactive(trace: Option<PathBuf>) -> ExitCode {
-    let mut harness = match build_openai_harness() {
+async fn run_interactive(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode {
+    let approval = ApprovalController::new(initial_mode);
+    let mut harness = match build_openai_harness(approval.clone(), harness_config(initial_mode)) {
         Ok(harness) => harness,
         Err(error) => {
             eprintln!("error: {error}");
@@ -144,7 +158,11 @@ async fn run_interactive(trace: Option<PathBuf>) -> ExitCode {
         }
     };
 
-    println!("mini-codex — /new /help /exit");
+    println!("mini-codex — /auto /new /help /exit");
+    if initial_mode == ApprovalMode::Automatic {
+        print_auto_warning();
+        println!("auto mode on");
+    }
     loop {
         print!("> ");
         if let Err(error) = io::stdout().flush() {
@@ -177,9 +195,24 @@ async fn run_interactive(trace: Option<PathBuf>) -> ExitCode {
                 continue;
             }
             "/help" => {
-                println!("/new   clear this in-memory conversation");
-                println!("/help  show local commands");
-                println!("/exit  quit");
+                println!("/auto      enable automatic execution");
+                println!("/auto off  require approval for writes and shell commands");
+                println!("/new       clear this in-memory conversation");
+                println!("/help      show local commands");
+                println!("/exit      quit");
+                continue;
+            }
+            "/auto" | "/auto on" => {
+                approval.set_mode(ApprovalMode::Automatic);
+                harness.replace_config(harness_config(ApprovalMode::Automatic));
+                print_auto_warning();
+                println!("auto mode on");
+                continue;
+            }
+            "/auto off" => {
+                approval.set_mode(ApprovalMode::Interactive);
+                harness.replace_config(harness_config(ApprovalMode::Interactive));
+                println!("auto mode off; writes and shell commands require approval");
                 continue;
             }
             command if command.starts_with('/') => {
@@ -237,7 +270,8 @@ async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
 }
 
 async fn run_openai(prompt: String, trace: Option<PathBuf>) -> ExitCode {
-    let mut harness = match build_openai_harness() {
+    let approval = ApprovalController::new(ApprovalMode::Interactive);
+    let mut harness = match build_openai_harness(approval, HarnessConfig::default()) {
         Ok(harness) => harness,
         Err(error) => {
             eprintln!("error: {error}");
@@ -265,7 +299,50 @@ async fn run_openai(prompt: String, trace: Option<PathBuf>) -> ExitCode {
     }
 }
 
-fn build_openai_harness() -> Result<Harness<OpenAiModel>, String> {
+async fn run_auto(prompt: String, trace: Option<PathBuf>) -> ExitCode {
+    print_auto_warning();
+    let approval = ApprovalController::new(ApprovalMode::Automatic);
+    let mut harness = match build_openai_harness(approval, harness_config(ApprovalMode::Automatic))
+    {
+        Ok(harness) => harness,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut observer = match RunObserver::new(trace) {
+        Ok(observer) => observer,
+        Err(error) => {
+            eprintln!("error: cannot create trace: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match harness.run(prompt, &mut observer).await {
+        Ok(outcome) => {
+            observer.finish();
+            if outcome.stop_reason == StopReason::StepLimit {
+                eprintln!(
+                    "error: auto mode stopped after {} model steps without completing",
+                    outcome.steps
+                );
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        Err(error) => {
+            observer.finish();
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn build_openai_harness(
+    approval: ApprovalController,
+    config: HarnessConfig,
+) -> Result<Harness<OpenAiModel>, String> {
     let environment = Environment::load(".env")?;
     let api_key = environment.required("OPENAI_API_KEY")?;
     let model = environment.required("OPENAI_MODEL")?;
@@ -280,11 +357,29 @@ fn build_openai_harness() -> Result<Harness<OpenAiModel>, String> {
         Ok(root) => root,
         Err(error) => return Err(format!("cannot resolve current directory: {error}")),
     };
-    let tools = match workspace_tools(root, ApprovalMode::Interactive) {
+    let tools = match workspace_tools(root, approval) {
         Ok(tools) => ToolRegistry::new(tools),
         Err(error) => return Err(error.to_string()),
     };
-    Ok(Harness::new(model, tools, HarnessConfig::default()))
+    Ok(Harness::new(model, tools, config))
+}
+
+fn harness_config(mode: ApprovalMode) -> HarnessConfig {
+    match mode {
+        ApprovalMode::Interactive => HarnessConfig::default(),
+        ApprovalMode::Automatic => HarnessConfig {
+            system_prompt: AUTO_SYSTEM_PROMPT.to_string(),
+            max_steps: AUTO_MAX_STEPS,
+            context_limit_behavior: ContextLimitBehavior::Compact,
+            ..HarnessConfig::default()
+        },
+    }
+}
+
+fn print_auto_warning() {
+    eprintln!(
+        "warning: auto mode runs workspace writes and unsandboxed shell commands without approval"
+    );
 }
 
 struct DemoModel {
@@ -448,6 +543,17 @@ impl Observer for TerminalObserver {
                 let status = if *is_error { "error" } else { "ok" };
                 println!("tool[{status}]> {content}");
             }
+            Event::ContextCompactionStarted { before_bytes } => {
+                self.end_stream();
+                println!("context> compacting {before_bytes} bytes");
+            }
+            Event::ContextCompactionFinished {
+                before_bytes,
+                after_bytes,
+                ..
+            } => {
+                println!("context> compacted {before_bytes} -> {after_bytes} bytes");
+            }
             Event::RunFinished { .. } => self.end_stream(),
             Event::RunStarted { .. }
             | Event::ModelStarted { .. }
@@ -498,5 +604,26 @@ mod tests {
             parse_args(vec!["run".to_string()]).unwrap_err(),
             "prompt is required"
         );
+    }
+
+    #[test]
+    fn parses_auto_mode() {
+        let invocation = parse_args(vec![
+            "auto".to_string(),
+            "finish".to_string(),
+            "the task".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(invocation.command, Command::Auto);
+        assert_eq!(invocation.prompt, "finish the task");
+    }
+
+    #[test]
+    fn parses_auto_mode_without_prompt() {
+        let invocation = parse_args(vec!["auto".to_string()]).unwrap();
+
+        assert_eq!(invocation.command, Command::Auto);
+        assert_eq!(invocation.prompt, "");
     }
 }

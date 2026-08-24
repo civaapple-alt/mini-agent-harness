@@ -146,7 +146,13 @@ impl Observer for TraceCounts {
 async fn run_treatment(surface: EditSurface) -> ExperimentResult {
     let root = tests::test_root();
     fs::write(root.join("settings.conf"), INITIAL).unwrap();
-    let workspace = Arc::new(Workspace::new(root.clone(), ApprovalMode::Always).unwrap());
+    let workspace = Arc::new(
+        Workspace::new(
+            root.clone(),
+            ApprovalController::new(ApprovalMode::Automatic),
+        )
+        .unwrap(),
+    );
     let mutation: Box<dyn Tool> = match surface {
         EditSurface::ExactReplacement => Box::new(EditFile(Arc::clone(&workspace))),
         EditSurface::WholeFileRewrite => Box::new(RewriteFile(Arc::clone(&workspace))),

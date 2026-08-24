@@ -17,6 +17,8 @@ use std::process::Command;
 use std::process::ExitStatus;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -27,16 +29,40 @@ const MAX_COMMAND_BYTES: usize = 16 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: usize = 64 * 1024;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApprovalMode {
     Interactive,
-    #[cfg(test)]
-    Always,
+    Automatic,
+}
+
+#[derive(Clone)]
+pub struct ApprovalController(Arc<AtomicBool>);
+
+impl ApprovalController {
+    pub fn new(mode: ApprovalMode) -> Self {
+        Self(Arc::new(AtomicBool::new(matches!(
+            mode,
+            ApprovalMode::Automatic
+        ))))
+    }
+
+    pub fn mode(&self) -> ApprovalMode {
+        if self.0.load(Ordering::Relaxed) {
+            ApprovalMode::Automatic
+        } else {
+            ApprovalMode::Interactive
+        }
+    }
+
+    pub fn set_mode(&self, mode: ApprovalMode) {
+        self.0
+            .store(matches!(mode, ApprovalMode::Automatic), Ordering::Relaxed);
+    }
 }
 
 pub fn workspace_tools(
     root: PathBuf,
-    approval: ApprovalMode,
+    approval: ApprovalController,
 ) -> Result<Vec<Box<dyn Tool>>, ToolError> {
     let workspace = Arc::new(Workspace::new(root, approval)?);
     Ok(vec![
@@ -49,11 +75,11 @@ pub fn workspace_tools(
 
 struct Workspace {
     root: PathBuf,
-    approval: ApprovalMode,
+    approval: ApprovalController,
 }
 
 impl Workspace {
-    fn new(root: PathBuf, approval: ApprovalMode) -> Result<Self, ToolError> {
+    fn new(root: PathBuf, approval: ApprovalController) -> Result<Self, ToolError> {
         let root = root
             .canonicalize()
             .map_err(|error| ToolError(format!("invalid workspace: {error}")))?;
@@ -120,9 +146,8 @@ impl Workspace {
     }
 
     fn approve(&self, action: &str) -> Result<(), ToolError> {
-        match self.approval {
-            #[cfg(test)]
-            ApprovalMode::Always => return Ok(()),
+        match self.approval.mode() {
+            ApprovalMode::Automatic => return Ok(()),
             ApprovalMode::Interactive => {}
         }
         if !io::stdin().is_terminal() {
@@ -262,7 +287,7 @@ impl Tool for Shell {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "shell".to_string(),
-            description: shell_description().to_string(),
+            description: shell_description(self.0.approval.mode()),
             parameters: json!({
                 "type": "object",
                 "properties": { "command": {"type": "string"} },
@@ -284,11 +309,17 @@ impl Tool for Shell {
     }
 }
 
-fn shell_description() -> &'static str {
+fn shell_description(approval: ApprovalMode) -> String {
+    let approval = match approval {
+        ApprovalMode::Interactive => "after user approval",
+        ApprovalMode::Automatic => "without per-command approval",
+    };
     if cfg!(windows) {
-        "Run one PowerShell 7 command via pwsh in the Windows workspace after user approval, with a 120-second deadline. Use PowerShell syntax and cmdlets; do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`."
+        format!(
+            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Use PowerShell syntax and cmdlets; do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`."
+        )
     } else {
-        "Run one POSIX sh command in the workspace after user approval, with a 120-second deadline"
+        format!("Run one POSIX sh command in the workspace {approval}, with a 120-second deadline")
     }
 }
 
@@ -497,7 +528,13 @@ mod tests {
     fn reads_and_edits_inside_workspace() {
         let root = test_root();
         fs::write(root.join("note.txt"), "hello world").unwrap();
-        let workspace = Arc::new(Workspace::new(root.clone(), ApprovalMode::Always).unwrap());
+        let workspace = Arc::new(
+            Workspace::new(
+                root.clone(),
+                ApprovalController::new(ApprovalMode::Automatic),
+            )
+            .unwrap(),
+        );
         let read = ReadFile(Arc::clone(&workspace));
         let edit = EditFile(workspace);
 
@@ -522,7 +559,11 @@ mod tests {
     #[test]
     fn rejects_escape_and_git_paths() {
         let root = test_root();
-        let workspace = Workspace::new(root.clone(), ApprovalMode::Always).unwrap();
+        let workspace = Workspace::new(
+            root.clone(),
+            ApprovalController::new(ApprovalMode::Automatic),
+        )
+        .unwrap();
 
         assert!(workspace.candidate(&json!({"path": "../secret"})).is_err());
         assert!(
@@ -543,7 +584,13 @@ mod tests {
     fn write_file_creates_but_does_not_replace() {
         let root = test_root();
         fs::write(root.join("existing.txt"), "keep me").unwrap();
-        let workspace = Arc::new(Workspace::new(root.clone(), ApprovalMode::Always).unwrap());
+        let workspace = Arc::new(
+            Workspace::new(
+                root.clone(),
+                ApprovalController::new(ApprovalMode::Automatic),
+            )
+            .unwrap(),
+        );
         let write = WriteFile(workspace);
 
         write
@@ -593,7 +640,13 @@ mod tests {
     #[test]
     fn shell_matches_the_host_environment() {
         let root = test_root();
-        let workspace = Arc::new(Workspace::new(root.clone(), ApprovalMode::Always).unwrap());
+        let workspace = Arc::new(
+            Workspace::new(
+                root.clone(),
+                ApprovalController::new(ApprovalMode::Automatic),
+            )
+            .unwrap(),
+        );
         let spec = Shell(workspace).spec();
         let command = shell_command("echo ready");
 
@@ -605,6 +658,7 @@ mod tests {
             assert_eq!(command.get_program(), "sh");
             assert!(spec.description.contains("POSIX sh"));
         }
+        assert!(spec.description.contains("without per-command approval"));
 
         fs::remove_dir_all(root).unwrap();
     }

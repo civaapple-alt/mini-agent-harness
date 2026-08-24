@@ -12,6 +12,14 @@ use std::error::Error;
 use std::fmt;
 
 const TRUNCATION_MARKER: &str = "\n[truncated]";
+const COMPACTION_PREFIX: &str = "[Compacted conversation context]";
+const COMPACTION_PROMPT: &str = "Summarize the conversation state for another coding agent that must continue the work. Preserve the user's active goal, constraints, decisions, files changed, commands and tests already run, failures, unresolved work, and the exact next actions. Be concise but do not omit information needed to continue. Output only the summary and do not call tools.";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContextLimitBehavior {
+    Reject,
+    Compact,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HarnessConfig {
@@ -22,6 +30,7 @@ pub struct HarnessConfig {
     pub max_tool_calls_per_step: usize,
     pub max_tool_output_bytes: usize,
     pub max_context_bytes: usize,
+    pub context_limit_behavior: ContextLimitBehavior,
 }
 
 impl Default for HarnessConfig {
@@ -36,6 +45,7 @@ impl Default for HarnessConfig {
             max_tool_calls_per_step: 8,
             max_tool_output_bytes: 16 * 1024,
             max_context_bytes: 256 * 1024,
+            context_limit_behavior: ContextLimitBehavior::Reject,
         }
     }
 }
@@ -95,6 +105,7 @@ pub struct RunOutcome {
 #[derive(Debug)]
 pub enum HarnessError<E> {
     Model(E),
+    Compaction(String),
     Limit(LimitExceeded),
 }
 
@@ -102,6 +113,7 @@ impl<E: fmt::Display> fmt::Display for HarnessError<E> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Model(error) => write!(formatter, "model request failed: {error}"),
+            Self::Compaction(error) => write!(formatter, "context compaction failed: {error}"),
             Self::Limit(error) => error.fmt(formatter),
         }
     }
@@ -134,6 +146,10 @@ impl<M: Model> Harness<M> {
         self.messages.clear();
     }
 
+    pub fn replace_config(&mut self, config: HarnessConfig) {
+        self.config = config;
+    }
+
     pub async fn run<O: Observer + Send>(
         &mut self,
         prompt: impl Into<String>,
@@ -154,15 +170,19 @@ impl<M: Model> Harness<M> {
             prompt: prompt.clone(),
         });
 
+        let previous_message_count = self.messages.len();
         self.messages.push(Message::User { text: prompt });
         let tool_specs = self.tools.specs();
-        if let Err(limit) = self.ensure_context_limit(&tool_specs) {
-            self.messages.pop();
-            return Err(fail_limit(limit, observer));
+        if let Err(error) = self.prepare_context(&tool_specs, observer).await {
+            if self.config.context_limit_behavior == ContextLimitBehavior::Reject {
+                self.messages.truncate(previous_message_count);
+            }
+            return Err(error);
         }
         let mut final_text = String::new();
 
         for step in 1..=self.config.max_steps {
+            self.prepare_context(&tool_specs, observer).await?;
             observer.observe(&Event::ModelStarted { step });
             let mut model_events = ModelEventForwarder {
                 observer,
@@ -260,9 +280,9 @@ impl<M: Model> Harness<M> {
                     content,
                     is_error,
                 });
-                if let Err(limit) = self.ensure_context_limit(&tool_specs) {
-                    return Err(fail_limit(limit, observer));
-                }
+            }
+            if let Err(limit) = self.ensure_context_limit(&tool_specs) {
+                return Err(fail_limit(limit, observer));
             }
         }
 
@@ -276,13 +296,7 @@ impl<M: Model> Harness<M> {
     }
 
     fn ensure_context_limit(&self, tool_specs: &[crate::ToolSpec]) -> Result<(), LimitExceeded> {
-        let actual = self.config.system_prompt.len()
-            + serde_json::to_vec(&self.messages)
-                .expect("messages must serialize")
-                .len()
-            + serde_json::to_vec(tool_specs)
-                .expect("tool specs must serialize")
-                .len();
+        let actual = self.context_bytes(&self.config.system_prompt, tool_specs);
         if actual <= self.config.max_context_bytes {
             Ok(())
         } else {
@@ -293,6 +307,142 @@ impl<M: Model> Harness<M> {
             })
         }
     }
+
+    fn context_bytes(&self, system_prompt: &str, tool_specs: &[crate::ToolSpec]) -> usize {
+        context_bytes_for(system_prompt, &self.messages, tool_specs)
+    }
+
+    async fn prepare_context<O: Observer + Send>(
+        &mut self,
+        tool_specs: &[crate::ToolSpec],
+        observer: &mut O,
+    ) -> Result<(), HarnessError<M::Error>> {
+        let actual = self.context_bytes(&self.config.system_prompt, tool_specs);
+        let compact_at = self.config.max_context_bytes / 2;
+        let should_compact = self.config.context_limit_behavior == ContextLimitBehavior::Compact
+            && self.messages.len() > 1
+            && actual >= compact_at;
+        if should_compact {
+            self.compact_context(tool_specs, observer).await?;
+        }
+        self.ensure_context_limit(tool_specs)
+            .map_err(|limit| fail_limit(limit, observer))
+    }
+
+    async fn compact_context<O: Observer + Send>(
+        &mut self,
+        tool_specs: &[crate::ToolSpec],
+        observer: &mut O,
+    ) -> Result<(), HarnessError<M::Error>> {
+        let before_bytes = self.context_bytes(&self.config.system_prompt, tool_specs);
+        let mut compaction_messages = self.messages.clone();
+        compaction_messages.push(Message::User {
+            text: COMPACTION_PROMPT.to_string(),
+        });
+        let compaction_bytes =
+            context_bytes_for(&self.config.system_prompt, &compaction_messages, tool_specs);
+        if compaction_bytes > self.config.max_context_bytes {
+            return Err(fail_limit(
+                LimitExceeded {
+                    kind: LimitKind::ContextBytes,
+                    limit: self.config.max_context_bytes,
+                    actual: compaction_bytes,
+                },
+                observer,
+            ));
+        }
+        observer.observe(&Event::ContextCompactionStarted { before_bytes });
+        let response = self
+            .model
+            .respond(
+                ModelRequest {
+                    system_prompt: &self.config.system_prompt,
+                    messages: &compaction_messages,
+                    tools: tool_specs,
+                    max_response_bytes: self.config.max_model_response_bytes,
+                },
+                &mut SilentModelEvents,
+            )
+            .await
+            .map_err(|error| {
+                observer.observe(&Event::RunFailed {
+                    reason: crate::RunFailure::Model,
+                });
+                HarnessError::Model(error)
+            })?;
+        if !response.tool_calls.is_empty() {
+            return Err(fail_compaction(
+                "model returned tool calls while compacting".to_string(),
+                observer,
+            ));
+        }
+        let summary = response.text.trim();
+        if summary.is_empty() {
+            return Err(fail_compaction(
+                "model returned an empty summary".to_string(),
+                observer,
+            ));
+        }
+        if summary.len() > self.config.max_model_response_bytes {
+            return Err(fail_limit(
+                LimitExceeded {
+                    kind: LimitKind::ModelResponseBytes,
+                    limit: self.config.max_model_response_bytes,
+                    actual: summary.len(),
+                },
+                observer,
+            ));
+        }
+
+        let compacted_messages = vec![Message::User {
+            text: format!("{COMPACTION_PREFIX}\n{summary}"),
+        }];
+        let after_bytes =
+            context_bytes_for(&self.config.system_prompt, &compacted_messages, tool_specs);
+        if after_bytes >= before_bytes {
+            return Err(fail_compaction(
+                format!("summary did not reduce context: {before_bytes} -> {after_bytes} bytes"),
+                observer,
+            ));
+        }
+        if after_bytes > self.config.max_context_bytes {
+            return Err(fail_limit(
+                LimitExceeded {
+                    kind: LimitKind::ContextBytes,
+                    limit: self.config.max_context_bytes,
+                    actual: after_bytes,
+                },
+                observer,
+            ));
+        }
+        self.messages = compacted_messages;
+        observer.observe(&Event::ContextCompactionFinished {
+            before_bytes,
+            after_bytes,
+            usage: response.usage,
+        });
+        Ok(())
+    }
+}
+
+fn context_bytes_for(
+    system_prompt: &str,
+    messages: &[Message],
+    tool_specs: &[crate::ToolSpec],
+) -> usize {
+    system_prompt.len()
+        + serde_json::to_vec(messages)
+            .expect("messages must serialize")
+            .len()
+        + serde_json::to_vec(tool_specs)
+            .expect("tool specs must serialize")
+            .len()
+}
+
+struct SilentModelEvents;
+
+impl ModelEventSink for SilentModelEvents {
+    fn emit(&mut self, _event: ModelEvent) {}
 }
 
 struct ModelEventForwarder<'a, O> {
@@ -335,6 +485,13 @@ fn fail_limit<E, O: Observer>(limit: LimitExceeded, observer: &mut O) -> Harness
         reason: crate::RunFailure::LimitExceeded(limit),
     });
     HarnessError::Limit(limit)
+}
+
+fn fail_compaction<E, O: Observer>(reason: String, observer: &mut O) -> HarnessError<E> {
+    observer.observe(&Event::RunFailed {
+        reason: crate::RunFailure::Compaction,
+    });
+    HarnessError::Compaction(reason)
 }
 
 fn truncate_utf8(mut content: String, max_bytes: usize) -> String {

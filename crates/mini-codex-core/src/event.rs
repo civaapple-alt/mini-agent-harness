@@ -32,6 +32,14 @@ pub enum Event {
         is_error: bool,
         truncated: bool,
     },
+    ContextCompactionStarted {
+        before_bytes: usize,
+    },
+    ContextCompactionFinished {
+        before_bytes: usize,
+        after_bytes: usize,
+        usage: Option<ModelUsage>,
+    },
     RunFinished {
         stop_reason: StopReason,
         steps: usize,
@@ -45,6 +53,7 @@ pub enum Event {
 #[serde(tag = "type", content = "detail", rename_all = "snake_case")]
 pub enum RunFailure {
     Model,
+    Compaction,
     LimitExceeded(LimitExceeded),
 }
 

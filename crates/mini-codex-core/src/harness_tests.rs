@@ -9,6 +9,8 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::VecDeque;
 use std::convert::Infallible;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 struct ScriptedModel {
     responses: VecDeque<ModelResponse>,
@@ -26,6 +28,38 @@ impl Model for ScriptedModel {
             .responses
             .pop_front()
             .expect("missing scripted response"))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct RecordedRequest {
+    system_prompt: String,
+    messages: Vec<Message>,
+    tools: Vec<ToolSpec>,
+}
+
+struct RecordingModel {
+    responses: VecDeque<ModelResponse>,
+    requests: Arc<Mutex<Vec<RecordedRequest>>>,
+}
+
+impl Model for RecordingModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        self.requests.lock().unwrap().push(RecordedRequest {
+            system_prompt: request.system_prompt.to_string(),
+            messages: request.messages.to_vec(),
+            tools: request.tools.to_vec(),
+        });
+        Ok(self
+            .responses
+            .pop_front()
+            .expect("missing recorded response"))
     }
 }
 
@@ -281,6 +315,145 @@ async fn preserves_history_across_runs_and_can_clear_it() {
 
     harness.clear_history();
     assert!(harness.messages().is_empty());
+}
+
+#[tokio::test]
+async fn compacts_context_and_continues_the_tool_loop() {
+    let long_tool_value = "x".repeat(300);
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let model = RecordingModel {
+        responses: VecDeque::from([
+            ModelResponse {
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call-1".to_string(),
+                    name: "uppercase".to_string(),
+                    arguments: json!({"text": long_tool_value}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                text: "The user asked for a long operation. The uppercase tool completed successfully. Continue by reporting completion.".to_string(),
+                tool_calls: Vec::new(),
+                usage: Some(ModelUsage {
+                    input_tokens: 100,
+                    cached_input_tokens: 0,
+                    output_tokens: 20,
+                }),
+            },
+            ModelResponse {
+                text: "Long operation completed.".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            },
+        ]),
+        requests: Arc::clone(&requests),
+    };
+    let config = HarnessConfig {
+        max_model_response_bytes: 1024,
+        max_tool_output_bytes: 512,
+        max_context_bytes: 2000,
+        context_limit_behavior: ContextLimitBehavior::Compact,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(model, ToolRegistry::new(vec![Box::new(Uppercase)]), config);
+    let mut events = RecordingObserver::default();
+
+    let outcome = harness
+        .run("perform the long operation", &mut events)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Completed);
+    assert_eq!(outcome.steps, 2);
+    assert_eq!(outcome.final_text, "Long operation completed.");
+    assert!(matches!(
+        outcome.messages.as_slice(),
+        [
+            Message::User { text },
+            Message::Assistant { text: answer, tool_calls }
+        ] if text.starts_with(COMPACTION_PREFIX)
+            && answer == "Long operation completed."
+            && tool_calls.is_empty()
+    ));
+    assert!(events.0.iter().any(|event| matches!(
+        event,
+        Event::ContextCompactionFinished {
+            before_bytes,
+            after_bytes,
+            usage: Some(ModelUsage { input_tokens: 100, .. }),
+        } if after_bytes < before_bytes
+    )));
+
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    let first = &requests[0];
+    let compaction = &requests[1];
+    let continuation = &requests[2];
+    assert_eq!(compaction.system_prompt, first.system_prompt);
+    assert_eq!(compaction.tools, first.tools);
+    assert_eq!(continuation.system_prompt, first.system_prompt);
+    assert_eq!(continuation.tools, first.tools);
+    assert_eq!(
+        &compaction.messages[..first.messages.len()],
+        first.messages.as_slice()
+    );
+    assert!(matches!(
+        compaction.messages.last(),
+        Some(Message::User { text }) if text == COMPACTION_PROMPT
+    ));
+}
+
+#[tokio::test]
+async fn failed_compaction_preserves_existing_history() {
+    let model = ScriptedModel {
+        responses: VecDeque::from([
+            ModelResponse {
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call-1".to_string(),
+                    name: "uppercase".to_string(),
+                    arguments: json!({"text": "x".repeat(300)}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                text: "   ".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            },
+        ]),
+    };
+    let config = HarnessConfig {
+        max_model_response_bytes: 1024,
+        max_tool_output_bytes: 512,
+        max_context_bytes: 2000,
+        context_limit_behavior: ContextLimitBehavior::Compact,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(model, ToolRegistry::new(vec![Box::new(Uppercase)]), config);
+    let mut events = RecordingObserver::default();
+
+    let error = harness
+        .run("perform the long operation", &mut events)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        HarnessError::Compaction(reason) if reason == "model returned an empty summary"
+    ));
+    assert_eq!(harness.messages().len(), 3);
+    assert!(matches!(
+        harness.messages().first(),
+        Some(Message::User { text }) if text == "perform the long operation"
+    ));
+    assert_eq!(
+        events.0.last(),
+        Some(&Event::RunFailed {
+            reason: crate::RunFailure::Compaction,
+        })
+    );
 }
 
 #[test]
