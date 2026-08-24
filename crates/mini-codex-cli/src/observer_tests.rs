@@ -36,3 +36,26 @@ fn terminal_final_answer_has_one_assistant_tag() {
 fn redirected_final_answer_remains_script_friendly() {
     assert_eq!(format_final_answer("finished", false, false), "finished");
 }
+
+#[test]
+fn plain_terminal_ask_streams_assistant_to_stdout() {
+    assert!(matches!(
+        script_assistant_display(ScriptFormat::Text, true, true),
+        AssistantDisplay::Stream {
+            target: OutputTarget::Stdout,
+            color: true
+        }
+    ));
+}
+
+#[test]
+fn redirected_and_json_ask_hold_the_final_answer() {
+    assert!(matches!(
+        script_assistant_display(ScriptFormat::Text, false, false),
+        AssistantDisplay::Hidden
+    ));
+    assert!(matches!(
+        script_assistant_display(ScriptFormat::Json, true, true),
+        AssistantDisplay::Hidden
+    ));
+}

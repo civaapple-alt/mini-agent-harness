@@ -19,7 +19,8 @@ enum StreamLane {
 
 struct TerminalObserver {
     lane: StreamLane,
-    text_streamed: bool,
+    lane_target: OutputTarget,
+    assistant_displayed: bool,
     target: OutputTarget,
     assistant: AssistantDisplay,
     color: bool,
@@ -39,11 +40,16 @@ enum OutputTarget {
     Stderr,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum AssistantDisplay {
-    #[default]
-    Stream,
     Hidden,
+    Stream { target: OutputTarget, color: bool },
+}
+
+#[derive(Clone, Copy)]
+pub enum ScriptFormat {
+    Text,
+    Json,
 }
 
 #[derive(Clone, Copy)]
@@ -67,11 +73,23 @@ struct RunStats {
 
 impl RunObserver {
     pub fn new(trace: Option<PathBuf>) -> io::Result<Self> {
-        Self::with_terminal(trace, OutputTarget::Stdout, AssistantDisplay::Stream)
+        Self::with_terminal(
+            trace,
+            OutputTarget::Stdout,
+            AssistantDisplay::Stream {
+                target: OutputTarget::Stdout,
+                color: OutputTarget::Stdout.color_enabled(),
+            },
+        )
     }
 
-    pub fn for_script(trace: Option<PathBuf>) -> io::Result<Self> {
-        Self::with_terminal(trace, OutputTarget::Stderr, AssistantDisplay::Hidden)
+    pub fn for_script(trace: Option<PathBuf>, format: ScriptFormat) -> io::Result<Self> {
+        let terminal = io::stdout().is_terminal();
+        Self::with_terminal(
+            trace,
+            OutputTarget::Stderr,
+            script_assistant_display(format, terminal, OutputTarget::Stdout.color_enabled()),
+        )
     }
 
     fn with_terminal(
@@ -91,7 +109,8 @@ impl RunObserver {
         Ok(Self {
             terminal: TerminalObserver {
                 lane: StreamLane::None,
-                text_streamed: false,
+                lane_target: target,
+                assistant_displayed: false,
                 target,
                 assistant,
                 color: target.color_enabled(),
@@ -120,6 +139,10 @@ impl RunObserver {
 
     pub fn tool_calls_json(&self) -> &[Value] {
         &self.stats.tool_calls
+    }
+
+    pub fn assistant_displayed(&self) -> bool {
+        self.terminal.assistant_displayed
     }
 }
 
@@ -184,20 +207,29 @@ impl Observer for RunObserver {
 impl TerminalObserver {
     fn end_stream(&mut self) {
         if self.lane != StreamLane::None {
-            self.target.line("");
+            self.lane_target.line("");
             self.lane = StreamLane::None;
         }
     }
 
-    fn write_delta(&mut self, lane: StreamLane, tag: &str, color: TagColor, delta: &str) {
+    fn write_delta(
+        &mut self,
+        lane: StreamLane,
+        target: OutputTarget,
+        tag: &str,
+        color: TagColor,
+        color_enabled: bool,
+        delta: &str,
+    ) {
         if self.lane != lane {
             self.end_stream();
-            self.target.write(&styled_tag(tag, color, self.color));
-            self.target.write(" ");
+            target.write(&styled_tag(tag, color, color_enabled));
+            target.write(" ");
             self.lane = lane;
+            self.lane_target = target;
         }
-        self.target.write(delta);
-        self.target.flush();
+        target.write(delta);
+        target.flush();
     }
 }
 
@@ -257,31 +289,55 @@ fn format_final_answer(text: &str, terminal: bool, color: bool) -> String {
     }
 }
 
+fn script_assistant_display(format: ScriptFormat, terminal: bool, color: bool) -> AssistantDisplay {
+    match (format, terminal) {
+        (ScriptFormat::Text, true) => AssistantDisplay::Stream {
+            target: OutputTarget::Stdout,
+            color,
+        },
+        (ScriptFormat::Text, false) | (ScriptFormat::Json, _) => AssistantDisplay::Hidden,
+    }
+}
+
 impl Observer for TerminalObserver {
     fn observe(&mut self, event: &Event) {
         match event {
             Event::ModelStarted { .. } => {
                 self.end_stream();
-                self.text_streamed = false;
+                self.assistant_displayed = false;
             }
             Event::AssistantReasoningDelta { delta } => {
-                self.write_delta(StreamLane::Reasoning, "thinking>", TagColor::Magenta, delta);
+                self.write_delta(
+                    StreamLane::Reasoning,
+                    self.target,
+                    "thinking>",
+                    TagColor::Magenta,
+                    self.color,
+                    delta,
+                );
             }
-            Event::AssistantTextDelta { delta } if self.assistant == AssistantDisplay::Stream => {
-                self.text_streamed = true;
-                self.write_delta(StreamLane::Text, "assistant>", TagColor::Blue, delta);
+            Event::AssistantTextDelta { delta } => {
+                if let AssistantDisplay::Stream { target, color } = self.assistant {
+                    self.assistant_displayed = true;
+                    self.write_delta(
+                        StreamLane::Text,
+                        target,
+                        "assistant>",
+                        TagColor::Blue,
+                        color,
+                        delta,
+                    );
+                }
             }
-            Event::AssistantTextDelta { .. } => {}
-            Event::ModelResponded { text, .. }
-                if self.assistant == AssistantDisplay::Stream
-                    && !text.is_empty()
-                    && !self.text_streamed =>
-            {
-                self.end_stream();
-                self.target.line(&format!(
-                    "{} {text}",
-                    styled_tag("assistant>", TagColor::Blue, self.color)
-                ));
+            Event::ModelResponded { text, .. } if !text.is_empty() && !self.assistant_displayed => {
+                if let AssistantDisplay::Stream { target, color } = self.assistant {
+                    self.end_stream();
+                    target.line(&format!(
+                        "{} {text}",
+                        styled_tag("assistant>", TagColor::Blue, color)
+                    ));
+                    self.assistant_displayed = true;
+                }
             }
             Event::ToolStarted { call } => {
                 self.end_stream();

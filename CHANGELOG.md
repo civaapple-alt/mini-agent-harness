@@ -15,6 +15,8 @@ All notable changes to mini-codex are documented here. The project follows
 
 - Interactive reasoning, assistant, tool, and context tags use distinct colors
   on terminals while redirected output remains plain text.
+- Plain terminal `ask` output streams assistant deltas without repeating the
+  completed answer; redirected and JSON output remain completion-buffered.
 
 ## [0.1.0] - 2026-08-24
 
