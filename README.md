@@ -175,4 +175,4 @@ See [the experiment protocol](docs/experiments.md), the
 [harness boundary](docs/harness-boundary.md). The exact defaults and failure
 behavior are listed in [harness limits](docs/limits.md).
 
-Licensed under the [Apache License 2.0](LICENSE).
+Licensed under the [MIT License](LICENSE).

@@ -13,6 +13,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- Changed the project license from Apache-2.0 to MIT.
 - Renamed the project from mini-codex to Mini Agent Harness, with the
   `mini-agent` executable and `mini-agent-core` / `mini-agent-cli` crates.
 - Interactive reasoning, assistant, tool, and context tags use distinct colors
