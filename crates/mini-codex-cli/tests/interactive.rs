@@ -30,11 +30,18 @@ fn interactive_terminal_keeps_history_until_new() {
         }
     });
     let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
         .current_dir(&root)
-        .env("OPENAI_API_KEY", "test-key")
-        .env("OPENAI_MODEL", "test-model")
-        .env("OPENAI_BASE_URL", format!("http://{address}/v1"))
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

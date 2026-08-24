@@ -60,6 +60,10 @@ edge. It keeps history only for the life of the process; `/new` clears it.
 
 ## Run
 
+Copy `.env.demo` to `.env` and fill in `OPENAI_API_KEY`. The demo defaults to
+DeepSeek's Responses API with the `deepseek-v4-flash` model. Process environment
+values take precedence over `.env`; the local file is ignored by Git.
+
 ```sh
 cargo test
 cargo run -p mini-codex-cli -- demo "make this loud"

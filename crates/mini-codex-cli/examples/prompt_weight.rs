@@ -1,6 +1,9 @@
+#[path = "../src/env_file.rs"]
+mod env_file;
 #[path = "../src/openai.rs"]
 mod openai;
 
+use env_file::Environment;
 use mini_codex_core::Event;
 use mini_codex_core::Harness;
 use mini_codex_core::HarnessConfig;
@@ -100,10 +103,12 @@ async fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     let args = parse_args(raw_args)?;
-    let api_key = required_env("OPENAI_API_KEY")?;
-    let model_name = required_env("OPENAI_MODEL")?;
-    let base_url =
-        env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let environment = Environment::load(".env")?;
+    let api_key = environment.required("OPENAI_API_KEY")?;
+    let model_name = environment.required("OPENAI_MODEL")?;
+    let base_url = environment
+        .get("OPENAI_BASE_URL")
+        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
     let mut output: Box<dyn Write> = match args.output {
         Some(path) => Box::new(BufWriter::new(
             OpenOptions::new().write(true).create_new(true).open(path)?,
@@ -352,13 +357,6 @@ fn parse_args(args: Vec<String>) -> Result<Args, String> {
         }
     }
     Ok(Args { runs, output })
-}
-
-fn required_env(name: &str) -> Result<String, String> {
-    env::var(name)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("{name} is required"))
 }
 
 fn write_json_line(output: &mut dyn Write, value: &Value) -> Result<(), Box<dyn Error>> {

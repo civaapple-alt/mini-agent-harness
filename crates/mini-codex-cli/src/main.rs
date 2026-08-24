@@ -1,3 +1,4 @@
+mod env_file;
 mod openai;
 mod workspace;
 
@@ -29,6 +30,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use env_file::Environment;
 use openai::OpenAiModel;
 use workspace::ApprovalMode;
 use workspace::workspace_tools;
@@ -264,16 +266,12 @@ async fn run_openai(prompt: String, trace: Option<PathBuf>) -> ExitCode {
 }
 
 fn build_openai_harness() -> Result<Harness<OpenAiModel>, String> {
-    let api_key = match env::var("OPENAI_API_KEY") {
-        Ok(value) if !value.trim().is_empty() => value,
-        _ => return Err("OPENAI_API_KEY is required".to_string()),
-    };
-    let model = match env::var("OPENAI_MODEL") {
-        Ok(value) if !value.trim().is_empty() => value,
-        _ => return Err("OPENAI_MODEL is required".to_string()),
-    };
-    let base_url =
-        env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let environment = Environment::load(".env")?;
+    let api_key = environment.required("OPENAI_API_KEY")?;
+    let model = environment.required("OPENAI_MODEL")?;
+    let base_url = environment
+        .get("OPENAI_BASE_URL")
+        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
     let model = match OpenAiModel::new(api_key, model, base_url) {
         Ok(model) => model,
         Err(error) => return Err(error.to_string()),

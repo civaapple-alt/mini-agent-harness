@@ -262,9 +262,7 @@ impl Tool for Shell {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "shell".to_string(),
-            description:
-                "Run one shell command in the workspace after user approval, with a 120-second deadline"
-                    .to_string(),
+            description: shell_description().to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": { "command": {"type": "string"} },
@@ -286,10 +284,24 @@ impl Tool for Shell {
     }
 }
 
+fn shell_description() -> &'static str {
+    if cfg!(windows) {
+        "Run one PowerShell 7 command via pwsh in the Windows workspace after user approval, with a 120-second deadline. Use PowerShell syntax and cmdlets; do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`."
+    } else {
+        "Run one POSIX sh command in the workspace after user approval, with a 120-second deadline"
+    }
+}
+
 fn shell_command(command: &str) -> Command {
     if cfg!(windows) {
-        let mut process = Command::new("powershell.exe");
-        process.args(["-NoLogo", "-NoProfile", "-Command", command]);
+        let mut process = Command::new("pwsh");
+        process.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            command,
+        ]);
         process
     } else {
         let mut process = Command::new("sh");
@@ -575,6 +587,25 @@ mod tests {
         let output = run_shell(command, &root, Duration::from_millis(50)).unwrap();
 
         assert!(output.contains("timed out"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn shell_matches_the_host_environment() {
+        let root = test_root();
+        let workspace = Arc::new(Workspace::new(root.clone(), ApprovalMode::Always).unwrap());
+        let spec = Shell(workspace).spec();
+        let command = shell_command("echo ready");
+
+        if cfg!(windows) {
+            assert_eq!(command.get_program(), "pwsh");
+            assert!(spec.description.contains("PowerShell 7"));
+            assert!(spec.description.contains("Windows"));
+        } else {
+            assert_eq!(command.get_program(), "sh");
+            assert!(spec.description.contains("POSIX sh"));
+        }
+
         fs::remove_dir_all(root).unwrap();
     }
 }
