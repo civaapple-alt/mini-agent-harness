@@ -8,7 +8,8 @@ All notable changes to mini-codex are documented here. The project follows
 ### Fixed
 
 - `ask` no longer echoes streamed assistant text before printing its final
-  stdout result.
+  result; terminals retain one `assistant>` tag while redirected stdout stays
+  raw.
 
 ### Changed
 

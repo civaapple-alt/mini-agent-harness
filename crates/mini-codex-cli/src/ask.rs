@@ -2,6 +2,7 @@ use crate::build_openai_harness_with;
 use crate::config::RuntimeConfig;
 use crate::harness_config;
 use crate::observer::RunObserver;
+use crate::observer::print_final_answer;
 use crate::print_auto_warning;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
@@ -65,7 +66,7 @@ pub async fn run(
                     })
                 );
             } else {
-                println!("{}", outcome.final_text);
+                print_final_answer(&outcome.final_text);
             }
             ExitCode::SUCCESS
         }

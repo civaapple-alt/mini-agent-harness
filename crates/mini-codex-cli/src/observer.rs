@@ -123,6 +123,18 @@ impl RunObserver {
     }
 }
 
+pub fn print_final_answer(text: &str) {
+    let terminal = io::stdout().is_terminal();
+    println!(
+        "{}",
+        format_final_answer(
+            text,
+            terminal,
+            terminal && OutputTarget::Stdout.color_enabled()
+        )
+    );
+}
+
 impl Observer for RunObserver {
     fn observe(&mut self, event: &Event) {
         self.terminal.observe(event);
@@ -235,6 +247,14 @@ fn styled_tag(tag: &str, color: TagColor, enabled: bool) -> String {
         TagColor::Cyan => 36,
     };
     format!("\u{1b}[{code}m{tag}\u{1b}[0m")
+}
+
+fn format_final_answer(text: &str, terminal: bool, color: bool) -> String {
+    if terminal {
+        format!("{} {text}", styled_tag("assistant>", TagColor::Blue, color))
+    } else {
+        text.to_string()
+    }
 }
 
 impl Observer for TerminalObserver {

@@ -19,3 +19,20 @@ fn leaves_tags_plain_when_color_is_disabled() {
         "tool[error]>"
     );
 }
+
+#[test]
+fn terminal_final_answer_has_one_assistant_tag() {
+    assert_eq!(
+        format_final_answer("finished", true, true),
+        "\u{1b}[34massistant>\u{1b}[0m finished"
+    );
+    assert_eq!(
+        format_final_answer("finished", true, false),
+        "assistant> finished"
+    );
+}
+
+#[test]
+fn redirected_final_answer_remains_script_friendly() {
+    assert_eq!(format_final_answer("finished", false, false), "finished");
+}

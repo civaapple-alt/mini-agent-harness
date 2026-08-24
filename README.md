@@ -110,9 +110,10 @@ mini-codex --trace trace.jsonl
 Use `--` before a prompt that begins with `-`, for example
 `mini-codex ask -- --explain-this`.
 
-`ask` writes final assistant Markdown exactly once to stdout and streams only
-reasoning/tool progress to stderr, so it composes with shell pipelines. It also
-accepts a bounded prompt from stdin.
+`ask` writes the final assistant answer exactly once and streams only
+reasoning/tool progress to stderr. A terminal receives one colored `assistant>`
+tag; redirected stdout receives the raw answer so it composes with shell
+pipelines. It also accepts a bounded prompt from stdin.
 `ask --json` emits one JSON object containing output, exit code, model, steps,
 usage, and tool-call statuses. Noninteractive sensitive tool calls fail closed;
 `ask --auto` permits them without approval and should be used only in a trusted
