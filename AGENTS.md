@@ -1,13 +1,13 @@
-# mini-codex development contract
+# Mini Agent Harness development contract
 
 ## Purpose
 
-mini-codex studies agent harness behavior. It is not a smaller copy of every
-feature in Codex, Pi, fx, or Qi.
+Mini Agent Harness studies agent harness behavior. It is not a smaller copy of
+every feature in Codex, Pi, fx, or Qi.
 
 ## Hard boundaries
 
-- `mini-codex-core` owns only portable model/tool contracts, the explicit run
+- `mini-agent-core` owns only portable model/tool contracts, the explicit run
   loop, limits, stop classification, and observation events.
 - Providers, files, processes, approval UI, persistence, and terminal output
   stay outside core.

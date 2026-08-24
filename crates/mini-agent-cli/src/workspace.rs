@@ -2,9 +2,9 @@ use crate::processes::ProcessManager;
 use crate::processes::process_tools;
 use crate::result_store::ReadToolResult;
 use crate::result_store::ResultStore;
-use mini_codex_core::Tool;
-use mini_codex_core::ToolError;
-use mini_codex_core::ToolSpec;
+use mini_agent_core::Tool;
+use mini_agent_core::ToolError;
+use mini_agent_core::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -582,7 +582,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("mini-codex-{nonce}"));
+        let root = std::env::temp_dir().join(format!("mini-agent-{nonce}"));
         fs::create_dir(&root).unwrap();
         root
     }

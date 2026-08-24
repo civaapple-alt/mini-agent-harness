@@ -30,7 +30,7 @@ policy.
 ## Reproduce
 
 ```sh
-cargo test -p mini-codex-cli workspace::edit_experiment -- --nocapture
+cargo test -p mini-agent-cli workspace::edit_experiment -- --nocapture
 ```
 
 ## Result

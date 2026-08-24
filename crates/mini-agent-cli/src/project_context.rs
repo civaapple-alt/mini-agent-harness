@@ -68,7 +68,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("mini-codex-project-context-{nonce}"));
+        let root = std::env::temp_dir().join(format!("mini-agent-project-context-{nonce}"));
         fs::create_dir(&root).unwrap();
         root
     }

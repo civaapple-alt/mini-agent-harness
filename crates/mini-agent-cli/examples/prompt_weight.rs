@@ -4,15 +4,15 @@ mod env_file;
 mod openai;
 
 use env_file::Environment;
-use mini_codex_core::Event;
-use mini_codex_core::Harness;
-use mini_codex_core::HarnessConfig;
-use mini_codex_core::Observer;
-use mini_codex_core::StopReason;
-use mini_codex_core::Tool;
-use mini_codex_core::ToolError;
-use mini_codex_core::ToolRegistry;
-use mini_codex_core::ToolSpec;
+use mini_agent_core::Event;
+use mini_agent_core::Harness;
+use mini_agent_core::HarnessConfig;
+use mini_agent_core::Observer;
+use mini_agent_core::StopReason;
+use mini_agent_core::Tool;
+use mini_agent_core::ToolError;
+use mini_agent_core::ToolRegistry;
+use mini_agent_core::ToolSpec;
 use openai::OpenAiModel;
 use serde_json::Value;
 use serde_json::json;
@@ -30,7 +30,7 @@ const MINIMAL_PROMPT: &str =
     include_str!("../../../docs/experiments/fixtures/prompt-weight-minimal.txt");
 const EXPANDED_PROMPT: &str =
     include_str!("../../../docs/experiments/fixtures/prompt-weight-expanded.txt");
-const HELP: &str = "prompt-weight experiment\n\nUSAGE:\n    cargo run -p mini-codex-cli --example prompt_weight -- [--runs N] [--output PATH]\n\nEach repetition normally issues 12 and may issue up to 18 model responses. Output paths must not already exist.";
+const HELP: &str = "prompt-weight experiment\n\nUSAGE:\n    cargo run -p mini-agent-cli --example prompt_weight -- [--runs N] [--output PATH]\n\nEach repetition normally issues 12 and may issue up to 18 model responses. Output paths must not already exist.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Treatment {

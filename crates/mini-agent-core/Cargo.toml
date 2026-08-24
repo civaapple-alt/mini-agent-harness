@@ -1,22 +1,19 @@
 [package]
-name = "mini-codex-cli"
+name = "mini-agent-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description.workspace = true
 readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-[[bin]]
-name = "mini-codex"
-path = "src/main.rs"
-
 [dependencies]
-eventsource-stream.workspace = true
-futures-util.workspace = true
-mini-codex-core = { version = "0.1.0", path = "../mini-codex-core" }
-reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
 tokio.workspace = true

@@ -1,6 +1,6 @@
-use mini_codex_core::Tool;
-use mini_codex_core::ToolError;
-use mini_codex_core::ToolSpec;
+use mini_agent_core::Tool;
+use mini_agent_core::ToolError;
+use mini_agent_core::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::VecDeque;

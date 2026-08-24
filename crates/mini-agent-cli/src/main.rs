@@ -9,20 +9,20 @@ mod repl;
 mod result_store;
 mod workspace;
 
-use mini_codex_core::ContextLimitBehavior;
-use mini_codex_core::Harness;
-use mini_codex_core::HarnessConfig;
-use mini_codex_core::Message;
-use mini_codex_core::Model;
-use mini_codex_core::ModelEventSink;
-use mini_codex_core::ModelRequest;
-use mini_codex_core::ModelResponse;
-use mini_codex_core::StopReason;
-use mini_codex_core::Tool;
-use mini_codex_core::ToolCall;
-use mini_codex_core::ToolError;
-use mini_codex_core::ToolRegistry;
-use mini_codex_core::ToolSpec;
+use mini_agent_core::ContextLimitBehavior;
+use mini_agent_core::Harness;
+use mini_agent_core::HarnessConfig;
+use mini_agent_core::Message;
+use mini_agent_core::Model;
+use mini_agent_core::ModelEventSink;
+use mini_agent_core::ModelRequest;
+use mini_agent_core::ModelResponse;
+use mini_agent_core::StopReason;
+use mini_agent_core::Tool;
+use mini_agent_core::ToolCall;
+use mini_agent_core::ToolError;
+use mini_agent_core::ToolRegistry;
+use mini_agent_core::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
 use std::convert::Infallible;
@@ -37,16 +37,16 @@ use workspace::ApprovalController;
 use workspace::ApprovalMode;
 use workspace::workspace_tools;
 
-const HELP: &str = "mini-codex\n\nUSAGE:\n    mini-codex [--trace PATH]\n    mini-codex ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-codex run [--trace PATH] [--] <PROMPT>\n    mini-codex auto [--trace PATH] [--] [PROMPT]\n    mini-codex demo [--trace PATH] [--] <PROMPT>\n    mini-codex status [--json]\n    mini-codex doctor [--json]\n    mini-codex help [COMMAND]\n    mini-codex --version\n\nRun `mini-codex help COMMAND` or `mini-codex COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY    Required except by demo\n    OPENAI_MODEL      Required except by demo\n    OPENAI_BASE_URL   Optional; defaults to https://api.openai.com/v1";
-const INTERACTIVE_HELP: &str = "mini-codex interactive\n\nUSAGE:\n    mini-codex [--trace PATH]\n\nStarts the approval-gated interactive REPL.";
-const ASK_HELP: &str = "mini-codex ask\n\nUSAGE:\n    mini-codex ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn. If PROMPT is omitted, reads at most 32 KiB from stdin.\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto        Run tools without approval\n    --json        Emit a machine-readable final result\n    --trace PATH  Write JSONL observation events";
-const RUN_HELP: &str = "mini-codex run\n\nUSAGE:\n    mini-codex run [--trace PATH] [--] <PROMPT>\n\nRuns one approval-gated model turn.";
-const AUTO_HELP: &str = "mini-codex auto\n\nUSAGE:\n    mini-codex auto [--trace PATH] [--] [PROMPT]\n\nRuns an automatic turn, or starts the REPL in automatic mode when PROMPT is omitted.";
-const DEMO_HELP: &str = "mini-codex demo\n\nUSAGE:\n    mini-codex demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
-const STATUS_HELP: &str = "mini-codex status\n\nUSAGE:\n    mini-codex status [--json]\n\nPrints effective non-secret startup configuration.";
-const DOCTOR_HELP: &str = "mini-codex doctor\n\nUSAGE:\n    mini-codex doctor [--json]\n\nChecks local configuration without contacting the model provider.";
+const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--trace PATH]\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent run [--trace PATH] [--] <PROMPT>\n    mini-agent auto [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY    Required except by demo\n    OPENAI_MODEL      Required except by demo\n    OPENAI_BASE_URL   Optional; defaults to https://api.openai.com/v1";
+const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--trace PATH]\n\nStarts the approval-gated interactive REPL.";
+const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn. If PROMPT is omitted, reads at most 32 KiB from stdin.\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto        Run tools without approval\n    --json        Emit a machine-readable final result\n    --trace PATH  Write JSONL observation events";
+const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--trace PATH] [--] <PROMPT>\n\nRuns one approval-gated model turn.";
+const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--trace PATH] [--] [PROMPT]\n\nRuns an automatic turn, or starts the REPL in automatic mode when PROMPT is omitted.";
+const DEMO_HELP: &str = "mini-agent demo\n\nUSAGE:\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
+const STATUS_HELP: &str = "mini-agent status\n\nUSAGE:\n    mini-agent status [--json]\n\nPrints effective non-secret startup configuration.";
+const DOCTOR_HELP: &str = "mini-agent doctor\n\nUSAGE:\n    mini-agent doctor [--json]\n\nChecks local configuration without contacting the model provider.";
 const VERSION_HELP: &str =
-    "mini-codex version\n\nUSAGE:\n    mini-codex version\n    mini-codex --version";
+    "mini-agent version\n\nUSAGE:\n    mini-agent version\n    mini-agent --version";
 const AUTO_SYSTEM_PROMPT: &str = "You are an autonomous coding agent. Work continuously toward the user's goal. Inspect the workspace before editing, use tools as needed, keep changes scoped to the request, and run relevant checks. Do not stop at intermediate progress or ask for confirmation unless you are blocked by missing information or an unsafe action outside the workspace. When the work is complete, report the result plainly.";
 const AUTO_MAX_STEPS: usize = 128;
 
@@ -81,7 +81,7 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Command::Version => {
-            println!("mini-codex {}", env!("CARGO_PKG_VERSION"));
+            println!("mini-agent {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Command::Status => run_status(invocation.json),

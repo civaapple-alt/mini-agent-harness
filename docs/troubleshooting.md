@@ -3,8 +3,8 @@
 Start with:
 
 ```sh
-mini-codex doctor
-mini-codex status
+mini-agent doctor
+mini-agent status
 ```
 
 `doctor --json` and `status --json` provide the same information for scripts.
@@ -16,8 +16,8 @@ Copy `.env.demo` to `.env`, set `OPENAI_API_KEY`, and confirm `OPENAI_MODEL` and
 
 ## PowerShell commands fail on Windows
 
-mini-codex intentionally uses `pwsh`, not Windows PowerShell. Install
-PowerShell 7 and confirm `pwsh` is on `PATH`; `mini-codex doctor` checks this.
+mini-agent intentionally uses `pwsh`, not Windows PowerShell. Install
+PowerShell 7 and confirm `pwsh` is on `PATH`; `mini-agent doctor` checks this.
 
 ## A noninteractive tool call is denied
 

@@ -13,7 +13,7 @@ a private channel before publishing details.
 
 ## Runtime boundary
 
-mini-codex does not sandbox shell commands. Interactive mode asks before file
+Mini Agent Harness does not sandbox shell commands. Interactive mode asks before file
 writes, shell commands, and managed-process starts. `auto` and `ask --auto`
 remove those approval prompts and should run only in a disposable or otherwise
 trusted workspace.

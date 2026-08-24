@@ -28,7 +28,7 @@ runtime policy interface.
 ## Reproduce
 
 ```sh
-cargo test -p mini-codex-core --test unknown_tool_experiment -- --nocapture
+cargo test -p mini-agent-core --test unknown_tool_experiment -- --nocapture
 ```
 
 ## Result

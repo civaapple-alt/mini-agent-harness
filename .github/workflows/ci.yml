@@ -42,16 +42,16 @@ jobs:
       - name: Test workspace
         run: cargo test --workspace --locked
       - name: Build release binary
-        run: cargo build --release --locked -p mini-codex-cli
+        run: cargo build --release --locked -p mini-agent-cli
       - name: Smoke test release binary
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            target/release/mini-codex.exe --version
-            target/release/mini-codex.exe status --json
+            target/release/mini-agent.exe --version
+            target/release/mini-agent.exe status --json
           else
-            target/release/mini-codex --version
-            target/release/mini-codex status --json
+            target/release/mini-agent --version
+            target/release/mini-agent status --json
           fi
 
   msrv:

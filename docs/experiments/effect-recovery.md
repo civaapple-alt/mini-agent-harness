@@ -28,7 +28,7 @@ outcome.
 ## Reproduce
 
 ```sh
-cargo test -p mini-codex-core --test effect_recovery_experiment -- --nocapture
+cargo test -p mini-agent-core --test effect_recovery_experiment -- --nocapture
 ```
 
 ## Result
@@ -48,7 +48,7 @@ write. A prepare/intent record prevents the harness from forgetting that the
 outcome is uncertain, but cannot prove whether the external write happened. It
 therefore improves safety without providing automatic completion.
 
-mini-codex does not add generic persistence after this result. If durable
+mini-agent does not add generic persistence after this result. If durable
 recovery becomes a product requirement, the smallest honest design must expose
 an effect's recovery class: replayable, externally idempotent under a stable
 call identity, or uncertain and requiring reconciliation. An intent journal

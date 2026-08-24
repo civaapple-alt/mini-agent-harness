@@ -18,7 +18,7 @@ class PackageReleaseTests(unittest.TestCase):
     def test_tar_archives_are_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
-            binary = root / "mini-codex"
+            binary = root / "mini-agent"
             binary.write_bytes(b"release-binary")
             first = root / "first"
             second = root / "second"
@@ -35,17 +35,17 @@ class PackageReleaseTests(unittest.TestCase):
     def test_tar_archive_contents_modes_and_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
-            binary = root / "mini-codex"
+            binary = root / "mini-agent"
             binary.write_bytes(b"linux-release-binary")
 
             archive, checksum = package_release.package_release(
                 binary, "x86_64-unknown-linux-gnu", "1.2.3", root / "out"
             )
 
-            package_name = "mini-codex-v1.2.3-x86_64-unknown-linux-gnu"
+            package_name = "mini-agent-v1.2.3-x86_64-unknown-linux-gnu"
             with tarfile.open(archive, "r:gz") as contents:
                 names = contents.getnames()
-                executable = contents.getmember(f"{package_name}/mini-codex")
+                executable = contents.getmember(f"{package_name}/mini-agent")
                 readme = contents.getmember(f"{package_name}/README.md")
                 payload = contents.extractfile(executable)
 
@@ -53,7 +53,7 @@ class PackageReleaseTests(unittest.TestCase):
                     names,
                     [
                         package_name,
-                        f"{package_name}/mini-codex",
+                        f"{package_name}/mini-agent",
                         f"{package_name}/README.md",
                         f"{package_name}/LICENSE",
                         f"{package_name}/CHANGELOG.md",
@@ -68,7 +68,7 @@ class PackageReleaseTests(unittest.TestCase):
     def test_zip_archive_is_deterministic_and_has_expected_contents(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
-            binary = root / "mini-codex.exe"
+            binary = root / "mini-agent.exe"
             binary.write_bytes(b"windows-release-binary")
             first_archive, checksum = package_release.package_release(
                 binary, "x86_64-pc-windows-msvc", "1.2.3", root / "first"
@@ -77,15 +77,15 @@ class PackageReleaseTests(unittest.TestCase):
                 binary, "x86_64-pc-windows-msvc", "1.2.3", root / "second"
             )
 
-            package_name = "mini-codex-v1.2.3-x86_64-pc-windows-msvc"
+            package_name = "mini-agent-v1.2.3-x86_64-pc-windows-msvc"
             with zipfile.ZipFile(first_archive) as contents:
                 names = contents.namelist()
-                executable = contents.getinfo(f"{package_name}/mini-codex.exe")
+                executable = contents.getinfo(f"{package_name}/mini-agent.exe")
 
                 self.assertEqual(
                     names,
                     [
-                        f"{package_name}/mini-codex.exe",
+                        f"{package_name}/mini-agent.exe",
                         f"{package_name}/README.md",
                         f"{package_name}/LICENSE",
                         f"{package_name}/CHANGELOG.md",
@@ -100,7 +100,7 @@ class PackageReleaseTests(unittest.TestCase):
 
     def test_rejects_non_semver_versions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            binary = pathlib.Path(directory) / "mini-codex.exe"
+            binary = pathlib.Path(directory) / "mini-agent.exe"
             binary.write_bytes(b"release-binary")
 
             with self.assertRaisesRegex(ValueError, "strict SemVer"):

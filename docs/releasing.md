@@ -8,7 +8,7 @@
    builds native archives, generates SHA-256 files, verifies every downloaded
    artifact again, and publishes a GitHub Release.
 5. Download at least one archive, verify its checksum, and run
-   `mini-codex --version` and `mini-codex doctor` from the extracted binary.
+   `mini-agent --version` and `mini-agent doctor` from the extracted binary.
 
 Release archives contain the binary, `README.md`, `LICENSE`, and
 `CHANGELOG.md`. No release job uses provider credentials or makes a paid model

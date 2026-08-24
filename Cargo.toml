@@ -1,7 +1,7 @@
 [workspace]
 members = [
-    "crates/mini-codex-core",
-    "crates/mini-codex-cli",
+    "crates/mini-agent-core",
+    "crates/mini-agent-cli",
 ]
 resolver = "2"
 
@@ -12,6 +12,8 @@ rust-version = "1.88"
 license = "Apache-2.0"
 description = "A small native coding-agent harness with bounded tools and OpenAI Responses support"
 readme = "README.md"
+repository = "https://github.com/civaapple-alt/mini-agent-harness"
+homepage = "https://github.com/civaapple-alt/mini-agent-harness"
 keywords = ["ai", "agent", "coding", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 

@@ -17,7 +17,9 @@ ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Package one mini-codex release binary")
+    parser = argparse.ArgumentParser(
+        description="Package one Mini Agent Harness release binary"
+    )
     parser.add_argument("--binary", required=True, type=pathlib.Path)
     parser.add_argument("--target", required=True)
     parser.add_argument("--version", required=True)
@@ -40,14 +42,14 @@ def package_release(
             raise ValueError(f"release input does not exist: {ROOT / name}")
 
     output.mkdir(parents=True, exist_ok=True)
-    package_name = f"mini-codex-v{version}-{target}"
+    package_name = f"mini-agent-v{version}-{target}"
     windows = "windows" in target
     archive = output / f"{package_name}{'.zip' if windows else '.tar.gz'}"
     checksum = archive.with_name(f"{archive.name}.sha256")
     if archive.exists() or checksum.exists():
         raise ValueError(f"release output already exists: {archive}")
 
-    members = [(binary, "mini-codex.exe" if windows else "mini-codex", 0o755)]
+    members = [(binary, "mini-agent.exe" if windows else "mini-agent", 0o755)]
     members.extend((ROOT / name, name, 0o644) for name in PUBLIC_FILES)
     if windows:
         write_zip(archive, package_name, members)

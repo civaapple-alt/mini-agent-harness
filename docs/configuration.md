@@ -1,6 +1,6 @@
 # Configuration
 
-mini-codex resolves provider settings in this order:
+mini-agent resolves provider settings in this order:
 
 1. process environment;
 2. `.env` in the startup workspace;
@@ -21,12 +21,12 @@ OPENAI_MODEL=deepseek-v4-flash
 OPENAI_BASE_URL=https://api.deepseek.com
 ```
 
-Run `mini-codex status` to inspect the effective non-secret configuration and
-its source. `status` never prints the credential. Run `mini-codex doctor` to
+Run `mini-agent status` to inspect the effective non-secret configuration and
+its source. `status` never prints the credential. Run `mini-agent doctor` to
 validate provider configuration and the host shell without starting an agent
 turn. Both commands accept `--json`.
 
-If the startup workspace contains `AGENTS.md`, mini-codex appends its UTF-8
+If the startup workspace contains `AGENTS.md`, mini-agent appends its UTF-8
 contents once to the stable system prompt. The file has a 16 KiB hard limit;
 startup fails explicitly rather than silently omitting or truncating oversized
 instructions. Nested instruction discovery is not part of the v0.1 contract.

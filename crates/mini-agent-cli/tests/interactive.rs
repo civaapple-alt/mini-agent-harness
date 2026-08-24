@@ -36,7 +36,7 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
     )
     .unwrap();
     fs::write(root.join("AGENTS.md"), "Use the release contract.\n").unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
         .current_dir(&root)
         .args(["ask", "--json"])
         .env_remove("OPENAI_API_KEY")
@@ -114,7 +114,7 @@ fn ask_prints_the_final_answer_once() {
         ),
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+    let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
         .current_dir(&root)
         .args(["ask", "answer once"])
         .env_remove("OPENAI_API_KEY")
@@ -139,7 +139,7 @@ fn ask_prints_the_final_answer_once() {
 fn status_json_remains_structured_when_env_file_is_invalid() {
     let root = test_root();
     fs::write(root.join(".env"), "NOT VALID\n").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+    let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
         .current_dir(&root)
         .args(["status", "--json"])
         .env_remove("OPENAI_API_KEY")
@@ -162,7 +162,7 @@ fn status_json_remains_structured_when_env_file_is_invalid() {
 #[test]
 fn subcommand_help_succeeds_without_configuration() {
     let root = test_root();
-    let output = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+    let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
         .current_dir(&root)
         .args(["ask", "--help"])
         .env_remove("OPENAI_API_KEY")
@@ -175,7 +175,7 @@ fn subcommand_help_succeeds_without_configuration() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("mini-codex ask"));
+    assert!(stdout.contains("mini-agent ask"));
     assert!(stdout.contains("--auto"));
     assert!(stdout.contains("32 KiB"));
 }
@@ -211,7 +211,7 @@ fn interactive_terminal_keeps_history_until_new() {
         ),
     )
     .unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
         .current_dir(&root)
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
@@ -247,7 +247,7 @@ fn interactive_terminal_keeps_history_until_new() {
     fs::remove_dir_all(root).unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-codex — /auto /queue /new /help /exit"));
+    assert!(stdout.contains("mini-agent — /auto /queue /new /help /exit"));
     assert!(stdout.contains("assistant> reply-one"));
     assert!(stdout.contains("thinking> inspect carefully"));
     assert!(stdout.contains("queued ("));
@@ -304,7 +304,7 @@ fn auto_mode_executes_shell_without_approval() {
         ),
     )
     .unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
         .current_dir(&root)
         .args(["auto", "inspect the workspace"])
         .env_remove("OPENAI_API_KEY")
@@ -394,7 +394,7 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
         ),
     )
     .unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
         .current_dir(&root)
         .arg("auto")
         .env_remove("OPENAI_API_KEY")
@@ -430,7 +430,7 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     server.join().unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-codex — /auto /queue /new /help /exit"));
+    assert!(stdout.contains("mini-agent — /auto /queue /new /help /exit"));
     assert!(stdout.contains("auto mode on"));
     assert!(stdout.contains("auto-started"));
     assert!(stdout.contains("auto mode off; writes and shell commands require approval"));
@@ -594,7 +594,7 @@ fn test_root() -> std::path::PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("mini-codex-interactive-{nonce}"));
+    let root = std::env::temp_dir().join(format!("mini-agent-interactive-{nonce}"));
     fs::create_dir(&root).unwrap();
     root
 }

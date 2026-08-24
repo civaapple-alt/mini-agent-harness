@@ -1,14 +1,14 @@
-use mini_codex_core::Event;
-use mini_codex_core::Harness;
-use mini_codex_core::HarnessConfig;
-use mini_codex_core::Message;
-use mini_codex_core::Model;
-use mini_codex_core::ModelEventSink;
-use mini_codex_core::ModelRequest;
-use mini_codex_core::ModelResponse;
-use mini_codex_core::Observer;
-use mini_codex_core::ToolCall;
-use mini_codex_core::ToolRegistry;
+use mini_agent_core::Event;
+use mini_agent_core::Harness;
+use mini_agent_core::HarnessConfig;
+use mini_agent_core::Message;
+use mini_agent_core::Model;
+use mini_agent_core::ModelEventSink;
+use mini_agent_core::ModelRequest;
+use mini_agent_core::ModelResponse;
+use mini_agent_core::Observer;
+use mini_agent_core::ToolCall;
+use mini_agent_core::ToolRegistry;
 use serde::Serialize;
 use serde_json::json;
 use std::convert::Infallible;
@@ -78,7 +78,7 @@ impl Observer for ErrorCounter {
 struct IgnoreModelEvents;
 
 impl ModelEventSink for IgnoreModelEvents {
-    fn emit(&mut self, _event: mini_codex_core::ModelEvent) {}
+    fn emit(&mut self, _event: mini_agent_core::ModelEvent) {}
 }
 
 async fn project_error_to_model() -> ExperimentResult {

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to mini-codex are documented here. The project follows
+All notable changes to Mini Agent Harness are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
@@ -13,6 +13,8 @@ All notable changes to mini-codex are documented here. The project follows
 
 ### Changed
 
+- Renamed the project from mini-codex to Mini Agent Harness, with the
+  `mini-agent` executable and `mini-agent-core` / `mini-agent-cli` crates.
 - Interactive reasoning, assistant, tool, and context tags use distinct colors
   on terminals while redirected output remains plain text.
 - Plain terminal `ask` output streams assistant deltas without repeating the

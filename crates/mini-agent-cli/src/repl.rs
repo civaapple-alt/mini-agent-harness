@@ -4,12 +4,12 @@ use crate::observer::RunObserver;
 use crate::print_auto_warning;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
-use mini_codex_core::Event;
-use mini_codex_core::HarnessError;
-use mini_codex_core::LimitKind;
-use mini_codex_core::Observer;
-use mini_codex_core::StopReason;
-use mini_codex_core::ToolError;
+use mini_agent_core::Event;
+use mini_agent_core::HarnessError;
+use mini_agent_core::LimitKind;
+use mini_agent_core::Observer;
+use mini_agent_core::StopReason;
+use mini_agent_core::ToolError;
 use std::collections::VecDeque;
 use std::io;
 use std::io::IsTerminal;
@@ -82,7 +82,7 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
     let (worker_tx, worker_rx) = mpsc::channel();
     let worker = spawn_worker(harness, approval, worker_rx, event_tx);
 
-    println!("mini-codex — /auto /queue /new /help /exit");
+    println!("mini-agent — /auto /queue /new /help /exit");
     if initial_mode == ApprovalMode::Automatic {
         print_auto_warning();
         println!("auto mode on");
@@ -199,7 +199,7 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
 }
 
 fn spawn_worker(
-    mut harness: mini_codex_core::Harness<crate::openai::OpenAiModel>,
+    mut harness: mini_agent_core::Harness<crate::openai::OpenAiModel>,
     approval: ApprovalController,
     commands: mpsc::Receiver<WorkerCommand>,
     events: mpsc::SyncSender<ReplEvent>,

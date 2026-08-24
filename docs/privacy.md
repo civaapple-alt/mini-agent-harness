@@ -1,6 +1,6 @@
 # Data and privacy
 
-mini-codex sends no product telemetry, analytics, update checks, or crash
+Mini Agent Harness sends no product telemetry, analytics, update checks, or crash
 reports. It has no project service of its own.
 
 Inference requests go to the configured `OPENAI_BASE_URL`. A request contains
@@ -9,7 +9,7 @@ tool or file output already added to that conversation. The workspace is not
 uploaded wholesale, but selected content can leave the machine when the model
 reads it through a tool or it appears in command output.
 
-This repository ignores `.env`, but mini-codex cannot guarantee another
+This repository ignores `.env`, but mini-agent cannot guarantee another
 workspace's ignore rules. Never commit provider credentials; prefer the process
 environment or a CI secret manager. Event traces are created only when
 `--trace PATH` is provided, use create-new semantics, and may contain prompts,

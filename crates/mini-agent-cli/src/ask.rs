@@ -7,7 +7,7 @@ use crate::observer::print_final_answer;
 use crate::print_auto_warning;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
-use mini_codex_core::StopReason;
+use mini_agent_core::StopReason;
 use serde_json::json;
 use std::io;
 use std::io::IsTerminal;

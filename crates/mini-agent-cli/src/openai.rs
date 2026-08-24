@@ -1,13 +1,13 @@
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
-use mini_codex_core::Message;
-use mini_codex_core::Model;
-use mini_codex_core::ModelEvent;
-use mini_codex_core::ModelEventSink;
-use mini_codex_core::ModelRequest;
-use mini_codex_core::ModelResponse;
-use mini_codex_core::ModelUsage;
-use mini_codex_core::ToolCall;
+use mini_agent_core::Message;
+use mini_agent_core::Model;
+use mini_agent_core::ModelEvent;
+use mini_agent_core::ModelEventSink;
+use mini_agent_core::ModelRequest;
+use mini_agent_core::ModelResponse;
+use mini_agent_core::ModelUsage;
+use mini_agent_core::ToolCall;
 use reqwest::Client;
 use serde_json::Value;
 use serde_json::json;
@@ -394,8 +394,8 @@ impl Error for OpenAiError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mini_codex_core::HarnessConfig;
-    use mini_codex_core::ToolSpec;
+    use mini_agent_core::HarnessConfig;
+    use mini_agent_core::ToolSpec;
 
     #[derive(Default)]
     struct Deltas {

@@ -1,5 +1,5 @@
-use mini_codex_core::Event;
-use mini_codex_core::Observer;
+use mini_agent_core::Event;
+use mini_agent_core::Observer;
 use serde_json::Value;
 use serde_json::json;
 use std::fs::OpenOptions;

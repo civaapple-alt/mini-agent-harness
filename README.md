@@ -1,7 +1,7 @@
-# mini-codex
+# Mini Agent Harness
 
-`mini-codex` is a small native agent harness for studying why some harnesses
-help a model and others get in its way.
+Mini Agent Harness is a small native agent harness for studying why some
+harnesses help a model and others get in its way. Its command is `mini-agent`.
 
 Version 0.1 is the first supported release contract: a native interactive CLI,
 a script-facing `ask` command, bounded workspace tools, deterministic tests,
@@ -20,7 +20,7 @@ only while both sides remain easy to read and change.
 
 ## Constraints
 
-- `mini-codex-core` stays between 10,000 and 20,000 Rust source lines when it
+- `mini-agent-core` stays between 10,000 and 20,000 Rust source lines when it
   becomes feature-complete. Its hard ceiling is 20,000 lines.
 - All Rust source, including tests and binaries, has a hard ceiling of 30,000
   lines.
@@ -39,8 +39,8 @@ Run `python scripts/line_budget.py` to enforce the ceilings.
 
 The workspace starts with two crates:
 
-- `mini-codex-core` owns the small contracts and the explicit agent loop.
-- `mini-codex-cli` owns terminal presentation and provider/tool adapters.
+- `mini-agent-core` owns the small contracts and the explicit agent loop.
+- `mini-agent-cli` owns terminal presentation and provider/tool adapters.
 
 Core intentionally has no provider, filesystem, process, MCP, plugin, session,
 or TUI framework. The harness loop is concrete rather than hidden behind a
@@ -48,7 +48,7 @@ policy framework. Experiments should change the loop, record its events, and
 compare outcomes before extracting another abstraction.
 
 Pi v2's durable harness design is an important reference, but not the default
-scope. mini-codex keeps only three lessons at the foundation:
+scope. Mini Agent Harness keeps only three lessons at the foundation:
 
 1. external effects have visible prepare, execute, and settle boundaries;
 2. the current run state is explicit rather than inferred from missing data;
@@ -76,16 +76,16 @@ clears history.
 Prebuilt archives are produced for Linux x86_64, macOS x86_64 and arm64, and
 Windows x86_64. Download the archive and matching `.sha256` file from the
 repository's Releases page, verify the checksum, extract it, and place
-`mini-codex` (or `mini-codex.exe`) on `PATH`.
+`mini-agent` (or `mini-agent.exe`) on `PATH`.
 
 To build from source, install Rust 1.88 or newer and run:
 
 ```sh
-cargo build --release --locked -p mini-codex-cli
-./target/release/mini-codex --version
+cargo build --release --locked -p mini-agent-cli
+./target/release/mini-agent --version
 ```
 
-On Windows, use `target\release\mini-codex.exe`. Runtime shell tools require
+On Windows, use `target\release\mini-agent.exe`. Runtime shell tools require
 PowerShell 7 (`pwsh`) on Windows and `sh` on Unix systems.
 
 ## Quick start
@@ -97,18 +97,18 @@ same before using it in another
 workspace, and prefer process secrets in CI.
 
 ```sh
-mini-codex doctor
-mini-codex status
-mini-codex
-mini-codex ask "summarize this repository"
-mini-codex ask --json "summarize the current changes"
-mini-codex help ask
-mini-codex auto "inspect this repository, improve it, and run the tests"
-mini-codex --trace trace.jsonl
+mini-agent doctor
+mini-agent status
+mini-agent
+mini-agent ask "summarize this repository"
+mini-agent ask --json "summarize the current changes"
+mini-agent help ask
+mini-agent auto "inspect this repository, improve it, and run the tests"
+mini-agent --trace trace.jsonl
 ```
 
 Use `--` before a prompt that begins with `-`, for example
-`mini-codex ask -- --explain-this`.
+`mini-agent ask -- --explain-this`.
 
 `ask` streams reasoning/tool progress to stderr. In a terminal, assistant text
 streams to stdout under one colored `assistant>` tag and is not repeated at the
@@ -123,7 +123,7 @@ The deterministic provider-free path remains available to verify the complete
 model → tool → model loop:
 
 ```sh
-mini-codex demo "make this loud"
+mini-agent demo "make this loud"
 ```
 
 The real modes expose `read_file`, `edit_file`, `write_file`, `shell`,
@@ -151,13 +151,13 @@ survives long context growth, not process termination.
 
 ## Operational contract
 
-- `mini-codex --version` reports the Cargo release version.
-- `mini-codex status [--json]` reports effective non-secret startup settings.
-- `mini-codex doctor [--json]` validates configuration, workspace, and shell
+- `mini-agent --version` reports the Cargo release version.
+- `mini-agent status [--json]` reports effective non-secret startup settings.
+- `mini-agent doctor [--json]` validates configuration, workspace, and shell
   availability without contacting a model provider.
 - A UTF-8 root `AGENTS.md` is appended once to the stable system prompt with a
   16 KiB hard limit.
-- mini-codex sends no telemetry, update checks, or crash reports.
+- Mini Agent Harness sends no telemetry, update checks, or crash reports.
 - Shell execution is approval-gated but not sandboxed.
 - Interactive sessions are process-local in v0.1 and cannot yet be resumed.
 

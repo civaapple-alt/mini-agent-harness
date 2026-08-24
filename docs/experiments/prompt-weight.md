@@ -32,13 +32,13 @@ because each successful task has a tool-call step and a final-answer step.
 
 ```sh
 OPENAI_API_KEY=... OPENAI_MODEL=... \
-  cargo run -p mini-codex-cli --example prompt_weight -- \
+  cargo run -p mini-agent-cli --example prompt_weight -- \
   --runs 3 --output prompt-weight.jsonl
 ```
 
 The output path must not already exist. The example defaults to one repetition,
 caps repetitions at twenty, never prints the API key, and does not alter the
-normal `mini-codex` command surface.
+normal `mini-agent` command surface.
 
 ## Decision rule
 

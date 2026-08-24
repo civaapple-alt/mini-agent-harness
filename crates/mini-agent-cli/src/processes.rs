@@ -2,9 +2,9 @@ use crate::result_store::ResultStore;
 use crate::workspace::ApprovalController;
 use crate::workspace::shell_command;
 use crate::workspace::terminate_process_tree;
-use mini_codex_core::Tool;
-use mini_codex_core::ToolError;
-use mini_codex_core::ToolSpec;
+use mini_agent_core::Tool;
+use mini_agent_core::ToolError;
+use mini_agent_core::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -306,7 +306,7 @@ impl Tool for ProcessList {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "process_list".to_string(),
-            description: "List managed processes in this mini-codex session".to_string(),
+            description: "List managed processes in this mini-agent session".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {},
@@ -402,7 +402,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("mini-codex-process-{nonce}"));
+        let root = std::env::temp_dir().join(format!("mini-agent-process-{nonce}"));
         fs::create_dir(&root).unwrap();
         let manager = ProcessManager::new(
             root.clone(),

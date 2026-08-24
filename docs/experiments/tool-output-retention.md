@@ -26,7 +26,7 @@ the winning retention rule rather than exposing a truncation-policy option.
 ## Reproduce
 
 ```sh
-cargo test -p mini-codex-core tool_output_experiment -- --nocapture
+cargo test -p mini-agent-core tool_output_experiment -- --nocapture
 ```
 
 ## Result
