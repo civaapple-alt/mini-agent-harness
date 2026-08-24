@@ -104,10 +104,18 @@ async fn run() -> Result<(), Box<dyn Error>> {
     }
     let args = parse_args(raw_args)?;
     let environment = Environment::load(".env")?;
-    let api_key = environment.required("OPENAI_API_KEY")?;
-    let model_name = environment.required("OPENAI_MODEL")?;
-    let base_url = environment
-        .get("OPENAI_BASE_URL")
+    let api_key = environment
+        .resolve("OPENAI_API_KEY")
+        .ok_or("OPENAI_API_KEY is required")?;
+    let model_name = environment
+        .resolve("OPENAI_MODEL")
+        .ok_or("OPENAI_MODEL is required")?;
+    let base_url = environment.resolve("OPENAI_BASE_URL");
+    let _sources = (api_key.source, model_name.source);
+    let api_key = api_key.value;
+    let model_name = model_name.value;
+    let base_url = base_url
+        .map(|value| value.value)
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
     let mut output: Box<dyn Write> = match args.output {
         Some(path) => Box::new(BufWriter::new(
@@ -119,7 +127,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
 
     for repetition in 1..=args.runs {
         for (task_index, task) in TASKS.iter().enumerate() {
-            let treatments = if (repetition + task_index).is_multiple_of(2) {
+            let treatments = if (repetition + task_index) % 2 == 0 {
                 [Treatment::Minimal, Treatment::Expanded]
             } else {
                 [Treatment::Expanded, Treatment::Minimal]

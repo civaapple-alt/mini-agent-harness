@@ -1,2 +1,4 @@
 /target/
 .env
+.tmp/
+/scripts/__pycache__/

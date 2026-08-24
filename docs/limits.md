@@ -59,6 +59,7 @@ Host tools add their own effect-side bounds before results reach core:
 | managed processes | 8 |
 | managed-process log | 256 KiB per stream |
 | queued REPL operations | 16 |
+| root `AGENTS.md` | 16 KiB; reject if larger or invalid UTF-8 |
 
 Shell streams are drained concurrently with a hard capture limit, so a noisy
 process cannot accumulate unbounded captured output or deadlock on a full pipe.

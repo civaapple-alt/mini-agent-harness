@@ -8,7 +8,12 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 license = "Apache-2.0"
+description = "A small native coding-agent harness with bounded tools and OpenAI Responses support"
+readme = "README.md"
+keywords = ["ai", "agent", "coding", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
 eventsource-stream = "0.2"
@@ -17,3 +22,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

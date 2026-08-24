@@ -1,6 +1,6 @@
-use crate::RunObserver;
 use crate::build_openai_harness;
 use crate::harness_config;
+use crate::observer::RunObserver;
 use crate::print_auto_warning;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;

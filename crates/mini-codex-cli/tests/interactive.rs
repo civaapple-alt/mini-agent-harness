@@ -15,6 +15,110 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 #[test]
+fn ask_reads_stdin_and_keeps_machine_output_clean() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        requests_tx.send(read_request_body(&mut stream)).unwrap();
+        write_reasoning_sse_response(&mut stream, "checking", "script answer");
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    fs::write(root.join("AGENTS.md"), "Use the release contract.\n").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+        .current_dir(&root)
+        .args(["ask", "--json"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"summarize this repository\n")
+        .unwrap();
+
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(status.success(), "stderr: {stderr}");
+    let output: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(output["output"], "script answer");
+    assert_eq!(output["exit_code"], 0);
+    assert_eq!(output["model"], "test-model");
+    assert_eq!(output["usage"]["requests"], 1);
+    assert!(stderr.contains("thinking> checking"));
+    assert!(stderr.contains("assistant> script answer"));
+    let request: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
+    assert!(
+        request["input"]
+            .to_string()
+            .contains("summarize this repository")
+    );
+    assert!(
+        request["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("Use the release contract.")
+    );
+}
+
+#[test]
+fn status_json_remains_structured_when_env_file_is_invalid() {
+    let root = test_root();
+    fs::write(root.join(".env"), "NOT VALID\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mini-codex"))
+        .current_dir(&root)
+        .args(["status", "--json"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .output()
+        .unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("invalid .env line")
+    );
+}
+
+#[test]
 fn interactive_terminal_keeps_history_until_new() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();

@@ -9,6 +9,17 @@ pub struct Environment {
     file_values: HashMap<String, String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValueSource {
+    Process,
+    EnvFile,
+}
+
+pub struct ResolvedValue {
+    pub value: String,
+    pub source: ValueSource,
+}
+
 impl Environment {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref();
@@ -20,15 +31,24 @@ impl Environment {
         parse(&source).map(|file_values| Self { file_values })
     }
 
-    pub fn get(&self, name: &str) -> Option<String> {
+    pub fn resolve(&self, name: &str) -> Option<ResolvedValue> {
         env::var(name)
             .ok()
-            .or_else(|| self.file_values.get(name).cloned())
             .filter(|value| !value.trim().is_empty())
-    }
-
-    pub fn required(&self, name: &str) -> Result<String, String> {
-        self.get(name).ok_or_else(|| format!("{name} is required"))
+            .map(|value| ResolvedValue {
+                value,
+                source: ValueSource::Process,
+            })
+            .or_else(|| {
+                self.file_values
+                    .get(name)
+                    .filter(|value| !value.trim().is_empty())
+                    .cloned()
+                    .map(|value| ResolvedValue {
+                        value,
+                        source: ValueSource::EnvFile,
+                    })
+            })
     }
 }
 

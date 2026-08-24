@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vMAJOR.MINOR.PATCH tag to package
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      - id: version
+        name: Verify tag matches Cargo version
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          CARGO_VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+          test "$REQUESTED_TAG" = "v$CARGO_VERSION"
+          echo "tag=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$CARGO_VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: verify
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: mini-codex
+          - name: macos-x86_64
+            os: macos-14
+            target: x86_64-apple-darwin
+            binary: mini-codex
+          - name: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+            binary: mini-codex
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: mini-codex.exe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked -p mini-codex-cli --target ${{ matrix.target }}
+      - name: Package
+        run: python scripts/package_release.py --binary target/${{ matrix.target }}/release/${{ matrix.binary }} --target ${{ matrix.target }} --version ${{ needs.verify.outputs.version }} --output dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mini-codex-${{ matrix.name }}
+          path: |
+            dist/mini-codex-*.tar.gz
+            dist/mini-codex-*.tar.gz.sha256
+            dist/mini-codex-*.zip
+            dist/mini-codex-*.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mini-codex-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.verify.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            mini-codex-*.tar.gz
+            mini-codex-*.tar.gz.sha256
+            mini-codex-*.zip
+            mini-codex-*.zip.sha256

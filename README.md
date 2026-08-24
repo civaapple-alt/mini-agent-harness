@@ -3,6 +3,11 @@
 `mini-codex` is a small native agent harness for studying why some harnesses
 help a model and others get in its way.
 
+Version 0.1 is the first supported release contract: a native interactive CLI,
+a script-facing `ask` command, bounded workspace tools, deterministic tests,
+diagnostics, and reproducible release archives. It intentionally does not claim
+feature parity with Codex, Pi, fx, or Qi.
+
 The working definition is deliberately narrow:
 
 ```text
@@ -64,21 +69,53 @@ edge. Reasoning and final-answer deltas use separate `thinking>` and
 bounded FIFO queue; `/queue` reports how much work is pending. History and
 queued work live only for the life of the process, and `/new` clears history.
 
-## Run
+## Install
+
+Prebuilt archives are produced for Linux x86_64, macOS x86_64 and arm64, and
+Windows x86_64. Download the archive and matching `.sha256` file from the
+repository's Releases page, verify the checksum, extract it, and place
+`mini-codex` (or `mini-codex.exe`) on `PATH`.
+
+To build from source, install Rust 1.88 or newer and run:
+
+```sh
+cargo build --release --locked -p mini-codex-cli
+./target/release/mini-codex --version
+```
+
+On Windows, use `target\release\mini-codex.exe`. Runtime shell tools require
+PowerShell 7 (`pwsh`) on Windows and `sh` on Unix systems.
+
+## Quick start
 
 Copy `.env.demo` to `.env` and fill in `OPENAI_API_KEY`. The demo defaults to
 DeepSeek's Responses API with the `deepseek-v4-flash` model. Process environment
-values take precedence over `.env`; the local file is ignored by Git.
+values take precedence over `.env`. This repository ignores `.env`; verify the
+same before using it in another
+workspace, and prefer process secrets in CI.
 
 ```sh
-cargo test
-cargo run -p mini-codex-cli -- demo "make this loud"
-OPENAI_API_KEY=... OPENAI_MODEL=... cargo run -p mini-codex-cli
-OPENAI_API_KEY=... OPENAI_MODEL=... cargo run -p mini-codex-cli -- run "say hello"
-cargo run -p mini-codex-cli -- auto
-cargo run -p mini-codex-cli -- auto "inspect this repository, improve it, and run the tests"
-cargo run -p mini-codex-cli -- --trace trace.jsonl
-python scripts/line_budget.py
+mini-codex doctor
+mini-codex status
+mini-codex
+mini-codex ask "summarize this repository"
+mini-codex ask --json "summarize the current changes"
+mini-codex auto "inspect this repository, improve it, and run the tests"
+mini-codex --trace trace.jsonl
+```
+
+`ask` writes final assistant Markdown to stdout and progress to stderr, so it
+composes with shell pipelines. It also accepts a bounded prompt from stdin.
+`ask --json` emits one JSON object containing output, exit code, model, steps,
+usage, and tool-call statuses. Noninteractive sensitive tool calls fail closed;
+`ask --auto` permits them without approval and should be used only in a trusted
+or disposable execution environment.
+
+The deterministic provider-free path remains available to verify the complete
+model → tool → model loop:
+
+```sh
+mini-codex demo "make this loud"
 ```
 
 The real modes expose `read_file`, `edit_file`, `write_file`, `shell`,
@@ -104,6 +141,23 @@ trees are stopped when the CLI exits. Conversation, result handles, queued
 input, and managed processes deliberately remain non-durable: auto mode
 survives long context growth, not process termination.
 
+## Operational contract
+
+- `mini-codex --version` reports the Cargo release version.
+- `mini-codex status [--json]` reports effective non-secret startup settings.
+- `mini-codex doctor [--json]` validates configuration, workspace, and shell
+  availability without contacting a model provider.
+- A UTF-8 root `AGENTS.md` is appended once to the stable system prompt with a
+  16 KiB hard limit.
+- mini-codex sends no telemetry, update checks, or crash reports.
+- Shell execution is approval-gated but not sandboxed.
+- Interactive sessions are process-local in v0.1 and cannot yet be resumed.
+
+See [configuration](docs/configuration.md),
+[troubleshooting](docs/troubleshooting.md), [data and privacy](docs/privacy.md),
+[security](SECURITY.md), the [changelog](CHANGELOG.md), and the
+[release procedure](docs/releasing.md).
+
 See [the experiment protocol](docs/experiments.md), the
 [unknown-tool comparison](docs/experiments/unknown-tool.md), the
 [edit-surface comparison](docs/experiments/edit-surface.md), the
@@ -112,3 +166,5 @@ See [the experiment protocol](docs/experiments.md), the
 [effect-recovery comparison](docs/experiments/effect-recovery.md), and the
 [harness boundary](docs/harness-boundary.md). The exact defaults and failure
 behavior are listed in [harness limits](docs/limits.md).
+
+Licensed under the [Apache License 2.0](LICENSE).
