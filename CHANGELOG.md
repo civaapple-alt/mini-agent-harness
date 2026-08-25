@@ -19,6 +19,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   during startup without clearing conversation history.
 - The REPL welcome block lists bounded skill, plugin, and MCP summaries and
   reports MCP transitions from inactive to enabled.
+- Bounded world-state detection for host, shell, project markers, execution
+  mode, approval policy, and a fixed local command catalog, exposed through
+  `status`, `/world`, and `/world refresh`.
+- Typed context messages mapped to Responses API developer items and retained
+  across context compaction.
 
 ### Fixed
 
@@ -29,6 +34,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   server requires connection approval.
 - Tool start events now show bounded shell and managed-process commands; file
   tools show only their path and arbitrary MCP arguments remain hidden.
+- `/auto` mode changes no longer replace augmented project and extension
+  instructions; they append a world-state item while keeping the stable prompt.
 
 ### Changed
 

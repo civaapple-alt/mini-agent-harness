@@ -3,6 +3,8 @@ use crate::env_file::ResolvedValue;
 use crate::env_file::ValueSource;
 use crate::project_context;
 use crate::skills;
+use crate::workspace::ApprovalMode;
+use crate::world::WorldState;
 use reqwest::Url;
 use serde_json::Value;
 use serde_json::json;
@@ -97,6 +99,7 @@ impl RuntimeConfig {
     pub fn status_json(&self) -> Value {
         let display_base_url = display_base_url(&self.base_url.value);
         let extensions = skills::discover(&self.workspace);
+        let world = WorldState::detect(&self.workspace, ApprovalMode::Interactive);
         json!({
             "version": env!("CARGO_PKG_VERSION"),
             "workspace": self.workspace,
@@ -117,14 +120,16 @@ impl RuntimeConfig {
             "mcp_http_servers": extensions.http_mcp_server_count(),
             "telemetry": false,
             "session_persistence": false,
-            "command_sandbox": false
+            "command_sandbox": false,
+            "world": world.status_json()
         })
     }
 
     pub fn status_lines(&self) -> Vec<String> {
         let display_base_url = display_base_url(&self.base_url.value);
         let extensions = skills::discover(&self.workspace);
-        vec![
+        let world = WorldState::detect(&self.workspace, ApprovalMode::Interactive);
+        let mut lines = vec![
             format!("version: {}", env!("CARGO_PKG_VERSION")),
             format!("workspace: {}", self.workspace.display()),
             "provider: openai_responses".to_string(),
@@ -162,7 +167,9 @@ impl RuntimeConfig {
             "telemetry: disabled".to_string(),
             "session_persistence: disabled".to_string(),
             "command_sandbox: disabled".to_string(),
-        ]
+        ];
+        lines.extend(world.status_lines());
+        lines
     }
 
     pub fn doctor(&self) -> DoctorReport {

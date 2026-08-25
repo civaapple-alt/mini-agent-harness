@@ -94,6 +94,13 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
             .to_string()
             .contains("summarize this repository")
     );
+    assert_eq!(request["input"][0]["role"], "developer");
+    assert!(
+        request["input"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("<world_state>")
+    );
     assert!(
         request["instructions"]
             .as_str()
@@ -186,10 +193,11 @@ fn interactive_prints_banner_before_initialization_error() {
     fs::remove_dir_all(root).unwrap();
 
     assert_eq!(output.status.code(), Some(2));
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "mini-agent — /auto /mcp /queue /new /help /exit\nskill> none\nplugin> none\nmcp> none configured\ninitializing extensions...\n"
-    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.starts_with("mini-agent — /auto /world /mcp /queue /new /help /exit\n"));
+    assert!(stdout.contains("world> "));
+    assert!(stdout.contains("default | approval per_action"));
+    assert!(stdout.ends_with("initializing extensions...\n"));
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
@@ -219,7 +227,7 @@ fn interactive_mcp_command_reports_when_nothing_needs_retry() {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"/mcp\n/exit\n")
+        .write_all(b"/world\n/world refresh\n/mcp\n/exit\n")
         .unwrap();
 
     let status = wait_for_child(&mut child);
@@ -240,6 +248,10 @@ fn interactive_mcp_command_reports_when_nothing_needs_retry() {
     fs::remove_dir_all(root).unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
+    assert!(stdout.contains("world> mode: default"));
+    assert!(stdout.contains("world> approval: per_action"));
+    assert!(stdout.contains("world> commands_available:"));
+    assert!(stdout.contains("world> unchanged; no context item appended"));
     assert!(stdout.contains("no MCP servers are waiting to be enabled"));
 }
 
@@ -331,7 +343,7 @@ fn interactive_terminal_keeps_history_until_new() {
     fs::remove_dir_all(root).unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-agent — /auto /mcp /queue /new /help /exit"));
+    assert!(stdout.contains("mini-agent — /auto /world /mcp /queue /new /help /exit"));
     assert!(stdout.contains("assistant> reply-one"));
     assert!(stdout.contains("thinking> inspect carefully"));
     assert!(stdout.contains("queued ("));
@@ -347,6 +359,7 @@ fn interactive_terminal_keeps_history_until_new() {
     assert!(second["input"].to_string().contains("reasoning"));
     assert!(second["input"].to_string().contains("again"));
     assert!(third["input"].to_string().contains("world"));
+    assert!(third["input"].to_string().contains("<world_state>"));
     assert!(!third["input"].to_string().contains("hello"));
     assert!(!third["input"].to_string().contains("again"));
 }
@@ -478,6 +491,11 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
         ),
     )
     .unwrap();
+    fs::write(
+        root.join("AGENTS.md"),
+        "Keep the stable project contract.\n",
+    )
+    .unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
         .current_dir(&root)
         .arg("auto")
@@ -514,7 +532,7 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     server.join().unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-agent — /auto /mcp /queue /new /help /exit"));
+    assert!(stdout.contains("mini-agent — /auto /world /mcp /queue /new /help /exit"));
     assert!(stdout.contains("auto mode on"));
     assert!(stdout.contains("auto-started"));
     assert!(stdout.contains("auto mode off; writes and shell commands require approval"));
@@ -532,8 +550,24 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
         .map(|_| serde_json::from_slice::<Value>(&requests_rx.recv().unwrap()).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(requests[0]["instructions"], requests[1]["instructions"]);
-    assert_ne!(requests[0]["instructions"], requests[2]["instructions"]);
+    assert_eq!(requests[0]["instructions"], requests[2]["instructions"]);
     assert_eq!(requests[0]["instructions"], requests[4]["instructions"]);
+    assert!(
+        requests[4]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("Keep the stable project contract.")
+    );
+    assert!(
+        requests[0]["input"]
+            .to_string()
+            .contains("mode=\\\"auto\\\"")
+    );
+    assert!(
+        requests[2]["input"]
+            .to_string()
+            .contains("mode=\\\"default\\\"")
+    );
     assert!(
         requests[0]["tools"][3]["description"]
             .as_str()

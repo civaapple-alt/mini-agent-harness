@@ -69,8 +69,10 @@ edge. Reasoning and final-answer deltas use separate `thinking>` and
 `NO_COLOR` sessions stay plain. Input entered while a turn is running is
 accepted into a bounded FIFO queue; `/queue` reports how much work is pending.
 History and queued work live only for the life of the process, and `/new`
-clears history. If an MCP server is denied or fails during startup, `/mcp`
-retries it without clearing conversation history. The welcome block lists a
+clears history while restoring the current bounded world-state item. `/world`
+shows the detected execution environment and `/world refresh` appends a new
+snapshot when it changes. If an MCP server is denied or fails during startup,
+`/mcp` retries it without clearing conversation history. The welcome block lists a
 bounded set of discovered skill and plugin names and shows configured MCP
 servers as inactive until connection approval succeeds.
 
@@ -142,6 +144,14 @@ approval, and compacts context between settled tool batches so work can
 continue. It prints a warning because process execution is not sandboxed and
 can escape the workspace even though direct file tools cannot.
 
+At startup mini-agent detects a fixed, bounded set of local command
+capabilities such as `git`, `rg`, `fd`, `tree`, `curl`, Cargo, Java/Maven,
+Go, Python, and Node tooling, plus root project markers and workspace wrappers.
+It appends these facts with the current shell, OS, mode, approval behavior, and
+sandbox boundary as a typed world-state item. Mode changes append a new item;
+they do not rewrite the stable system prompt, preserving provider prefix-cache
+opportunities. See [world state](docs/world-state.md).
+
 Foreground `shell` commands have a 120-second deadline and bounded concurrent
 stdout/stderr capture; timeout terminates the process tree. A large result is
 returned as a short head/tail preview plus a process-local handle that
@@ -211,6 +221,8 @@ See [configuration](docs/configuration.md) and the copyable
   availability without contacting a model provider.
 - A UTF-8 root `AGENTS.md` is appended once to the stable system prompt with a
   16 KiB hard limit.
+- World state is an append-only, 8 KiB-bounded context item; `status` and
+  `/world` expose the same non-secret snapshot.
 - Project skills, plugins, marketplaces, and MCP use fixed `.agents/` locations and do
   not rewrite conversation history.
 - Mini Agent Harness sends no telemetry, update checks, or crash reports.
@@ -220,7 +232,8 @@ See [configuration](docs/configuration.md) and the copyable
 See [configuration](docs/configuration.md),
 [troubleshooting](docs/troubleshooting.md), [data and privacy](docs/privacy.md),
 [security](SECURITY.md), the [changelog](CHANGELOG.md), and the
-[release procedure](docs/releasing.md).
+[release procedure](docs/releasing.md). The durable item and mentor direction
+is recorded in [world state](docs/world-state.md).
 
 See [the experiment protocol](docs/experiments.md), the
 [unknown-tool comparison](docs/experiments/unknown-tool.md), the

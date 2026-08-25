@@ -5,6 +5,7 @@ use crate::print_auto_warning;
 use crate::skills;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
+use crate::world::WorldState;
 use mini_agent_core::Event;
 use mini_agent_core::HarnessError;
 use mini_agent_core::LimitKind;
@@ -43,6 +44,8 @@ enum ReplEvent {
 enum WorkerCommand {
     Prompt(String),
     ClearHistory,
+    ShowWorld,
+    RefreshWorld,
     EnableMcp,
     SetMode(ApprovalMode),
     Shutdown,
@@ -76,20 +79,27 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
             return ExitCode::FAILURE;
         }
     };
-    let startup_extensions = std::env::current_dir()
-        .ok()
-        .map(|workspace| skills::discover(&workspace));
+    let workspace = std::env::current_dir().ok();
+    let startup_extensions = workspace
+        .as_ref()
+        .map(|workspace| skills::discover(workspace));
+    let startup_world = workspace
+        .as_ref()
+        .map(|workspace| WorldState::detect(workspace, initial_mode));
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
     let worker = spawn_worker(initial_mode, approval, worker_rx, event_tx);
 
-    println!("mini-agent — /auto /mcp /queue /new /help /exit");
+    println!("mini-agent — /auto /world /mcp /queue /new /help /exit");
     if initial_mode == ApprovalMode::Automatic {
         print_auto_warning();
         println!("auto mode on");
     }
     if let Some(discovery) = startup_extensions {
         print_extension_summary(&discovery);
+    }
+    if let Some(world) = startup_world {
+        println!("world> {}", world.summary());
     }
     println!("initializing extensions...");
 
@@ -132,6 +142,10 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
                     }
                     "/new" => {
                         queue_work(&worker_tx, WorkerCommand::ClearHistory, &mut pending_work)
+                    }
+                    "/world" => queue_work(&worker_tx, WorkerCommand::ShowWorld, &mut pending_work),
+                    "/world refresh" => {
+                        queue_work(&worker_tx, WorkerCommand::RefreshWorld, &mut pending_work)
                     }
                     "/mcp" => queue_work(&worker_tx, WorkerCommand::EnableMcp, &mut pending_work),
                     "/auto" | "/auto on" => queue_work(
@@ -235,6 +249,8 @@ fn spawn_worker(
         };
         let crate::ReplHarnessBuild {
             mut harness,
+            stable_system_prompt,
+            mut world,
             enabled_mcp_servers,
             mcp_tool_count,
             mut retry_mcp_servers,
@@ -288,7 +304,58 @@ fn spawn_worker(
                 }
                 WorkerCommand::ClearHistory => {
                     harness.clear_history();
-                    let _ = events.send(ReplEvent::Notice("new conversation".to_string()));
+                    match world.model_context() {
+                        Ok(context) => match harness.append_context(context) {
+                            Ok(()) => {
+                                let _ =
+                                    events.send(ReplEvent::Notice("new conversation".to_string()));
+                            }
+                            Err(error) => {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "error: cannot restore world state: {error}"
+                                )));
+                            }
+                        },
+                        Err(error) => {
+                            let _ = events.send(ReplEvent::Warning(format!(
+                                "error: cannot restore world state: {error}"
+                            )));
+                        }
+                    }
+                }
+                WorkerCommand::ShowWorld => {
+                    for line in world.status_lines() {
+                        let _ = events.send(ReplEvent::Notice(format!("world> {line}")));
+                    }
+                }
+                WorkerCommand::RefreshWorld => {
+                    let refreshed = WorldState::detect(world.workspace(), world.mode());
+                    if refreshed != world {
+                        match refreshed.model_context() {
+                            Ok(context) => match harness.append_context(context) {
+                                Ok(()) => {
+                                    world = refreshed;
+                                    let _ = events.send(ReplEvent::Notice(
+                                        "world> refreshed and appended to context".to_string(),
+                                    ));
+                                }
+                                Err(error) => {
+                                    let _ = events.send(ReplEvent::Warning(format!(
+                                        "error: cannot append world state: {error}"
+                                    )));
+                                }
+                            },
+                            Err(error) => {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "error: cannot refresh world state: {error}"
+                                )));
+                            }
+                        }
+                    } else {
+                        let _ = events.send(ReplEvent::Notice(
+                            "world> unchanged; no context item appended".to_string(),
+                        ));
+                    }
                 }
                 WorkerCommand::EnableMcp => {
                     if retry_mcp_servers.is_empty() {
@@ -337,7 +404,27 @@ fn spawn_worker(
                 }
                 WorkerCommand::SetMode(mode) => {
                     approval.set_mode(mode);
-                    harness.replace_config(harness_config(mode));
+                    let mut config = harness_config(mode);
+                    config.system_prompt.clone_from(&stable_system_prompt);
+                    harness.replace_config(config);
+                    let updated_world = world.with_mode(mode);
+                    if updated_world != world {
+                        match updated_world.model_context() {
+                            Ok(context) => match harness.append_context(context) {
+                                Ok(()) => world = updated_world,
+                                Err(error) => {
+                                    let _ = events.send(ReplEvent::Warning(format!(
+                                        "error: cannot append execution mode state: {error}"
+                                    )));
+                                }
+                            },
+                            Err(error) => {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "error: cannot render execution mode state: {error}"
+                                )));
+                            }
+                        }
+                    }
                     match mode {
                         ApprovalMode::Automatic => {
                             let _ = events.send(ReplEvent::Warning("warning: auto mode runs workspace writes and unsandboxed shell commands without approval".to_string()));
@@ -470,6 +557,8 @@ fn print_help() {
     println!("/auto      enable automatic execution");
     println!("/auto off  require approval for writes and shell commands");
     println!("/mcp       retry configured MCP servers that are not enabled");
+    println!("/world     show detected environment, mode, and command capabilities");
+    println!("/world refresh  detect changes and append a new world-state item");
     println!("/queue     show pending operations");
     println!("/new       clear this in-memory conversation");
     println!("/help      show local commands");

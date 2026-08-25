@@ -7,6 +7,9 @@ use std::future::Future;
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "role", rename_all = "snake_case")]
 pub enum Message {
+    Context {
+        text: String,
+    },
     User {
         text: String,
     },

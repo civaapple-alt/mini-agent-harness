@@ -31,11 +31,17 @@ retains settled reasoning with its assistant turn so a later Responses API
 request can replay the same item order. This remains conversation mechanics,
 not a second control lane or hidden scheduler.
 
+The host may append a bounded typed context item for facts such as world state.
+Core preserves its order and limit but does not discover the environment or
+interpret the payload. Provider adapters decide the protocol role; the
+Responses adapter maps it to a `developer` message.
+
 ## HOW
 
 The harness owns mechanics:
 
 - the system prompt and ordered conversation;
+- an independently bounded context-item message shape;
 - the model/tool/model loop;
 - step and output limits;
 - hard user-input, response, tool-call, and request-context bounds;
@@ -88,7 +94,9 @@ migration. It also has no generic scheduler or state-machine framework.
 Reasoning display, the terminal input queue, result handles, and managed
 processes stay in the CLI/provider host rather than becoming core scheduling or
 persistence concepts. Context compaction is present as one direct loop branch
-but remains disabled by default.
+but remains disabled by default. When compaction runs, the latest typed context
+item is retained so a summary cannot silently erase current execution
+authority.
 
 Each omission is reversible. Adding all of them preemptively is not.
 

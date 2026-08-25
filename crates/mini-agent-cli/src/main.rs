@@ -11,6 +11,7 @@ mod repl;
 mod result_store;
 mod skills;
 mod workspace;
+mod world;
 
 use mini_agent_core::ContextLimitBehavior;
 use mini_agent_core::Harness;
@@ -39,6 +40,7 @@ use openai::OpenAiModel;
 use workspace::ApprovalController;
 use workspace::ApprovalMode;
 use workspace::workspace_tools;
+use world::WorldState;
 
 const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--trace PATH]\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent run [--trace PATH] [--] <PROMPT>\n    mini-agent auto [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY    Required except by demo\n    OPENAI_MODEL      Required except by demo\n    OPENAI_BASE_URL   Optional; defaults to https://api.openai.com/v1";
 const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--trace PATH]\n\nStarts the approval-gated interactive REPL.";
@@ -50,7 +52,6 @@ const STATUS_HELP: &str = "mini-agent status\n\nUSAGE:\n    mini-agent status [-
 const DOCTOR_HELP: &str = "mini-agent doctor\n\nUSAGE:\n    mini-agent doctor [--json]\n\nChecks local configuration without contacting the model provider.";
 const VERSION_HELP: &str =
     "mini-agent version\n\nUSAGE:\n    mini-agent version\n    mini-agent --version";
-const AUTO_SYSTEM_PROMPT: &str = "You are an autonomous coding agent. Work continuously toward the user's goal. Inspect the workspace before editing, use tools as needed, keep changes scoped to the request, and run relevant checks. Do not stop at intermediate progress or ask for confirmation unless you are blocked by missing information or an unsafe action outside the workspace. When the work is complete, report the result plainly.";
 const AUTO_MAX_STEPS: usize = 128;
 
 #[tokio::main(flavor = "current_thread")]
@@ -483,6 +484,8 @@ fn build_openai_harness(
 
 struct ReplHarnessBuild {
     harness: Harness<OpenAiModel>,
+    stable_system_prompt: String,
+    world: WorldState,
     enabled_mcp_servers: Vec<String>,
     mcp_tool_count: usize,
     retry_mcp_servers: Vec<skills::McpServerConfig>,
@@ -510,6 +513,7 @@ fn build_openai_harness_with_retries(
     mut config: HarnessConfig,
 ) -> Result<ReplHarnessBuild, String> {
     let provider = runtime_config.provider_settings()?;
+    let mode = approval.mode();
     let model = match OpenAiModel::new(provider.api_key, provider.model, provider.base_url) {
         Ok(model) => model,
         Err(error) => return Err(error.to_string()),
@@ -522,7 +526,7 @@ fn build_openai_harness_with_retries(
         eprintln!("warning: {diagnostic}");
     }
     config.system_prompt = skill_discovery.augment_system_prompt(&config.system_prompt)?;
-    let mut tools = match workspace_tools(workspace, approval.clone()) {
+    let mut tools = match workspace_tools(workspace.clone(), approval.clone()) {
         Ok(tools) => tools,
         Err(error) => return Err(error.to_string()),
     };
@@ -544,8 +548,17 @@ fn build_openai_harness_with_retries(
             !loaded_servers.contains(&format!("{}/{}", server.plugin_name, server.server_name))
         })
         .collect();
+    let stable_system_prompt = config.system_prompt.clone();
+    let world = WorldState::detect(&workspace, mode);
+    let world_context = world.model_context()?;
+    let mut harness = Harness::new(model, ToolRegistry::new(tools), config);
+    harness
+        .append_context(world_context)
+        .map_err(|error| error.to_string())?;
     Ok(ReplHarnessBuild {
-        harness: Harness::new(model, ToolRegistry::new(tools), config),
+        harness,
+        stable_system_prompt,
+        world,
         enabled_mcp_servers,
         mcp_tool_count,
         retry_mcp_servers,
@@ -556,7 +569,6 @@ fn harness_config(mode: ApprovalMode) -> HarnessConfig {
     match mode {
         ApprovalMode::Interactive => HarnessConfig::default(),
         ApprovalMode::Automatic => HarnessConfig {
-            system_prompt: AUTO_SYSTEM_PROMPT.to_string(),
             max_steps: AUTO_MAX_STEPS,
             context_limit_behavior: ContextLimitBehavior::Compact,
             ..HarnessConfig::default()
@@ -589,7 +601,9 @@ impl Model for DemoModel {
                 .iter()
                 .find_map(|message| match message {
                     Message::User { text } => Some(text.as_str()),
-                    Message::Assistant { .. } | Message::Tool { .. } => None,
+                    Message::Context { .. } | Message::Assistant { .. } | Message::Tool { .. } => {
+                        None
+                    }
                 })
                 .unwrap_or_default();
             return Ok(ModelResponse {
@@ -610,7 +624,7 @@ impl Model for DemoModel {
             .rev()
             .find_map(|message| match message {
                 Message::Tool { content, .. } => Some(content.as_str()),
-                Message::User { .. } | Message::Assistant { .. } => None,
+                Message::Context { .. } | Message::User { .. } | Message::Assistant { .. } => None,
             })
             .unwrap_or("no tool result");
         Ok(ModelResponse {

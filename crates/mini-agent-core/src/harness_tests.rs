@@ -328,6 +328,33 @@ async fn preserves_history_across_runs_and_can_clear_it() {
     assert!(harness.messages().is_empty());
 }
 
+#[test]
+fn context_items_have_an_independent_hard_limit() {
+    let config = HarnessConfig {
+        max_context_item_bytes: 4,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(
+        ScriptedModel {
+            responses: VecDeque::new(),
+        },
+        ToolRegistry::default(),
+        config,
+    );
+
+    let error = harness.append_context("12345").unwrap_err();
+
+    assert_eq!(
+        error,
+        LimitExceeded {
+            kind: LimitKind::ContextItemBytes,
+            limit: 4,
+            actual: 5,
+        }
+    );
+    assert!(harness.messages().is_empty());
+}
+
 #[tokio::test]
 async fn compacts_context_and_continues_the_tool_loop() {
     let long_tool_value = "x".repeat(300);
@@ -371,6 +398,9 @@ async fn compacts_context_and_continues_the_tool_loop() {
         ..HarnessConfig::default()
     };
     let mut harness = Harness::new(model, ToolRegistry::new(vec![Box::new(Uppercase)]), config);
+    harness
+        .append_context("<world_state>rust,cargo</world_state>")
+        .unwrap();
     let mut events = RecordingObserver::default();
 
     let outcome = harness
@@ -385,12 +415,14 @@ async fn compacts_context_and_continues_the_tool_loop() {
         outcome.messages.as_slice(),
         [
             Message::User { text },
+            Message::Context { text: context },
             Message::Assistant {
                 text: answer,
                 tool_calls,
                 ..
             }
         ] if text.starts_with(COMPACTION_PREFIX)
+            && context == "<world_state>rust,cargo</world_state>"
             && answer == "Long operation completed."
             && tool_calls.is_empty()
     ));

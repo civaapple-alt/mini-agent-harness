@@ -26,6 +26,7 @@ pub enum ContextLimitBehavior {
 pub struct HarnessConfig {
     pub system_prompt: String,
     pub max_steps: usize,
+    pub max_context_item_bytes: usize,
     pub max_user_input_bytes: usize,
     pub max_model_response_bytes: usize,
     pub max_tool_calls_per_step: usize,
@@ -41,6 +42,7 @@ impl Default for HarnessConfig {
                 "You are a coding agent. Use tools when needed and report the result plainly."
                     .to_string(),
             max_steps: 8,
+            max_context_item_bytes: 8 * 1024,
             max_user_input_bytes: 32 * 1024,
             max_model_response_bytes: 64 * 1024,
             max_tool_calls_per_step: 8,
@@ -54,6 +56,7 @@ impl Default for HarnessConfig {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LimitKind {
+    ContextItemBytes,
     UserInputBytes,
     ModelResponseBytes,
     ToolCallsPerStep,
@@ -63,6 +66,7 @@ pub enum LimitKind {
 impl fmt::Display for LimitKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::ContextItemBytes => "context item bytes",
             Self::UserInputBytes => "user input bytes",
             Self::ModelResponseBytes => "model response bytes",
             Self::ToolCallsPerStep => "tool calls per step",
@@ -145,6 +149,19 @@ impl<M: Model> Harness<M> {
 
     pub fn clear_history(&mut self) {
         self.messages.clear();
+    }
+
+    pub fn append_context(&mut self, text: impl Into<String>) -> Result<(), LimitExceeded> {
+        let text = text.into();
+        if text.len() > self.config.max_context_item_bytes {
+            return Err(LimitExceeded {
+                kind: LimitKind::ContextItemBytes,
+                limit: self.config.max_context_item_bytes,
+                actual: text.len(),
+            });
+        }
+        self.messages.push(Message::Context { text });
+        Ok(())
     }
 
     pub fn replace_config(&mut self, config: HarnessConfig) {
@@ -398,9 +415,17 @@ impl<M: Model> Harness<M> {
                 observer,
             ));
         }
-        let compacted_messages = vec![Message::User {
+        let mut compacted_messages = vec![Message::User {
             text: format!("{COMPACTION_PREFIX}\n{summary}"),
         }];
+        if let Some(context) = self
+            .messages
+            .iter()
+            .rev()
+            .find(|message| matches!(message, Message::Context { .. }))
+        {
+            compacted_messages.push(context.clone());
+        }
         let after_bytes =
             context_bytes_for(&self.config.system_prompt, &compacted_messages, tool_specs);
         if after_bytes >= before_bytes {

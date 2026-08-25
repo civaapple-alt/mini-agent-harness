@@ -22,14 +22,21 @@ OPENAI_BASE_URL=https://api.deepseek.com
 ```
 
 Run `mini-agent status` to inspect the effective non-secret configuration and
-its source. `status` never prints the credential. Run `mini-agent doctor` to
-validate provider configuration and the host shell without starting an agent
-turn. Both commands accept `--json`.
+its source and detected world state. `status` never prints the credential. Run
+`mini-agent doctor` to validate provider configuration and the host shell
+without starting an agent turn. Both commands accept `--json`.
 
 If the startup workspace contains `AGENTS.md`, mini-agent appends its UTF-8
 contents once to the stable system prompt. The file has a 16 KiB hard limit;
 startup fails explicitly rather than silently omitting or truncating oversized
 instructions. Nested instruction discovery is not part of the v0.1 contract.
+
+World state is not configured through environment variables. Mini-agent
+detects a fixed command catalog, root project markers, host shell, OS,
+architecture, execution mode, and approval behavior. Use `/world` to inspect
+the current snapshot and `/world refresh` after installing a command or
+changing root project files. World-state items are bounded and contain no
+environment values or command output.
 
 ## Project extensions
 

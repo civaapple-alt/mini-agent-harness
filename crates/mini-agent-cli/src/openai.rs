@@ -164,6 +164,11 @@ fn request_body(model: &str, request: &ModelRequest<'_>) -> Value {
 
 fn message_items(message: &Message) -> Vec<Value> {
     match message {
+        Message::Context { text } => vec![json!({
+            "type": "message",
+            "role": "developer",
+            "content": [{ "type": "input_text", "text": text }]
+        })],
         Message::User { text } => vec![json!({
             "type": "message",
             "role": "user",
@@ -415,6 +420,9 @@ mod tests {
     #[test]
     fn serializes_responses_input_and_tools() {
         let messages = vec![
+            Message::Context {
+                text: "world state".to_string(),
+            },
             Message::User {
                 text: "hello".to_string(),
             },
@@ -451,9 +459,11 @@ mod tests {
         );
 
         assert_eq!(body["model"], "test-model");
-        assert_eq!(body["input"][1]["type"], "reasoning");
-        assert_eq!(body["input"][2]["type"], "function_call");
-        assert_eq!(body["input"][3]["type"], "function_call_output");
+        assert_eq!(body["input"][0]["role"], "developer");
+        assert_eq!(body["input"][1]["role"], "user");
+        assert_eq!(body["input"][2]["type"], "reasoning");
+        assert_eq!(body["input"][3]["type"], "function_call");
+        assert_eq!(body["input"][4]["type"], "function_call_output");
         assert_eq!(body["tools"][0]["name"], "lookup");
         assert_eq!(body["parallel_tool_calls"], false);
     }

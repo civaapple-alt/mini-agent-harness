@@ -5,6 +5,7 @@ defaults are part of the harness rather than terminal flags.
 
 | Boundary | Default | Behavior at limit |
 | --- | ---: | --- |
+| one host context item | 8 KiB | reject before retaining the item |
 | user input | 32 KiB | reject before retaining or tracing the text |
 | model response | 64 KiB | reject before retaining text or tool calls |
 | tool calls in one model step | 8 | reject the whole proposal before effects |
@@ -44,6 +45,11 @@ Compaction has its own trace events and does not consume an agent step. A
 pathological single step can still exceed the hard context ceiling and fail
 rather than sending an oversized request.
 
+The host currently uses context items for full world-state snapshots. The
+latest snapshot is retained across compaction and restored after `/new`.
+Changing execution mode appends a new context item while leaving the system
+prompt byte-stable.
+
 Host tools add their own effect-side bounds before results reach core:
 
 | Host boundary | Default |
@@ -60,6 +66,7 @@ Host tools add their own effect-side bounds before results reach core:
 | managed-process log | 256 KiB per stream |
 | queued REPL operations | 16 |
 | root `AGENTS.md` | 16 KiB; reject if larger or invalid UTF-8 |
+| rendered world-state snapshot | 8 KiB; fixed command catalog and capped path |
 | discovered skill or compatible plugin instructions | 64; 16 KiB combined metadata catalog |
 | skill, plugin, or MCP metadata file | 64 KiB |
 | marketplace manifest | 256 KiB |
