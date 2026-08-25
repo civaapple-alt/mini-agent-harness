@@ -236,8 +236,8 @@ including marketplace entries with explicit `skills` arrays. It deliberately
 does not download remote `url` or `git-subdir` entries.
 
 If `.agents/skillsets.json` is present, only the listed skillsets and skill
-directory names are enabled. Without that file, every immediate child of
-`.agents/skillsets/` still loads its whole collection.
+names (directory or YAML `name`) are enabled. Without that file, every
+immediate child of `.agents/skillsets/` still loads its whole collection.
 
 Discovery injects only each instruction's name, description, kind, and
 workspace-relative location into the stable system prompt. The model reads the

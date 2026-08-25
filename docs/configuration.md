@@ -89,7 +89,8 @@ Install one standards-strict Agent Skill at
 `.agents/skillsets/<collection>` or be referenced from `.agents/skillsets.json`.
 Without `skillsets.json`, every immediate child of `.agents/skillsets/` loads
 its root `SKILL.md` and immediate `skills/*/SKILL.md`. With `skillsets.json`,
-only named skillsets and listed skill directory names are enabled:
+only named skillsets and listed skill names (directory or YAML `name`) are
+enabled:
 
 ```json
 {
@@ -146,8 +147,8 @@ local directory; omit it to use `.agents/marketplaces/<key>`:
 ```
 
 The object key is a local name. `skills` selects `SKILL.md` directories by
-directory name: an immediate `skills/<name>/SKILL.md` first, otherwise a
-bounded walk of at most five levels inside the clone. A Claude or Grok
+directory name or YAML `name`: an immediate `skills/<name>/SKILL.md` first,
+otherwise a bounded walk of at most five levels inside the clone. A Claude or Grok
 marketplace manifest is not required for skill-only selection. `plugins`
 selects a marketplace plugin entry and still requires `.claude-plugin` or
 `.grok-plugin` `marketplace.json`. A legacy string array remains accepted,

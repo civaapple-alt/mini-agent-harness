@@ -27,7 +27,7 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-const MAX_READ_BYTES: u64 = 64 * 1024;
+const MAX_READ_BYTES: u64 = 128 * 1024;
 const MAX_WRITE_BYTES: usize = 1024 * 1024;
 const MAX_COMMAND_BYTES: usize = 16 * 1024;
 const MAX_COMMAND_CAPTURE_BYTES: usize = 8 * 1024 * 1024;

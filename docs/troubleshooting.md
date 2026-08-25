@@ -74,7 +74,7 @@ effective mentor endpoint when the model is configured.
 Cloning a marketplace does not enable every entry. Name it in
 `.agents/marketplaces.json` with `{ "skills": ["name"] }` or
 `{ "plugins": ["name"] }`. Set `path` to an existing local clone, or omit it
-to use `.agents/marketplaces/<key>`. Skills match a `SKILL.md` directory
+to use `.agents/marketplaces/<key>`. Skills match a `SKILL.md` directory or its YAML `name`
 (immediate `skills/<name>/` or nested within five levels). Plugins still need
 a Claude or Grok marketplace manifest. A legacy string array only matches an
 immediate skill or a plugin name under `.agents/marketplaces/<key>`. Then run
@@ -82,8 +82,8 @@ immediate skill or a plugin name under `.agents/marketplaces/<key>`. Then run
 downloaded.
 
 If `.agents/skillsets.json` exists, unlisted skillsets and unlisted skills in
-those collections stay disabled. A missing skill usually means the json list
-omitted it, `path` does not resolve, or the directory name does not match.
+those collections stay disabled. A missing skill usually means the json list omitted it, `path` does not
+resolve, or neither the directory nor YAML `name` matches.
 
 ## An MCP server is not discovered
 

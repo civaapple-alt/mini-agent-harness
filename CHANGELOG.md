@@ -62,6 +62,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- Skill discovery reads only a bounded YAML frontmatter prefix, so an oversized
+  `SKILL.md` can still be selected. `read_file` accepts up to 128 KiB so those
+  instruction files can be opened.
+
 - Default interactive sessions and TTY `ask` run tools without per-step
   approval. `/auto` is the 128-step copilot loop; `/auto off` restores prompts.
   `run` is an alias of `ask`.

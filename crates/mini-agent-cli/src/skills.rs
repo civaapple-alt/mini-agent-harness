@@ -6,6 +6,7 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -16,6 +17,7 @@ const MAX_DISCOVERED_SKILLS: usize = 64;
 const MAX_DISCOVERED_SERVERS: usize = 8;
 const MAX_DIRECTORY_ENTRIES: usize = 128;
 const MAX_METADATA_BYTES: u64 = 64 * 1024;
+const MAX_INSTRUCTION_FRONTMATTER_BYTES: usize = 16 * 1024;
 const MAX_CATALOG_BYTES: usize = 16 * 1024;
 const MAX_SKILLSETS: usize = 16;
 const MAX_SKILLS_PER_SKILLSET: usize = 32;
@@ -1217,7 +1219,7 @@ fn parse_instruction(
     if !path.starts_with(boundary) || !path.is_file() {
         return Err(format!("{} escapes its package boundary", path.display()));
     }
-    let content = read_bounded(&path)?;
+    let content = read_instruction_prefix(&path)?;
     let frontmatter = frontmatter(&content)
         .ok_or_else(|| format!("{} has invalid YAML frontmatter", path.display()))?;
     let metadata: SkillMetadata = yaml_serde::from_str(frontmatter)
@@ -1355,6 +1357,16 @@ fn read_json(path: &Path) -> Result<Value, String> {
     let content = read_bounded(path)?;
     serde_json::from_str(&content)
         .map_err(|error| format!("cannot parse {}: {error}", path.display()))
+}
+
+fn read_instruction_prefix(path: &Path) -> Result<String, String> {
+    let mut file =
+        fs::File::open(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let mut buf = vec![0; MAX_INSTRUCTION_FRONTMATTER_BYTES];
+    let read = file
+        .read(&mut buf)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    String::from_utf8(buf[..read].to_vec()).map_err(|_| format!("{} is not UTF-8", path.display()))
 }
 
 fn read_bounded(path: &Path) -> Result<String, String> {

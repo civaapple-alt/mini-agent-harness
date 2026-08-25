@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 use std::fs;
+use std::io::Read;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
@@ -15,7 +16,13 @@ const MAX_SELECTORS_PER_MARKETPLACE: usize = 32;
 const MAX_SKILLS_PER_PLUGIN: usize = 32;
 const MAX_SKILL_SEARCH_DEPTH: usize = 5;
 const MAX_SKILL_SEARCH_DIRS: usize = 128;
+const MAX_SKILL_NAME_PEEK_BYTES: usize = 8 * 1024;
 const SKIP_DIR_NAMES: &[&str] = &["node_modules", ".git", "dist", "build", "__pycache__"];
+
+#[derive(Deserialize)]
+struct SkillNameMetadata {
+    name: String,
+}
 
 #[derive(Debug)]
 pub struct MarketplacePlugin {
@@ -435,7 +442,7 @@ pub(crate) fn find_named_skill_dirs(
         match found.remove(&name) {
             Some(skill_root) => matched.push((name, skill_root)),
             None => diagnostics.push(format!(
-                "{} skill {name:?} was not found as a SKILL.md directory within {MAX_SKILL_SEARCH_DEPTH} levels",
+                "{} skill {name:?} was not found as a SKILL.md directory or instruction name within {MAX_SKILL_SEARCH_DEPTH} levels",
                 collection_root.display()
             )),
         }
@@ -474,14 +481,7 @@ fn search_nested_skills(
                 continue;
             }
             if child.join("SKILL.md").is_file() {
-                if requested.contains(name) && !found.contains_key(name) {
-                    match contained_directory(&child, collection_root) {
-                        Ok(skill_root) => {
-                            found.insert(name.to_string(), skill_root);
-                        }
-                        Err(error) => diagnostics.push(error),
-                    }
-                }
+                record_skill_match(&child, collection_root, requested, found, diagnostics);
                 continue;
             }
             if depth < MAX_SKILL_SEARCH_DEPTH {
@@ -489,6 +489,63 @@ fn search_nested_skills(
             }
         }
     }
+}
+
+fn record_skill_match(
+    skill_dir: &Path,
+    collection_root: &Path,
+    requested: &BTreeSet<String>,
+    found: &mut BTreeMap<String, PathBuf>,
+    diagnostics: &mut Vec<String>,
+) {
+    let Some(dir_name) = skill_dir.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    let selector = if requested.contains(dir_name) {
+        dir_name.to_string()
+    } else if let Some(instruction_name) =
+        skill_instruction_name(skill_dir).filter(|name| requested.contains(name))
+    {
+        instruction_name
+    } else {
+        return;
+    };
+    if found.contains_key(&selector) {
+        return;
+    }
+    match contained_directory(skill_dir, collection_root) {
+        Ok(skill_root) => {
+            found.insert(selector, skill_root);
+        }
+        Err(error) => diagnostics.push(error),
+    }
+}
+
+fn skill_instruction_name(skill_dir: &Path) -> Option<String> {
+    let mut file = fs::File::open(skill_dir.join("SKILL.md")).ok()?;
+    let mut buf = vec![0; MAX_SKILL_NAME_PEEK_BYTES];
+    let read = file.read(&mut buf).ok()?;
+    let content = std::str::from_utf8(&buf[..read]).ok()?;
+    let yaml = frontmatter_yaml(content)?;
+    yaml_serde::from_str::<SkillNameMetadata>(yaml)
+        .ok()
+        .map(|metadata| metadata.name)
+}
+
+fn frontmatter_yaml(content: &str) -> Option<&str> {
+    let opening_end = content.find('\n')? + 1;
+    if content[..opening_end].trim_end_matches(['\r', '\n']) != "---" {
+        return None;
+    }
+    let rest = &content[opening_end..];
+    let mut offset = 0;
+    for line in rest.split_inclusive('\n') {
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            return Some(&rest[..offset]);
+        }
+        offset += line.len();
+    }
+    None
 }
 
 fn skill_search_children(root: &Path, diagnostics: &mut Vec<String>) -> Vec<PathBuf> {

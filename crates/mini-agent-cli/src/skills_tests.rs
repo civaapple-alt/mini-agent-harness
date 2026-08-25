@@ -329,6 +329,28 @@ fn discovers_claude_and_grok_marketplace_plugins_selected_explicitly() {
 }
 
 #[test]
+fn discovers_an_oversized_skill_from_frontmatter() {
+    let root = test_root();
+    let skill = root.join(".agents/skills/huge-skill");
+    write_skill(
+        &skill,
+        "huge-skill",
+        "A long published skill.",
+        &"x".repeat(80_000),
+    );
+
+    let discovery = discover(&root);
+
+    assert_eq!(discovery.skill_names(), vec!["huge-skill".to_string()]);
+    assert!(
+        discovery.diagnostics().is_empty(),
+        "{:?}",
+        discovery.diagnostics()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn discovers_an_explicit_nested_marketplace_skill() {
     let root = test_root();
     let skill = root.join(

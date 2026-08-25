@@ -235,6 +235,42 @@ fn explicit_skills_find_a_nested_skill_without_a_marketplace_manifest() {
 }
 
 #[test]
+fn explicit_skills_match_instruction_name_when_folder_differs() {
+    let root = test_root();
+    let marketplace = root.join(".agents/marketplaces/taste-skill");
+    let skill = marketplace.join("skills/taste-skill");
+    fs::create_dir_all(&skill).unwrap();
+    fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: design-taste-frontend\ndescription: Anti-slop frontend.\n---\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agents/marketplaces.json"),
+        serde_json::to_vec(&json!({
+            "marketplaces": {
+                "taste-skill": {
+                    "skills": ["design-taste-frontend"]
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let discovery = discover(&root.canonicalize().unwrap());
+
+    assert_eq!(discovery.plugins.len(), 1);
+    assert_eq!(discovery.plugins[0].name, "design-taste-frontend");
+    assert_eq!(
+        discovery.plugins[0].explicit_skills,
+        Some(vec![skill.canonicalize().unwrap()])
+    );
+    assert!(discovery.diagnostics.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn explicit_plugins_do_not_select_a_same_named_nested_skill() {
     let root = test_root();
     let marketplace = root.join(".agents/marketplaces/catalog");

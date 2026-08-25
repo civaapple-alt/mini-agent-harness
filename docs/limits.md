@@ -58,7 +58,7 @@ Host tools add their own effect-side bounds before results reach core:
 
 | Host boundary | Default |
 | --- | ---: |
-| file read | 64 KiB |
+| file read | 128 KiB |
 | new file or edited file | 1 MiB |
 | shell command text | 16 KiB |
 | shell runtime | 120 seconds |
