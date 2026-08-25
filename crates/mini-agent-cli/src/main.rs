@@ -3,6 +3,7 @@ mod config;
 mod env_file;
 mod marketplaces;
 mod mcp;
+mod mentor;
 mod observer;
 mod openai;
 mod processes;
@@ -44,10 +45,11 @@ use workspace::ApprovalMode;
 use workspace::workspace_tools;
 use world::WorldState;
 
-const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent run [--trace PATH] [--] <PROMPT>\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY    Required except by demo\n    OPENAI_MODEL      Required except by demo\n    OPENAI_BASE_URL   Optional; defaults to https://api.openai.com/v1";
+const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent run [--trace PATH] [--] <PROMPT>\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
 const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n\nStarts the approval-gated interactive REPL. --persist creates a resumable project session.";
 const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SESSION_ID [--trace PATH]\n\nResumes the latest settled checkpoint of a durable project session.";
 const SESSIONS_HELP: &str = "mini-agent sessions\n\nUSAGE:\n    mini-agent sessions\n\nLists bounded durable sessions in the current project.";
+const MENTOR_HELP: &str = "mini-agent mentor\n\nUSAGE:\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n\nRuns a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.\n\nCONFIGURATION:\n    MENTOR_OPENAI_MODEL      Required dedicated mentor model\n    MENTOR_OPENAI_API_KEY    Optional; falls back to OPENAI_API_KEY\n    MENTOR_OPENAI_BASE_URL   Optional; falls back to OPENAI_BASE_URL";
 const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn. If PROMPT is omitted, reads at most 32 KiB from stdin.\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto        Run tools without approval\n    --json        Emit a machine-readable final result\n    --trace PATH  Write JSONL observation events";
 const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--trace PATH] [--] <PROMPT>\n\nRuns one approval-gated model turn.";
 const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--trace PATH] [--] [PROMPT]\n\nRuns an automatic turn, or starts the REPL in automatic mode when PROMPT is omitted.";
@@ -115,6 +117,7 @@ async fn main() -> ExitCode {
             .await
         }
         Command::Sessions => run_sessions(),
+        Command::Mentor => mentor::run(invocation.prompt, invocation.trace, invocation.json).await,
     }
 }
 
@@ -127,6 +130,7 @@ enum Command {
     Auto,
     Resume,
     Sessions,
+    Mentor,
     Status,
     Doctor,
     Help,
@@ -153,6 +157,7 @@ enum HelpTopic {
     Auto,
     Resume,
     Sessions,
+    Mentor,
     Demo,
     Status,
     Doctor,
@@ -208,6 +213,10 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         Some("sessions") => {
             args.next();
             Command::Sessions
+        }
+        Some("mentor") => {
+            args.next();
+            Command::Mentor
         }
         Some("status") => {
             args.next();
@@ -301,8 +310,13 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if command == Command::Resume && prompt.len() != 1 {
         return Err("resume requires exactly one SESSION_ID".to_string());
     }
-    if json && !matches!(command, Command::Ask | Command::Status | Command::Doctor) {
-        return Err("--json is supported only by ask, status, and doctor".to_string());
+    if json
+        && !matches!(
+            command,
+            Command::Ask | Command::Mentor | Command::Status | Command::Doctor
+        )
+    {
+        return Err("--json is supported only by ask, mentor, status, and doctor".to_string());
     }
     if automatic && command != Command::Ask {
         return Err("--auto is supported only by ask".to_string());
@@ -351,6 +365,7 @@ fn help_topic(name: &str) -> Result<HelpTopic, String> {
         "auto" => Ok(HelpTopic::Auto),
         "resume" => Ok(HelpTopic::Resume),
         "sessions" => Ok(HelpTopic::Sessions),
+        "mentor" => Ok(HelpTopic::Mentor),
         "demo" => Ok(HelpTopic::Demo),
         "status" => Ok(HelpTopic::Status),
         "doctor" => Ok(HelpTopic::Doctor),
@@ -367,6 +382,7 @@ fn help_topic_for(command: Command) -> HelpTopic {
         Command::Auto => HelpTopic::Auto,
         Command::Resume => HelpTopic::Resume,
         Command::Sessions => HelpTopic::Sessions,
+        Command::Mentor => HelpTopic::Mentor,
         Command::Demo => HelpTopic::Demo,
         Command::Status => HelpTopic::Status,
         Command::Doctor => HelpTopic::Doctor,
@@ -384,6 +400,7 @@ fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::Auto => AUTO_HELP,
         HelpTopic::Resume => RESUME_HELP,
         HelpTopic::Sessions => SESSIONS_HELP,
+        HelpTopic::Mentor => MENTOR_HELP,
         HelpTopic::Demo => DEMO_HELP,
         HelpTopic::Status => STATUS_HELP,
         HelpTopic::Doctor => DOCTOR_HELP,
@@ -794,6 +811,31 @@ mod tests {
         assert_eq!(resume.command, Command::Resume);
         assert_eq!(resume.prompt, "s-123");
         assert_eq!(sessions.command, Command::Sessions);
+    }
+
+    #[test]
+    fn parses_mentor_commands_and_options() {
+        let insight = parse_args(vec![
+            "mentor".to_string(),
+            "insight".to_string(),
+            "s-123".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+        let verify = parse_args(vec![
+            "mentor".to_string(),
+            "verify".to_string(),
+            "s-123".to_string(),
+            "--".to_string(),
+            "tests pass".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(insight.command, Command::Mentor);
+        assert_eq!(insight.prompt, "insight s-123");
+        assert!(insight.json);
+        assert_eq!(verify.command, Command::Mentor);
+        assert_eq!(verify.prompt, "verify s-123 tests pass");
     }
 
     #[test]

@@ -432,6 +432,164 @@ fn durable_session_resumes_settled_history_after_restart() {
 }
 
 #[test]
+fn mentor_reviews_a_settled_checkpoint_without_polluting_primary_history() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        for reply in [
+            "primary answer",
+            "mentor review",
+            "verification result",
+            "resumed primary answer",
+        ] {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            requests_tx.send(read_request_body(&mut stream)).unwrap();
+            write_sse_response(&mut stream, reply);
+        }
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://{address}/v1\nMENTOR_OPENAI_MODEL=mentor-model\n"
+        ),
+    )
+    .unwrap();
+    let command = |arguments: &[&str], input: Option<&[u8]>| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
+            .current_dir(&root)
+            .args(arguments)
+            .env_remove("OPENAI_API_KEY")
+            .env_remove("OPENAI_MODEL")
+            .env_remove("OPENAI_BASE_URL")
+            .env_remove("MENTOR_OPENAI_API_KEY")
+            .env_remove("MENTOR_OPENAI_MODEL")
+            .env_remove("MENTOR_OPENAI_BASE_URL")
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        if let Some(input) = input {
+            child.stdin.take().unwrap().write_all(input).unwrap();
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+
+    let first = command(&["--persist"], Some(b"first question\n/exit\n"));
+    let first_stdout = String::from_utf8(first.stdout).unwrap();
+    let session_id = first_stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("session> new "))
+        .and_then(|line| line.split_once(" |"))
+        .map(|(id, _)| id.to_string())
+        .unwrap();
+    let mentor = command(&["mentor", "insight", &session_id, "--json"], None);
+    let mentor_json: Value = serde_json::from_slice(&mentor.stdout).unwrap();
+    let verification = command(
+        &[
+            "mentor",
+            "verify",
+            &session_id,
+            "--json",
+            "--",
+            "the primary answer exists",
+        ],
+        None,
+    );
+    let verification_json: Value = serde_json::from_slice(&verification.stdout).unwrap();
+    let _resumed = command(&["resume", &session_id], Some(b"second question\n/exit\n"));
+
+    server.join().unwrap();
+    let primary_request: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
+    let mentor_request: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
+    let verification_request: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
+    let resumed_request: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
+    let session_records = fs::read_to_string(
+        root.join(".agents/sessions")
+            .join(format!("{session_id}.jsonl")),
+    )
+    .unwrap();
+
+    assert_eq!(primary_request["model"], "primary-model");
+    assert_eq!(mentor_request["model"], "mentor-model");
+    assert_eq!(mentor_request["tools"], json!([]));
+    assert!(
+        mentor_request["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("independent mentor")
+    );
+    assert!(
+        mentor_request["input"]
+            .to_string()
+            .contains("first question")
+    );
+    assert!(
+        mentor_request["input"]
+            .to_string()
+            .contains("primary answer")
+    );
+    assert!(
+        mentor_request["input"]
+            .to_string()
+            .contains("insight review")
+    );
+    assert_eq!(mentor_json["output"], "mentor review");
+    assert_eq!(mentor_json["action"], "insight");
+    assert_eq!(mentor_json["tool_calls"], json!([]));
+    assert_eq!(verification_request["model"], "mentor-model");
+    assert_eq!(verification_request["tools"], json!([]));
+    assert!(
+        verification_request["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("independent verifier")
+    );
+    assert!(
+        verification_request["input"]
+            .to_string()
+            .contains("the primary answer exists")
+    );
+    assert_eq!(verification_json["output"], "verification result");
+    assert_eq!(verification_json["action"], "verify");
+    assert!(session_records.contains("\"kind\":\"derived_item\""));
+    assert!(session_records.contains("\"output\":\"mentor review\""));
+    assert!(session_records.contains("\"item_kind\":\"mentor_verification\""));
+    assert!(session_records.contains("\"output\":\"verification result\""));
+    assert!(
+        resumed_request["input"]
+            .to_string()
+            .contains("primary answer")
+    );
+    assert!(
+        !resumed_request["input"]
+            .to_string()
+            .contains("mentor review")
+    );
+    assert!(
+        !resumed_request["input"]
+            .to_string()
+            .contains("verification result")
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn auto_mode_executes_shell_without_approval() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();

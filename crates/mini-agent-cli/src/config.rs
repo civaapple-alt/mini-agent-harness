@@ -19,9 +19,18 @@ pub struct RuntimeConfig {
     api_key: Option<ResolvedValue>,
     model: Option<ResolvedValue>,
     base_url: ResolvedSetting,
+    mentor_api_key: Option<ResolvedValue>,
+    mentor_model: Option<ResolvedValue>,
+    mentor_base_url: Option<ResolvedSetting>,
 }
 
 pub struct ProviderSettings {
+    pub api_key: String,
+    pub model: String,
+    pub base_url: String,
+}
+
+pub struct MentorProviderSettings {
     pub api_key: String,
     pub model: String,
     pub base_url: String,
@@ -59,11 +68,19 @@ impl RuntimeConfig {
                 value: DEFAULT_BASE_URL.to_string(),
                 source: SettingSource::BuiltIn,
             });
+        let mentor_api_key = environment.resolve("MENTOR_OPENAI_API_KEY");
+        let mentor_model = environment.resolve("MENTOR_OPENAI_MODEL");
+        let mentor_base_url = environment
+            .resolve("MENTOR_OPENAI_BASE_URL")
+            .map(ResolvedSetting::from_environment);
         Ok(Self {
             workspace,
             api_key,
             model,
             base_url,
+            mentor_api_key,
+            mentor_model,
+            mentor_base_url,
         })
     }
 
@@ -92,12 +109,43 @@ impl RuntimeConfig {
         self.workspace.clone()
     }
 
+    pub fn mentor_provider_settings(&self) -> Result<MentorProviderSettings, String> {
+        let model = self
+            .mentor_model
+            .as_ref()
+            .ok_or_else(|| "MENTOR_OPENAI_MODEL is required for mentor commands".to_string())?
+            .value
+            .clone();
+        let api_key = self
+            .mentor_api_key
+            .as_ref()
+            .or(self.api_key.as_ref())
+            .ok_or_else(|| {
+                "MENTOR_OPENAI_API_KEY or OPENAI_API_KEY is required for mentor commands"
+                    .to_string()
+            })?
+            .value
+            .clone();
+        let base_url = self
+            .mentor_base_url
+            .as_ref()
+            .unwrap_or(&self.base_url)
+            .value
+            .clone();
+        validate_base_url_named("MENTOR_OPENAI_BASE_URL", &base_url)?;
+        Ok(MentorProviderSettings {
+            api_key,
+            model,
+            base_url,
+        })
+    }
+
     pub fn model(&self) -> Option<&str> {
         self.model.as_ref().map(|model| model.value.as_str())
     }
 
     pub fn status_json(&self) -> Value {
-        let display_base_url = display_base_url(&self.base_url.value);
+        let primary_display_base_url = display_base_url(&self.base_url.value);
         let extensions = skills::discover(&self.workspace);
         let world = WorldState::detect(&self.workspace, ApprovalMode::Interactive);
         json!({
@@ -106,10 +154,29 @@ impl RuntimeConfig {
             "provider": "openai_responses",
             "model": self.model.as_ref().map(|value| value.value.as_str()),
             "model_source": self.model.as_ref().map(|value| source_name(value.source)),
-            "base_url": display_base_url,
+            "base_url": primary_display_base_url,
             "base_url_source": setting_source_name(self.base_url.source),
             "credential": if self.api_key.is_some() { "configured" } else { "missing" },
             "credential_source": self.api_key.as_ref().map(|value| source_name(value.source)),
+            "mentor": {
+                "enabled": self.mentor_model.is_some(),
+                "model": self.mentor_model.as_ref().map(|value| value.value.as_str()),
+                "model_source": self.mentor_model.as_ref().map(|value| source_name(value.source)),
+                "credential": if self.mentor_api_key.is_some() {
+                    "dedicated"
+                } else if self.api_key.is_some() {
+                    "inherited"
+                } else {
+                    "missing"
+                },
+                "base_url": display_base_url(
+                    &self.mentor_base_url.as_ref().unwrap_or(&self.base_url).value
+                ),
+                "base_url_source": self.mentor_base_url.as_ref().map_or(
+                    "inherited",
+                    |value| setting_source_name(value.source)
+                )
+            },
             "instructions": extensions.len(),
             "skills": extensions.skill_count(),
             "plugin_agents": extensions.plugin_agent_count(),
@@ -158,6 +225,7 @@ impl RuntimeConfig {
                         source_name(value.source)
                     ))
             ),
+            self.mentor_status_line(),
             format!("instructions: {}", extensions.len()),
             format!("skills: {}", extensions.skill_count()),
             format!("plugin_agents: {}", extensions.plugin_agent_count()),
@@ -206,6 +274,30 @@ impl RuntimeConfig {
             Ok(()) => check("base_url", true, display_base_url(&self.base_url.value)),
             Err(error) => check("base_url", false, error),
         });
+        if self.mentor_model.is_some() {
+            checks.push(check(
+                "mentor_credential",
+                self.mentor_api_key.is_some() || self.api_key.is_some(),
+                if self.mentor_api_key.is_some() {
+                    "MENTOR_OPENAI_API_KEY is configured".to_string()
+                } else if self.api_key.is_some() {
+                    "using OPENAI_API_KEY".to_string()
+                } else {
+                    "MENTOR_OPENAI_API_KEY and OPENAI_API_KEY are missing".to_string()
+                },
+            ));
+            let mentor_base_url = &self
+                .mentor_base_url
+                .as_ref()
+                .unwrap_or(&self.base_url)
+                .value;
+            checks.push(
+                match validate_base_url_named("MENTOR_OPENAI_BASE_URL", mentor_base_url) {
+                    Ok(()) => check("mentor_base_url", true, display_base_url(mentor_base_url)),
+                    Err(error) => check("mentor_base_url", false, error),
+                },
+            );
+        }
         checks.push(match shell_available() {
             Ok(shell) => check("shell", true, shell),
             Err(error) => check("shell", false, error),
@@ -271,6 +363,26 @@ impl RuntimeConfig {
             lines,
         }
     }
+
+    fn mentor_status_line(&self) -> String {
+        self.mentor_model.as_ref().map_or_else(
+            || "mentor: disabled (set MENTOR_OPENAI_MODEL)".to_string(),
+            |model| {
+                format!(
+                    "mentor: {} ({}, {} credential)",
+                    model.value,
+                    source_name(model.source),
+                    if self.mentor_api_key.is_some() {
+                        "dedicated"
+                    } else if self.api_key.is_some() {
+                        "inherited"
+                    } else {
+                        "missing"
+                    }
+                )
+            },
+        )
+    }
 }
 
 impl ResolvedSetting {
@@ -296,10 +408,14 @@ fn check(name: &'static str, ok: bool, detail: String) -> Check {
 }
 
 fn validate_base_url(base_url: &str) -> Result<(), String> {
-    let url = Url::parse(base_url)
-        .map_err(|error| format!("OPENAI_BASE_URL is not a valid URL: {error}"))?;
+    validate_base_url_named("OPENAI_BASE_URL", base_url)
+}
+
+fn validate_base_url_named(name: &str, base_url: &str) -> Result<(), String> {
+    let url =
+        Url::parse(base_url).map_err(|error| format!("{name} is not a valid URL: {error}"))?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return Err("OPENAI_BASE_URL must be an absolute http or https URL".to_string());
+        return Err(format!("{name} must be an absolute http or https URL"));
     }
     Ok(())
 }

@@ -14,6 +14,10 @@ use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+#[path = "session_derived.rs"]
+mod derived;
+pub(crate) use derived::DerivedItem;
+
 const SCHEMA_VERSION: u64 = 1;
 const MAX_SESSION_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 512 * 1024;
@@ -39,6 +43,7 @@ pub(crate) struct SessionStore {
     file: File,
     bytes: u64,
     next_seq: u64,
+    checkpoint_seq: u64,
     _lock: SessionLock,
 }
 
@@ -112,7 +117,9 @@ impl SessionStore {
         self.append_records(vec![
             self.item_record(/*turn_id*/ None, context),
             self.checkpoint_record(checkpoint),
-        ])
+        ])?;
+        self.checkpoint_seq = self.next_seq.saturating_sub(1);
+        Ok(())
     }
 
     pub(crate) fn record_turn(&mut self, turn: TurnCommit<'_>) -> Result<(), String> {
@@ -139,7 +146,9 @@ impl SessionStore {
             "error": turn.error,
         }));
         records.push(self.checkpoint_record(turn.checkpoint));
-        self.append_records(records)
+        self.append_records(records)?;
+        self.checkpoint_seq = self.next_seq.saturating_sub(1);
+        Ok(())
     }
 
     fn create(workspace: &Path) -> Result<OpenedSession, String> {
@@ -163,6 +172,7 @@ impl SessionStore {
                 file,
                 bytes: 0,
                 next_seq: 1,
+                checkpoint_seq: 0,
                 _lock: lock,
             };
             store.append_records(vec![
@@ -219,6 +229,7 @@ impl SessionStore {
                 file,
                 bytes: loaded.valid_bytes as u64,
                 next_seq: loaded.next_seq,
+                checkpoint_seq: loaded.checkpoint_seq,
                 _lock: lock,
             },
             messages: loaded.messages,
@@ -323,6 +334,7 @@ struct LoadedRecords {
     thread_id: String,
     messages: Vec<Message>,
     next_seq: u64,
+    checkpoint_seq: u64,
     valid_bytes: usize,
 }
 
@@ -382,7 +394,7 @@ fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecords, String>
                         .ok_or_else(|| "checkpoint is missing messages".to_string())?,
                 )
                 .map_err(|error| format!("invalid checkpoint messages: {error}"))?;
-                latest_checkpoint = Some((thread_id, messages));
+                latest_checkpoint = Some((seq, thread_id, messages));
             }
             Some(_) if header_seen => {}
             Some(_) => return Err("session header must be the first record".to_string()),
@@ -391,12 +403,13 @@ fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecords, String>
         offset = offset.saturating_add(end + 1);
         valid_bytes = offset;
     }
-    let (thread_id, messages) = latest_checkpoint
+    let (checkpoint_seq, thread_id, messages) = latest_checkpoint
         .ok_or_else(|| "session has no settled checkpoint to resume".to_string())?;
     Ok(LoadedRecords {
         thread_id,
         messages,
         next_seq: expected_seq,
+        checkpoint_seq,
         valid_bytes,
     })
 }
