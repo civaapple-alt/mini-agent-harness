@@ -167,21 +167,22 @@ streams to stdout under one colored `assistant>` tag and is not repeated at the
 end. Redirected stdout and `--json` hold the assistant answer until completion
 so machine output remains valid. It also accepts a bounded prompt from stdin.
 `ask --json` emits one JSON object containing output, exit code, model, steps,
-usage, and tool-call statuses. Noninteractive sensitive tool calls fail closed;
-`ask --auto` permits them without approval and should be used only in a trusted
-or disposable execution environment.
+usage, and tool-call statuses. On a TTY, `ask` runs tools without per-step
+approval. When stdin is not a TTY, sensitive tool calls fail closed; `ask --auto`
+permits them and should be used only in a trusted or disposable execution
+environment. `run` is an alias of `ask`.
 
 The real modes expose `read_file`, `edit_file`, `write_file`, `shell`,
 `read_tool_result`, and managed-process tools. Reads and direct file writes are
 confined to the current workspace; `.git` is protected. `edit_file` makes one
 exact unique replacement; `write_file` creates new files and refuses to replace
-existing ones. Interactive and `run` modes ask before writes, shell commands,
-and process starts. `auto` without a prompt starts an interactive auto session;
-`/auto` enables automatic execution in any interactive session and `/auto off`
-restores per-action approval. `auto` with a prompt remains a one-shot copilot.
-Auto mode runs up to 128 model steps, performs effects without per-step
-approval, and compacts context between settled tool batches so work can
-continue. It prints a warning because process execution is not sandboxed and
+existing ones. Reads never prompt. The interactive REPL and TTY `ask` run
+writes, shell commands, process starts, and MCP without per-step approval;
+shell is not sandboxed. `/auto off` restores per-action prompts. `auto` without
+a prompt starts the REPL in the copilot loop; `/auto` enables that loop in any
+interactive session. `auto` with a prompt remains a one-shot copilot. Copilot
+mode runs up to 128 model steps and compacts context between settled tool
+batches. It prints a warning because process execution is not sandboxed and
 can escape the workspace even though direct file tools cannot.
 
 At startup mini-agent detects a fixed, bounded set of local command

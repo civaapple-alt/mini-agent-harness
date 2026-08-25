@@ -11,8 +11,8 @@ discovered commands. It inspects only the current workspace and `PATH` and
 records:
 
 - operating system, architecture, workspace, and the actual host shell;
-- `default` or `auto` mode, per-action or automatic approval, and the lack of a
-  command sandbox;
+- `default` (8 steps) or `auto` (128 steps and compact) loop mode, per-action
+  or automatic approval, and the lack of a command sandbox;
 - root project markers for Rust, Maven/Gradle Java, Go, Python, Node, and .NET;
 - availability of a fixed catalog of common navigation, VCS, build, runtime,
   and package-manager commands;
@@ -29,9 +29,9 @@ stable prefix while placing local facts immediately before conversation input.
 `/world` shows the same state to the user. `/world refresh` appends a new full
 snapshot only when detection changed.
 
-Mode changes are also append-only. `/auto` and `/auto off` keep `instructions`
-byte-stable, update execution limits, and append an authoritative full world
-snapshot. `/new` restores the current snapshot after clearing conversation
+Mode changes are also append-only. `/auto` (copilot loop) and `/auto off`
+(restore prompts) keep `instructions` byte-stable, update execution limits and
+approval, and append an authoritative full world snapshot. `/new` restores the current snapshot after clearing conversation
 history. Compaction retains the newest context item next to its summary.
 
 Full snapshots are deliberate at this scale. They avoid requiring old deltas

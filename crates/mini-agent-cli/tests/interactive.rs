@@ -204,13 +204,11 @@ fn interactive_prints_banner_before_initialization_error() {
         "mini-agent — /auto /world /session /mcp /queue /new /help /exit"
     );
     assert!(stdout.contains("world> "));
-    assert!(stdout.contains("default | approval per_action"));
+    assert!(stdout.contains("default | approval automatic"));
     assert!(stdout.ends_with("initializing extensions...\n"));
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("invalid .env line")
-    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("invalid .env line"));
+    assert!(stderr.contains("unsandboxed shell commands without approval"));
 }
 
 #[test]
@@ -256,7 +254,7 @@ fn interactive_mcp_command_reports_when_nothing_needs_retry() {
 
     assert!(status.success(), "stderr: {stderr}");
     assert!(stdout.contains("world> mode: default"));
-    assert!(stdout.contains("world> approval: per_action"));
+    assert!(stdout.contains("world> approval: automatic"));
     assert!(stdout.contains("world> commands_available:"));
     assert!(stdout.contains("world> unchanged; no context item appended"));
     assert!(stdout.contains("no MCP servers are waiting to be enabled"));
@@ -781,6 +779,147 @@ fn mentor_reviews_a_settled_checkpoint_without_polluting_primary_history() {
             .contains("verification result")
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn default_repl_executes_shell_without_approval() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    let shell_command = if cfg!(windows) {
+        "Write-Output default-ready"
+    } else {
+        "printf default-ready"
+    };
+    let server = thread::spawn(move || {
+        let (mut first_stream, _) = listener.accept().unwrap();
+        first_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        requests_tx
+            .send(read_request_body(&mut first_stream))
+            .unwrap();
+        write_tool_sse_response(&mut first_stream, shell_command);
+
+        let (mut second_stream, _) = listener.accept().unwrap();
+        second_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        requests_tx
+            .send(read_request_body(&mut second_stream))
+            .unwrap();
+        write_sse_response(&mut second_stream, "default complete");
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"inspect\n/exit\n")
+        .unwrap();
+
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(status.success(), "stderr: {stderr}");
+    assert!(stdout.contains("tool> shell"));
+    assert!(stdout.contains("default-ready"));
+    assert!(stdout.contains("assistant> default complete"));
+    assert!(stderr.contains("unsandboxed shell commands without approval"));
+    assert!(!stderr.contains("approve shell command"));
+    drop(requests_rx);
+}
+
+#[test]
+fn ask_without_auto_denies_shell_when_stdin_is_not_a_tty() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    let shell_command = if cfg!(windows) {
+        "Write-Output should-not-run"
+    } else {
+        "printf should-not-run"
+    };
+    let server = thread::spawn(move || {
+        let (mut first_stream, _) = listener.accept().unwrap();
+        first_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        requests_tx
+            .send(read_request_body(&mut first_stream))
+            .unwrap();
+        write_tool_sse_response(&mut first_stream, shell_command);
+
+        let (mut second_stream, _) = listener.accept().unwrap();
+        second_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let second = read_request_body(&mut second_stream);
+        requests_tx.send(second).unwrap();
+        write_sse_response(&mut second_stream, "denied and stopped");
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    let output = mini_agent(&root)
+        .args(["ask", "inspect the workspace"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let first = requests_rx.recv().unwrap();
+    let second = requests_rx.recv().unwrap();
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    drop(first);
+    let second: Value = serde_json::from_slice(&second).unwrap();
+    assert!(
+        second.to_string().contains("denied non-interactive"),
+        "{}",
+        second
+    );
+    assert!(!stderr.contains("unsandboxed shell commands without approval"));
 }
 
 #[test]

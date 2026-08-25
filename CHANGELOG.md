@@ -55,6 +55,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- Default interactive sessions and TTY `ask` run tools without per-step
+  approval. `/auto` is the 128-step copilot loop; `/auto off` restores prompts.
+  `run` is an alias of `ask`.
 - Raised the default model request context from 256 KiB to 1 MiB and the model
   response ceiling from 64 KiB to 384 KiB. These remain provider-neutral byte
   bounds under DeepSeek V4's 1M-token context and 384K-token output.

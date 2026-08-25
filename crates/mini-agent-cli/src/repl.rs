@@ -55,7 +55,10 @@ enum WorkerCommand {
     RefreshWorld,
     ShowSession,
     EnableMcp,
-    SetMode(ApprovalMode),
+    SetExecution {
+        approval: ApprovalMode,
+        copilot: bool,
+    },
     Shutdown,
 }
 
@@ -69,13 +72,14 @@ impl Observer for ChannelObserver {
 
 pub async fn run(
     trace: Option<PathBuf>,
-    initial_mode: ApprovalMode,
+    initial_approval: ApprovalMode,
+    copilot: bool,
     session_request: SessionRequest,
 ) -> ExitCode {
     let (event_tx, event_rx) = mpsc::sync_channel(EVENT_BUFFER);
     let approval_events = event_tx.clone();
     let interactive_terminal = io::stdin().is_terminal();
-    let approval = ApprovalController::with_callback(initial_mode, move |action| {
+    let approval = ApprovalController::with_callback(initial_approval, move |action| {
         if interactive_terminal {
             request_approval(&approval_events, action)
         } else {
@@ -97,15 +101,15 @@ pub async fn run(
         .map(|workspace| skills::discover(workspace));
     let startup_world = workspace
         .as_ref()
-        .map(|workspace| WorldState::detect(workspace, initial_mode));
+        .map(|workspace| WorldState::detect(workspace, initial_approval, copilot));
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
-    let worker = spawn_worker(initial_mode, approval, session_request, worker_rx, event_tx);
+    let worker = spawn_worker(copilot, approval, session_request, worker_rx, event_tx);
 
     println!("{}", crate::version_line());
     println!("mini-agent — /auto /world /session /mcp /queue /new /help /exit");
-    if initial_mode == ApprovalMode::Automatic {
-        print_auto_warning();
+    print_auto_warning();
+    if copilot {
         println!("auto mode on");
     }
     if let Some(discovery) = startup_extensions {
@@ -166,12 +170,18 @@ pub async fn run(
                     "/mcp" => queue_work(&worker_tx, WorkerCommand::EnableMcp, &mut pending_work),
                     "/auto" | "/auto on" => queue_work(
                         &worker_tx,
-                        WorkerCommand::SetMode(ApprovalMode::Automatic),
+                        WorkerCommand::SetExecution {
+                            approval: ApprovalMode::Automatic,
+                            copilot: true,
+                        },
                         &mut pending_work,
                     ),
                     "/auto off" => queue_work(
                         &worker_tx,
-                        WorkerCommand::SetMode(ApprovalMode::Interactive),
+                        WorkerCommand::SetExecution {
+                            approval: ApprovalMode::Interactive,
+                            copilot: false,
+                        },
                         &mut pending_work,
                     ),
                     command if command.starts_with('/') => {
@@ -248,7 +258,7 @@ pub async fn run(
 }
 
 fn spawn_worker(
-    initial_mode: ApprovalMode,
+    copilot: bool,
     approval: ApprovalController,
     session_request: SessionRequest,
     commands: mpsc::Receiver<WorkerCommand>,
@@ -256,7 +266,7 @@ fn spawn_worker(
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let build = match RuntimeConfig::load().and_then(|runtime| {
-            crate::prepare_openai_harness(&runtime, approval.clone(), harness_config(initial_mode))
+            crate::prepare_openai_harness(&runtime, approval.clone(), harness_config(copilot))
         }) {
             Ok(build) => build,
             Err(error) => {
@@ -432,7 +442,8 @@ fn spawn_worker(
                     }
                 }
                 WorkerCommand::RefreshWorld => {
-                    let refreshed = WorldState::detect(world.workspace(), world.mode());
+                    let refreshed =
+                        WorldState::detect(world.workspace(), world.approval(), world.copilot());
                     if refreshed != world {
                         match refreshed.model_context() {
                             Ok(context) => match harness.append_context(context) {
@@ -522,12 +533,15 @@ fn spawn_worker(
                         ));
                     }
                 },
-                WorkerCommand::SetMode(mode) => {
+                WorkerCommand::SetExecution {
+                    approval: mode,
+                    copilot,
+                } => {
                     approval.set_mode(mode);
-                    let mut config = harness_config(mode);
+                    let mut config = harness_config(copilot);
                     config.system_prompt.clone_from(&stable_system_prompt);
                     harness.replace_config(config);
-                    let updated_world = world.with_mode(mode);
+                    let updated_world = world.with_execution(mode, copilot);
                     if updated_world != world {
                         match updated_world.model_context() {
                             Ok(context) => match harness.append_context(context) {
@@ -548,17 +562,13 @@ fn spawn_worker(
                             }
                         }
                     }
-                    match mode {
-                        ApprovalMode::Automatic => {
-                            let _ = events.send(ReplEvent::Warning("warning: auto mode runs workspace writes and unsandboxed shell commands without approval".to_string()));
-                            let _ = events.send(ReplEvent::Notice("auto mode on".to_string()));
-                        }
-                        ApprovalMode::Interactive => {
-                            let _ = events.send(ReplEvent::Notice(
-                                "auto mode off; writes and shell commands require approval"
-                                    .to_string(),
-                            ));
-                        }
+                    if copilot {
+                        let _ = events.send(ReplEvent::Warning("warning: auto mode runs workspace writes and unsandboxed shell commands without approval".to_string()));
+                        let _ = events.send(ReplEvent::Notice("auto mode on".to_string()));
+                    } else if mode == ApprovalMode::Interactive {
+                        let _ = events.send(ReplEvent::Notice(
+                            "auto mode off; writes and shell commands require approval".to_string(),
+                        ));
                     }
                 }
                 WorkerCommand::Shutdown => break,
@@ -703,8 +713,10 @@ fn bounded_names(names: &[String]) -> String {
 }
 
 fn print_help() {
-    println!("/auto      enable automatic execution");
-    println!("/auto off  require approval for writes and shell commands");
+    println!(
+        "/auto      unattended copilot loop (128 steps, compact); tools already run without approval"
+    );
+    println!("/auto off  require approval for writes, shell, and MCP");
     println!("/mcp       retry configured MCP servers that are not enabled");
     println!("/world     show detected environment, mode, and command capabilities");
     println!("/world refresh  detect changes and append a new world-state item");

@@ -20,7 +20,8 @@ pub(crate) struct WorldState {
     os: &'static str,
     arch: &'static str,
     shell: &'static str,
-    mode: ApprovalMode,
+    approval: ApprovalMode,
+    copilot: bool,
     available_commands: Vec<&'static str>,
     unavailable_commands: Vec<&'static str>,
     workspace_commands: Vec<&'static str>,
@@ -28,7 +29,7 @@ pub(crate) struct WorldState {
 }
 
 impl WorldState {
-    pub(crate) fn detect(workspace: &Path, mode: ApprovalMode) -> Self {
+    pub(crate) fn detect(workspace: &Path, approval: ApprovalMode, copilot: bool) -> Self {
         let search_paths = env::var_os("PATH")
             .map(|path| env::split_paths(&path).collect::<Vec<_>>())
             .unwrap_or_default();
@@ -46,7 +47,8 @@ impl WorldState {
             os: env::consts::OS,
             arch: env::consts::ARCH,
             shell: if cfg!(windows) { "pwsh" } else { "sh" },
-            mode,
+            approval,
+            copilot,
             available_commands,
             unavailable_commands,
             workspace_commands,
@@ -54,14 +56,19 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn with_mode(&self, mode: ApprovalMode) -> Self {
+    pub(crate) fn with_execution(&self, approval: ApprovalMode, copilot: bool) -> Self {
         let mut state = self.clone();
-        state.mode = mode;
+        state.approval = approval;
+        state.copilot = copilot;
         state
     }
 
-    pub(crate) fn mode(&self) -> ApprovalMode {
-        self.mode
+    pub(crate) fn approval(&self) -> ApprovalMode {
+        self.approval
+    }
+
+    pub(crate) fn copilot(&self) -> bool {
+        self.copilot
     }
 
     pub(crate) fn workspace(&self) -> &Path {
@@ -96,7 +103,7 @@ impl WorldState {
         );
         push_list_element(&mut context, "workspace_commands", &self.workspace_commands);
         context.push_str("<execution_guidance>");
-        context.push_str(match self.mode {
+        context.push_str(match self.approval {
             ApprovalMode::Interactive => {
                 "Sensitive writes, shell commands, managed process starts, MCP connections, and MCP calls require per-action user approval."
             }
@@ -167,14 +174,11 @@ impl WorldState {
     }
 
     fn mode_name(&self) -> &'static str {
-        match self.mode {
-            ApprovalMode::Interactive => "default",
-            ApprovalMode::Automatic => "auto",
-        }
+        if self.copilot { "auto" } else { "default" }
     }
 
     fn approval_name(&self) -> &'static str {
-        match self.mode {
+        match self.approval {
             ApprovalMode::Interactive => "per_action",
             ApprovalMode::Automatic => "automatic",
         }

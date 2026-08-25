@@ -13,10 +13,12 @@ a private channel before publishing details.
 
 ## Runtime boundary
 
-Mini Agent Harness does not sandbox shell commands. Interactive mode asks before file
-writes, shell commands, and managed-process starts. `auto` and `ask --auto`
-remove those approval prompts and should run only in a disposable or otherwise
-trusted workspace.
+Mini Agent Harness does not sandbox shell commands. Reads never prompt. The
+default interactive session and TTY `ask` run writes, shell commands,
+managed-process starts, and MCP without per-step approval. `/auto off` restores
+prompts. Noninteractive `ask` fails closed on those tools unless `ask --auto`.
+Unattended `auto` (128 steps, compact) also skips prompts. Use `/auto off` when
+you want to review each effect; use auto-approval only in a workspace you trust.
 
 Project `.agents` content is repository-controlled input. Skill, collection,
 plugin, and marketplace instructions can influence model behavior. Stdio MCP

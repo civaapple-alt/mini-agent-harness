@@ -46,14 +46,14 @@ use workspace::ApprovalMode;
 use workspace::workspace_tools;
 use world::WorldState;
 
-const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent run [--trace PATH] [--] <PROMPT>\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
-const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n\nStarts the approval-gated interactive REPL. --persist creates a resumable project session.";
+const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (128 steps, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
+const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is unsandboxed. `/auto off` restores prompts. --persist creates a resumable project session.";
 const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SESSION_ID [--trace PATH]\n\nResumes the latest settled checkpoint of a durable project session.";
 const SESSIONS_HELP: &str = "mini-agent sessions\n\nUSAGE:\n    mini-agent sessions\n\nLists bounded durable sessions in the current project.";
 const MENTOR_HELP: &str = "mini-agent mentor\n\nUSAGE:\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n\nRuns a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.\n\nCONFIGURATION:\n    MENTOR_OPENAI_MODEL      Required dedicated mentor model\n    MENTOR_OPENAI_API_KEY    Optional; falls back to OPENAI_API_KEY\n    MENTOR_OPENAI_BASE_URL   Optional; falls back to OPENAI_BASE_URL";
-const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn. If PROMPT is omitted, reads at most 32 KiB from stdin.\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto        Run tools without approval\n    --json        Emit a machine-readable final result\n    --trace PATH  Write JSONL observation events";
-const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--trace PATH] [--] <PROMPT>\n\nRuns one approval-gated model turn.";
-const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--trace PATH] [--] [PROMPT]\n\nRuns an automatic turn, or starts the REPL in automatic mode when PROMPT is omitted.";
+const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.\nOn a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto`.\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto        Permit sensitive tools without a TTY\n    --json        Emit a machine-readable final result\n    --trace PATH  Write JSONL observation events";
+const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--auto] [--json] [--trace PATH] [--] <PROMPT>\n\nAlias of `ask`. Prefer `ask` in scripts and docs.";
+const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, 128 model steps, and context compaction.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
 const DEMO_HELP: &str = "mini-agent demo\n\nUSAGE:\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
 const STATUS_HELP: &str = "mini-agent status\n\nUSAGE:\n    mini-agent status [--json]\n\nPrints effective non-secret startup configuration.";
 const DOCTOR_HELP: &str = "mini-agent doctor\n\nUSAGE:\n    mini-agent doctor [--json]\n\nChecks local configuration without contacting the model provider.";
@@ -85,10 +85,18 @@ async fn main() -> ExitCode {
             } else {
                 SessionRequest::Disabled
             };
-            repl::run(invocation.trace, ApprovalMode::Interactive, request).await
+            repl::run(invocation.trace, ApprovalMode::Automatic, false, request).await
         }
         Command::Demo => run_demo(invocation.prompt, invocation.trace).await,
-        Command::Run => run_openai(invocation.prompt, invocation.trace).await,
+        Command::Run => {
+            ask::run(
+                invocation.prompt,
+                invocation.trace,
+                invocation.json,
+                invocation.automatic,
+            )
+            .await
+        }
         Command::Ask => {
             ask::run(
                 invocation.prompt,
@@ -104,7 +112,7 @@ async fn main() -> ExitCode {
             } else {
                 SessionRequest::Disabled
             };
-            repl::run(invocation.trace, ApprovalMode::Automatic, request).await
+            repl::run(invocation.trace, ApprovalMode::Automatic, true, request).await
         }
         Command::Auto => run_auto(invocation.prompt, invocation.trace).await,
         Command::Help => {
@@ -120,7 +128,8 @@ async fn main() -> ExitCode {
         Command::Resume => {
             repl::run(
                 invocation.trace,
-                ApprovalMode::Interactive,
+                ApprovalMode::Automatic,
+                false,
                 SessionRequest::Resume(invocation.prompt),
             )
             .await
@@ -304,7 +313,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         }
     }
     if matches!(command, Command::Interactive) && !prompt.is_empty() {
-        return Err("interactive mode does not accept a prompt; use `run`".to_string());
+        return Err("interactive mode does not accept a prompt; use `ask`".to_string());
     }
     if matches!(command, Command::Demo | Command::Run) && prompt.is_empty() {
         return Err("prompt is required".to_string());
@@ -322,12 +331,12 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if json
         && !matches!(
             command,
-            Command::Ask | Command::Mentor | Command::Status | Command::Doctor
+            Command::Ask | Command::Run | Command::Mentor | Command::Status | Command::Doctor
         )
     {
         return Err("--json is supported only by ask, mentor, status, and doctor".to_string());
     }
-    if automatic && command != Command::Ask {
+    if automatic && !matches!(command, Command::Ask | Command::Run) {
         return Err("--auto is supported only by ask".to_string());
     }
     if trace.is_some()
@@ -507,25 +516,10 @@ async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
     }
 }
 
-async fn run_openai(prompt: String, trace: Option<PathBuf>) -> ExitCode {
-    let approval = ApprovalController::new(ApprovalMode::Interactive);
-    let mut harness = match openai_harness(approval, HarnessConfig::default()) {
-        Ok(harness) => harness,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(2);
-        }
-    };
-    match run_with_observer(&mut harness, prompt, trace).await {
-        Ok(_) => ExitCode::SUCCESS,
-        Err(code) => code,
-    }
-}
-
 async fn run_auto(prompt: String, trace: Option<PathBuf>) -> ExitCode {
     print_auto_warning();
     let approval = ApprovalController::new(ApprovalMode::Automatic);
-    let mut harness = match openai_harness(approval, harness_config(ApprovalMode::Automatic)) {
+    let mut harness = match openai_harness(approval, harness_config(true)) {
         Ok(harness) => harness,
         Err(error) => {
             eprintln!("error: {error}");
@@ -590,7 +584,7 @@ fn prepare_openai_harness(
     mut config: HarnessConfig,
 ) -> Result<HarnessBuild, String> {
     let provider = runtime_config.provider_settings()?;
-    let mode = approval.mode();
+    let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
     let model = match OpenAiModel::new(provider.api_key, provider.model, provider.base_url) {
         Ok(model) => model,
         Err(error) => return Err(error.to_string()),
@@ -611,6 +605,7 @@ fn prepare_openai_harness(
         Err(error) => return Err(error.to_string()),
     };
     let configured_mcp_servers = skill_discovery.mcp_servers().to_vec();
+    let approval_mode = approval.mode();
     let mcp::LoadResult {
         tools: mcp_tools,
         loaded_servers,
@@ -629,7 +624,7 @@ fn prepare_openai_harness(
         })
         .collect();
     let stable_system_prompt = config.system_prompt.clone();
-    let world = WorldState::detect(&workspace, mode);
+    let world = WorldState::detect(&workspace, approval_mode, copilot);
     let world_context = world.model_context()?;
     let mut harness = Harness::new(model, ToolRegistry::new(tools), config);
     harness
@@ -645,14 +640,15 @@ fn prepare_openai_harness(
     })
 }
 
-fn harness_config(mode: ApprovalMode) -> HarnessConfig {
-    match mode {
-        ApprovalMode::Interactive => HarnessConfig::default(),
-        ApprovalMode::Automatic => HarnessConfig {
+fn harness_config(copilot: bool) -> HarnessConfig {
+    if copilot {
+        HarnessConfig {
             max_steps: AUTO_MAX_STEPS,
             context_limit_behavior: ContextLimitBehavior::Compact,
             ..HarnessConfig::default()
-        },
+        }
+    } else {
+        HarnessConfig::default()
     }
 }
 

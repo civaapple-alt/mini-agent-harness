@@ -394,7 +394,7 @@ impl RuntimeConfig {
     fn status_snapshot(&self) -> (skills::Discovery, WorldState) {
         (
             skills::discover(&self.workspace),
-            WorldState::detect(&self.workspace, ApprovalMode::Interactive),
+            WorldState::detect(&self.workspace, ApprovalMode::Automatic, false),
         )
     }
 

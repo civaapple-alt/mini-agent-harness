@@ -22,7 +22,8 @@ fn renders_bounded_explicit_execution_state() {
         os: "windows",
         arch: "x86_64",
         shell: "pwsh",
-        mode: ApprovalMode::Interactive,
+        approval: ApprovalMode::Interactive,
+        copilot: false,
         available_commands: vec!["git", "cargo"],
         unavailable_commands: vec!["rg"],
         workspace_commands: vec![],
@@ -35,12 +36,19 @@ fn renders_bounded_explicit_execution_state() {
     assert!(context.contains("<available_commands>git,cargo</available_commands>"));
     assert!(context.contains("cwd=\"repo&lt;&amp;&gt;\""));
 
-    let automatic = state.with_mode(ApprovalMode::Automatic);
+    let automatic = state.with_execution(ApprovalMode::Automatic, true);
     assert!(
         automatic
             .model_context()
             .unwrap()
             .contains("mode=\"auto\" approval=\"automatic\"")
+    );
+    let default_auto = state.with_execution(ApprovalMode::Automatic, false);
+    assert!(
+        default_auto
+            .model_context()
+            .unwrap()
+            .contains("mode=\"default\" approval=\"automatic\"")
     );
 }
 

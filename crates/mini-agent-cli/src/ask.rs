@@ -32,14 +32,15 @@ pub async fn run(
         Err(error) => return preflight_error(json_output, &error),
     };
     let model_name = runtime_config.model().unwrap_or_default().to_string();
-    let mode = if automatic {
+    let tty = io::stdin().is_terminal();
+    let mode = if automatic || tty {
         print_auto_warning();
         ApprovalMode::Automatic
     } else {
         ApprovalMode::Interactive
     };
     let approval = ApprovalController::new(mode);
-    let mut harness = match prepare_openai_harness(&runtime_config, approval, harness_config(mode))
+    let mut harness = match prepare_openai_harness(&runtime_config, approval, harness_config(false))
     {
         Ok(build) => build.harness,
         Err(error) => return preflight_error(json_output, &error),
