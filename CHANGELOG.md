@@ -62,6 +62,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- Durable sessions live under `~/.mini-agent/sessions/<workspace>/<session-id>/`
+  instead of `.agents/sessions/` in the project tree.
 - Skill discovery reads only a bounded YAML frontmatter prefix, so an oversized
   `SKILL.md` can still be selected. `read_file` accepts up to 128 KiB so those
   instruction files can be opened.

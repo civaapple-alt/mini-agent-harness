@@ -2,6 +2,7 @@ use crate::env_file::Environment;
 use crate::env_file::ResolvedValue;
 use crate::env_file::ValueSource;
 use crate::project_context;
+use crate::session;
 use crate::skills;
 use crate::workspace::ApprovalMode;
 use crate::world::WorldState;
@@ -196,7 +197,10 @@ impl RuntimeConfig {
             "telemetry": false,
             "session_persistence": false,
             "session_persistence_available": true,
-            "session_directory": self.workspace.join(".agents/sessions"),
+            "session_directory": session::session_directory(&self.workspace)
+                .ok()
+                .map(|path| json!(path.display().to_string()))
+                .unwrap_or(Value::Null),
             "user_config_directory": user_config_dir(),
             "command_sandbox": false,
             "world": world.status_json()
@@ -250,7 +254,10 @@ impl RuntimeConfig {
             "session_persistence: opt_in (--persist or resume)".to_string(),
             format!(
                 "session_directory: {}",
-                self.workspace.join(".agents/sessions").display()
+                session::session_directory(&self.workspace).map_or_else(
+                    |_| "unavailable".to_string(),
+                    |path| path.display().to_string()
+                )
             ),
             format!(
                 "user_config_directory: {}",

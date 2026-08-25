@@ -54,7 +54,8 @@ move the existing trace first.
 
 Only one process may write a session. Exit the other process before resuming.
 After confirming no mini-agent process is using that session, a lock left by a
-crash can be removed from `.agents/sessions/<SESSION_ID>.lock`; the JSONL data
+crash can be removed from
+`~/.mini-agent/sessions/<workspace>/<SESSION_ID>/session.lock`; the JSONL data
 file remains untouched. Mini-agent never removes a stale lock automatically.
 
 Mentor commands acquire this same lock so they cannot derive from a checkpoint

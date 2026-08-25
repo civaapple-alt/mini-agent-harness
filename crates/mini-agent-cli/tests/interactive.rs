@@ -711,11 +711,7 @@ fn mentor_reviews_a_settled_checkpoint_without_polluting_primary_history() {
     let mentor_request: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
     let verification_request: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
     let resumed_request: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
-    let session_records = fs::read_to_string(
-        root.join(".agents/sessions")
-            .join(format!("{session_id}.jsonl")),
-    )
-    .unwrap();
+    let session_records = fs::read_to_string(find_session_file(&root, &session_id)).unwrap();
 
     assert_eq!(primary_request["model"], "primary-model");
     assert_eq!(mentor_request["model"], "mentor-model");
@@ -1273,6 +1269,24 @@ fn test_root() -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("mini-agent-interactive-{nonce}-{sequence}"));
     fs::create_dir(&root).unwrap();
     root
+}
+
+fn find_session_file(root: &Path, session_id: &str) -> PathBuf {
+    let sessions = root.join(".mini-agent").join("sessions");
+    for project in fs::read_dir(&sessions).unwrap() {
+        let candidate = project
+            .unwrap()
+            .path()
+            .join(session_id)
+            .join("session.jsonl");
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    panic!(
+        "session {session_id} was not stored under {}",
+        sessions.display()
+    );
 }
 
 fn mini_agent(root: &Path) -> Command {

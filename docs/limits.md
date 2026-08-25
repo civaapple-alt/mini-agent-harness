@@ -72,7 +72,7 @@ Host tools add their own effect-side bounds before results reach core:
 | root `AGENTS.md` | 64 KiB; UTF-8-safe head and tail if larger; reject if invalid UTF-8 |
 | rendered world-state snapshot | 8 KiB; fixed command catalog and capped path |
 | durable session file / JSONL record | 32 MiB / 512 KiB |
-| listed durable sessions | 128 project-local files |
+| listed durable sessions | 128 per workspace under `~/.mini-agent/sessions/` |
 | mentor verification criteria | 32 KiB |
 | mentor execution | 1 model step, 0 tool calls |
 | discovered skill or compatible plugin instructions | 64; 16 KiB combined metadata catalog |
@@ -110,7 +110,8 @@ deadline to the complete streaming request. It enforces the harness response
 byte limit while accumulating text and tool calls, before returning them to
 core, and retains at most 4 KiB from an HTTP error body.
 
-Durable sessions are opt-in and append-only. Resume validates strictly
+Durable sessions are opt-in and append-only. They are stored per workspace
+under `~/.mini-agent/sessions/`, not in the project tree. Resume validates strictly
 increasing sequence numbers and restores only the newest complete checkpoint.
 An incomplete final JSONL line is treated as a torn write and truncated before
 new records are appended. One lock file prevents concurrent writers; a stale

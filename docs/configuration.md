@@ -56,8 +56,9 @@ environment values or command output.
 Interactive sessions remain in-memory by default. Start one with
 `mini-agent --persist`, copy the displayed session ID, list known IDs with
 `mini-agent sessions`, and restore one with `mini-agent resume SESSION_ID`.
-Settled records live under `.agents/sessions/` in the startup workspace. No
-provider setting enables persistence implicitly.
+Settled records live under `~/.mini-agent/sessions/<workspace>/<session-id>/`,
+where `<workspace>` is the percent-encoded absolute project path. No provider
+setting enables persistence implicitly.
 
 ## Mentor insight and verification
 

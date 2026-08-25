@@ -1,6 +1,7 @@
 use mini_agent_core::Message;
 use serde_json::Value;
 use serde_json::json;
+use std::env;
 use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -22,6 +23,9 @@ const SCHEMA_VERSION: u64 = 1;
 const MAX_SESSION_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 512 * 1024;
 const MAX_SESSIONS: usize = 128;
+const MAX_WORKSPACE_KEY: usize = 240;
+const SESSION_FILE_NAME: &str = "session.jsonl";
+const SESSION_LOCK_NAME: &str = "session";
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) enum SessionRequest {
@@ -152,18 +156,19 @@ impl SessionStore {
     }
 
     fn create(workspace: &Path) -> Result<OpenedSession, String> {
-        let directory = session_directory(workspace);
-        fs::create_dir_all(&directory)
-            .map_err(|error| format!("cannot create session directory: {error}"))?;
+        let project_dir = session_directory(workspace)?;
         for _ in 0..16 {
             let session_id = new_id("s");
-            let path = directory.join(format!("{session_id}.jsonl"));
+            let session_dir = project_dir.join(&session_id);
+            fs::create_dir_all(&session_dir)
+                .map_err(|error| format!("cannot create session directory: {error}"))?;
+            let path = session_dir.join(SESSION_FILE_NAME);
             let file = match OpenOptions::new().append(true).create_new(true).open(&path) {
                 Ok(file) => file,
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(format!("cannot create session: {error}")),
             };
-            let lock = acquire_lock(&directory, &session_id)?;
+            let lock = acquire_lock(&session_dir, SESSION_LOCK_NAME)?;
             let thread_id = new_id("t");
             let mut store = Self {
                 session_id: session_id.clone(),
@@ -200,14 +205,14 @@ impl SessionStore {
 
     fn resume(workspace: &Path, session_id: &str) -> Result<OpenedSession, String> {
         validate_session_id(session_id)?;
-        let directory = session_directory(workspace);
-        let path = directory.join(format!("{session_id}.jsonl"));
+        let session_dir = session_directory(workspace)?.join(session_id);
+        let path = session_dir.join(SESSION_FILE_NAME);
         let metadata = fs::metadata(&path)
             .map_err(|error| format!("cannot open session {session_id}: {error}"))?;
         if metadata.len() > MAX_SESSION_BYTES {
             return Err(format!("session exceeds {MAX_SESSION_BYTES} byte limit"));
         }
-        let lock = acquire_lock(&directory, session_id)?;
+        let lock = acquire_lock(&session_dir, SESSION_LOCK_NAME)?;
         let bytes = fs::read(&path).map_err(|error| format!("cannot read session: {error}"))?;
         let loaded = load_records(session_id, &bytes)?;
         let mut file = OpenOptions::new()
@@ -303,7 +308,7 @@ impl TurnStatus {
 }
 
 pub(crate) fn list(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
-    let directory = session_directory(workspace);
+    let directory = session_directory(workspace)?;
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -314,12 +319,15 @@ pub(crate) fn list(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let path = entry.path();
-            if path.extension().and_then(|extension| extension.to_str()) != Some("jsonl") {
+            if !path.is_dir() {
                 return None;
             }
+            let id = path.file_name()?.to_str()?.to_string();
+            validate_session_id(&id).ok()?;
+            let file = path.join(SESSION_FILE_NAME);
             Some(SessionSummary {
-                id: path.file_stem()?.to_str()?.to_string(),
-                bytes: entry.metadata().ok()?.len(),
+                id,
+                bytes: fs::metadata(file).ok()?.len(),
             })
         })
         .collect::<Vec<_>>();
@@ -440,8 +448,51 @@ fn acquire_lock(directory: &Path, session_id: &str) -> Result<SessionLock, Strin
     Ok(SessionLock(path))
 }
 
-fn session_directory(workspace: &Path) -> PathBuf {
-    workspace.join(".agents/sessions")
+pub(crate) fn session_directory(workspace: &Path) -> Result<PathBuf, String> {
+    let home = mini_agent_home()
+        .ok_or_else(|| "cannot resolve home directory for ~/.mini-agent/sessions".to_string())?;
+    let workspace = workspace
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve workspace for sessions: {error}"))?;
+    let key = percent_encode_path(&display_workspace_path(&workspace));
+    if key.is_empty() || key.len() > MAX_WORKSPACE_KEY {
+        return Err("workspace path is too long to name a session directory".to_string());
+    }
+    Ok(home.join("sessions").join(key))
+}
+
+fn mini_agent_home() -> Option<PathBuf> {
+    let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    env::var_os(key)
+        .or_else(|| {
+            if cfg!(windows) {
+                env::var_os("HOME")
+            } else {
+                None
+            }
+        })
+        .map(|home| PathBuf::from(home).join(".mini-agent"))
+}
+
+fn display_workspace_path(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    raw.strip_prefix(r"\\?\")
+        .or_else(|| raw.strip_prefix("//?/"))
+        .unwrap_or(&raw)
+        .to_string()
+}
+
+fn percent_encode_path(path: &str) -> String {
+    let mut encoded = String::new();
+    for byte in path.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
+                encoded.push(*byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
 }
 
 fn validate_session_id(session_id: &str) -> Result<(), String> {

@@ -77,7 +77,8 @@ bounded set of discovered skill and plugin names and shows configured MCP
 servers as inactive until connection approval succeeds.
 
 Interactive history remains in-memory by default. `--persist` creates a
-project-local durable session, `sessions` lists bounded session files, and
+durable session under `~/.mini-agent/sessions/<workspace>/<session-id>/`,
+`sessions` lists bounded session files for the current workspace, and
 `resume SESSION_ID` restores the latest completely settled checkpoint. `/new`
 starts a new thread inside a durable session; `/session` shows its identity.
 The append-only JSONL record distinguishes session, thread, turn, and item
@@ -281,7 +282,7 @@ See [configuration](docs/configuration.md) and the copyable
 - Mini Agent Harness sends no telemetry, update checks, or crash reports.
 - Shell execution is approval-gated but not sandboxed.
 - Interactive sessions are process-local by default; `--persist` and `resume`
-  opt into project-local settled-turn persistence.
+  opt into settled-turn persistence under `~/.mini-agent/sessions/`.
 - Mentor insight and verification require a durable settled checkpoint, expose
   no tools, and append only a non-replayed derived item.
 

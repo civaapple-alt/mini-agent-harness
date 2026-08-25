@@ -18,11 +18,11 @@ redact traces before sharing them.
 
 Conversation history is process-local unless the user starts an interactive
 session with `--persist` or resumes an existing session. Durable JSONL files
-under `.agents/sessions/` contain prompts, world-state context, reasoning,
-assistant messages, tool calls and results, errors, and complete settled
-checkpoints. They can contain source code or secrets exposed during a turn.
-Review workspace ignore rules and session contents before sharing or committing
-`.agents`. Session files are neither encrypted nor uploaded by mini-agent.
+under `~/.mini-agent/sessions/<workspace>/<session-id>/` contain prompts,
+world-state context, reasoning, assistant messages, tool calls and results,
+errors, and complete settled checkpoints. They can contain source code or
+secrets exposed during a turn. Review those files before sharing them. Session
+files are neither encrypted nor uploaded by mini-agent.
 
 Mentor commands send the complete latest settled checkpoint to the effective
 mentor endpoint, which may differ from `OPENAI_BASE_URL`. This can include all

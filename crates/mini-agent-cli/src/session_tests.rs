@@ -1,8 +1,32 @@
 use super::*;
+use std::env;
+use std::sync::Mutex;
+
+static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+struct HomeGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    previous_home: Option<std::ffi::OsString>,
+    previous_profile: Option<std::ffi::OsString>,
+}
+
+impl Drop for HomeGuard {
+    fn drop(&mut self) {
+        restore_env("HOME", self.previous_home.take());
+        restore_env("USERPROFILE", self.previous_profile.take());
+    }
+}
+
+fn restore_env(key: &str, previous: Option<std::ffi::OsString>) {
+    match previous {
+        Some(value) => unsafe { env::set_var(key, value) },
+        None => unsafe { env::remove_var(key) },
+    }
+}
 
 #[test]
 fn persists_and_resumes_the_latest_settled_checkpoint() {
-    let root = test_root();
+    let (root, _home) = test_root();
     let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
     let session_id = opened.store.session_id().to_string();
     let context = Message::Context {
@@ -46,7 +70,7 @@ fn persists_and_resumes_the_latest_settled_checkpoint() {
 
 #[test]
 fn removes_a_torn_final_record_and_uses_the_previous_checkpoint() {
-    let root = test_root();
+    let (root, _home) = test_root();
     let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
     let session_id = opened.store.session_id().to_string();
     let path = opened.store.path().to_path_buf();
@@ -76,7 +100,7 @@ fn removes_a_torn_final_record_and_uses_the_previous_checkpoint() {
 
 #[test]
 fn rejects_unsafe_session_ids() {
-    let root = test_root();
+    let (root, _home) = test_root();
     let error = SessionStore::open(&root, SessionRequest::Resume("../outside".to_string()))
         .err()
         .unwrap();
@@ -87,7 +111,7 @@ fn rejects_unsafe_session_ids() {
 
 #[test]
 fn derived_items_reference_a_checkpoint_without_entering_resume_history() {
-    let root = test_root();
+    let (root, _home) = test_root();
     let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
     let session_id = opened.store.session_id().to_string();
     let path = opened.store.path().to_path_buf();
@@ -129,8 +153,42 @@ fn derived_items_reference_a_checkpoint_without_entering_resume_history() {
     fs::remove_dir_all(root).unwrap();
 }
 
-fn test_root() -> PathBuf {
+#[test]
+fn stores_sessions_under_the_user_config_directory() {
+    let (root, _home) = test_root();
+    let opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+    let session_id = opened.store.session_id().to_string();
+    let path = opened.store.path().to_path_buf();
+    drop(opened);
+
+    let expected = session_directory(&root)
+        .unwrap()
+        .join(&session_id)
+        .join(SESSION_FILE_NAME);
+    assert_eq!(path, expected);
+    assert!(path.starts_with(root.join(".mini-agent").join("sessions")));
+    assert!(
+        !path
+            .components()
+            .any(|component| component.as_os_str() == ".agents")
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn test_root() -> (PathBuf, HomeGuard) {
+    let lock = HOME_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = std::env::temp_dir().join(new_id("mini-agent-session-test"));
     fs::create_dir(&root).unwrap();
-    root
+    let guard = HomeGuard {
+        _lock: lock,
+        previous_home: env::var_os("HOME"),
+        previous_profile: env::var_os("USERPROFILE"),
+    };
+    unsafe {
+        env::set_var("HOME", &root);
+        env::set_var("USERPROFILE", &root);
+    }
+    (root, guard)
 }
