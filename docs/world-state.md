@@ -11,7 +11,7 @@ discovered commands. It inspects only the current workspace and `PATH` and
 records:
 
 - operating system, architecture, workspace, and the actual host shell;
-- `default` (8 steps) or `auto` (128 steps and compact) loop mode, per-action
+- `default` (8 steps) or `auto` (unlimited steps unless `MINI_AGENT_MAX_STEPS`, compact) loop mode, per-action
   or automatic approval, and the lack of a command sandbox;
 - root project markers for Rust, Maven/Gradle Java, Go, Python, Node, and .NET;
 - availability of a fixed catalog of common navigation, VCS, build, runtime,

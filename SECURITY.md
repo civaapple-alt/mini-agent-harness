@@ -17,7 +17,7 @@ Mini Agent Harness does not sandbox shell commands. Reads never prompt. The
 default interactive session and TTY `ask` run writes, shell commands,
 managed-process starts, and MCP without per-step approval. `/auto off` restores
 prompts. Noninteractive `ask` fails closed on those tools unless `ask --auto`.
-Unattended `auto` (128 steps, compact) also skips prompts. Use `/auto off` when
+Unattended `auto` (unlimited steps unless `MINI_AGENT_MAX_STEPS`, compact) also skips prompts. Use `/auto off` when
 you want to review each effect; use auto-approval only in a workspace you trust.
 
 Project `.agents` content is repository-controlled input. Skill, collection,

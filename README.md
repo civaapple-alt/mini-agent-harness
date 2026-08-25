@@ -182,7 +182,8 @@ writes, shell commands, process starts, and MCP without per-step approval;
 shell is not sandboxed. `/auto off` restores per-action prompts. `auto` without
 a prompt starts the REPL in the copilot loop; `/auto` enables that loop in any
 interactive session. `auto` with a prompt remains a one-shot copilot. Copilot
-mode runs up to 128 model steps and compacts context between settled tool
+mode runs until the model finishes, unless `MINI_AGENT_MAX_STEPS` sets a
+positive cap (`0` is unlimited), and compact context between settled tool
 batches. It prints a warning because process execution is not sandboxed and
 can escape the workspace even though direct file tools cannot.
 

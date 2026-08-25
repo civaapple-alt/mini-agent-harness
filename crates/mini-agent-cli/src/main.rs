@@ -46,20 +46,20 @@ use workspace::ApprovalMode;
 use workspace::workspace_tools_with_read_roots;
 use world::WorldState;
 
-const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (128 steps, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
+const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
 const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is unsandboxed. `/auto off` restores prompts. --persist creates a resumable session under ~/.mini-agent/sessions.";
 const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SESSION_ID [--trace PATH]\n\nResumes the latest settled checkpoint of a durable session for this workspace.";
 const SESSIONS_HELP: &str = "mini-agent sessions\n\nUSAGE:\n    mini-agent sessions\n\nLists bounded durable sessions for the current workspace under ~/.mini-agent/sessions.";
 const MENTOR_HELP: &str = "mini-agent mentor\n\nUSAGE:\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n\nRuns a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.\n\nCONFIGURATION:\n    MENTOR_OPENAI_MODEL      Required dedicated mentor model\n    MENTOR_OPENAI_API_KEY    Optional; falls back to OPENAI_API_KEY\n    MENTOR_OPENAI_BASE_URL   Optional; falls back to OPENAI_BASE_URL";
 const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.\nOn a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto`.\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto        Permit sensitive tools without a TTY\n    --json        Emit a machine-readable final result\n    --trace PATH  Write JSONL observation events";
 const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--auto] [--json] [--trace PATH] [--] <PROMPT>\n\nAlias of `ask`. Prefer `ask` in scripts and docs.";
-const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, 128 model steps, and context compaction.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
+const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, unlimited model steps (MINI_AGENT_MAX_STEPS, 0 = unlimited), and context compaction.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
 const DEMO_HELP: &str = "mini-agent demo\n\nUSAGE:\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
 const STATUS_HELP: &str = "mini-agent status\n\nUSAGE:\n    mini-agent status [--json]\n\nPrints effective non-secret startup configuration.";
 const DOCTOR_HELP: &str = "mini-agent doctor\n\nUSAGE:\n    mini-agent doctor [--json]\n\nChecks local configuration without contacting the model provider.";
 const VERSION_HELP: &str =
     "mini-agent version\n\nUSAGE:\n    mini-agent version\n    mini-agent --version";
-const AUTO_MAX_STEPS: usize = 128;
+const AUTO_MAX_STEPS: usize = 0;
 
 pub(crate) fn version_line() -> String {
     format!("mini-agent {} ({})", env!("CARGO_PKG_VERSION"), git_sha())
@@ -519,7 +519,17 @@ async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
 async fn run_auto(prompt: String, trace: Option<PathBuf>) -> ExitCode {
     print_auto_warning();
     let approval = ApprovalController::new(ApprovalMode::Automatic);
-    let mut harness = match openai_harness(approval, harness_config(true)) {
+    let runtime = match RuntimeConfig::load() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut harness = match openai_harness(
+        approval,
+        harness_config_auto(true, runtime.copilot_max_steps()),
+    ) {
         Ok(harness) => harness,
         Err(error) => {
             eprintln!("error: {error}");
@@ -644,10 +654,14 @@ fn prepare_openai_harness(
     })
 }
 
-fn harness_config(copilot: bool) -> HarnessConfig {
+pub(crate) fn harness_config(copilot: bool) -> HarnessConfig {
+    harness_config_auto(copilot, AUTO_MAX_STEPS)
+}
+
+pub(crate) fn harness_config_auto(copilot: bool, auto_max_steps: usize) -> HarnessConfig {
     if copilot {
         HarnessConfig {
-            max_steps: AUTO_MAX_STEPS,
+            max_steps: auto_max_steps,
             context_limit_behavior: ContextLimitBehavior::Compact,
             ..HarnessConfig::default()
         }
@@ -744,6 +758,16 @@ impl Tool for Uppercase {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_harness_uses_unlimited_steps_by_default() {
+        let config = harness_config(true);
+        assert_eq!(config.max_steps, 0);
+        assert_eq!(config.context_limit_behavior, ContextLimitBehavior::Compact);
+        let capped = harness_config_auto(true, 40);
+        assert_eq!(capped.max_steps, 40);
+        assert_eq!(harness_config(false).max_steps, 8);
+    }
 
     #[test]
     fn defaults_to_interactive_mode() {

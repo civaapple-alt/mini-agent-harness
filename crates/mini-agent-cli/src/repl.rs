@@ -1,5 +1,5 @@
 use crate::config::RuntimeConfig;
-use crate::harness_config;
+use crate::harness_config_auto;
 use crate::mcp;
 use crate::observer::RunObserver;
 use crate::print_auto_warning;
@@ -265,10 +265,16 @@ fn spawn_worker(
     events: mpsc::SyncSender<ReplEvent>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let build = match RuntimeConfig::load().and_then(|runtime| {
-            crate::prepare_openai_harness(&runtime, approval.clone(), harness_config(copilot))
+        let (build, auto_max_steps) = match RuntimeConfig::load().and_then(|runtime| {
+            let auto_max_steps = runtime.copilot_max_steps();
+            crate::prepare_openai_harness(
+                &runtime,
+                approval.clone(),
+                harness_config_auto(copilot, auto_max_steps),
+            )
+            .map(|build| (build, auto_max_steps))
         }) {
-            Ok(build) => build,
+            Ok(loaded) => loaded,
             Err(error) => {
                 let _ = events.send(ReplEvent::InitializationFailed(error));
                 let _ = events.send(ReplEvent::Exited);
@@ -538,7 +544,7 @@ fn spawn_worker(
                     copilot,
                 } => {
                     approval.set_mode(mode);
-                    let mut config = harness_config(copilot);
+                    let mut config = harness_config_auto(copilot, auto_max_steps);
                     config.system_prompt.clone_from(&stable_system_prompt);
                     harness.replace_config(config);
                     let updated_world = world.with_execution(mode, copilot);
@@ -714,7 +720,7 @@ fn bounded_names(names: &[String]) -> String {
 
 fn print_help() {
     println!(
-        "/auto      unattended copilot loop (128 steps, compact); tools already run without approval"
+        "/auto      unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS, compact); tools already run without approval"
     );
     println!("/auto off  require approval for writes, shell, and MCP");
     println!("/mcp       retry configured MCP servers that are not enabled");

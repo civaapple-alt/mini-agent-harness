@@ -62,6 +62,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- Copilot/auto no longer stops at 128 model steps. `max_steps = 0` means no
+  step cap; set `MINI_AGENT_MAX_STEPS` to impose one. Context compaction still
+  keeps long runs inside the 1 MiB request ceiling.
 - Durable sessions live under `~/.mini-agent/sessions/<workspace>/<session-id>/`
   instead of `.agents/sessions/` in the project tree.
 - Skill discovery reads only a bounded YAML frontmatter prefix, so an oversized
@@ -69,7 +72,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   instruction files can be opened.
 
 - Default interactive sessions and TTY `ask` run tools without per-step
-  approval. `/auto` is the 128-step copilot loop; `/auto off` restores prompts.
+  approval. `/auto` is the copilot loop; `/auto off` restores prompts.
   `run` is an alias of `ask`.
 - Raised the default model request context from 256 KiB to 1 MiB and the model
   response ceiling from 64 KiB to 384 KiB. These remain provider-neutral byte

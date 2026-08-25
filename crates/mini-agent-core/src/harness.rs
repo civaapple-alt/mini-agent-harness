@@ -25,6 +25,7 @@ pub enum ContextLimitBehavior {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HarnessConfig {
     pub system_prompt: String,
+    /// Maximum model steps in one run. `0` means no step cap.
     pub max_steps: usize,
     pub max_context_item_bytes: usize,
     pub max_user_input_bytes: usize,
@@ -231,8 +232,19 @@ impl<M: Model> Harness<M> {
             return Err(error);
         }
         let mut final_text = String::new();
+        let mut step = 0usize;
 
-        for step in 1..=self.config.max_steps {
+        loop {
+            step = step.saturating_add(1);
+            if self.config.max_steps > 0 && step > self.config.max_steps {
+                return Ok(finish(
+                    final_text,
+                    self.messages.clone(),
+                    self.config.max_steps,
+                    StopReason::StepLimit,
+                    observer,
+                ));
+            }
             self.prepare_context(&tool_specs, observer).await?;
             observer.observe(&Event::ModelStarted { step });
             let mut model_events = ModelEventForwarder {
@@ -335,14 +347,6 @@ impl<M: Model> Harness<M> {
                 return Err(fail_limit(limit, observer));
             }
         }
-
-        Ok(finish(
-            final_text,
-            self.messages.clone(),
-            self.config.max_steps,
-            StopReason::StepLimit,
-            observer,
-        ))
     }
 
     fn ensure_context_limit(&self, tool_specs: &[crate::ToolSpec]) -> Result<(), LimitExceeded> {

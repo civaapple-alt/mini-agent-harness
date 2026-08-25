@@ -278,6 +278,51 @@ async fn stops_at_step_limit() {
 }
 
 #[tokio::test]
+async fn zero_max_steps_runs_until_the_model_completes() {
+    let model = ScriptedModel {
+        responses: VecDeque::from([
+            ModelResponse {
+                reasoning: String::new(),
+                text: "need a tool".to_string(),
+                tool_calls: vec![ToolCall {
+                    id: "call-1".to_string(),
+                    name: "missing".to_string(),
+                    arguments: json!({}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: "need another tool".to_string(),
+                tool_calls: vec![ToolCall {
+                    id: "call-2".to_string(),
+                    name: "missing".to_string(),
+                    arguments: json!({}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: "done after three steps".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            },
+        ]),
+    };
+    let config = HarnessConfig {
+        max_steps: 0,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(model, ToolRegistry::default(), config);
+
+    let outcome = harness.run("keep going", &mut ()).await.unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Completed);
+    assert_eq!(outcome.steps, 3);
+    assert_eq!(outcome.final_text, "done after three steps");
+}
+
+#[tokio::test]
 async fn preserves_history_across_runs_and_can_clear_it() {
     let model = ScriptedModel {
         responses: VecDeque::from([

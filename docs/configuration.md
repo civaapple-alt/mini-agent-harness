@@ -20,6 +20,7 @@ non-secret source of each value.
 | `MENTOR_OPENAI_MODEL` | for mentor commands | Independent mentor model identifier |
 | `MENTOR_OPENAI_API_KEY` | no | Mentor credential override; otherwise inherits `OPENAI_API_KEY` |
 | `MENTOR_OPENAI_BASE_URL` | no | Mentor API root override; otherwise inherits `OPENAI_BASE_URL` |
+| `MINI_AGENT_MAX_STEPS` | no | Copilot/auto model-step cap; `0` means unlimited (the default) |
 
 The adapter appends `/responses` to `OPENAI_BASE_URL`. DeepSeek's Responses API
 therefore uses:

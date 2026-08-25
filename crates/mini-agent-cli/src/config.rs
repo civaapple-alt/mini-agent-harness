@@ -23,6 +23,7 @@ pub struct RuntimeConfig {
     mentor_api_key: Option<ResolvedValue>,
     mentor_model: Option<ResolvedValue>,
     mentor_base_url: Option<ResolvedSetting>,
+    max_agent_steps: Option<usize>,
 }
 
 pub struct ProviderSettings {
@@ -75,6 +76,11 @@ impl RuntimeConfig {
         let mentor_model = resolve_value("MENTOR_OPENAI_MODEL", &workspace_env, &user_env);
         let mentor_base_url = resolve_value("MENTOR_OPENAI_BASE_URL", &workspace_env, &user_env)
             .map(ResolvedSetting::from_environment);
+        let max_agent_steps = match resolve_value("MINI_AGENT_MAX_STEPS", &workspace_env, &user_env)
+        {
+            Some(value) => Some(parse_max_agent_steps(&value.value)?),
+            None => None,
+        };
         Ok(Self {
             workspace,
             api_key,
@@ -83,6 +89,7 @@ impl RuntimeConfig {
             mentor_api_key,
             mentor_model,
             mentor_base_url,
+            max_agent_steps,
         })
     }
 
@@ -113,6 +120,10 @@ impl RuntimeConfig {
 
     pub fn workspace(&self) -> PathBuf {
         self.workspace.clone()
+    }
+
+    pub fn copilot_max_steps(&self) -> usize {
+        self.max_agent_steps.unwrap_or(0)
     }
 
     pub fn mentor_provider_settings(&self) -> Result<ProviderSettings, String> {
@@ -202,6 +213,7 @@ impl RuntimeConfig {
                 .map(|path| json!(path.display().to_string()))
                 .unwrap_or(Value::Null),
             "user_config_directory": user_config_dir(),
+            "auto_max_agent_steps": self.copilot_max_steps(),
             "command_sandbox": false,
             "world": world.status_json()
         })
@@ -265,6 +277,10 @@ impl RuntimeConfig {
                     || "unavailable".to_string(),
                     |path| path.display().to_string()
                 )
+            ),
+            format!(
+                "auto_max_agent_steps: {}",
+                display_max_agent_steps(self.copilot_max_steps())
             ),
             "command_sandbox: disabled".to_string(),
         ];
@@ -497,6 +513,20 @@ fn shell_available() -> Result<String, String> {
     }
 }
 
+fn parse_max_agent_steps(value: &str) -> Result<usize, String> {
+    value.parse::<usize>().map_err(|_| {
+        "MINI_AGENT_MAX_STEPS must be a non-negative integer (0 = unlimited)".to_string()
+    })
+}
+
+fn display_max_agent_steps(steps: usize) -> String {
+    if steps == 0 {
+        "unlimited".to_string()
+    } else {
+        steps.to_string()
+    }
+}
+
 fn resolve_value(name: &str, workspace: &Environment, user: &Environment) -> Option<ResolvedValue> {
     workspace.resolve(name).or_else(|| {
         user.get(name).map(|value| ResolvedValue {
@@ -609,6 +639,34 @@ mod tests {
 
         assert_eq!(config.api_key.as_ref().unwrap().value, "workspace-key");
         assert_eq!(source_name(config.api_key.as_ref().unwrap().source), ".env");
+    }
+
+    #[test]
+    fn copilot_max_steps_default_to_unlimited() {
+        let workspace = unique_dir("workspace");
+        let config = RuntimeConfig::load_from(workspace, None).unwrap();
+        assert_eq!(config.copilot_max_steps(), 0);
+        assert_eq!(display_max_agent_steps(0), "unlimited");
+        assert_eq!(display_max_agent_steps(40), "40");
+    }
+
+    #[test]
+    fn copilot_max_steps_reads_workspace_env() {
+        let workspace = unique_dir("workspace");
+        fs::write(workspace.join(".env"), "MINI_AGENT_MAX_STEPS=40\n").unwrap();
+        let config = RuntimeConfig::load_from(workspace, None).unwrap();
+        assert_eq!(config.copilot_max_steps(), 40);
+    }
+
+    #[test]
+    fn copilot_max_steps_rejects_invalid_values() {
+        let workspace = unique_dir("workspace");
+        fs::write(workspace.join(".env"), "MINI_AGENT_MAX_STEPS=-1\n").unwrap();
+        let error = match RuntimeConfig::load_from(workspace, None) {
+            Ok(_) => panic!("expected MINI_AGENT_MAX_STEPS to be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.contains("MINI_AGENT_MAX_STEPS"));
     }
 
     fn unique_dir(label: &str) -> PathBuf {
