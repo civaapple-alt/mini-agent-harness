@@ -29,7 +29,9 @@ before MCP connection and each tool call. These are guardrails, not a sandbox;
 review extension code and endpoints before approval and use auto mode only with
 trusted extensions.
 
-Direct file tools are confined to the startup workspace and reject `.git`
-paths. Shell commands are operating-system processes and can access anything
+Direct file writes stay in the startup workspace and reject `.git` paths.
+`read_file` may also open files inside local marketplace or skillset roots
+named by `path` in `.agents/marketplaces.json` or `.agents/skillsets.json`.
+Shell commands are operating-system processes and can access anything
 the current user can access. Provider requests can contain prompts,
 conversation history, and tool or file content selected during the run.

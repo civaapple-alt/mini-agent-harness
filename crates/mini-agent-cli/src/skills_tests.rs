@@ -162,6 +162,88 @@ fn discovers_skillsets_legacy_plugins_agents_and_standalone_mcp() {
 }
 
 #[test]
+fn configured_skillset_enables_only_listed_skills() {
+    let root = test_root();
+    write_skill(
+        &root.join(".agents/skillsets/vercel/skills/keep-me"),
+        "keep-me",
+        "Keep this skill.",
+        "keep",
+    );
+    write_skill(
+        &root.join(".agents/skillsets/vercel/skills/skip-me"),
+        "skip-me",
+        "Skip this skill.",
+        "skip",
+    );
+    fs::write(
+        root.join(".agents/skillsets.json"),
+        serde_json::to_vec(&json!({
+            "skillsets": {
+                "vercel": ["keep-me"]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let discovery = discover(&root);
+
+    assert_eq!(discovery.skill_names(), vec!["keep-me".to_string()]);
+    assert!(
+        discovery.diagnostics().is_empty(),
+        "{:?}",
+        discovery.diagnostics()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn configured_skillset_path_uses_an_external_collection() {
+    let root = test_root();
+    let outside = test_root();
+    write_skill(
+        &outside.join("skills/frontend-design"),
+        "frontend-design",
+        "Frontend taste.",
+        "body",
+    );
+    write_skill(
+        &outside.join("skills/skill-creator"),
+        "skill-creator",
+        "Create skills.",
+        "body",
+    );
+    let outside_path = outside.canonicalize().unwrap();
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/skillsets.json"),
+        serde_json::to_vec(&json!({
+            "skillsets": {
+                "anthropics-skills": {
+                    "path": outside_path,
+                    "skills": ["frontend-design"]
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let discovery = discover(&root);
+
+    assert_eq!(discovery.skill_names(), vec!["frontend-design".to_string()]);
+    assert_eq!(discovery.extra_read_roots(), &[outside_path]);
+    assert!(
+        discovery.diagnostics().is_empty(),
+        "{:?}",
+        discovery.diagnostics()
+    );
+    fs::remove_dir_all(outside).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn discovers_claude_and_grok_marketplace_plugins_selected_explicitly() {
     let root = test_root();
     let claude = root.join(".agents/marketplaces/anthropic");
@@ -238,6 +320,48 @@ fn discovers_claude_and_grok_marketplace_plugins_selected_explicitly() {
     assert_eq!(discovery.marketplace_count(), 2);
     assert_eq!(discovery.plugin_count(), 2);
     assert_eq!(discovery.http_mcp_server_count(), 1);
+    assert!(
+        discovery.diagnostics().is_empty(),
+        "{:?}",
+        discovery.diagnostics()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn discovers_an_explicit_nested_marketplace_skill() {
+    let root = test_root();
+    let skill = root.join(
+        ".agents/marketplaces/cursor-plugins/cursor-team-kit/skills/thermo-nuclear-code-quality-review",
+    );
+    write_skill(
+        &skill,
+        "thermo-nuclear-code-quality-review",
+        "Run a harsh maintainability review.",
+        "body",
+    );
+    fs::write(
+        root.join(".agents/marketplaces.json"),
+        serde_json::to_vec(&json!({
+            "marketplaces": {
+                "cursor-plugins": {
+                    "skills": ["thermo-nuclear-code-quality-review"]
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let discovery = discover(&root);
+
+    assert_eq!(discovery.skill_count(), 1);
+    assert_eq!(discovery.marketplace_count(), 1);
+    assert_eq!(discovery.plugin_count(), 0);
+    assert_eq!(
+        discovery.skill_names(),
+        vec!["thermo-nuclear-code-quality-review".to_string()]
+    );
     assert!(
         discovery.diagnostics().is_empty(),
         "{:?}",

@@ -43,7 +43,7 @@ use openai::OpenAiModel;
 use session::SessionRequest;
 use workspace::ApprovalController;
 use workspace::ApprovalMode;
-use workspace::workspace_tools;
+use workspace::workspace_tools_with_read_roots;
 use world::WorldState;
 
 const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (128 steps, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
@@ -600,7 +600,11 @@ fn prepare_openai_harness(
         eprintln!("warning: {diagnostic}");
     }
     config.system_prompt = skill_discovery.augment_system_prompt(&config.system_prompt)?;
-    let mut tools = match workspace_tools(workspace.clone(), approval.clone()) {
+    let mut tools = match workspace_tools_with_read_roots(
+        workspace.clone(),
+        approval.clone(),
+        skill_discovery.extra_read_roots().to_vec(),
+    ) {
         Ok(tools) => tools,
         Err(error) => return Err(error.to_string()),
     };

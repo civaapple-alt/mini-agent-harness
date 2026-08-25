@@ -1,8 +1,11 @@
 {
   "marketplaces": {
-    "taste-skill": ["minimalist-skill"],
-    "anthropics-skills": ["skill-creator"],
-    "claude-plugins-official": ["code-simplifier"],
-    "xai-org-plugin-marketplace": ["neon"]
+    "taste-skill": { "skills": ["minimalist-skill"] },
+    "anthropics-skills": {
+      "path": "D:/gh-ws/skill-ws/anthropics-skills",
+      "skills": ["skill-creator"]
+    },
+    "claude-plugins-official": { "plugins": ["code-simplifier"] },
+    "xai-org-plugin-marketplace": { "plugins": ["neon"] }
   }
 }

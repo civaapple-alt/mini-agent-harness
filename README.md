@@ -210,9 +210,9 @@ Mini Agent Harness provides one bounded, project-scoped compatibility layer:
 | Capability | Project location | Supported formats |
 | --- | --- | --- |
 | installed skill | `.agents/skills/<skill>/SKILL.md` | Agent Skills, standards-strict |
-| cloned skill collection | `.agents/skillsets/<repo>/` | root `SKILL.md` or immediate `skills/*/SKILL.md` |
+| cloned skill collection | `.agents/skillsets/<repo>/` or `.agents/skillsets.json` | root `SKILL.md` or `skills/*/SKILL.md`; json selects names and optional local `path` |
 | installed plugin | `.agents/plugins/<plugin>/` | Agent Plugins v1, Claude plugin, or Grok plugin |
-| cloned marketplace | `.agents/marketplaces/<repo>/` | Claude or Grok marketplace, selected by `.agents/marketplaces.json` |
+| cloned marketplace | `.agents/marketplaces/<repo>/` or `path` in `.agents/marketplaces.json` | Claude or Grok plugins, or nested `SKILL.md` skills |
 | standalone MCP | `.agents/mcp.json` or `.agents/mcp/<server>.json` | aggregate or one-server configuration |
 
 [Agent Plugins 1.0.0](https://agent-plugins.org/) use root `plugin.json`,
@@ -223,12 +223,21 @@ emulated. A compatible plugin agent becomes on-demand instructions for the
 main harness and is labeled `plugin-agent` in model-visible metadata.
 
 Marketplace repositories are inert until local selectors are named in
-`.agents/marketplaces.json`. A selector first matches an immediate
-`skills/<name>/SKILL.md`, allowing one skill to be enabled from a collection;
-otherwise it matches a marketplace plugin entry. Mini-agent resolves string
-sources such as `./plugins/name` and Grok `{ "type": "local", "path": "..." }`
-sources, including marketplace entries with explicit `skills` arrays. It
-deliberately does not download remote `url` or `git-subdir` entries.
+`.agents/marketplaces.json`. An object with `skills` and `plugins` keys names
+each kind separately. Optional `path` points at an existing local clone;
+otherwise the clone must live at `.agents/marketplaces/<key>`. `skills`
+matches an immediate `skills/<name>/SKILL.md` or, failing that, a bounded
+nested `SKILL.md` directory of that name inside the clone, without requiring
+a Claude or Grok marketplace manifest. `plugins` matches a marketplace plugin
+entry. A legacy string array still means "immediate skill, else plugin" under
+`.agents/marketplaces/<key>`. Mini-agent resolves string sources such as
+`./plugins/name` and Grok `{ "type": "local", "path": "..." }` sources,
+including marketplace entries with explicit `skills` arrays. It deliberately
+does not download remote `url` or `git-subdir` entries.
+
+If `.agents/skillsets.json` is present, only the listed skillsets and skill
+directory names are enabled. Without that file, every immediate child of
+`.agents/skillsets/` still loads its whole collection.
 
 Discovery injects only each instruction's name, description, kind, and
 workspace-relative location into the stable system prompt. The model reads the

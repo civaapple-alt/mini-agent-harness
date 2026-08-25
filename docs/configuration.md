@@ -77,17 +77,35 @@ checkpoint; it is not inserted into the primary thread's replay history.
 
 ## Project extensions
 
-All extension paths are relative to the startup workspace and must remain
-inside it after filesystem resolution.
+Installed skills, plugins, and MCP configs stay inside the startup workspace.
+Marketplace and skillset `path` values may point at an existing local clone
+outside the workspace; `read_file` can open files inside those configured
+roots, while `edit_file` and `write_file` remain workspace-only.
 
 ### Skills
 
 Install one standards-strict Agent Skill at
-`.agents/skills/<skill>/SKILL.md`. A directly cloned collection belongs at
-`.agents/skillsets/<collection>` and may contain either a root `SKILL.md` or an
-immediate `skills/*/SKILL.md` collection. Collection compatibility mode accepts
-the install-name/folder-name differences used by repositories such as
-`taste-skill` and `vercel-labs/agent-skills`.
+`.agents/skills/<skill>/SKILL.md`. A cloned collection can live at
+`.agents/skillsets/<collection>` or be referenced from `.agents/skillsets.json`.
+Without `skillsets.json`, every immediate child of `.agents/skillsets/` loads
+its root `SKILL.md` and immediate `skills/*/SKILL.md`. With `skillsets.json`,
+only named skillsets and listed skill directory names are enabled:
+
+```json
+{
+  "skillsets": {
+    "anthropics-skills": {
+      "path": "D:/gh-ws/skill-ws/anthropics-skills",
+      "skills": ["frontend-design", "skill-creator"]
+    }
+  }
+}
+```
+
+`path` is optional and defaults to `.agents/skillsets/<key>`. A string array is
+shorthand for that default path plus an explicit skill list. Collection
+compatibility mode accepts the install-name/folder-name differences used by
+repositories such as `taste-skill` and `vercel-labs/agent-skills`.
 
 ### Plugins
 
@@ -105,27 +123,40 @@ isolation remain client-specific and are not executed by mini-agent.
 
 ### Plugin marketplaces
 
-Clone each marketplace into `.agents/marketplaces/<directory>` and explicitly
-enable local entries in `.agents/marketplaces.json`:
+Name local marketplace clones in `.agents/marketplaces.json`. Prefer an object
+that separates skills from plugins. `path` is optional and may be an existing
+local directory; omit it to use `.agents/marketplaces/<key>`:
 
 ```json
 {
   "marketplaces": {
-    "taste-skill": ["minimalist-skill"],
-    "anthropics-skills": ["skill-creator"],
-    "claude-plugins-official": ["code-simplifier"],
-    "xai-org-plugin-marketplace": ["neon"]
+    "taste-skill": { "skills": ["minimalist-skill"] },
+    "anthropics-skills": {
+      "path": "D:/gh-ws/skill-ws/anthropics-skills",
+      "skills": ["skill-creator"]
+    },
+    "claude-plugins-official": { "plugins": ["code-simplifier"] },
+    "xai-org-plugin-marketplace": { "plugins": ["neon"] },
+    "cursor-plugins": {
+      "path": "D:/gh-ws/skill-ws/cursor-plugins",
+      "skills": ["thermo-nuclear-code-quality-review"]
+    }
   }
 }
 ```
 
-The object key is the clone's directory name. Each array contains selectors. A
-selector first enables an immediate `skills/<selector>/SKILL.md` directory when
-present; otherwise it selects a marketplace plugin with that name. Direct skill
-selection wins when a skill directory and plugin entry share a name. Claude
-string sources and Grok local source objects are resolved inside the clone. An
-enabled remote source is diagnosed but never downloaded; install it under
-`.agents/plugins` or use a marketplace clone containing a local source.
+The object key is a local name. `skills` selects `SKILL.md` directories by
+directory name: an immediate `skills/<name>/SKILL.md` first, otherwise a
+bounded walk of at most five levels inside the clone. A Claude or Grok
+marketplace manifest is not required for skill-only selection. `plugins`
+selects a marketplace plugin entry and still requires `.claude-plugin` or
+`.grok-plugin` `marketplace.json`. A legacy string array remains accepted,
+uses `.agents/marketplaces/<key>`, and still means "immediate skill, else
+plugin". Direct skill selection in that legacy form wins when a skill
+directory and plugin entry share a name. Claude string sources and Grok local
+source objects are resolved inside the clone. An enabled remote source is
+diagnosed but never downloaded; install it under `.agents/plugins` or set
+`path` to a local clone.
 
 ### Standalone MCP
 

@@ -1,0 +1,8 @@
+{
+  "skillsets": {
+    "agent-skills": {
+      "path": "D:/gh-ws/skill-ws/agent-skills",
+      "skills": ["react-best-practices"]
+    }
+  }
+}

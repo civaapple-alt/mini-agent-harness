@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::VecDeque;
 use std::fs;
 use std::path::Component;
 use std::path::Path;
@@ -12,6 +13,9 @@ const MAX_MARKETPLACE_BYTES: u64 = 256 * 1024;
 const MAX_MARKETPLACES: usize = 16;
 const MAX_SELECTORS_PER_MARKETPLACE: usize = 32;
 const MAX_SKILLS_PER_PLUGIN: usize = 32;
+const MAX_SKILL_SEARCH_DEPTH: usize = 5;
+const MAX_SKILL_SEARCH_DIRS: usize = 128;
+const SKIP_DIR_NAMES: &[&str] = &["node_modules", ".git", "dist", "build", "__pycache__"];
 
 #[derive(Debug)]
 pub struct MarketplacePlugin {
@@ -25,6 +29,7 @@ pub struct MarketplacePlugin {
 #[derive(Debug, Default)]
 pub struct MarketplaceDiscovery {
     pub plugins: Vec<MarketplacePlugin>,
+    pub extra_roots: Vec<PathBuf>,
     pub marketplace_count: usize,
     pub diagnostics: Vec<String>,
 }
@@ -32,7 +37,25 @@ pub struct MarketplaceDiscovery {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MarketplaceConfig {
-    marketplaces: BTreeMap<String, Vec<String>>,
+    marketplaces: BTreeMap<String, MarketplaceSelection>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum MarketplaceSelection {
+    Legacy(Vec<String>),
+    Explicit(ExplicitSelectors),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExplicitSelectors {
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    skills: Vec<String>,
+    #[serde(default)]
+    plugins: Vec<String>,
 }
 
 pub fn discover(workspace: &Path) -> MarketplaceDiscovery {
@@ -61,7 +84,7 @@ pub fn discover(workspace: &Path) -> MarketplaceDiscovery {
 
     let marketplaces_root = workspace.join(".agents/marketplaces");
     let mut discovery = MarketplaceDiscovery::default();
-    for (directory_name, selected_plugins) in config.marketplaces {
+    for (directory_name, selection) in config.marketplaces {
         if !safe_component(&directory_name) {
             discovery.diagnostics.push(format!(
                 "{} marketplace key {directory_name:?} must be one directory name",
@@ -69,47 +92,113 @@ pub fn discover(workspace: &Path) -> MarketplaceDiscovery {
             ));
             continue;
         }
-        if selected_plugins.len() > MAX_SELECTORS_PER_MARKETPLACE {
+        let selector_count = match &selection {
+            MarketplaceSelection::Legacy(names) => names.len(),
+            MarketplaceSelection::Explicit(explicit) => {
+                explicit.skills.len() + explicit.plugins.len()
+            }
+        };
+        if selector_count > MAX_SELECTORS_PER_MARKETPLACE {
             discovery.diagnostics.push(format!(
                 "marketplace {directory_name:?} enables more than {MAX_SELECTORS_PER_MARKETPLACE} selectors"
             ));
             continue;
         }
-        let root = match contained_directory(&marketplaces_root.join(&directory_name), workspace) {
-            Ok(root) => root,
-            Err(error) => {
-                discovery.diagnostics.push(error);
-                continue;
+        match selection {
+            MarketplaceSelection::Legacy(names) => {
+                let root = match contained_directory(
+                    &marketplaces_root.join(&directory_name),
+                    workspace,
+                ) {
+                    Ok(root) => root,
+                    Err(error) => {
+                        discovery.diagnostics.push(error);
+                        continue;
+                    }
+                };
+                let Some((manifest_path, ecosystem, manifest)) =
+                    load_manifest(&root, &mut discovery)
+                else {
+                    continue;
+                };
+                discovery.marketplace_count += 1;
+                discover_legacy_selectors(
+                    &root,
+                    &manifest_path,
+                    &manifest,
+                    ecosystem,
+                    names,
+                    &mut discovery,
+                );
             }
-        };
-        let (manifest_path, ecosystem) = match marketplace_manifest(&root) {
-            Ok(manifest) => manifest,
-            Err(error) => {
-                discovery.diagnostics.push(error);
-                continue;
+            MarketplaceSelection::Explicit(explicit) => {
+                if explicit.skills.is_empty() && explicit.plugins.is_empty() {
+                    discovery.diagnostics.push(format!(
+                        "marketplace {directory_name:?} enables no skills or plugins"
+                    ));
+                    continue;
+                }
+                let default_root = marketplaces_root.join(&directory_name);
+                let root = match resolve_local_directory(
+                    workspace,
+                    explicit.path.as_deref(),
+                    default_root,
+                ) {
+                    Ok(root) => root,
+                    Err(error) => {
+                        discovery.diagnostics.push(error);
+                        continue;
+                    }
+                };
+                record_extra_root(workspace, &root, &mut discovery.extra_roots);
+                discovery.marketplace_count += 1;
+                let skill_ecosystem = marketplace_manifest(&root)
+                    .ok()
+                    .map(|(_, ecosystem)| ecosystem)
+                    .unwrap_or("marketplace");
+                discover_explicit_skills(&root, skill_ecosystem, explicit.skills, &mut discovery);
+                if !explicit.plugins.is_empty() {
+                    let Some((manifest_path, ecosystem, manifest)) =
+                        load_manifest(&root, &mut discovery)
+                    else {
+                        continue;
+                    };
+                    discover_named_plugins(
+                        &root,
+                        &manifest_path,
+                        &manifest,
+                        ecosystem,
+                        explicit.plugins,
+                        &mut discovery,
+                    );
+                }
             }
-        };
-        let manifest = match read_json(&manifest_path) {
-            Ok(manifest) => manifest,
-            Err(error) => {
-                discovery.diagnostics.push(error);
-                continue;
-            }
-        };
-        discovery.marketplace_count += 1;
-        discover_selected_plugins(
-            &root,
-            &manifest_path,
-            &manifest,
-            ecosystem,
-            selected_plugins,
-            &mut discovery,
-        );
+        }
     }
     discovery
 }
 
-fn discover_selected_plugins(
+fn load_manifest(
+    root: &Path,
+    discovery: &mut MarketplaceDiscovery,
+) -> Option<(PathBuf, &'static str, Value)> {
+    let (manifest_path, ecosystem) = match marketplace_manifest(root) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            discovery.diagnostics.push(error);
+            return None;
+        }
+    };
+    match read_json(&manifest_path) {
+        Ok(manifest) => Some((manifest_path, ecosystem, manifest)),
+        Err(error) => {
+            discovery.diagnostics.push(error);
+            None
+        }
+    }
+}
+
+fn discover_legacy_selectors(
     marketplace_root: &Path,
     manifest_path: &Path,
     manifest: &Value,
@@ -117,99 +206,373 @@ fn discover_selected_plugins(
     selected_plugins: Vec<String>,
     discovery: &mut MarketplaceDiscovery,
 ) {
-    let Some(entries) = manifest.get("plugins").and_then(Value::as_array) else {
-        discovery.diagnostics.push(format!(
-            "{} field \"plugins\" must be an array",
-            manifest_path.display()
-        ));
+    let Some(entries) = plugin_entries(manifest_path, manifest, discovery) else {
         return;
     };
-    let selected = selected_plugins.into_iter().collect::<BTreeSet<_>>();
-    for selected_name in selected {
-        if !safe_component(&selected_name) {
+    for selected_name in selected_plugins.into_iter().collect::<BTreeSet<_>>() {
+        if !safe_selector(manifest_path, &selected_name, discovery) {
+            continue;
+        }
+        if try_immediate_skill(marketplace_root, ecosystem, &selected_name, discovery) {
+            continue;
+        }
+        select_plugin(
+            marketplace_root,
+            manifest_path,
+            entries,
+            ecosystem,
+            selected_name,
+            "an immediate skill or plugin",
+            discovery,
+        );
+    }
+}
+
+fn discover_named_plugins(
+    marketplace_root: &Path,
+    manifest_path: &Path,
+    manifest: &Value,
+    ecosystem: &'static str,
+    selected_plugins: Vec<String>,
+    discovery: &mut MarketplaceDiscovery,
+) {
+    let Some(entries) = plugin_entries(manifest_path, manifest, discovery) else {
+        return;
+    };
+    for selected_name in selected_plugins.into_iter().collect::<BTreeSet<_>>() {
+        if !safe_selector(manifest_path, &selected_name, discovery) {
+            continue;
+        }
+        select_plugin(
+            marketplace_root,
+            manifest_path,
+            entries,
+            ecosystem,
+            selected_name,
+            "a plugin",
+            discovery,
+        );
+    }
+}
+
+fn plugin_entries<'a>(
+    manifest_path: &Path,
+    manifest: &'a Value,
+    discovery: &mut MarketplaceDiscovery,
+) -> Option<&'a Vec<Value>> {
+    match manifest.get("plugins").and_then(Value::as_array) {
+        Some(entries) => Some(entries),
+        None => {
             discovery.diagnostics.push(format!(
-                "{} selection {selected_name:?} must be one directory or plugin name",
+                "{} field \"plugins\" must be an array",
                 manifest_path.display()
+            ));
+            None
+        }
+    }
+}
+
+fn safe_selector(path: &Path, selected_name: &str, discovery: &mut MarketplaceDiscovery) -> bool {
+    if safe_component(selected_name) {
+        true
+    } else {
+        discovery.diagnostics.push(format!(
+            "{} selection {selected_name:?} must be one directory or plugin name",
+            path.display()
+        ));
+        false
+    }
+}
+
+fn try_immediate_skill(
+    marketplace_root: &Path,
+    ecosystem: &'static str,
+    selected_name: &str,
+    discovery: &mut MarketplaceDiscovery,
+) -> bool {
+    let direct_skill = marketplace_root.join("skills").join(selected_name);
+    if !direct_skill.join("SKILL.md").is_file() {
+        return false;
+    }
+    match contained_directory(&direct_skill, marketplace_root) {
+        Ok(skill_root) => discovery.plugins.push(MarketplacePlugin {
+            name: selected_name.to_string(),
+            root: marketplace_root.to_path_buf(),
+            explicit_skills: Some(vec![skill_root]),
+            ecosystem,
+            is_plugin: false,
+        }),
+        Err(error) => discovery.diagnostics.push(error),
+    }
+    true
+}
+
+fn select_plugin(
+    marketplace_root: &Path,
+    manifest_path: &Path,
+    entries: &[Value],
+    ecosystem: &'static str,
+    selected_name: String,
+    missing_kind: &str,
+    discovery: &mut MarketplaceDiscovery,
+) {
+    let matches = entries
+        .iter()
+        .filter(|entry| entry.get("name").and_then(Value::as_str) == Some(&selected_name))
+        .collect::<Vec<_>>();
+    let [entry] = matches.as_slice() else {
+        if matches.is_empty() {
+            discovery.diagnostics.push(format!(
+                "{} selection {selected_name:?} was not found as {missing_kind}",
+                manifest_path.display()
+            ));
+        } else {
+            discovery.diagnostics.push(format!(
+                "{} plugin {selected_name:?} is duplicated",
+                manifest_path.display()
+            ));
+        }
+        return;
+    };
+    let source = match local_source(entry.get("source")) {
+        Ok(Some(source)) => source,
+        Ok(None) => {
+            discovery.diagnostics.push(format!(
+                "{} plugin {selected_name:?} is remote; clone or install it as a local marketplace source before enabling it",
+                manifest_path.display()
+            ));
+            return;
+        }
+        Err(error) => {
+            discovery.diagnostics.push(format!(
+                "{} plugin {selected_name:?}: {error}",
+                manifest_path.display()
+            ));
+            return;
+        }
+    };
+    let plugin_root = match contained_relative_directory(marketplace_root, &source) {
+        Ok(root) => root,
+        Err(error) => {
+            discovery.diagnostics.push(format!(
+                "{} plugin {selected_name:?}: {error}",
+                manifest_path.display()
+            ));
+            return;
+        }
+    };
+    let explicit_skills = match explicit_skill_paths(entry, &plugin_root) {
+        Ok(paths) => paths,
+        Err(error) => {
+            discovery.diagnostics.push(format!(
+                "{} plugin {selected_name:?}: {error}",
+                manifest_path.display()
+            ));
+            return;
+        }
+    };
+    discovery.plugins.push(MarketplacePlugin {
+        name: selected_name,
+        root: plugin_root,
+        explicit_skills,
+        ecosystem,
+        is_plugin: true,
+    });
+}
+
+fn discover_explicit_skills(
+    marketplace_root: &Path,
+    ecosystem: &'static str,
+    names: Vec<String>,
+    discovery: &mut MarketplaceDiscovery,
+) {
+    for (name, skill_root) in
+        find_named_skill_dirs(marketplace_root, names, &mut discovery.diagnostics)
+    {
+        discovery.plugins.push(MarketplacePlugin {
+            name,
+            root: marketplace_root.to_path_buf(),
+            explicit_skills: Some(vec![skill_root]),
+            ecosystem,
+            is_plugin: false,
+        });
+    }
+}
+
+pub(crate) fn find_named_skill_dirs(
+    collection_root: &Path,
+    names: Vec<String>,
+    diagnostics: &mut Vec<String>,
+) -> Vec<(String, PathBuf)> {
+    let mut requested = BTreeSet::new();
+    for name in names {
+        if !safe_component(&name) {
+            diagnostics.push(format!(
+                "{} skill {name:?} must be one directory name",
+                collection_root.display()
             ));
             continue;
         }
-        let direct_skill = marketplace_root.join("skills").join(&selected_name);
-        if direct_skill.join("SKILL.md").is_file() {
-            match contained_directory(&direct_skill, marketplace_root) {
-                Ok(skill_root) => discovery.plugins.push(MarketplacePlugin {
-                    name: selected_name,
-                    root: marketplace_root.to_path_buf(),
-                    explicit_skills: Some(vec![skill_root]),
-                    ecosystem,
-                    is_plugin: false,
-                }),
-                Err(error) => discovery.diagnostics.push(error),
+        requested.insert(name);
+    }
+    let mut found = BTreeMap::new();
+    for name in &requested {
+        let direct = collection_root.join("skills").join(name);
+        if direct.join("SKILL.md").is_file() {
+            match contained_directory(&direct, collection_root) {
+                Ok(skill_root) => {
+                    found.insert(name.clone(), skill_root);
+                }
+                Err(error) => diagnostics.push(error),
             }
+        }
+    }
+    if found.len() < requested.len() {
+        search_nested_skills(collection_root, &requested, &mut found, diagnostics);
+    }
+    let mut matched = Vec::new();
+    for name in requested {
+        match found.remove(&name) {
+            Some(skill_root) => matched.push((name, skill_root)),
+            None => diagnostics.push(format!(
+                "{} skill {name:?} was not found as a SKILL.md directory within {MAX_SKILL_SEARCH_DEPTH} levels",
+                collection_root.display()
+            )),
+        }
+    }
+    matched
+}
+
+fn search_nested_skills(
+    collection_root: &Path,
+    requested: &BTreeSet<String>,
+    found: &mut BTreeMap<String, PathBuf>,
+    diagnostics: &mut Vec<String>,
+) {
+    let mut queue = VecDeque::from([(collection_root.to_path_buf(), 0usize)]);
+    let mut scanned = 0usize;
+    while let Some((dir, depth)) = queue.pop_front() {
+        if found.len() == requested.len() {
+            break;
+        }
+        if scanned >= MAX_SKILL_SEARCH_DIRS {
+            diagnostics.push(format!(
+                "{} skill search exceeded {MAX_SKILL_SEARCH_DIRS} directories",
+                collection_root.display()
+            ));
+            break;
+        }
+        scanned += 1;
+        if depth > MAX_SKILL_SEARCH_DEPTH {
             continue;
         }
-        let matches = entries
-            .iter()
-            .filter(|entry| entry.get("name").and_then(Value::as_str) == Some(&selected_name))
-            .collect::<Vec<_>>();
-        let [entry] = matches.as_slice() else {
-            if matches.is_empty() {
-                discovery.diagnostics.push(format!(
-                    "{} selection {selected_name:?} was not found as an immediate skill or plugin",
-                    manifest_path.display()
-                ));
-            } else {
-                discovery.diagnostics.push(format!(
-                    "{} plugin {selected_name:?} is duplicated",
-                    manifest_path.display()
-                ));
-            }
-            continue;
-        };
-        let source = match local_source(entry.get("source")) {
-            Ok(Some(source)) => source,
-            Ok(None) => {
-                discovery.diagnostics.push(format!(
-                    "{} plugin {selected_name:?} is remote; clone or install it as a local marketplace source before enabling it",
-                    manifest_path.display()
-                ));
+        for child in skill_search_children(&dir, diagnostics) {
+            let Some(name) = child.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if SKIP_DIR_NAMES.contains(&name) {
                 continue;
             }
-            Err(error) => {
-                discovery.diagnostics.push(format!(
-                    "{} plugin {selected_name:?}: {error}",
-                    manifest_path.display()
-                ));
+            if child.join("SKILL.md").is_file() {
+                if requested.contains(name) && !found.contains_key(name) {
+                    match contained_directory(&child, collection_root) {
+                        Ok(skill_root) => {
+                            found.insert(name.to_string(), skill_root);
+                        }
+                        Err(error) => diagnostics.push(error),
+                    }
+                }
                 continue;
             }
-        };
-        let plugin_root = match contained_relative_directory(marketplace_root, &source) {
-            Ok(root) => root,
-            Err(error) => {
-                discovery.diagnostics.push(format!(
-                    "{} plugin {selected_name:?}: {error}",
-                    manifest_path.display()
-                ));
-                continue;
+            if depth < MAX_SKILL_SEARCH_DEPTH {
+                queue.push_back((child, depth + 1));
             }
-        };
-        let explicit_skills = match explicit_skill_paths(entry, &plugin_root) {
-            Ok(paths) => paths,
-            Err(error) => {
-                discovery.diagnostics.push(format!(
-                    "{} plugin {selected_name:?}: {error}",
-                    manifest_path.display()
-                ));
-                continue;
-            }
-        };
-        discovery.plugins.push(MarketplacePlugin {
-            name: selected_name,
-            root: plugin_root,
-            explicit_skills,
-            ecosystem,
-            is_plugin: true,
-        });
+        }
     }
+}
+
+fn skill_search_children(root: &Path, diagnostics: &mut Vec<String>) -> Vec<PathBuf> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            diagnostics.push(format!(
+                "cannot scan {} for marketplace skills: {error}",
+                root.display()
+            ));
+            return Vec::new();
+        }
+    };
+    let mut children = entries
+        .take(MAX_SKILL_SEARCH_DIRS + 1)
+        .filter_map(|entry| match entry {
+            Ok(entry) => {
+                let path = entry.path();
+                path.is_dir().then_some(path)
+            }
+            Err(error) => {
+                diagnostics.push(format!(
+                    "cannot read an entry in {}: {error}",
+                    root.display()
+                ));
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if children.len() > MAX_SKILL_SEARCH_DIRS {
+        children.truncate(MAX_SKILL_SEARCH_DIRS);
+        diagnostics.push(format!(
+            "{} contains more than {MAX_SKILL_SEARCH_DIRS} entries; remaining entries were skipped",
+            root.display()
+        ));
+    }
+    children.sort();
+    children
+}
+
+pub(crate) fn resolve_local_directory(
+    workspace: &Path,
+    configured: Option<&str>,
+    default: PathBuf,
+) -> Result<PathBuf, String> {
+    let candidate = match configured.map(str::trim).filter(|path| !path.is_empty()) {
+        None => default,
+        Some(path) => {
+            if looks_remote(path) {
+                return Err(format!(
+                    "path {path:?} is remote; clone it locally and set a filesystem path"
+                ));
+            }
+            let raw = Path::new(path);
+            if raw.is_absolute() {
+                raw.to_path_buf()
+            } else {
+                workspace.join(raw)
+            }
+        }
+    };
+    let resolved = candidate
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve {}: {error}", candidate.display()))?;
+    if resolved.is_dir() {
+        Ok(resolved)
+    } else {
+        Err(format!("{} is not a directory", candidate.display()))
+    }
+}
+
+pub(crate) fn record_extra_root(workspace: &Path, root: &Path, extra_roots: &mut Vec<PathBuf>) {
+    if !root.starts_with(workspace) && !extra_roots.iter().any(|existing| existing == root) {
+        extra_roots.push(root.to_path_buf());
+    }
+}
+
+fn looks_remote(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("git@")
+        || lower.starts_with("ssh://")
+        || lower.starts_with("git://")
 }
 
 fn local_source(value: Option<&Value>) -> Result<Option<String>, String> {
@@ -337,7 +700,7 @@ fn contained_directory(path: &Path, boundary: &Path) -> Result<PathBuf, String> 
     }
 }
 
-fn safe_component(value: &str) -> bool {
+pub(crate) fn safe_component(value: &str) -> bool {
     !value.is_empty()
         && value != "."
         && value != ".."

@@ -24,10 +24,10 @@ The local reference repositories map to mini-agent as follows:
 
 | Local clone | Recommended project destination | Mode |
 | --- | --- | --- |
-| `taste-skill` | `.agents/marketplaces/taste-skill` | enable one immediate skill such as `minimalist-skill`, or clone under `skillsets` to load the whole `skills/` collection |
-| `context7` | `.agents/marketplaces/context7` | enable its Claude marketplace entry; alternatively copy `plugins/agent-plugins/context7` into `.agents/plugins/context7` |
-| `anthropics-skills` | `.agents/marketplaces/anthropics-skills` | enable an immediate skill such as `skill-creator` or one of its explicit skill bundles |
-| `agent-skills` | `.agents/skillsets/agent-skills` | load the repository's immediate `skills/` collection |
+| `taste-skill` | `.agents/marketplaces/taste-skill` | `{ "skills": ["minimalist-skill"] }`, or clone under `skillsets` to load the whole `skills/` collection |
+| `context7` | `.agents/marketplaces/context7` | `{ "plugins": ["context7"] }` for its Claude marketplace entry; alternatively copy `plugins/agent-plugins/context7` into `.agents/plugins/context7` |
+| `anthropics-skills` | `path` in `.agents/marketplaces.json` or `.agents/skillsets.json` | `{ "path": "D:/gh-ws/skill-ws/anthropics-skills", "skills": ["skill-creator"] }` |
+| `agent-skills` | `path` in `.agents/skillsets.json` | `{ "path": "D:/gh-ws/skill-ws/agent-skills", "skills": ["react-best-practices"] }`; omit json to load a cloned `.agents/skillsets/agent-skills` in full |
 | `claude-plugins-official` | `.agents/marketplaces/claude-plugins-official` | enable only selected local Claude plugins |
 | `xai-org-plugin-marketplace` | `.agents/marketplaces/xai-org-plugin-marketplace` | enable selected local Grok plugins such as `neon` |
 
@@ -36,11 +36,19 @@ The local reference repositories map to mini-agent as follows:
 - Copy `skill/repository-review` to `.agents/skills/repository-review`.
 - See `project/.agents/skillsets/example-collection` for a self-contained
   cloned-style skill collection example.
-- Clone a repository whose root contains `skills/` into
-  `.agents/skillsets/<name>`. For example on Windows:
+- Point `.agents/skillsets.json` at an existing local collection and list the
+  skills to enable, or clone a repository whose root contains `skills/` into
+  `.agents/skillsets/<name>` when you want the whole collection without json:
 
-  ```powershell
-  git clone D:\gh-ws\skill-ws\agent-skills .agents\skillsets\agent-skills
+  ```json
+  {
+    "skillsets": {
+      "agent-skills": {
+        "path": "D:/gh-ws/skill-ws/agent-skills",
+        "skills": ["react-best-practices"]
+      }
+    }
+  }
   ```
 
 Skill collections use compatibility naming because real skills.sh repositories
@@ -62,11 +70,12 @@ The self-contained example lives at
 `project/.agents/marketplaces/example-marketplace`, with its selector in
 `project/.agents/marketplaces.json`.
 
-Clone marketplace repositories below `.agents/marketplaces/`, then copy
-`marketplaces.json` to `.agents/marketplaces.json`. Each listed selector enables
-an immediate `skills/<name>/SKILL.md` when present, otherwise a marketplace
-plugin with that name. Remote marketplace entries are never downloaded by
-mini-agent; install or clone them locally first.
+Copy `marketplaces.json` to `.agents/marketplaces.json`. Use `skills` for a
+`SKILL.md` directory (immediate or nested inside the clone) and `plugins` for a
+Claude or Grok marketplace plugin. Set `path` to an existing local clone, or
+clone into `.agents/marketplaces/<key>`. Remote marketplace entries are never
+downloaded by mini-agent. Copy `skillsets.json` to `.agents/skillsets.json` to
+enable named skills from a local collection without loading every skill.
 
 ```powershell
 git clone D:\gh-ws\skill-ws\taste-skill .agents\marketplaces\taste-skill

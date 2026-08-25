@@ -150,9 +150,10 @@ async fn run_treatment(surface: EditSurface) -> ExperimentResult {
     let root = tests::test_root();
     fs::write(root.join("settings.conf"), INITIAL).unwrap();
     let workspace = Arc::new(
-        Workspace::new(
+        Workspace::with_read_roots(
             root.clone(),
             ApprovalController::new(ApprovalMode::Automatic),
+            Vec::new(),
         )
         .unwrap(),
     );

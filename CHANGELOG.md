@@ -20,6 +20,13 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   with bounded headers, environment placeholders, and connection timeouts.
 - Individual immediate skills can be selected from cloned marketplaces without
   enabling their containing plugin bundle.
+- `.agents/marketplaces.json` can name `skills` and `plugins` separately.
+  Explicit `skills` selectors walk a cloned collection for a nested `SKILL.md`
+  directory and do not require a Claude or Grok marketplace manifest.
+- Marketplace and skillset objects accept a local `path` so an existing clone
+  does not need to live under `.agents/`. `.agents/skillsets.json` enables
+  only the listed skills; without that file, `.agents/skillsets/` still loads
+  each collection in full. `read_file` can open those configured roots.
 - Interactive `/mcp` retries configured servers that were denied or unavailable
   during startup without clearing conversation history.
 - The REPL welcome block lists bounded skill, plugin, and MCP summaries and

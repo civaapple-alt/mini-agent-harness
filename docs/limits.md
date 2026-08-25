@@ -79,6 +79,8 @@ Host tools add their own effect-side bounds before results reach core:
 | skill, plugin, or MCP metadata file | 64 KiB |
 | marketplace manifest | 256 KiB |
 | marketplaces / enabled selectors per marketplace | 16 / 32 |
+| marketplace skill search | 5 directory levels; 128 directories |
+| skillsets.json / enabled skills per skillset | 16 / 32 |
 | MCP servers | 8 configured stdio or streamable HTTP servers |
 | MCP tools | 32 total; 16 KiB input schema per tool |
 | MCP connection / tool call | 20 seconds default (120 seconds max) / 120 seconds |
@@ -95,9 +97,11 @@ execution is still not an isolation boundary. Interactive and `run` modes
 require approval; the explicitly selected `auto` mode does not.
 
 Project extension discovery scans only immediate children at fixed locations
-and at most 128 directory entries per location. Filesystem-resolved skill,
-plugin, and marketplace paths must remain inside their package or workspace
-root. Stdio MCP servers run as local processes with a small ambient environment
+and at most 128 directory entries per location, except explicit marketplace
+and skillset `skills` selectors, which may walk a clone up to five directory
+levels and 128 directories. Installed skills, plugins, and MCP stay inside
+the workspace. A marketplace or skillset `path` may name a local directory
+outside the workspace; file reads may follow those roots, writes may not. Stdio MCP servers run as local processes with a small ambient environment
 allowlist; they are not sandboxed. HTTP MCP connects only to its configured
 absolute URL and applies bounded SSE events and tool results.
 

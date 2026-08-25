@@ -109,11 +109,16 @@ fn terminal_approval(action: &str) -> Result<bool, ToolError> {
     ))
 }
 
-pub fn workspace_tools(
+pub fn workspace_tools_with_read_roots(
     root: PathBuf,
     approval: ApprovalController,
+    extra_read_roots: Vec<PathBuf>,
 ) -> Result<Vec<Box<dyn Tool>>, ToolError> {
-    let workspace = Arc::new(Workspace::new(root, approval)?);
+    let workspace = Arc::new(Workspace::with_read_roots(
+        root,
+        approval,
+        extra_read_roots,
+    )?);
     let results = ResultStore::default();
     let processes = ProcessManager::new(
         workspace.root.clone(),
@@ -133,18 +138,40 @@ pub fn workspace_tools(
 
 struct Workspace {
     root: PathBuf,
+    extra_read_roots: Vec<PathBuf>,
     approval: ApprovalController,
 }
 
 impl Workspace {
-    fn new(root: PathBuf, approval: ApprovalController) -> Result<Self, ToolError> {
+    fn with_read_roots(
+        root: PathBuf,
+        approval: ApprovalController,
+        extra_read_roots: Vec<PathBuf>,
+    ) -> Result<Self, ToolError> {
         let root = root
             .canonicalize()
             .map_err(|error| ToolError(format!("invalid workspace: {error}")))?;
-        Ok(Self { root, approval })
+        let extra_read_roots = extra_read_roots
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok())
+            .filter(|path| path.is_dir() && !path.starts_with(&root))
+            .collect();
+        Ok(Self {
+            root,
+            extra_read_roots,
+            approval,
+        })
     }
 
     fn read_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
+        let candidate = self.candidate(value)?;
+        let resolved = candidate
+            .canonicalize()
+            .map_err(|error| ToolError(format!("cannot resolve path: {error}")))?;
+        self.ensure_readable(resolved)
+    }
+
+    fn mutate_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
         let candidate = self.candidate(value)?;
         let resolved = candidate
             .canonicalize()
@@ -175,28 +202,54 @@ impl Workspace {
 
     fn candidate(&self, value: &Value) -> Result<PathBuf, ToolError> {
         let raw = string_arg(value, "path")?;
-        let relative = Path::new(raw);
-        if relative.as_os_str().is_empty()
-            || relative.components().any(|component| {
-                matches!(
-                    component,
-                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
-                ) || matches!(
-                    component,
-                    Component::Normal(name)
-                        if name.to_string_lossy().eq_ignore_ascii_case(".git")
-                )
-            })
-        {
+        let path = Path::new(raw);
+        if path.as_os_str().is_empty() || has_git_component(path) {
+            return Err(ToolError(
+                "path must remain in the workspace or a configured extension root, and avoid .git"
+                    .to_string(),
+            ));
+        }
+        if path.is_absolute() {
+            if self.extra_read_roots.is_empty() {
+                return Err(ToolError(
+                    "path must be relative, remain in the workspace, and avoid .git".to_string(),
+                ));
+            }
+            return Ok(path.to_path_buf());
+        }
+        if path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        }) {
             return Err(ToolError(
                 "path must be relative, remain in the workspace, and avoid .git".to_string(),
             ));
         }
-        Ok(self.root.join(relative))
+        Ok(self.root.join(path))
     }
 
     fn ensure_inside(&self, path: PathBuf) -> Result<PathBuf, ToolError> {
-        if path.starts_with(&self.root) && path != self.root {
+        if path.starts_with(&self.root) && path != self.root && !has_git_component(&path) {
+            Ok(path)
+        } else {
+            Err(ToolError("path escapes the workspace".to_string()))
+        }
+    }
+
+    fn ensure_readable(&self, path: PathBuf) -> Result<PathBuf, ToolError> {
+        if let Ok(path) = self.ensure_inside(path.clone()) {
+            return Ok(path);
+        }
+        if has_git_component(&path) {
+            return Err(ToolError("path escapes the workspace".to_string()));
+        }
+        if self
+            .extra_read_roots
+            .iter()
+            .any(|root| path.starts_with(root) && path != *root)
+        {
             Ok(path)
         } else {
             Err(ToolError("path escapes the workspace".to_string()))
@@ -212,7 +265,11 @@ struct ReadFile(Arc<Workspace>);
 
 impl Tool for ReadFile {
     fn spec(&self) -> ToolSpec {
-        file_tool_spec("read_file", "Read a UTF-8 file in the workspace", false)
+        file_tool_spec(
+            "read_file",
+            "Read a UTF-8 file in the workspace or a configured local extension root",
+            false,
+        )
     }
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
@@ -254,7 +311,7 @@ impl Tool for EditFile {
     }
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let path = self.0.read_path(arguments)?;
+        let path = self.0.mutate_path(arguments)?;
         let old_text = string_arg(arguments, "old_text")?;
         let new_text = string_arg(arguments, "new_text")?;
         if old_text.is_empty() {
@@ -540,6 +597,15 @@ fn capture_bounded(mut reader: impl Read, max_bytes: usize) -> io::Result<Captur
     })
 }
 
+fn has_git_component(path: &Path) -> bool {
+    path.components().any(|component| {
+        matches!(
+            component,
+            Component::Normal(name) if name.to_string_lossy().eq_ignore_ascii_case(".git")
+        )
+    })
+}
+
 fn file_tool_spec(name: &str, description: &str, content: bool) -> ToolSpec {
     let mut properties = json!({"path": {"type": "string"}});
     let mut required = vec!["path"];
@@ -596,9 +662,10 @@ mod tests {
         let root = test_root();
         fs::write(root.join("note.txt"), "hello world").unwrap();
         let workspace = Arc::new(
-            Workspace::new(
+            Workspace::with_read_roots(
                 root.clone(),
                 ApprovalController::new(ApprovalMode::Automatic),
+                Vec::new(),
             )
             .unwrap(),
         );
@@ -626,9 +693,10 @@ mod tests {
     #[test]
     fn rejects_escape_and_git_paths() {
         let root = test_root();
-        let workspace = Workspace::new(
+        let workspace = Workspace::with_read_roots(
             root.clone(),
             ApprovalController::new(ApprovalMode::Automatic),
+            Vec::new(),
         )
         .unwrap();
 
@@ -648,13 +716,54 @@ mod tests {
     }
 
     #[test]
+    fn read_file_accepts_configured_extension_roots() {
+        let root = test_root();
+        let extra = test_root();
+        fs::write(extra.join("SKILL.md"), "extension body").unwrap();
+        let extra_root = extra.canonicalize().unwrap();
+        let skill = extra.join("SKILL.md").canonicalize().unwrap();
+        let workspace = Arc::new(
+            Workspace::with_read_roots(
+                root.clone(),
+                ApprovalController::new(ApprovalMode::Automatic),
+                vec![extra_root],
+            )
+            .unwrap(),
+        );
+        let location = skill.to_string_lossy().replace('\\', "/");
+        let read = ReadFile(Arc::clone(&workspace));
+        let edit = EditFile(Arc::clone(&workspace));
+
+        assert_eq!(
+            read.execute(&json!({"path": location})).unwrap(),
+            "extension body"
+        );
+        assert!(
+            edit.execute(&json!({
+                "path": location,
+                "old_text": "extension",
+                "new_text": "changed"
+            }))
+            .is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(extra.join("SKILL.md")).unwrap(),
+            "extension body"
+        );
+
+        fs::remove_dir_all(extra).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn write_file_creates_but_does_not_replace() {
         let root = test_root();
         fs::write(root.join("existing.txt"), "keep me").unwrap();
         let workspace = Arc::new(
-            Workspace::new(
+            Workspace::with_read_roots(
                 root.clone(),
                 ApprovalController::new(ApprovalMode::Automatic),
+                Vec::new(),
             )
             .unwrap(),
         );
@@ -708,9 +817,10 @@ mod tests {
     fn shell_matches_the_host_environment() {
         let root = test_root();
         let workspace = Arc::new(
-            Workspace::new(
+            Workspace::with_read_roots(
                 root.clone(),
                 ApprovalController::new(ApprovalMode::Automatic),
+                Vec::new(),
             )
             .unwrap(),
         );
@@ -734,9 +844,10 @@ mod tests {
     fn large_shell_output_is_available_through_a_result_handle() {
         let root = test_root();
         let workspace = Arc::new(
-            Workspace::new(
+            Workspace::with_read_roots(
                 root.clone(),
                 ApprovalController::new(ApprovalMode::Automatic),
+                Vec::new(),
             )
             .unwrap(),
         );

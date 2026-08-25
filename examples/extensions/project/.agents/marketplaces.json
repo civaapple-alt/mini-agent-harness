@@ -1,5 +1,5 @@
 {
   "marketplaces": {
-    "example-marketplace": ["marketplace-review"]
+    "example-marketplace": { "skills": ["marketplace-review"] }
   }
 }

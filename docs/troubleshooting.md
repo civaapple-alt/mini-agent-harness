@@ -71,11 +71,19 @@ effective mentor endpoint when the model is configured.
 
 ## A cloned marketplace skill or plugin is missing
 
-Cloning a marketplace does not enable every entry. Put the clone under
-`.agents/marketplaces/<directory>`, add the desired immediate skill directory or
-plugin name to `.agents/marketplaces.json`, then run `mini-agent doctor`. Only
-local marketplace sources are loaded. Remote `url` and `git-subdir` entries must
-be installed or cloned locally first.
+Cloning a marketplace does not enable every entry. Name it in
+`.agents/marketplaces.json` with `{ "skills": ["name"] }` or
+`{ "plugins": ["name"] }`. Set `path` to an existing local clone, or omit it
+to use `.agents/marketplaces/<key>`. Skills match a `SKILL.md` directory
+(immediate `skills/<name>/` or nested within five levels). Plugins still need
+a Claude or Grok marketplace manifest. A legacy string array only matches an
+immediate skill or a plugin name under `.agents/marketplaces/<key>`. Then run
+`mini-agent doctor`. Remote `url` and `git-subdir` entries are never
+downloaded.
+
+If `.agents/skillsets.json` exists, unlisted skillsets and unlisted skills in
+those collections stay disabled. A missing skill usually means the json list
+omitted it, `path` does not resolve, or the directory name does not match.
 
 ## An MCP server is not discovered
 
