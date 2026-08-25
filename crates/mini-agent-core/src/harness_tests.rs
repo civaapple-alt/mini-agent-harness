@@ -696,6 +696,13 @@ async fn rejects_oversized_model_response_before_retaining_it() {
     );
 }
 
+#[test]
+fn default_ceilings_remain_bounded_under_deepseek_v4_windows() {
+    let config = HarnessConfig::default();
+    assert_eq!(config.max_context_bytes, 1024 * 1024);
+    assert_eq!(config.max_model_response_bytes, 384 * 1024);
+}
+
 #[derive(Default)]
 struct RecordingObserver(Vec<Event>);
 

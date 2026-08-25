@@ -397,7 +397,7 @@ fn ask_keeps_bounded_head_and_tail_of_oversized_agents_md() {
     });
     let root = test_root();
     let mut agents = String::from("UNIQUE-HEAD-RULE\n");
-    agents.push_str(&"n".repeat(20 * 1024));
+    agents.push_str(&"n".repeat(80 * 1024));
     agents.push_str("\nUNIQUE-TAIL-RULE\n");
     fs::write(root.join("AGENTS.md"), &agents).unwrap();
     fs::write(

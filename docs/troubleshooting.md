@@ -19,7 +19,7 @@ override `.env` values.
 
 ## AGENTS.md is too large
 
-`ask` and the interactive terminal still start. Mini-agent keeps a 16 KiB head
+`ask` and the interactive terminal still start. Mini-agent keeps a 64 KiB head
 and tail of root `AGENTS.md`, marks the gap with `[truncated]`, and prints a
 warning. `doctor` reports the oversize check as an error. Trim the file if the
 omitted middle contains rules the model must see. Invalid UTF-8 still prevents

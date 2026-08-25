@@ -44,10 +44,10 @@ impl Default for HarnessConfig {
             max_steps: 8,
             max_context_item_bytes: 8 * 1024,
             max_user_input_bytes: 32 * 1024,
-            max_model_response_bytes: 64 * 1024,
+            max_model_response_bytes: 384 * 1024,
             max_tool_calls_per_step: 8,
             max_tool_output_bytes: 16 * 1024,
-            max_context_bytes: 256 * 1024,
+            max_context_bytes: 1024 * 1024,
             context_limit_behavior: ContextLimitBehavior::Reject,
         }
     }

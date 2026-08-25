@@ -251,7 +251,7 @@ See [configuration](docs/configuration.md) and the copyable
 - `mini-agent doctor [--json]` validates configuration, workspace, and shell
   availability without contacting a model provider.
 - A UTF-8 root `AGENTS.md` is appended once to the stable system prompt with a
-  16 KiB hard limit. Oversized files keep a UTF-8-safe head and tail with an
+  64 KiB hard limit. Oversized files keep a UTF-8-safe head and tail with an
   explicit truncation marker; invalid UTF-8 still fails startup.
 - World state is an append-only, 8 KiB-bounded context item; `status` and
   `/world` expose the same non-secret snapshot.

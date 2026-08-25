@@ -47,6 +47,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- Raised the default model request context from 256 KiB to 1 MiB and the model
+  response ceiling from 64 KiB to 384 KiB. These remain provider-neutral byte
+  bounds under DeepSeek V4's 1M-token context and 384K-token output.
+- Raised the root `AGENTS.md` bound from 16 KiB to 64 KiB.
 - Changed the project license from Apache-2.0 to MIT.
 - Renamed the project from mini-codex to Mini Agent Harness, with the
   `mini-agent` executable and `mini-agent-core` / `mini-agent-cli` crates.
