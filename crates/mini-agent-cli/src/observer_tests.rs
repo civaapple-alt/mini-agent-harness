@@ -98,6 +98,28 @@ fn file_tool_start_only_displays_the_path() {
 }
 
 #[test]
+fn tool_finished_stays_on_one_bounded_line() {
+    assert_eq!(
+        format_tool_finished("MAKE THIS LOUD", false, false),
+        "tool[ok]> MAKE THIS LOUD"
+    );
+    assert_eq!(
+        format_tool_finished(
+            "use crate::config::RuntimeConfig;\nuse crate::observer::RunObserver;",
+            false,
+            false
+        ),
+        "tool[ok]> use crate::config::RuntimeConfig;\\nuse crate::observer::RunObserver;"
+    );
+
+    let long = "x".repeat(MAX_TOOL_DETAIL_BYTES + 8);
+    let line = format_tool_finished(&long, false, false);
+    assert!(line.starts_with("tool[ok]> "));
+    assert!(line.ends_with('…'));
+    assert!(line.len() <= "tool[ok]> ".len() + MAX_TOOL_DETAIL_BYTES);
+}
+
+#[test]
 fn unknown_tool_start_does_not_display_arbitrary_arguments() {
     let call = ToolCall {
         id: "call-1".to_string(),

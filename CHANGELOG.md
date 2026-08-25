@@ -36,6 +36,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Fixed
 
+- Interactive `tool[ok]>` / `tool[error]>` lines stay on one bounded preview;
+  the model and `--trace` still receive the full truncated-to-limit tool result.
 - Oversized root `AGENTS.md` no longer aborts startup; the host keeps a bounded
   head and tail with an explicit truncation warning.
 - `ask` no longer echoes streamed assistant text before printing its final

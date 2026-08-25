@@ -310,6 +310,20 @@ fn format_tool_started(call: &ToolCall, color: bool) -> String {
     }
 }
 
+fn format_tool_finished(content: &str, is_error: bool, color: bool) -> String {
+    let (tag, tag_color) = if is_error {
+        ("tool[error]>", TagColor::Red)
+    } else {
+        ("tool[ok]>", TagColor::Green)
+    };
+    let preview = bounded_single_line(content, MAX_TOOL_DETAIL_BYTES);
+    if preview.is_empty() {
+        styled_tag(tag, tag_color, color)
+    } else {
+        format!("{} {preview}", styled_tag(tag, tag_color, color))
+    }
+}
+
 fn tool_detail(call: &ToolCall) -> Option<String> {
     let field = match call.name.as_str() {
         "shell" | "process_start" => "command",
@@ -392,13 +406,9 @@ impl Observer for TerminalObserver {
             Event::ToolFinished {
                 content, is_error, ..
             } => {
-                let (tag, color) = if *is_error {
-                    ("tool[error]>", TagColor::Red)
-                } else {
-                    ("tool[ok]>", TagColor::Green)
-                };
+                self.end_stream();
                 self.target
-                    .line(&format!("{} {content}", styled_tag(tag, color, self.color)));
+                    .line(&format_tool_finished(content, *is_error, self.color));
             }
             Event::ContextCompactionStarted { before_bytes } => {
                 self.end_stream();
