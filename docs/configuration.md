@@ -25,9 +25,11 @@ OPENAI_BASE_URL=https://api.deepseek.com
 ```
 
 Run `mini-agent status` to inspect the effective non-secret configuration and
-its source and detected world state. `status` never prints the credential. Run
-`mini-agent doctor` to validate provider configuration and the host shell
-without starting an agent turn. Both commands accept `--json`.
+its source and detected world state. `status` never prints the credential and
+succeeds even when the provider is unconfigured. Run `mini-agent doctor` to
+validate provider configuration and the host shell without starting an agent
+turn. `doctor` exits non-zero while `OPENAI_API_KEY` or `OPENAI_MODEL` is
+missing. Both commands accept `--json`. `mini-agent demo` needs no credentials.
 
 If the startup workspace contains `AGENTS.md`, mini-agent appends its UTF-8
 contents once to the stable system prompt. The file has a 16 KiB hard limit;

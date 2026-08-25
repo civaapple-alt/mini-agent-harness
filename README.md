@@ -109,11 +109,27 @@ PowerShell 7 (`pwsh`) on Windows and `sh` on Unix systems.
 
 ## Quick start
 
-Copy `.env.demo` to `.env` and fill in `OPENAI_API_KEY`. The demo defaults to
-DeepSeek's Responses API with the `deepseek-v4-flash` model. Process environment
-values take precedence over `.env`. This repository ignores `.env`; verify the
-same before using it in another
-workspace, and prefer process secrets in CI.
+After the source build, first-use needs no provider credentials. On Windows,
+run the same arguments with `target\release\mini-agent.exe`.
+
+```sh
+mini-agent --version
+mini-agent doctor
+mini-agent status
+mini-agent demo "make this loud"
+```
+
+`--version` prints the Cargo release version. `doctor` and `status` report
+non-secret startup checks without contacting a provider. `doctor` exits
+non-zero while `OPENAI_API_KEY` or `OPENAI_MODEL` is missing; `status` still
+prints the snapshot. `demo` runs the deterministic model → tool → model →
+answer path locally.
+
+Copy `.env.demo` to `.env` and fill in `OPENAI_API_KEY` before `ask`, the
+interactive terminal, `auto`, or mentor commands. The template defaults to
+DeepSeek's Responses API with `deepseek-v4-flash`. Process environment values
+take precedence over `.env`. This repository ignores `.env`; verify the same
+before using it in another workspace, and prefer process secrets in CI.
 
 Set `MENTOR_OPENAI_MODEL` to enable mentor commands. The mentor inherits the
 primary key and base URL by default; `MENTOR_OPENAI_API_KEY` and
@@ -121,8 +137,6 @@ primary key and base URL by default; `MENTOR_OPENAI_API_KEY` and
 model or provider without coupling it to normal agent turns.
 
 ```sh
-mini-agent doctor
-mini-agent status
 mini-agent
 mini-agent ask "summarize this repository"
 mini-agent ask --json "summarize the current changes"
@@ -147,13 +161,6 @@ so machine output remains valid. It also accepts a bounded prompt from stdin.
 usage, and tool-call statuses. Noninteractive sensitive tool calls fail closed;
 `ask --auto` permits them without approval and should be used only in a trusted
 or disposable execution environment.
-
-The deterministic provider-free path remains available to verify the complete
-model → tool → model loop:
-
-```sh
-mini-agent demo "make this loud"
-```
 
 The real modes expose `read_file`, `edit_file`, `write_file`, `shell`,
 `read_tool_result`, and managed-process tools. Reads and direct file writes are

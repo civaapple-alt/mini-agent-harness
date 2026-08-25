@@ -5,6 +5,8 @@ use std::io::Read;
 use std::io::Write;
 use std::net::TcpListener;
 use std::net::TcpStream;
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::atomic::AtomicU64;
@@ -260,14 +262,7 @@ fn interactive_mcp_command_reports_when_nothing_needs_retry() {
 #[test]
 fn subcommand_help_succeeds_without_configuration() {
     let root = test_root();
-    let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-        .current_dir(&root)
-        .args(["ask", "--help"])
-        .env_remove("OPENAI_API_KEY")
-        .env_remove("OPENAI_MODEL")
-        .env_remove("OPENAI_BASE_URL")
-        .output()
-        .unwrap();
+    let output = first_use_command(&root, &["ask", "--help"]);
     fs::remove_dir_all(root).unwrap();
 
     assert!(output.status.success());
@@ -276,6 +271,132 @@ fn subcommand_help_succeeds_without_configuration() {
     assert!(stdout.contains("mini-agent ask"));
     assert!(stdout.contains("--auto"));
     assert!(stdout.contains("32 KiB"));
+}
+
+#[test]
+fn first_use_version_prints_the_package_version() {
+    let root = test_root();
+    let output = first_use_command(&root, &["--version"]);
+    fs::remove_dir_all(&root).unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim(),
+        format!("mini-agent {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn first_use_doctor_reports_missing_provider_settings() {
+    let root = test_root();
+    let plain = first_use_command(&root, &["doctor"]);
+    let json = first_use_command(&root, &["doctor", "--json"]);
+    fs::remove_dir_all(&root).unwrap();
+
+    assert_eq!(plain.status.code(), Some(1), "stderr: {}", stderr(&plain));
+    let plain_out = stdout(&plain);
+    assert!(plain_out.contains("error: credential"), "{plain_out}");
+    assert!(
+        plain_out.contains("OPENAI_API_KEY is missing"),
+        "{plain_out}"
+    );
+    assert!(plain_out.contains("error: model"), "{plain_out}");
+    assert!(plain_out.contains("OPENAI_MODEL is missing"), "{plain_out}");
+    assert!(plain_out.contains("ok: workspace"), "{plain_out}");
+    assert!(
+        plain_out.contains("ok: shell") || plain_out.contains("error: shell"),
+        "{plain_out}"
+    );
+
+    assert_eq!(json.status.code(), Some(1), "stderr: {}", stderr(&json));
+    let body: Value = serde_json::from_str(stdout(&json).trim()).unwrap();
+    assert_eq!(body["ok"], false);
+    let checks = body["checks"].as_array().expect("doctor checks");
+    assert_eq!(check_status(checks, "workspace"), "ok");
+    assert_eq!(check_status(checks, "credential"), "error");
+    assert_eq!(check_status(checks, "model"), "error");
+    assert_eq!(check_status(checks, "base_url"), "ok");
+    assert!(matches!(check_status(checks, "shell"), "ok" | "error"));
+}
+
+#[test]
+fn first_use_status_reports_non_secret_snapshot() {
+    let root = test_root();
+    let plain = first_use_command(&root, &["status"]);
+    let json = first_use_command(&root, &["status", "--json"]);
+    fs::remove_dir_all(&root).unwrap();
+
+    assert!(plain.status.success(), "stderr: {}", stderr(&plain));
+    let plain_out = stdout(&plain);
+    assert!(
+        plain_out.contains(&format!("version: {}", env!("CARGO_PKG_VERSION"))),
+        "{plain_out}"
+    );
+    assert!(
+        plain_out.contains("provider: openai_responses"),
+        "{plain_out}"
+    );
+    assert!(plain_out.contains("credential: missing"), "{plain_out}");
+    assert!(
+        !plain_out.to_ascii_lowercase().contains("sk-"),
+        "{plain_out}"
+    );
+
+    assert!(json.status.success(), "stderr: {}", stderr(&json));
+    let json_out = stdout(&json);
+    let body: Value = serde_json::from_str(json_out.trim()).unwrap();
+    assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(body["provider"], "openai_responses");
+    assert_eq!(body["credential"], "missing");
+    assert!(body["model"].is_null());
+    assert_eq!(body["telemetry"], false);
+    assert!(!json_out.to_ascii_lowercase().contains("sk-"), "{json_out}");
+}
+
+#[test]
+fn first_use_status_reads_env_demo_without_a_secret() {
+    let root = test_root();
+    let template = env_demo_template();
+    assert!(
+        template.is_file(),
+        "Quick start names {}, which must exist in the clone",
+        template.display()
+    );
+    fs::copy(&template, root.join(".env")).unwrap();
+    let output = first_use_command(&root, &["status", "--json"]);
+    let doctor = first_use_command(&root, &["doctor", "--json"]);
+    fs::remove_dir_all(&root).unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let body: Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(body["model"], "deepseek-v4-flash");
+    assert_eq!(body["credential"], "missing");
+    assert_eq!(body["base_url"], "https://api.deepseek.com");
+    assert_eq!(body["base_url_source"], ".env");
+
+    assert_eq!(doctor.status.code(), Some(1), "stderr: {}", stderr(&doctor));
+    let doctor_body: Value = serde_json::from_str(stdout(&doctor).trim()).unwrap();
+    assert_eq!(doctor_body["ok"], false);
+    let checks = doctor_body["checks"].as_array().expect("doctor checks");
+    assert_eq!(check_status(checks, "credential"), "error");
+    assert_eq!(check_status(checks, "model"), "ok");
+}
+
+#[test]
+fn first_use_demo_completes_the_model_tool_model_path() {
+    let root = test_root();
+    let output = first_use_command(&root, &["demo", "make this loud"]);
+    fs::remove_dir_all(&root).unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let stdout = stdout(&output);
+    assert!(stdout.contains("I will run one tool."), "{stdout}");
+    assert!(stdout.contains("uppercase"), "{stdout}");
+    assert!(stdout.contains("MAKE THIS LOUD"), "{stdout}");
+    assert!(
+        stdout.contains("The tool returned: MAKE THIS LOUD"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -942,4 +1063,38 @@ fn test_root() -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("mini-agent-interactive-{nonce}-{sequence}"));
     fs::create_dir(&root).unwrap();
     root
+}
+
+fn first_use_command(root: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_mini-agent"))
+        .current_dir(root)
+        .args(args)
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .env_remove("MENTOR_OPENAI_MODEL")
+        .env_remove("MENTOR_OPENAI_API_KEY")
+        .env_remove("MENTOR_OPENAI_BASE_URL")
+        .output()
+        .unwrap()
+}
+
+fn stdout(output: &std::process::Output) -> String {
+    String::from_utf8(output.stdout.clone()).unwrap()
+}
+
+fn stderr(output: &std::process::Output) -> String {
+    String::from_utf8(output.stderr.clone()).unwrap()
+}
+
+fn check_status<'a>(checks: &'a [Value], name: &str) -> &'a str {
+    checks
+        .iter()
+        .find(|check| check["name"] == name)
+        .and_then(|check| check["status"].as_str())
+        .unwrap_or("missing")
+}
+
+fn env_demo_template() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.env.demo")
 }

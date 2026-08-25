@@ -11,8 +11,11 @@ mini-agent status
 
 ## Missing provider configuration
 
-Copy `.env.demo` to `.env`, set `OPENAI_API_KEY`, and confirm `OPENAI_MODEL` and
-`OPENAI_BASE_URL`. Process environment values override `.env` values.
+`mini-agent --version`, `status`, and `demo` work without credentials. `doctor`
+prints a structured report and exits non-zero until `OPENAI_API_KEY` and
+`OPENAI_MODEL` are set. Copy `.env.demo` to `.env`, set `OPENAI_API_KEY`, and
+confirm `OPENAI_MODEL` and `OPENAI_BASE_URL`. Process environment values
+override `.env` values.
 
 ## PowerShell commands fail on Windows
 

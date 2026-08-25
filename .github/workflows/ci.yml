@@ -47,12 +47,13 @@ jobs:
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            target/release/mini-agent.exe --version
-            target/release/mini-agent.exe status --json
+            bin=target/release/mini-agent.exe
           else
-            target/release/mini-agent --version
-            target/release/mini-agent status --json
+            bin=target/release/mini-agent
           fi
+          "$bin" --version
+          "$bin" status --json
+          "$bin" demo "make this loud"
 
   msrv:
     name: Minimum Rust 1.88
