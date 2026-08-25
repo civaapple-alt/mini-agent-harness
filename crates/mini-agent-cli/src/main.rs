@@ -23,6 +23,7 @@ use mini_agent_core::Model;
 use mini_agent_core::ModelEventSink;
 use mini_agent_core::ModelRequest;
 use mini_agent_core::ModelResponse;
+use mini_agent_core::RunOutcome;
 use mini_agent_core::StopReason;
 use mini_agent_core::Tool;
 use mini_agent_core::ToolCall;
@@ -76,7 +77,7 @@ async fn main() -> ExitCode {
             } else {
                 SessionRequest::Disabled
             };
-            run_interactive(invocation.trace, ApprovalMode::Interactive, request).await
+            repl::run(invocation.trace, ApprovalMode::Interactive, request).await
         }
         Command::Demo => run_demo(invocation.prompt, invocation.trace).await,
         Command::Run => run_openai(invocation.prompt, invocation.trace).await,
@@ -95,7 +96,7 @@ async fn main() -> ExitCode {
             } else {
                 SessionRequest::Disabled
             };
-            run_interactive(invocation.trace, ApprovalMode::Automatic, request).await
+            repl::run(invocation.trace, ApprovalMode::Automatic, request).await
         }
         Command::Auto => run_auto(invocation.prompt, invocation.trace).await,
         Command::Help => {
@@ -109,7 +110,7 @@ async fn main() -> ExitCode {
         Command::Status => run_status(invocation.json),
         Command::Doctor => run_doctor(invocation.json),
         Command::Resume => {
-            run_interactive(
+            repl::run(
                 invocation.trace,
                 ApprovalMode::Interactive,
                 SessionRequest::Resume(invocation.prompt),
@@ -488,118 +489,85 @@ fn run_sessions() -> ExitCode {
     }
 }
 
-async fn run_interactive(
-    trace: Option<PathBuf>,
-    initial_mode: ApprovalMode,
-    session: SessionRequest,
-) -> ExitCode {
-    repl::run(trace, initial_mode, session).await
-}
-
 async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
     let model = DemoModel { turn: 0 };
     let tools = ToolRegistry::new(vec![Box::new(Uppercase)]);
     let mut harness = Harness::new(model, tools, HarnessConfig::default());
-
-    let mut observer = match RunObserver::new(trace) {
-        Ok(observer) => observer,
-        Err(error) => {
-            eprintln!("error: cannot create trace: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    match harness.run(prompt, &mut observer).await {
-        Ok(_) => {
-            observer.finish();
-            ExitCode::SUCCESS
-        }
-        Err(error) => {
-            observer.finish();
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
+    match run_with_observer(&mut harness, prompt, trace).await {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(code) => code,
     }
 }
 
 async fn run_openai(prompt: String, trace: Option<PathBuf>) -> ExitCode {
     let approval = ApprovalController::new(ApprovalMode::Interactive);
-    let mut harness = match build_openai_harness(approval, HarnessConfig::default()) {
+    let mut harness = match openai_harness(approval, HarnessConfig::default()) {
         Ok(harness) => harness,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::from(2);
         }
     };
-    let mut observer = match RunObserver::new(trace) {
-        Ok(observer) => observer,
-        Err(error) => {
-            eprintln!("error: cannot create trace: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    match harness.run(prompt, &mut observer).await {
-        Ok(_) => {
-            observer.finish();
-            ExitCode::SUCCESS
-        }
-        Err(error) => {
-            observer.finish();
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
+    match run_with_observer(&mut harness, prompt, trace).await {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(code) => code,
     }
 }
 
 async fn run_auto(prompt: String, trace: Option<PathBuf>) -> ExitCode {
     print_auto_warning();
     let approval = ApprovalController::new(ApprovalMode::Automatic);
-    let mut harness = match build_openai_harness(approval, harness_config(ApprovalMode::Automatic))
-    {
+    let mut harness = match openai_harness(approval, harness_config(ApprovalMode::Automatic)) {
         Ok(harness) => harness,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::from(2);
         }
     };
+    match run_with_observer(&mut harness, prompt, trace).await {
+        Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
+            eprintln!(
+                "error: auto mode stopped after {} model steps without completing",
+                outcome.steps
+            );
+            ExitCode::FAILURE
+        }
+        Ok(_) => ExitCode::SUCCESS,
+        Err(code) => code,
+    }
+}
+
+async fn run_with_observer<M: Model>(
+    harness: &mut Harness<M>,
+    prompt: String,
+    trace: Option<PathBuf>,
+) -> Result<RunOutcome, ExitCode> {
     let mut observer = match RunObserver::new(trace) {
         Ok(observer) => observer,
         Err(error) => {
             eprintln!("error: cannot create trace: {error}");
-            return ExitCode::FAILURE;
+            return Err(ExitCode::FAILURE);
         }
     };
-
-    match harness.run(prompt, &mut observer).await {
-        Ok(outcome) => {
-            observer.finish();
-            if outcome.stop_reason == StopReason::StepLimit {
-                eprintln!(
-                    "error: auto mode stopped after {} model steps without completing",
-                    outcome.steps
-                );
-                ExitCode::FAILURE
-            } else {
-                ExitCode::SUCCESS
-            }
-        }
+    let result = harness.run(prompt, &mut observer).await;
+    observer.finish();
+    match result {
+        Ok(outcome) => Ok(outcome),
         Err(error) => {
-            observer.finish();
             eprintln!("error: {error}");
-            ExitCode::FAILURE
+            Err(ExitCode::FAILURE)
         }
     }
 }
 
-fn build_openai_harness(
+fn openai_harness(
     approval: ApprovalController,
     config: HarnessConfig,
 ) -> Result<Harness<OpenAiModel>, String> {
-    let runtime_config = RuntimeConfig::load()?;
-    build_openai_harness_with(&runtime_config, approval, config)
+    Ok(prepare_openai_harness(&RuntimeConfig::load()?, approval, config)?.harness)
 }
 
-struct ReplHarnessBuild {
+struct HarnessBuild {
     harness: Harness<OpenAiModel>,
     stable_system_prompt: String,
     world: WorldState,
@@ -608,27 +576,11 @@ struct ReplHarnessBuild {
     retry_mcp_servers: Vec<skills::McpServerConfig>,
 }
 
-fn build_repl_harness(
-    approval: ApprovalController,
-    config: HarnessConfig,
-) -> Result<ReplHarnessBuild, String> {
-    let runtime_config = RuntimeConfig::load()?;
-    build_openai_harness_with_retries(&runtime_config, approval, config)
-}
-
-fn build_openai_harness_with(
-    runtime_config: &RuntimeConfig,
-    approval: ApprovalController,
-    config: HarnessConfig,
-) -> Result<Harness<OpenAiModel>, String> {
-    build_openai_harness_with_retries(runtime_config, approval, config).map(|build| build.harness)
-}
-
-fn build_openai_harness_with_retries(
+fn prepare_openai_harness(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
     mut config: HarnessConfig,
-) -> Result<ReplHarnessBuild, String> {
+) -> Result<HarnessBuild, String> {
     let provider = runtime_config.provider_settings()?;
     let mode = approval.mode();
     let model = match OpenAiModel::new(provider.api_key, provider.model, provider.base_url) {
@@ -672,7 +624,7 @@ fn build_openai_harness_with_retries(
     harness
         .append_context(world_context)
         .map_err(|error| error.to_string())?;
-    Ok(ReplHarnessBuild {
+    Ok(HarnessBuild {
         harness,
         stable_system_prompt,
         world,

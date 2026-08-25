@@ -1,3 +1,4 @@
+use crate::config::RuntimeConfig;
 use crate::harness_config;
 use crate::mcp;
 use crate::observer::RunObserver;
@@ -253,8 +254,9 @@ fn spawn_worker(
     events: mpsc::SyncSender<ReplEvent>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let build = match crate::build_repl_harness(approval.clone(), harness_config(initial_mode))
-        {
+        let build = match RuntimeConfig::load().and_then(|runtime| {
+            crate::prepare_openai_harness(&runtime, approval.clone(), harness_config(initial_mode))
+        }) {
             Ok(build) => build,
             Err(error) => {
                 let _ = events.send(ReplEvent::InitializationFailed(error));
@@ -262,7 +264,7 @@ fn spawn_worker(
                 return;
             }
         };
-        let crate::ReplHarnessBuild {
+        let crate::HarnessBuild {
             mut harness,
             stable_system_prompt,
             mut world,

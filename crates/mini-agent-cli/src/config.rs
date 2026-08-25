@@ -30,12 +30,6 @@ pub struct ProviderSettings {
     pub base_url: String,
 }
 
-pub struct MentorProviderSettings {
-    pub api_key: String,
-    pub model: String,
-    pub base_url: String,
-}
-
 struct ResolvedSetting {
     value: String,
     source: SettingSource,
@@ -109,7 +103,7 @@ impl RuntimeConfig {
         self.workspace.clone()
     }
 
-    pub fn mentor_provider_settings(&self) -> Result<MentorProviderSettings, String> {
+    pub fn mentor_provider_settings(&self) -> Result<ProviderSettings, String> {
         let model = self
             .mentor_model
             .as_ref()
@@ -133,7 +127,7 @@ impl RuntimeConfig {
             .value
             .clone();
         validate_base_url_named("MENTOR_OPENAI_BASE_URL", &base_url)?;
-        Ok(MentorProviderSettings {
+        Ok(ProviderSettings {
             api_key,
             model,
             base_url,
@@ -146,8 +140,7 @@ impl RuntimeConfig {
 
     pub fn status_json(&self) -> Value {
         let primary_display_base_url = display_base_url(&self.base_url.value);
-        let extensions = skills::discover(&self.workspace);
-        let world = WorldState::detect(&self.workspace, ApprovalMode::Interactive);
+        let (extensions, world) = self.status_snapshot();
         json!({
             "version": env!("CARGO_PKG_VERSION"),
             "workspace": self.workspace,
@@ -196,8 +189,7 @@ impl RuntimeConfig {
 
     pub fn status_lines(&self) -> Vec<String> {
         let display_base_url = display_base_url(&self.base_url.value);
-        let extensions = skills::discover(&self.workspace);
-        let world = WorldState::detect(&self.workspace, ApprovalMode::Interactive);
+        let (extensions, world) = self.status_snapshot();
         let mut lines = vec![
             format!("version: {}", env!("CARGO_PKG_VERSION")),
             format!("workspace: {}", self.workspace.display()),
@@ -362,6 +354,13 @@ impl RuntimeConfig {
             json: json!({"ok": ok, "checks": json_checks}),
             lines,
         }
+    }
+
+    fn status_snapshot(&self) -> (skills::Discovery, WorldState) {
+        (
+            skills::discover(&self.workspace),
+            WorldState::detect(&self.workspace, ApprovalMode::Interactive),
+        )
     }
 
     fn mentor_status_line(&self) -> String {

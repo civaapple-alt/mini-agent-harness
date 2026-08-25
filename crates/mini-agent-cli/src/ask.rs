@@ -1,9 +1,9 @@
-use crate::build_openai_harness_with;
 use crate::config::RuntimeConfig;
 use crate::harness_config;
 use crate::observer::RunObserver;
 use crate::observer::ScriptFormat;
 use crate::observer::print_final_answer;
+use crate::prepare_openai_harness;
 use crate::print_auto_warning;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
@@ -39,11 +39,11 @@ pub async fn run(
         ApprovalMode::Interactive
     };
     let approval = ApprovalController::new(mode);
-    let mut harness =
-        match build_openai_harness_with(&runtime_config, approval, harness_config(mode)) {
-            Ok(harness) => harness,
-            Err(error) => return preflight_error(json_output, &error),
-        };
+    let mut harness = match prepare_openai_harness(&runtime_config, approval, harness_config(mode))
+    {
+        Ok(build) => build.harness,
+        Err(error) => return preflight_error(json_output, &error),
+    };
     let format = if json_output {
         ScriptFormat::Json
     } else {
