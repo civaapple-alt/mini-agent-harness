@@ -14,16 +14,18 @@ description = "A small native coding-agent harness with bounded tools and OpenAI
 readme = "README.md"
 repository = "https://github.com/civaapple-alt/mini-agent-harness"
 homepage = "https://github.com/civaapple-alt/mini-agent-harness"
-keywords = ["ai", "agent", "coding", "cli"]
+keywords = ["ai", "agent", "coding", "cli", "mcp"]
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
 eventsource-stream = "0.2"
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rmcp = { version = "3.1.4", default-features = false, features = ["client", "transport-child-process", "which-command"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "process", "rt", "sync", "time"] }
+yaml_serde = "0.10.7"
 
 [profile.release]
 codegen-units = 1

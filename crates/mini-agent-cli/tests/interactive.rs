@@ -36,6 +36,12 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
     )
     .unwrap();
     fs::write(root.join("AGENTS.md"), "Use the release contract.\n").unwrap();
+    fs::create_dir_all(root.join(".agents/skills/release-review")).unwrap();
+    fs::write(
+        root.join(".agents/skills/release-review/SKILL.md"),
+        "---\nname: release-review\ndescription: Review release readiness when preparing a release.\n---\nFULL SKILL BODY LOADS ON DEMAND.\n",
+    )
+    .unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
         .current_dir(&root)
         .args(["ask", "--json"])
@@ -92,6 +98,10 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
             .unwrap()
             .contains("Use the release contract.")
     );
+    let instructions = request["instructions"].as_str().unwrap();
+    assert!(instructions.contains("release-review"));
+    assert!(instructions.contains(".agents/skills/release-review/SKILL.md"));
+    assert!(!instructions.contains("FULL SKILL BODY LOADS ON DEMAND"));
 }
 
 #[test]

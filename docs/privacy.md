@@ -19,3 +19,10 @@ redact traces before sharing them.
 Conversation history, result handles, the input queue, and managed-process
 records are process-local and are not persisted. Managed child process trees
 are stopped when the CLI exits.
+
+Project Agent Skills contribute only bounded metadata until the model chooses
+to read a `SKILL.md` or one of its resources. Agent Plugin stdio MCP servers are
+third-party local processes and may themselves access files, networks, or
+external services. They do not inherit provider credentials implicitly, but
+they receive their declared plugin environment and any data passed in MCP tool
+arguments. Persistent plugin state is stored under `.agents/plugin-data/`.

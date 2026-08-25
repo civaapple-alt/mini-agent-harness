@@ -20,5 +20,8 @@ eventsource-stream.workspace = true
 futures-util.workspace = true
 mini-agent-core = { version = "0.1.0", path = "../mini-agent-core" }
 reqwest.workspace = true
+rmcp.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+yaml_serde.workspace = true

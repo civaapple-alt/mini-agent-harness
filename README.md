@@ -149,6 +149,34 @@ trees are stopped when the CLI exits. Conversation, result handles, queued
 input, and managed processes deliberately remain non-durable: auto mode
 survives long context growth, not process termination.
 
+## Portable skills and plugins
+
+Mini Agent Harness discovers project-scoped [Agent Skills](https://agentskills.io/)
+from `.agents/skills/<skill>/SKILL.md`. It also loads
+[Agent Plugins 1.0.0](https://agent-plugins.org/) from
+`.agents/plugins/<plugin>/plugin.json`, including skills at the plugin's fixed
+`skills/` location. Discovery injects only each valid skill's name,
+description, and workspace-relative location into the stable system prompt.
+The model reads the complete `SKILL.md` with the existing `read_file` tool only
+when a task matches, so skill instructions and resources remain progressively
+disclosed.
+
+Plugins may expose MCP servers through root `mcp.json`. The minimal client
+supports the standard `stdio` transport through the official Rust MCP SDK and
+negotiates MCP 2026-07-28 with fallback for older servers. Server startup and
+every MCP tool call require approval unless auto mode is explicitly enabled.
+MCP tools are exposed as `mcp__<plugin>_<server>__<tool>` and remain subject to
+the harness's bounded tool-result context. Plugin subprocesses receive a small
+allowlist of ambient OS variables plus declared `env`, `PLUGIN_ROOT`, and a
+persistent `.agents/plugin-data/<plugin>` directory; provider credentials are
+not inherited implicitly.
+
+This first adapter is deliberately project-only. It does not install or update
+packages, load user-global directories, implement client extensions, or
+support `streamable-http` and legacy `sse` transports. Unsupported and invalid
+components are reported and isolated without hiding valid sibling skills or
+servers.
+
 ## Operational contract
 
 - `mini-agent --version` reports the Cargo release version.
@@ -157,6 +185,8 @@ survives long context growth, not process termination.
   availability without contacting a model provider.
 - A UTF-8 root `AGENTS.md` is appended once to the stable system prompt with a
   16 KiB hard limit.
+- Project Agent Skills and Agent Plugins use fixed `.agents/` locations and do
+  not rewrite conversation history.
 - Mini Agent Harness sends no telemetry, update checks, or crash reports.
 - Shell execution is approval-gated but not sandboxed.
 - Interactive sessions are process-local in v0.1 and cannot yet be resumed.

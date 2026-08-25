@@ -2,6 +2,7 @@ use crate::env_file::Environment;
 use crate::env_file::ResolvedValue;
 use crate::env_file::ValueSource;
 use crate::project_context;
+use crate::skills;
 use reqwest::Url;
 use serde_json::Value;
 use serde_json::json;
@@ -95,6 +96,7 @@ impl RuntimeConfig {
 
     pub fn status_json(&self) -> Value {
         let display_base_url = display_base_url(&self.base_url.value);
+        let extensions = skills::discover(&self.workspace);
         json!({
             "version": env!("CARGO_PKG_VERSION"),
             "workspace": self.workspace,
@@ -105,6 +107,8 @@ impl RuntimeConfig {
             "base_url_source": setting_source_name(self.base_url.source),
             "credential": if self.api_key.is_some() { "configured" } else { "missing" },
             "credential_source": self.api_key.as_ref().map(|value| source_name(value.source)),
+            "skills": extensions.len(),
+            "mcp_servers": extensions.mcp_server_count(),
             "telemetry": false,
             "session_persistence": false,
             "command_sandbox": false
@@ -113,6 +117,7 @@ impl RuntimeConfig {
 
     pub fn status_lines(&self) -> Vec<String> {
         let display_base_url = display_base_url(&self.base_url.value);
+        let extensions = skills::discover(&self.workspace);
         vec![
             format!("version: {}", env!("CARGO_PKG_VERSION")),
             format!("workspace: {}", self.workspace.display()),
@@ -140,6 +145,8 @@ impl RuntimeConfig {
                         source_name(value.source)
                     ))
             ),
+            format!("skills: {}", extensions.len()),
+            format!("mcp_servers: {}", extensions.mcp_server_count()),
             "telemetry: disabled".to_string(),
             "session_persistence: disabled".to_string(),
             "command_sandbox: disabled".to_string(),
@@ -193,6 +200,24 @@ impl RuntimeConfig {
                 Err(error) => check("project_instructions", false, error),
             },
         );
+        let skill_discovery = skills::discover(&self.workspace);
+        checks.push(if skill_discovery.diagnostics().is_empty() {
+            check(
+                "extensions",
+                true,
+                format!(
+                    "{} project skills and {} stdio MCP servers discovered",
+                    skill_discovery.len(),
+                    skill_discovery.mcp_server_count()
+                ),
+            )
+        } else {
+            check(
+                "extensions",
+                false,
+                skill_discovery.diagnostics().join("; "),
+            )
+        });
         let ok = checks.iter().all(|item| item.ok);
         let lines = checks
             .iter()

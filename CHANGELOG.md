@@ -5,6 +5,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+### Added
+
+- Minimal project-scoped Agent Skills and Agent Plugins 1.0.0 discovery with
+  progressive skill disclosure and approval-gated stdio MCP tools via RMCP.
+
 ### Fixed
 
 - `ask` no longer echoes streamed assistant text before printing its final

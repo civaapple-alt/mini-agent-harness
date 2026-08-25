@@ -1,12 +1,14 @@
 mod ask;
 mod config;
 mod env_file;
+mod mcp;
 mod observer;
 mod openai;
 mod processes;
 mod project_context;
 mod repl;
 mod result_store;
+mod skills;
 mod workspace;
 
 use mini_agent_core::ContextLimitBehavior;
@@ -491,11 +493,21 @@ fn build_openai_harness_with(
     let workspace = runtime_config.workspace();
     config.system_prompt =
         project_context::augment_system_prompt(&config.system_prompt, &workspace)?;
-    let tools = match workspace_tools(workspace, approval) {
-        Ok(tools) => ToolRegistry::new(tools),
+    let skill_discovery = skills::discover(&workspace);
+    for diagnostic in skill_discovery.diagnostics() {
+        eprintln!("warning: {diagnostic}");
+    }
+    config.system_prompt = skill_discovery.augment_system_prompt(&config.system_prompt)?;
+    let mut tools = match workspace_tools(workspace, approval.clone()) {
+        Ok(tools) => tools,
         Err(error) => return Err(error.to_string()),
     };
-    Ok(Harness::new(model, tools, config))
+    let mcp = mcp::load(skill_discovery.mcp_servers(), approval);
+    for diagnostic in mcp.diagnostics {
+        eprintln!("warning: {diagnostic}");
+    }
+    tools.extend(mcp.tools);
+    Ok(Harness::new(model, ToolRegistry::new(tools), config))
 }
 
 fn harness_config(mode: ApprovalMode) -> HarnessConfig {
@@ -512,7 +524,7 @@ fn harness_config(mode: ApprovalMode) -> HarnessConfig {
 
 fn print_auto_warning() {
     eprintln!(
-        "warning: auto mode runs workspace writes and unsandboxed shell commands without approval"
+        "warning: auto mode runs workspace writes, MCP servers, and unsandboxed shell commands without approval"
     );
 }
 
