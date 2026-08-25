@@ -65,7 +65,7 @@ Host tools add their own effect-side bounds before results reach core:
 | managed processes | 8 |
 | managed-process log | 256 KiB per stream |
 | queued REPL operations | 16 |
-| root `AGENTS.md` | 16 KiB; reject if larger or invalid UTF-8 |
+| root `AGENTS.md` | 16 KiB; UTF-8-safe head and tail if larger; reject if invalid UTF-8 |
 | rendered world-state snapshot | 8 KiB; fixed command catalog and capped path |
 | durable session file / JSONL record | 32 MiB / 512 KiB |
 | listed durable sessions | 128 project-local files |

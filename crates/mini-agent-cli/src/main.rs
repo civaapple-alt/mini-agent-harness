@@ -588,8 +588,11 @@ fn prepare_openai_harness(
         Err(error) => return Err(error.to_string()),
     };
     let workspace = runtime_config.workspace();
-    config.system_prompt =
-        project_context::augment_system_prompt(&config.system_prompt, &workspace)?;
+    let project_instructions = project_context::load_agents_md(&workspace)?;
+    if let Some(warning) = project_instructions.truncation_warning() {
+        eprintln!("warning: {warning}");
+    }
+    config.system_prompt = project_instructions.augment(&config.system_prompt);
     let skill_discovery = skills::discover(&workspace);
     for diagnostic in skill_discovery.diagnostics() {
         eprintln!("warning: {diagnostic}");

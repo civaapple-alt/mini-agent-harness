@@ -33,6 +33,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Fixed
 
+- Oversized root `AGENTS.md` no longer aborts startup; the host keeps a bounded
+  head and tail with an explicit truncation warning.
 - `ask` no longer echoes streamed assistant text before printing its final
   result; terminals retain one `assistant>` tag while redirected stdout stays
   raw.

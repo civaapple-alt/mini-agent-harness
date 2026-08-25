@@ -383,6 +383,62 @@ fn first_use_status_reads_env_demo_without_a_secret() {
 }
 
 #[test]
+fn ask_keeps_bounded_head_and_tail_of_oversized_agents_md() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        requests_tx.send(read_request_body(&mut stream)).unwrap();
+        write_sse_response(&mut stream, "bounded instructions");
+    });
+    let root = test_root();
+    let mut agents = String::from("UNIQUE-HEAD-RULE\n");
+    agents.push_str(&"n".repeat(20 * 1024));
+    agents.push_str("\nUNIQUE-TAIL-RULE\n");
+    fs::write(root.join("AGENTS.md"), &agents).unwrap();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
+        .current_dir(&root)
+        .args(["ask", "hello"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .env_remove("MENTOR_OPENAI_MODEL")
+        .env_remove("MENTOR_OPENAI_API_KEY")
+        .env_remove("MENTOR_OPENAI_BASE_URL")
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("AGENTS.md exceeds") && stderr.contains("bounded head and tail"),
+        "{stderr}"
+    );
+    let request: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
+    let instructions = request["instructions"].as_str().unwrap();
+    assert!(instructions.contains("UNIQUE-HEAD-RULE"), "{instructions}");
+    assert!(instructions.contains("[truncated]"), "{instructions}");
+    assert!(instructions.contains("UNIQUE-TAIL-RULE"), "{instructions}");
+    assert!(
+        instructions.len() < agents.len(),
+        "instructions should be bounded"
+    );
+}
+
+#[test]
 fn first_use_demo_completes_the_model_tool_model_path() {
     let root = test_root();
     let output = first_use_command(&root, &["demo", "make this loud"]);

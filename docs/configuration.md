@@ -32,9 +32,11 @@ turn. `doctor` exits non-zero while `OPENAI_API_KEY` or `OPENAI_MODEL` is
 missing. Both commands accept `--json`. `mini-agent demo` needs no credentials.
 
 If the startup workspace contains `AGENTS.md`, mini-agent appends its UTF-8
-contents once to the stable system prompt. The file has a 16 KiB hard limit;
-startup fails explicitly rather than silently omitting or truncating oversized
-instructions. Nested instruction discovery is not part of the v0.1 contract.
+contents once to the stable system prompt. The file has a 16 KiB hard limit.
+Oversized files are not dropped: the host keeps a UTF-8-safe head and tail,
+inserts an explicit `[truncated]` marker, and prints a warning. Invalid UTF-8
+still fails startup. Nested instruction discovery is not part of the v0.1
+contract.
 
 World state is not configured through environment variables. Mini-agent
 detects a fixed command catalog, root project markers, host shell, OS,

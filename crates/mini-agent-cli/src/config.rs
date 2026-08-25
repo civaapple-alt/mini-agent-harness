@@ -294,21 +294,29 @@ impl RuntimeConfig {
             Ok(shell) => check("shell", true, shell),
             Err(error) => check("shell", false, error),
         });
-        checks.push(
-            match project_context::augment_system_prompt("", &self.workspace) {
-                Ok(_) if self.workspace.join("AGENTS.md").is_file() => check(
-                    "project_instructions",
-                    true,
-                    "root AGENTS.md is valid".to_string(),
+        checks.push(match project_context::load_agents_md(&self.workspace) {
+            Ok(project_context::AgentsMd::Absent) => check(
+                "project_instructions",
+                true,
+                "no root AGENTS.md".to_string(),
+            ),
+            Ok(project_context::AgentsMd::Loaded {
+                truncated: false, ..
+            }) => check(
+                "project_instructions",
+                true,
+                "root AGENTS.md is valid".to_string(),
+            ),
+            Ok(project_context::AgentsMd::Loaded { source_bytes, .. }) => check(
+                "project_instructions",
+                false,
+                format!(
+                    "root AGENTS.md exceeds {} bytes ({source_bytes}); using bounded head and tail",
+                    project_context::MAX_PROJECT_INSTRUCTIONS_BYTES
                 ),
-                Ok(_) => check(
-                    "project_instructions",
-                    true,
-                    "no root AGENTS.md".to_string(),
-                ),
-                Err(error) => check("project_instructions", false, error),
-            },
-        );
+            ),
+            Err(error) => check("project_instructions", false, error),
+        });
         let skill_discovery = skills::discover(&self.workspace);
         checks.push(if skill_discovery.diagnostics().is_empty() {
             check(
