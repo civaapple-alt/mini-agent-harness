@@ -9,6 +9,7 @@ mod processes;
 mod project_context;
 mod repl;
 mod result_store;
+mod session;
 mod skills;
 mod workspace;
 mod world;
@@ -37,13 +38,16 @@ use std::process::ExitCode;
 use config::RuntimeConfig;
 use observer::RunObserver;
 use openai::OpenAiModel;
+use session::SessionRequest;
 use workspace::ApprovalController;
 use workspace::ApprovalMode;
 use workspace::workspace_tools;
 use world::WorldState;
 
-const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--trace PATH]\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent run [--trace PATH] [--] <PROMPT>\n    mini-agent auto [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY    Required except by demo\n    OPENAI_MODEL      Required except by demo\n    OPENAI_BASE_URL   Optional; defaults to https://api.openai.com/v1";
-const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--trace PATH]\n\nStarts the approval-gated interactive REPL.";
+const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent run [--trace PATH] [--] <PROMPT>\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY    Required except by demo\n    OPENAI_MODEL      Required except by demo\n    OPENAI_BASE_URL   Optional; defaults to https://api.openai.com/v1";
+const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n\nStarts the approval-gated interactive REPL. --persist creates a resumable project session.";
+const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SESSION_ID [--trace PATH]\n\nResumes the latest settled checkpoint of a durable project session.";
+const SESSIONS_HELP: &str = "mini-agent sessions\n\nUSAGE:\n    mini-agent sessions\n\nLists bounded durable sessions in the current project.";
 const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn. If PROMPT is omitted, reads at most 32 KiB from stdin.\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto        Run tools without approval\n    --json        Emit a machine-readable final result\n    --trace PATH  Write JSONL observation events";
 const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--trace PATH] [--] <PROMPT>\n\nRuns one approval-gated model turn.";
 const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--trace PATH] [--] [PROMPT]\n\nRuns an automatic turn, or starts the REPL in automatic mode when PROMPT is omitted.";
@@ -64,7 +68,14 @@ async fn main() -> ExitCode {
         }
     };
     match invocation.command {
-        Command::Interactive => run_interactive(invocation.trace, ApprovalMode::Interactive).await,
+        Command::Interactive => {
+            let request = if invocation.persist {
+                SessionRequest::New
+            } else {
+                SessionRequest::Disabled
+            };
+            run_interactive(invocation.trace, ApprovalMode::Interactive, request).await
+        }
         Command::Demo => run_demo(invocation.prompt, invocation.trace).await,
         Command::Run => run_openai(invocation.prompt, invocation.trace).await,
         Command::Ask => {
@@ -77,7 +88,12 @@ async fn main() -> ExitCode {
             .await
         }
         Command::Auto if invocation.prompt.is_empty() => {
-            run_interactive(invocation.trace, ApprovalMode::Automatic).await
+            let request = if invocation.persist {
+                SessionRequest::New
+            } else {
+                SessionRequest::Disabled
+            };
+            run_interactive(invocation.trace, ApprovalMode::Automatic, request).await
         }
         Command::Auto => run_auto(invocation.prompt, invocation.trace).await,
         Command::Help => {
@@ -90,6 +106,15 @@ async fn main() -> ExitCode {
         }
         Command::Status => run_status(invocation.json),
         Command::Doctor => run_doctor(invocation.json),
+        Command::Resume => {
+            run_interactive(
+                invocation.trace,
+                ApprovalMode::Interactive,
+                SessionRequest::Resume(invocation.prompt),
+            )
+            .await
+        }
+        Command::Sessions => run_sessions(),
     }
 }
 
@@ -100,6 +125,8 @@ enum Command {
     Run,
     Ask,
     Auto,
+    Resume,
+    Sessions,
     Status,
     Doctor,
     Help,
@@ -113,6 +140,7 @@ struct Invocation {
     trace: Option<PathBuf>,
     json: bool,
     automatic: bool,
+    persist: bool,
     help_topic: HelpTopic,
 }
 
@@ -123,6 +151,8 @@ enum HelpTopic {
     Ask,
     Run,
     Auto,
+    Resume,
+    Sessions,
     Demo,
     Status,
     Doctor,
@@ -132,7 +162,7 @@ enum HelpTopic {
 fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut args = args.into_iter().peekable();
     let command = match args.peek().map(String::as_str) {
-        None | Some("--trace") => Command::Interactive,
+        None | Some("--trace" | "--persist") => Command::Interactive,
         Some("help") => {
             args.next();
             let topic = match args.next() {
@@ -171,6 +201,14 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             args.next();
             Command::Auto
         }
+        Some("resume") => {
+            args.next();
+            Command::Resume
+        }
+        Some("sessions") => {
+            args.next();
+            Command::Sessions
+        }
         Some("status") => {
             args.next();
             Command::Status
@@ -203,6 +241,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             trace: None,
             json: false,
             automatic: false,
+            persist: false,
             help_topic: HelpTopic::Root,
         });
     }
@@ -212,6 +251,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut trace = None;
     let mut json = false;
     let mut automatic = false;
+    let mut persist = false;
     let mut options = true;
     while let Some(argument) = args.next() {
         if options && argument == "--" {
@@ -234,6 +274,11 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 return Err("--auto may be provided only once".to_string());
             }
             automatic = true;
+        } else if options && argument == "--persist" {
+            if persist {
+                return Err("--persist may be provided only once".to_string());
+            }
+            persist = true;
         } else if options && argument.starts_with('-') {
             return Err(format!("unknown option: {argument}"));
         } else {
@@ -246,8 +291,15 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if matches!(command, Command::Demo | Command::Run) && prompt.is_empty() {
         return Err("prompt is required".to_string());
     }
-    if matches!(command, Command::Status | Command::Doctor) && !prompt.is_empty() {
+    if matches!(
+        command,
+        Command::Status | Command::Doctor | Command::Sessions
+    ) && !prompt.is_empty()
+    {
         return Err("this command does not accept positional arguments".to_string());
+    }
+    if command == Command::Resume && prompt.len() != 1 {
+        return Err("resume requires exactly one SESSION_ID".to_string());
     }
     if json && !matches!(command, Command::Ask | Command::Status | Command::Doctor) {
         return Err("--json is supported only by ask, status, and doctor".to_string());
@@ -255,8 +307,18 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if automatic && command != Command::Ask {
         return Err("--auto is supported only by ask".to_string());
     }
-    if trace.is_some() && matches!(command, Command::Status | Command::Doctor) {
-        return Err("--trace is not supported by status or doctor".to_string());
+    if trace.is_some()
+        && matches!(
+            command,
+            Command::Status | Command::Doctor | Command::Sessions
+        )
+    {
+        return Err("--trace is not supported by status, doctor, or sessions".to_string());
+    }
+    if persist
+        && !(command == Command::Interactive || command == Command::Auto && prompt.is_empty())
+    {
+        return Err("--persist is supported only by interactive sessions".to_string());
     }
     Ok(Invocation {
         command,
@@ -264,6 +326,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         trace,
         json,
         automatic,
+        persist,
         help_topic: HelpTopic::Root,
     })
 }
@@ -275,6 +338,7 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         trace: None,
         json: false,
         automatic: false,
+        persist: false,
         help_topic,
     }
 }
@@ -285,6 +349,8 @@ fn help_topic(name: &str) -> Result<HelpTopic, String> {
         "ask" => Ok(HelpTopic::Ask),
         "run" => Ok(HelpTopic::Run),
         "auto" => Ok(HelpTopic::Auto),
+        "resume" => Ok(HelpTopic::Resume),
+        "sessions" => Ok(HelpTopic::Sessions),
         "demo" => Ok(HelpTopic::Demo),
         "status" => Ok(HelpTopic::Status),
         "doctor" => Ok(HelpTopic::Doctor),
@@ -299,6 +365,8 @@ fn help_topic_for(command: Command) -> HelpTopic {
         Command::Ask => HelpTopic::Ask,
         Command::Run => HelpTopic::Run,
         Command::Auto => HelpTopic::Auto,
+        Command::Resume => HelpTopic::Resume,
+        Command::Sessions => HelpTopic::Sessions,
         Command::Demo => HelpTopic::Demo,
         Command::Status => HelpTopic::Status,
         Command::Doctor => HelpTopic::Doctor,
@@ -314,6 +382,8 @@ fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::Ask => ASK_HELP,
         HelpTopic::Run => RUN_HELP,
         HelpTopic::Auto => AUTO_HELP,
+        HelpTopic::Resume => RESUME_HELP,
+        HelpTopic::Sessions => SESSIONS_HELP,
         HelpTopic::Demo => DEMO_HELP,
         HelpTopic::Status => STATUS_HELP,
         HelpTopic::Doctor => DOCTOR_HELP,
@@ -375,8 +445,38 @@ fn run_doctor(json: bool) -> ExitCode {
     }
 }
 
-async fn run_interactive(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode {
-    repl::run(trace, initial_mode).await
+fn run_sessions() -> ExitCode {
+    let workspace = match env::current_dir() {
+        Ok(workspace) => workspace,
+        Err(error) => {
+            eprintln!("error: cannot resolve current directory: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match session::list(&workspace) {
+        Ok(sessions) if sessions.is_empty() => {
+            println!("no durable sessions");
+            ExitCode::SUCCESS
+        }
+        Ok(sessions) => {
+            for session in sessions {
+                println!("{} ({} bytes)", session.id, session.bytes);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run_interactive(
+    trace: Option<PathBuf>,
+    initial_mode: ApprovalMode,
+    session: SessionRequest,
+) -> ExitCode {
+    repl::run(trace, initial_mode, session).await
 }
 
 async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
@@ -684,6 +784,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_durable_session_commands() {
+        let persistent = parse_args(vec!["--persist".to_string()]).unwrap();
+        let resume = parse_args(vec!["resume".to_string(), "s-123".to_string()]).unwrap();
+        let sessions = parse_args(vec!["sessions".to_string()]).unwrap();
+
+        assert_eq!(persistent.command, Command::Interactive);
+        assert!(persistent.persist);
+        assert_eq!(resume.command, Command::Resume);
+        assert_eq!(resume.prompt, "s-123");
+        assert_eq!(sessions.command, Command::Sessions);
+    }
+
+    #[test]
     fn joins_one_shot_prompt() {
         let invocation = parse_args(vec![
             "run".to_string(),
@@ -756,7 +869,7 @@ mod tests {
                 "events.jsonl".to_string(),
             ])
             .unwrap_err(),
-            "--trace is not supported by status or doctor"
+            "--trace is not supported by status, doctor, or sessions"
         );
         assert_eq!(
             parse_args(vec!["--version".to_string(), "extra".to_string()]).unwrap_err(),

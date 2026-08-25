@@ -120,6 +120,8 @@ impl RuntimeConfig {
             "mcp_http_servers": extensions.http_mcp_server_count(),
             "telemetry": false,
             "session_persistence": false,
+            "session_persistence_available": true,
+            "session_directory": self.workspace.join(".agents/sessions"),
             "command_sandbox": false,
             "world": world.status_json()
         })
@@ -165,7 +167,11 @@ impl RuntimeConfig {
             format!("mcp_stdio_servers: {}", extensions.stdio_mcp_server_count()),
             format!("mcp_http_servers: {}", extensions.http_mcp_server_count()),
             "telemetry: disabled".to_string(),
-            "session_persistence: disabled".to_string(),
+            "session_persistence: opt_in (--persist or resume)".to_string(),
+            format!(
+                "session_directory: {}",
+                self.workspace.join(".agents/sessions").display()
+            ),
             "command_sandbox: disabled".to_string(),
         ];
         lines.extend(world.status_lines());

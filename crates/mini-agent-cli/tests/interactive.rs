@@ -194,7 +194,9 @@ fn interactive_prints_banner_before_initialization_error() {
 
     assert_eq!(output.status.code(), Some(2));
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.starts_with("mini-agent — /auto /world /mcp /queue /new /help /exit\n"));
+    assert!(
+        stdout.starts_with("mini-agent — /auto /world /session /mcp /queue /new /help /exit\n")
+    );
     assert!(stdout.contains("world> "));
     assert!(stdout.contains("default | approval per_action"));
     assert!(stdout.ends_with("initializing extensions...\n"));
@@ -343,7 +345,7 @@ fn interactive_terminal_keeps_history_until_new() {
     fs::remove_dir_all(root).unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-agent — /auto /world /mcp /queue /new /help /exit"));
+    assert!(stdout.contains("mini-agent — /auto /world /session /mcp /queue /new /help /exit"));
     assert!(stdout.contains("assistant> reply-one"));
     assert!(stdout.contains("thinking> inspect carefully"));
     assert!(stdout.contains("queued ("));
@@ -362,6 +364,71 @@ fn interactive_terminal_keeps_history_until_new() {
     assert!(third["input"].to_string().contains("<world_state>"));
     assert!(!third["input"].to_string().contains("hello"));
     assert!(!third["input"].to_string().contains("again"));
+}
+
+#[test]
+fn durable_session_resumes_settled_history_after_restart() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        for reply in ["first durable answer", "resumed answer"] {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            requests_tx.send(read_request_body(&mut stream)).unwrap();
+            write_sse_response(&mut stream, reply);
+        }
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    let run = |arguments: &[&str], input: &[u8]| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
+            .current_dir(&root)
+            .args(arguments)
+            .env_remove("OPENAI_API_KEY")
+            .env_remove("OPENAI_MODEL")
+            .env_remove("OPENAI_BASE_URL")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(input).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+
+    let first_stdout = run(&["--persist"], b"first question\n/exit\n");
+    let session_id = first_stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("session> new "))
+        .and_then(|line| line.split_once(" |"))
+        .map(|(id, _)| id)
+        .unwrap();
+    let second_stdout = run(&["resume", session_id], b"second question\n/exit\n");
+
+    server.join().unwrap();
+    let first: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
+    let second: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
+    assert!(first["input"].to_string().contains("first question"));
+    assert!(second_stdout.contains(&format!("session> resumed {session_id}")));
+    assert!(second["input"].to_string().contains("first question"));
+    assert!(second["input"].to_string().contains("first durable answer"));
+    assert!(second["input"].to_string().contains("second question"));
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -532,7 +599,7 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     server.join().unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-agent — /auto /world /mcp /queue /new /help /exit"));
+    assert!(stdout.contains("mini-agent — /auto /world /session /mcp /queue /new /help /exit"));
     assert!(stdout.contains("auto mode on"));
     assert!(stdout.contains("auto-started"));
     assert!(stdout.contains("auto mode off; writes and shell commands require approval"));

@@ -2,6 +2,12 @@ use crate::harness_config;
 use crate::mcp;
 use crate::observer::RunObserver;
 use crate::print_auto_warning;
+use crate::session;
+use crate::session::OpenedSession;
+use crate::session::SessionRequest;
+use crate::session::SessionStore;
+use crate::session::TurnCommit;
+use crate::session::TurnStatus;
 use crate::skills;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
@@ -46,6 +52,7 @@ enum WorkerCommand {
     ClearHistory,
     ShowWorld,
     RefreshWorld,
+    ShowSession,
     EnableMcp,
     SetMode(ApprovalMode),
     Shutdown,
@@ -59,7 +66,11 @@ impl Observer for ChannelObserver {
     }
 }
 
-pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode {
+pub async fn run(
+    trace: Option<PathBuf>,
+    initial_mode: ApprovalMode,
+    session_request: SessionRequest,
+) -> ExitCode {
     let (event_tx, event_rx) = mpsc::sync_channel(EVENT_BUFFER);
     let approval_events = event_tx.clone();
     let interactive_terminal = io::stdin().is_terminal();
@@ -88,9 +99,9 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
         .map(|workspace| WorldState::detect(workspace, initial_mode));
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
-    let worker = spawn_worker(initial_mode, approval, worker_rx, event_tx);
+    let worker = spawn_worker(initial_mode, approval, session_request, worker_rx, event_tx);
 
-    println!("mini-agent — /auto /world /mcp /queue /new /help /exit");
+    println!("mini-agent — /auto /world /session /mcp /queue /new /help /exit");
     if initial_mode == ApprovalMode::Automatic {
         print_auto_warning();
         println!("auto mode on");
@@ -146,6 +157,9 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
                     "/world" => queue_work(&worker_tx, WorkerCommand::ShowWorld, &mut pending_work),
                     "/world refresh" => {
                         queue_work(&worker_tx, WorkerCommand::RefreshWorld, &mut pending_work)
+                    }
+                    "/session" => {
+                        queue_work(&worker_tx, WorkerCommand::ShowSession, &mut pending_work)
                     }
                     "/mcp" => queue_work(&worker_tx, WorkerCommand::EnableMcp, &mut pending_work),
                     "/auto" | "/auto on" => queue_work(
@@ -234,6 +248,7 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
 fn spawn_worker(
     initial_mode: ApprovalMode,
     approval: ApprovalController,
+    session_request: SessionRequest,
     commands: mpsc::Receiver<WorkerCommand>,
     events: mpsc::SyncSender<ReplEvent>,
 ) -> thread::JoinHandle<()> {
@@ -255,6 +270,52 @@ fn spawn_worker(
             mcp_tool_count,
             mut retry_mcp_servers,
         } = build;
+        let mut durable = match session_request {
+            SessionRequest::Disabled => None,
+            request => match SessionStore::open(world.workspace(), request) {
+                Ok(opened) => Some(opened),
+                Err(error) => {
+                    let _ = events.send(ReplEvent::InitializationFailed(error));
+                    let _ = events.send(ReplEvent::Exited);
+                    return;
+                }
+            },
+        };
+        if let Some(opened) = &mut durable {
+            if opened.resumed {
+                if let Err(error) = harness.restore_history(std::mem::take(&mut opened.messages)) {
+                    let _ = events.send(ReplEvent::InitializationFailed(format!(
+                        "cannot restore session history: {error}"
+                    )));
+                    let _ = events.send(ReplEvent::Exited);
+                    return;
+                }
+                match world.model_context() {
+                    Ok(context) => {
+                        if let Err(error) = harness.append_context(context) {
+                            let _ = events.send(ReplEvent::InitializationFailed(format!(
+                                "cannot append current world state: {error}"
+                            )));
+                            let _ = events.send(ReplEvent::Exited);
+                            return;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = events.send(ReplEvent::InitializationFailed(error));
+                        let _ = events.send(ReplEvent::Exited);
+                        return;
+                    }
+                }
+            }
+            let label = if opened.resumed { "resumed" } else { "new" };
+            let _ = events.send(ReplEvent::Notice(format!(
+                "session> {label} {} | thread {} | {}",
+                opened.store.session_id(),
+                opened.store.thread_id(),
+                opened.store.path().display()
+            )));
+            persist_latest_context(&mut durable, &harness, &events);
+        }
         let runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -290,8 +351,38 @@ fn spawn_worker(
         while let Ok(command) = commands.recv() {
             match command {
                 WorkerCommand::Prompt(prompt) => {
+                    let started_at_ms = session::timestamp_ms();
+                    let previous_messages = harness.messages().to_vec();
                     let mut observer = ChannelObserver(events.clone());
-                    match runtime.block_on(harness.run(prompt, &mut observer)) {
+                    let result = runtime.block_on(harness.run(prompt.clone(), &mut observer));
+                    let (status, steps, error) = match &result {
+                        Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
+                            (TurnStatus::StepLimit, outcome.steps, None)
+                        }
+                        Ok(outcome) => (TurnStatus::Completed, outcome.steps, None),
+                        Err(error) => (TurnStatus::Failed, 0, Some(error.to_string())),
+                    };
+                    let turn_messages = harness
+                        .messages()
+                        .strip_prefix(previous_messages.as_slice())
+                        .unwrap_or_else(|| harness.messages());
+                    if let Some(opened) = &mut durable
+                        && let Err(error) = opened.store.record_turn(TurnCommit {
+                            started_at_ms,
+                            prompt: &prompt,
+                            status,
+                            steps,
+                            error: error.as_deref(),
+                            messages: turn_messages,
+                            checkpoint: harness.messages(),
+                        })
+                    {
+                        let _ = events.send(ReplEvent::Warning(format!(
+                            "warning: session persistence stopped: {error}"
+                        )));
+                        durable = None;
+                    }
+                    match result {
                         Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
                             let _ = events.send(ReplEvent::Warning(format!(
                                 "warning: stopped after {} model steps",
@@ -303,10 +394,19 @@ fn spawn_worker(
                     }
                 }
                 WorkerCommand::ClearHistory => {
+                    if let Some(opened) = &mut durable
+                        && let Err(error) = opened.store.start_thread()
+                    {
+                        let _ = events.send(ReplEvent::Warning(format!(
+                            "warning: session persistence stopped: {error}"
+                        )));
+                        durable = None;
+                    }
                     harness.clear_history();
                     match world.model_context() {
                         Ok(context) => match harness.append_context(context) {
                             Ok(()) => {
+                                persist_latest_context(&mut durable, &harness, &events);
                                 let _ =
                                     events.send(ReplEvent::Notice("new conversation".to_string()));
                             }
@@ -335,6 +435,7 @@ fn spawn_worker(
                             Ok(context) => match harness.append_context(context) {
                                 Ok(()) => {
                                     world = refreshed;
+                                    persist_latest_context(&mut durable, &harness, &events);
                                     let _ = events.send(ReplEvent::Notice(
                                         "world> refreshed and appended to context".to_string(),
                                     ));
@@ -402,6 +503,22 @@ fn spawn_worker(
                         }
                     }
                 }
+                WorkerCommand::ShowSession => match &durable {
+                    Some(opened) => {
+                        let _ = events.send(ReplEvent::Notice(format!(
+                            "session> durable {} | thread {} | {}",
+                            opened.store.session_id(),
+                            opened.store.thread_id(),
+                            opened.store.path().display()
+                        )));
+                    }
+                    None => {
+                        let _ = events.send(ReplEvent::Notice(
+                            "session> in-memory; restart with --persist to make it durable"
+                                .to_string(),
+                        ));
+                    }
+                },
                 WorkerCommand::SetMode(mode) => {
                     approval.set_mode(mode);
                     let mut config = harness_config(mode);
@@ -411,7 +528,10 @@ fn spawn_worker(
                     if updated_world != world {
                         match updated_world.model_context() {
                             Ok(context) => match harness.append_context(context) {
-                                Ok(()) => world = updated_world,
+                                Ok(()) => {
+                                    world = updated_world;
+                                    persist_latest_context(&mut durable, &harness, &events);
+                                }
                                 Err(error) => {
                                     let _ = events.send(ReplEvent::Warning(format!(
                                         "error: cannot append execution mode state: {error}"
@@ -444,6 +564,32 @@ fn spawn_worker(
         }
         let _ = events.send(ReplEvent::Exited);
     })
+}
+
+fn persist_latest_context(
+    durable: &mut Option<OpenedSession>,
+    harness: &mini_agent_core::Harness<crate::openai::OpenAiModel>,
+    events: &mpsc::SyncSender<ReplEvent>,
+) {
+    let context = harness
+        .messages()
+        .iter()
+        .rev()
+        .find(|message| matches!(message, mini_agent_core::Message::Context { .. }))
+        .cloned();
+    let error = durable.as_mut().and_then(|opened| {
+        let context = context.as_ref()?;
+        opened
+            .store
+            .record_context(context, harness.messages())
+            .err()
+    });
+    if let Some(error) = error {
+        let _ = events.send(ReplEvent::Warning(format!(
+            "warning: session persistence stopped: {error}"
+        )));
+        *durable = None;
+    }
 }
 
 fn report_run_error(
@@ -559,6 +705,7 @@ fn print_help() {
     println!("/mcp       retry configured MCP servers that are not enabled");
     println!("/world     show detected environment, mode, and command capabilities");
     println!("/world refresh  detect changes and append a new world-state item");
+    println!("/session    show current in-memory or durable session identity");
     println!("/queue     show pending operations");
     println!("/new       clear this in-memory conversation");
     println!("/help      show local commands");

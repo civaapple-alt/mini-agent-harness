@@ -164,6 +164,35 @@ impl<M: Model> Harness<M> {
         Ok(())
     }
 
+    pub fn restore_history(&mut self, messages: Vec<Message>) -> Result<(), LimitExceeded> {
+        if let Some(actual) = messages.iter().find_map(|message| match message {
+            Message::Context { text } if text.len() > self.config.max_context_item_bytes => {
+                Some(text.len())
+            }
+            Message::Context { .. }
+            | Message::User { .. }
+            | Message::Assistant { .. }
+            | Message::Tool { .. } => None,
+        }) {
+            return Err(LimitExceeded {
+                kind: LimitKind::ContextItemBytes,
+                limit: self.config.max_context_item_bytes,
+                actual,
+            });
+        }
+        let tool_specs = self.tools.specs();
+        let actual = context_bytes_for(&self.config.system_prompt, &messages, &tool_specs);
+        if actual > self.config.max_context_bytes {
+            return Err(LimitExceeded {
+                kind: LimitKind::ContextBytes,
+                limit: self.config.max_context_bytes,
+                actual,
+            });
+        }
+        self.messages = messages;
+        Ok(())
+    }
+
     pub fn replace_config(&mut self, config: HarnessConfig) {
         self.config = config;
     }

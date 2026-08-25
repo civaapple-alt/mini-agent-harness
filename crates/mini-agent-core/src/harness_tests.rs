@@ -355,6 +355,31 @@ fn context_items_have_an_independent_hard_limit() {
     assert!(harness.messages().is_empty());
 }
 
+#[test]
+fn restores_only_history_that_fits_the_current_harness() {
+    let mut harness = Harness::new(
+        ScriptedModel {
+            responses: VecDeque::new(),
+        },
+        ToolRegistry::default(),
+        HarnessConfig::default(),
+    );
+    let messages = vec![Message::Context {
+        text: "persisted world".to_string(),
+    }];
+
+    harness.restore_history(messages.clone()).unwrap();
+
+    assert_eq!(harness.messages(), messages);
+    let error = harness
+        .restore_history(vec![Message::Context {
+            text: "x".repeat(HarnessConfig::default().max_context_item_bytes + 1),
+        }])
+        .unwrap_err();
+    assert_eq!(error.kind, LimitKind::ContextItemBytes);
+    assert_eq!(harness.messages(), messages);
+}
+
 #[tokio::test]
 async fn compacts_context_and_continues_the_tool_loop() {
     let long_tool_value = "x".repeat(300);
