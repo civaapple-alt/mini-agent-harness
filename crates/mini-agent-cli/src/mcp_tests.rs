@@ -7,6 +7,8 @@ use std::io::Read;
 use std::io::Write;
 use std::net::TcpListener;
 use std::process::Command as StdCommand;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -232,11 +234,13 @@ fn python_command() -> String {
 }
 
 fn test_root() -> PathBuf {
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("mini-agent-mcp-{nonce}"));
+    let sequence = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("mini-agent-mcp-{nonce}-{sequence}"));
     fs::create_dir(&root).unwrap();
     root
 }

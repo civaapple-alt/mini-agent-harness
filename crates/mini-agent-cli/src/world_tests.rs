@@ -1,4 +1,6 @@
 use super::*;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -79,11 +81,13 @@ fn command_probe_uses_explicit_search_paths() {
 }
 
 fn test_root() -> PathBuf {
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = env::temp_dir().join(format!("mini-agent-world-{nonce}"));
+    let sequence = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
+    let root = env::temp_dir().join(format!("mini-agent-world-{nonce}-{sequence}"));
     fs::create_dir(&root).unwrap();
     root
 }

@@ -1,5 +1,7 @@
 use super::*;
 use serde_json::json;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -192,11 +194,13 @@ fn direct_marketplace_skill_wins_over_same_named_plugin_bundle() {
 }
 
 fn test_root() -> PathBuf {
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("mini-agent-marketplace-{nonce}"));
+    let sequence = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("mini-agent-marketplace-{nonce}-{sequence}"));
     fs::create_dir(&root).unwrap();
     root
 }
