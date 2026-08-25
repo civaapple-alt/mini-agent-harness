@@ -59,3 +59,51 @@ fn redirected_and_json_ask_hold_the_final_answer() {
         AssistantDisplay::Hidden
     ));
 }
+
+#[test]
+fn shell_tool_start_includes_a_bounded_single_line_command() {
+    let call = ToolCall {
+        id: "call-1".to_string(),
+        name: "shell".to_string(),
+        arguments: json!({"command": "Get-ChildItem\n-Force"}),
+    };
+
+    assert_eq!(
+        format_tool_started(&call, false),
+        "tool> shell — Get-ChildItem\\n-Force"
+    );
+
+    let long_call = ToolCall {
+        arguments: json!({"command": "x".repeat(MAX_TOOL_DETAIL_BYTES + 1)}),
+        ..call
+    };
+    let detail = tool_detail(&long_call).unwrap();
+    assert!(detail.ends_with('…'));
+    assert!(detail.len() <= MAX_TOOL_DETAIL_BYTES);
+}
+
+#[test]
+fn file_tool_start_only_displays_the_path() {
+    let call = ToolCall {
+        id: "call-1".to_string(),
+        name: "write_file".to_string(),
+        arguments: json!({"path": "README.md", "content": "secret"}),
+    };
+
+    assert_eq!(
+        format_tool_started(&call, false),
+        "tool> write_file — README.md"
+    );
+    assert!(!format_tool_started(&call, false).contains("secret"));
+}
+
+#[test]
+fn unknown_tool_start_does_not_display_arbitrary_arguments() {
+    let call = ToolCall {
+        id: "call-1".to_string(),
+        name: "project/mcp_tool".to_string(),
+        arguments: json!({"token": "secret"}),
+    };
+
+    assert_eq!(format_tool_started(&call, false), "tool> project/mcp_tool");
+}

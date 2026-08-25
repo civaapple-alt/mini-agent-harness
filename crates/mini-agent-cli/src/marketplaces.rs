@@ -19,6 +19,7 @@ pub struct MarketplacePlugin {
     pub root: PathBuf,
     pub explicit_skills: Option<Vec<PathBuf>>,
     pub ecosystem: &'static str,
+    pub is_plugin: bool,
 }
 
 #[derive(Debug, Default)]
@@ -140,6 +141,7 @@ fn discover_selected_plugins(
                     root: marketplace_root.to_path_buf(),
                     explicit_skills: Some(vec![skill_root]),
                     ecosystem,
+                    is_plugin: false,
                 }),
                 Err(error) => discovery.diagnostics.push(error),
             }
@@ -205,6 +207,7 @@ fn discover_selected_plugins(
             root: plugin_root,
             explicit_skills,
             ecosystem,
+            is_plugin: true,
         });
     }
 }

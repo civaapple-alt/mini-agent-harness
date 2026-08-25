@@ -15,12 +15,20 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   with bounded headers, environment placeholders, and connection timeouts.
 - Individual immediate skills can be selected from cloned marketplaces without
   enabling their containing plugin bundle.
+- Interactive `/mcp` retries configured servers that were denied or unavailable
+  during startup without clearing conversation history.
+- The REPL welcome block lists bounded skill, plugin, and MCP summaries and
+  reports MCP transitions from inactive to enabled.
 
 ### Fixed
 
 - `ask` no longer echoes streamed assistant text before printing its final
   result; terminals retain one `assistant>` tag while redirected stdout stays
   raw.
+- Interactive startup no longer blocks before displaying the REPL when an MCP
+  server requires connection approval.
+- Tool start events now show bounded shell and managed-process commands; file
+  tools show only their path and arbitrary MCP arguments remain hidden.
 
 ### Changed
 

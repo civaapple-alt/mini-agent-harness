@@ -69,7 +69,10 @@ edge. Reasoning and final-answer deltas use separate `thinking>` and
 `NO_COLOR` sessions stay plain. Input entered while a turn is running is
 accepted into a bounded FIFO queue; `/queue` reports how much work is pending.
 History and queued work live only for the life of the process, and `/new`
-clears history.
+clears history. If an MCP server is denied or fails during startup, `/mcp`
+retries it without clearing conversation history. The welcome block lists a
+bounded set of discovered skill and plugin names and shows configured MCP
+servers as inactive until connection approval succeeds.
 
 ## Install
 
@@ -189,10 +192,13 @@ Rust MCP SDK; legacy SSE is rejected. HTTP configs may declare headers with
 Interactive OAuth browser flows are not implemented; use an anonymous endpoint
 or provide an already-issued credential through an explicit header.
 Connection and every MCP tool call require approval unless auto mode is
-explicitly enabled. Tools are exposed as `mcp__<plugin>_<server>__<tool>` and
-remain bounded. Stdio servers receive a small ambient environment allowlist,
-declared `env`, `PLUGIN_ROOT`, `CLAUDE_PLUGIN_ROOT`, and persistent
-`.agents/plugin-data/<plugin>`; provider credentials are not inherited.
+explicitly enabled. A server rejected or unavailable during interactive startup
+can be retried with `/mcp`; successfully discovered tools are added to the
+current conversation without resetting history. Tools are exposed as
+`mcp__<plugin>_<server>__<tool>` and remain bounded. Stdio servers receive a
+small ambient environment allowlist, declared `env`, `PLUGIN_ROOT`,
+`CLAUDE_PLUGIN_ROOT`, and persistent `.agents/plugin-data/<plugin>`; provider
+credentials are not inherited.
 
 See [configuration](docs/configuration.md) and the copyable
 [extension examples](examples/extensions/README.md).

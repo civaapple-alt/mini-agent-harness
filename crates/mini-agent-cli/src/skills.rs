@@ -49,7 +49,7 @@ pub struct McpServerConfig {
 pub struct Discovery {
     skills: Vec<Skill>,
     mcp_servers: Vec<McpServerConfig>,
-    plugins: usize,
+    plugins: Vec<String>,
     marketplaces: usize,
     diagnostics: Vec<String>,
 }
@@ -81,6 +81,19 @@ enum SkillDiscoveryPolicy {
     Direct,
     Strict,
     Compatible,
+}
+
+#[derive(Clone, Copy)]
+enum PluginAccounting {
+    Count,
+    Skip,
+}
+
+struct PluginLoadOptions<'a> {
+    expected_name: Option<&'a str>,
+    explicit_skills: Option<&'a [PathBuf]>,
+    accounting: PluginAccounting,
+    source: &'a str,
 }
 
 pub fn discover(workspace: &Path) -> Discovery {
@@ -140,7 +153,26 @@ impl Discovery {
     }
 
     pub fn plugin_count(&self) -> usize {
-        self.plugins
+        self.plugins.len()
+    }
+
+    pub fn skill_names(&self) -> Vec<String> {
+        self.skills
+            .iter()
+            .filter(|skill| skill.kind == "skill")
+            .map(|skill| skill.name.clone())
+            .collect()
+    }
+
+    pub fn plugin_names(&self) -> Vec<String> {
+        self.plugins.clone()
+    }
+
+    pub fn mcp_server_labels(&self) -> Vec<String> {
+        self.mcp_servers
+            .iter()
+            .map(|server| format!("{}/{}", server.plugin_name, server.server_name))
+            .collect()
     }
 
     pub fn marketplace_count(&self) -> usize {
@@ -222,9 +254,12 @@ fn discover_plugins(
         load_plugin(
             workspace,
             &plugin_root,
-            None,
-            None,
-            "installed",
+            PluginLoadOptions {
+                expected_name: None,
+                explicit_skills: None,
+                accounting: PluginAccounting::Count,
+                source: "installed",
+            },
             skills,
             discovery,
         );
@@ -299,9 +334,16 @@ fn discover_marketplaces(
         load_plugin(
             workspace,
             &plugin.root,
-            Some(&plugin.name),
-            plugin.explicit_skills.as_deref(),
-            plugin.ecosystem,
+            PluginLoadOptions {
+                expected_name: Some(&plugin.name),
+                explicit_skills: plugin.explicit_skills.as_deref(),
+                accounting: if plugin.is_plugin {
+                    PluginAccounting::Count
+                } else {
+                    PluginAccounting::Skip
+                },
+                source: plugin.ecosystem,
+            },
             skills,
             discovery,
         );
@@ -319,12 +361,16 @@ enum PluginFlavor {
 fn load_plugin(
     workspace: &Path,
     plugin_root: &Path,
-    expected_name: Option<&str>,
-    explicit_skills: Option<&[PathBuf]>,
-    source: &str,
+    options: PluginLoadOptions<'_>,
     skills: &mut BTreeMap<String, Skill>,
     discovery: &mut Discovery,
 ) {
+    let PluginLoadOptions {
+        expected_name,
+        explicit_skills,
+        accounting,
+        source,
+    } = options;
     let manifest = find_plugin_manifest(plugin_root);
     let (plugin_name, flavor) = match manifest {
         Ok(Some((manifest_path, PluginFlavor::Portable))) => {
@@ -383,7 +429,9 @@ fn load_plugin(
         ));
         return;
     }
-    discovery.plugins += 1;
+    if matches!(accounting, PluginAccounting::Count) {
+        discovery.plugins.push(plugin_name.clone());
+    }
     let source = format!("{source} plugin {plugin_name}");
     if let Some(explicit_skills) = explicit_skills {
         for skill_root in explicit_skills {

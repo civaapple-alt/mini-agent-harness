@@ -115,6 +115,14 @@ for line in sys.stdin:
 
     assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
     assert_eq!(loaded.tools.len(), 1);
+    assert_eq!(
+        loaded
+            .loaded_servers
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["fixture.tools/fixture"]
+    );
     let tool = loaded.tools.pop().unwrap();
     assert_eq!(tool.spec().name, "mcp__fixture_tools_fixture__echo");
     let output = tool.execute(&serde_json::json!({"text": "hello"})).unwrap();
@@ -154,6 +162,14 @@ fn loads_and_calls_streamable_http_server_with_expanded_headers() {
 
     assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
     assert_eq!(loaded.tools.len(), 1);
+    assert_eq!(
+        loaded
+            .loaded_servers
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["fixture.http/fixture"]
+    );
     let tool = loaded.tools.pop().unwrap();
     assert_eq!(tool.spec().name, "mcp__fixture_http_fixture__echo");
     let output = tool.execute(&serde_json::json!({"text": "hello"})).unwrap();
@@ -191,6 +207,7 @@ fn approval_denial_prevents_server_start_and_data_creation() {
     let loaded = load(&[config], approval);
 
     assert!(loaded.tools.is_empty());
+    assert!(loaded.loaded_servers.is_empty());
     assert!(
         loaded
             .diagnostics

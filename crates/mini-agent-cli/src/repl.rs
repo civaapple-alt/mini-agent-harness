@@ -1,7 +1,8 @@
-use crate::build_openai_harness;
 use crate::harness_config;
+use crate::mcp;
 use crate::observer::RunObserver;
 use crate::print_auto_warning;
+use crate::skills;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
 use mini_agent_core::Event;
@@ -22,15 +23,18 @@ use std::thread;
 const MAX_QUEUED_INPUTS: usize = 16;
 const MAX_INPUT_BYTES: usize = 32 * 1024;
 const EVENT_BUFFER: usize = 64;
+const MAX_WELCOME_NAMES: usize = 8;
 
 enum ReplEvent {
     Input(Result<Option<String>, String>),
     Observed(Event),
+    Ready,
     WorkFinished,
     Approval {
         action: String,
         response: mpsc::SyncSender<bool>,
     },
+    InitializationFailed(String),
     Notice(String),
     Warning(String),
     Exited,
@@ -39,6 +43,7 @@ enum ReplEvent {
 enum WorkerCommand {
     Prompt(String),
     ClearHistory,
+    EnableMcp,
     SetMode(ApprovalMode),
     Shutdown,
 }
@@ -64,13 +69,6 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
             )))
         }
     });
-    let harness = match build_openai_harness(approval.clone(), harness_config(initial_mode)) {
-        Ok(harness) => harness,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(2);
-        }
-    };
     let mut observer = match RunObserver::new(trace) {
         Ok(observer) => observer,
         Err(error) => {
@@ -78,20 +76,28 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
             return ExitCode::FAILURE;
         }
     };
+    let startup_extensions = std::env::current_dir()
+        .ok()
+        .map(|workspace| skills::discover(&workspace));
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
-    let worker = spawn_worker(harness, approval, worker_rx, event_tx);
+    let worker = spawn_worker(initial_mode, approval, worker_rx, event_tx);
 
-    println!("mini-agent — /auto /queue /new /help /exit");
+    println!("mini-agent — /auto /mcp /queue /new /help /exit");
     if initial_mode == ApprovalMode::Automatic {
         print_auto_warning();
         println!("auto mode on");
     }
-    print_prompt();
+    if let Some(discovery) = startup_extensions {
+        print_extension_summary(&discovery);
+    }
+    println!("initializing extensions...");
 
     let mut pending_work = 0usize;
     let mut pending_approval: VecDeque<mpsc::SyncSender<bool>> = VecDeque::new();
+    let mut ready = false;
     let mut exiting = false;
+    let mut initialization_failed = false;
     while let Ok(event) = event_rx.recv() {
         match event {
             ReplEvent::Input(Ok(Some(line))) => {
@@ -114,19 +120,20 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
                     }
                     "/help" => {
                         print_help();
-                        if pending_work == 0 {
+                        if ready && pending_work == 0 {
                             print_prompt();
                         }
                     }
                     "/queue" => {
                         println!("{pending_work} pending operation(s)");
-                        if pending_work == 0 {
+                        if ready && pending_work == 0 {
                             print_prompt();
                         }
                     }
                     "/new" => {
                         queue_work(&worker_tx, WorkerCommand::ClearHistory, &mut pending_work)
                     }
+                    "/mcp" => queue_work(&worker_tx, WorkerCommand::EnableMcp, &mut pending_work),
                     "/auto" | "/auto on" => queue_work(
                         &worker_tx,
                         WorkerCommand::SetMode(ApprovalMode::Automatic),
@@ -139,13 +146,13 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
                     ),
                     command if command.starts_with('/') => {
                         eprintln!("unknown local command: {command}");
-                        if pending_work == 0 {
+                        if ready && pending_work == 0 {
                             print_prompt();
                         }
                     }
                     _ if input.len() > MAX_INPUT_BYTES => {
                         eprintln!("input exceeds {MAX_INPUT_BYTES} byte limit");
-                        if pending_work == 0 {
+                        if ready && pending_work == 0 {
                             print_prompt();
                         }
                     }
@@ -171,10 +178,16 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
                 let _ = worker_tx.send(WorkerCommand::Shutdown);
             }
             ReplEvent::Observed(event) => observer.observe(&event),
+            ReplEvent::Ready => {
+                ready = true;
+                if pending_work == 0 && !exiting {
+                    print_prompt();
+                }
+            }
             ReplEvent::WorkFinished => {
                 observer.finish();
                 pending_work = pending_work.saturating_sub(1);
-                if pending_work == 0 && !exiting {
+                if ready && pending_work == 0 && !exiting {
                     print_prompt();
                 }
             }
@@ -182,6 +195,10 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
                 eprint!("approve {action}? [y/N] ");
                 let _ = io::stderr().flush();
                 pending_approval.push_back(response);
+            }
+            ReplEvent::InitializationFailed(error) => {
+                eprintln!("error: {error}");
+                initialization_failed = true;
             }
             ReplEvent::Notice(message) => println!("{message}"),
             ReplEvent::Warning(message) => eprintln!("{message}"),
@@ -191,7 +208,9 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
 
     observer.finish();
     let _ = worker.join();
-    if exiting {
+    if initialization_failed {
+        ExitCode::from(2)
+    } else if exiting {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
@@ -199,12 +218,27 @@ pub async fn run(trace: Option<PathBuf>, initial_mode: ApprovalMode) -> ExitCode
 }
 
 fn spawn_worker(
-    mut harness: mini_agent_core::Harness<crate::openai::OpenAiModel>,
+    initial_mode: ApprovalMode,
     approval: ApprovalController,
     commands: mpsc::Receiver<WorkerCommand>,
     events: mpsc::SyncSender<ReplEvent>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
+        let build = match crate::build_repl_harness(approval.clone(), harness_config(initial_mode))
+        {
+            Ok(build) => build,
+            Err(error) => {
+                let _ = events.send(ReplEvent::InitializationFailed(error));
+                let _ = events.send(ReplEvent::Exited);
+                return;
+            }
+        };
+        let crate::ReplHarnessBuild {
+            mut harness,
+            enabled_mcp_servers,
+            mcp_tool_count,
+            mut retry_mcp_servers,
+        } = build;
         let runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -218,6 +252,25 @@ fn spawn_worker(
                 return;
             }
         };
+        if !enabled_mcp_servers.is_empty() {
+            let _ = events.send(ReplEvent::Notice(format!(
+                "mcp> enabled — {} ({mcp_tool_count} tool(s))",
+                bounded_names(&enabled_mcp_servers)
+            )));
+        }
+        if !retry_mcp_servers.is_empty() {
+            let inactive = retry_mcp_servers
+                .iter()
+                .map(|server| format!("{}/{}", server.plugin_name, server.server_name))
+                .collect::<Vec<_>>();
+            let _ = events.send(ReplEvent::Notice(format!(
+                "mcp> inactive — {}; use /mcp to retry",
+                bounded_names(&inactive)
+            )));
+        }
+        if events.send(ReplEvent::Ready).is_err() {
+            return;
+        }
         while let Ok(command) = commands.recv() {
             match command {
                 WorkerCommand::Prompt(prompt) => {
@@ -236,6 +289,51 @@ fn spawn_worker(
                 WorkerCommand::ClearHistory => {
                     harness.clear_history();
                     let _ = events.send(ReplEvent::Notice("new conversation".to_string()));
+                }
+                WorkerCommand::EnableMcp => {
+                    if retry_mcp_servers.is_empty() {
+                        let _ = events.send(ReplEvent::Notice(
+                            "no MCP servers are waiting to be enabled".to_string(),
+                        ));
+                    } else {
+                        let mcp::LoadResult {
+                            tools,
+                            loaded_servers,
+                            diagnostics,
+                        } = mcp::load(&retry_mcp_servers, approval.clone());
+                        for diagnostic in diagnostics {
+                            let _ =
+                                events.send(ReplEvent::Warning(format!("warning: {diagnostic}")));
+                        }
+                        retry_mcp_servers.retain(|server| {
+                            !loaded_servers
+                                .contains(&format!("{}/{}", server.plugin_name, server.server_name))
+                        });
+                        let enabled = loaded_servers.iter().cloned().collect::<Vec<_>>();
+                        let tool_count = tools.len();
+                        harness.extend_tools(tools);
+                        let message = if enabled.is_empty() {
+                            "mcp> inactive — no servers enabled; use /mcp to retry".to_string()
+                        } else {
+                            format!(
+                                "mcp> enabled — {} ({tool_count} tool(s))",
+                                bounded_names(&enabled)
+                            )
+                        };
+                        let _ = events.send(ReplEvent::Notice(message));
+                        if !retry_mcp_servers.is_empty() {
+                            let inactive = retry_mcp_servers
+                                .iter()
+                                .map(|server| {
+                                    format!("{}/{}", server.plugin_name, server.server_name)
+                                })
+                                .collect::<Vec<_>>();
+                            let _ = events.send(ReplEvent::Notice(format!(
+                                "mcp> inactive — {}; use /mcp to retry",
+                                bounded_names(&inactive)
+                            )));
+                        }
+                    }
                 }
                 WorkerCommand::SetMode(mode) => {
                     approval.set_mode(mode);
@@ -326,9 +424,52 @@ fn queue_work(
     }
 }
 
+fn print_extension_summary(discovery: &skills::Discovery) {
+    print_loaded_extensions("skill", discovery.skill_names());
+    print_loaded_extensions("plugin", discovery.plugin_names());
+    let mut mcp_servers = discovery.mcp_server_labels();
+    mcp_servers.sort();
+    if mcp_servers.is_empty() {
+        println!("mcp> none configured");
+    } else {
+        println!(
+            "mcp> {} configured, inactive — {}",
+            mcp_servers.len(),
+            bounded_names(&mcp_servers)
+        );
+    }
+}
+
+fn print_loaded_extensions(label: &str, mut names: Vec<String>) {
+    names.sort();
+    if names.is_empty() {
+        println!("{label}> none");
+    } else {
+        println!(
+            "{label}> {} loaded — {}",
+            names.len(),
+            bounded_names(&names)
+        );
+    }
+}
+
+fn bounded_names(names: &[String]) -> String {
+    let mut summary = names
+        .iter()
+        .take(MAX_WELCOME_NAMES)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if names.len() > MAX_WELCOME_NAMES {
+        summary.push_str(&format!(", +{} more", names.len() - MAX_WELCOME_NAMES));
+    }
+    summary
+}
+
 fn print_help() {
     println!("/auto      enable automatic execution");
     println!("/auto off  require approval for writes and shell commands");
+    println!("/mcp       retry configured MCP servers that are not enabled");
     println!("/queue     show pending operations");
     println!("/new       clear this in-memory conversation");
     println!("/help      show local commands");

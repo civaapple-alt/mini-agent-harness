@@ -172,6 +172,78 @@ fn status_json_remains_structured_when_env_file_is_invalid() {
 }
 
 #[test]
+fn interactive_prints_banner_before_initialization_error() {
+    let root = test_root();
+    fs::write(root.join(".env"), "NOT VALID\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
+        .current_dir(&root)
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "mini-agent — /auto /mcp /queue /new /help /exit\nskill> none\nplugin> none\nmcp> none configured\ninitializing extensions...\n"
+    );
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("invalid .env line")
+    );
+}
+
+#[test]
+fn interactive_mcp_command_reports_when_nothing_needs_retry() {
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=https://example.invalid\n",
+    )
+    .unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
+        .current_dir(&root)
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"/mcp\n/exit\n")
+        .unwrap();
+
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(status.success(), "stderr: {stderr}");
+    assert!(stdout.contains("no MCP servers are waiting to be enabled"));
+}
+
+#[test]
 fn subcommand_help_succeeds_without_configuration() {
     let root = test_root();
     let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
@@ -259,7 +331,7 @@ fn interactive_terminal_keeps_history_until_new() {
     fs::remove_dir_all(root).unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-agent — /auto /queue /new /help /exit"));
+    assert!(stdout.contains("mini-agent — /auto /mcp /queue /new /help /exit"));
     assert!(stdout.contains("assistant> reply-one"));
     assert!(stdout.contains("thinking> inspect carefully"));
     assert!(stdout.contains("queued ("));
@@ -442,7 +514,7 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     server.join().unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-agent — /auto /queue /new /help /exit"));
+    assert!(stdout.contains("mini-agent — /auto /mcp /queue /new /help /exit"));
     assert!(stdout.contains("auto mode on"));
     assert!(stdout.contains("auto-started"));
     assert!(stdout.contains("auto mode off; writes and shell commands require approval"));

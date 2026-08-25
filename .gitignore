@@ -2,4 +2,4 @@
 .env
 .tmp/
 /scripts/__pycache__/
-/.agents/plugin-data/
+.agents/

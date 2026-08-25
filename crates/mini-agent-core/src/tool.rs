@@ -46,6 +46,10 @@ impl ToolRegistry {
         self.tools.iter().map(|tool| tool.spec()).collect()
     }
 
+    pub fn extend(&mut self, tools: Vec<Box<dyn Tool>>) {
+        self.tools.extend(tools);
+    }
+
     pub fn execute(&self, name: &str, arguments: &Value) -> Result<String, ToolError> {
         let tool = self
             .tools

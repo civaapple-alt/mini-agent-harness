@@ -481,11 +481,34 @@ fn build_openai_harness(
     build_openai_harness_with(&runtime_config, approval, config)
 }
 
+struct ReplHarnessBuild {
+    harness: Harness<OpenAiModel>,
+    enabled_mcp_servers: Vec<String>,
+    mcp_tool_count: usize,
+    retry_mcp_servers: Vec<skills::McpServerConfig>,
+}
+
+fn build_repl_harness(
+    approval: ApprovalController,
+    config: HarnessConfig,
+) -> Result<ReplHarnessBuild, String> {
+    let runtime_config = RuntimeConfig::load()?;
+    build_openai_harness_with_retries(&runtime_config, approval, config)
+}
+
 fn build_openai_harness_with(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
-    mut config: HarnessConfig,
+    config: HarnessConfig,
 ) -> Result<Harness<OpenAiModel>, String> {
+    build_openai_harness_with_retries(runtime_config, approval, config).map(|build| build.harness)
+}
+
+fn build_openai_harness_with_retries(
+    runtime_config: &RuntimeConfig,
+    approval: ApprovalController,
+    mut config: HarnessConfig,
+) -> Result<ReplHarnessBuild, String> {
     let provider = runtime_config.provider_settings()?;
     let model = match OpenAiModel::new(provider.api_key, provider.model, provider.base_url) {
         Ok(model) => model,
@@ -503,12 +526,30 @@ fn build_openai_harness_with(
         Ok(tools) => tools,
         Err(error) => return Err(error.to_string()),
     };
-    let mcp = mcp::load(skill_discovery.mcp_servers(), approval);
-    for diagnostic in mcp.diagnostics {
+    let configured_mcp_servers = skill_discovery.mcp_servers().to_vec();
+    let mcp::LoadResult {
+        tools: mcp_tools,
+        loaded_servers,
+        diagnostics,
+    } = mcp::load(&configured_mcp_servers, approval);
+    for diagnostic in diagnostics {
         eprintln!("warning: {diagnostic}");
     }
-    tools.extend(mcp.tools);
-    Ok(Harness::new(model, ToolRegistry::new(tools), config))
+    let enabled_mcp_servers = loaded_servers.iter().cloned().collect();
+    let mcp_tool_count = mcp_tools.len();
+    tools.extend(mcp_tools);
+    let retry_mcp_servers = configured_mcp_servers
+        .into_iter()
+        .filter(|server| {
+            !loaded_servers.contains(&format!("{}/{}", server.plugin_name, server.server_name))
+        })
+        .collect();
+    Ok(ReplHarnessBuild {
+        harness: Harness::new(model, ToolRegistry::new(tools), config),
+        enabled_mcp_servers,
+        mcp_tool_count,
+        retry_mcp_servers,
+    })
 }
 
 fn harness_config(mode: ApprovalMode) -> HarnessConfig {

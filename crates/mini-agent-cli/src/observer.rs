@@ -1,5 +1,6 @@
 use mini_agent_core::Event;
 use mini_agent_core::Observer;
+use mini_agent_core::ToolCall;
 use serde_json::Value;
 use serde_json::json;
 use std::fs::OpenOptions;
@@ -61,6 +62,8 @@ enum TagColor {
     Magenta,
     Cyan,
 }
+
+const MAX_TOOL_DETAIL_BYTES: usize = 512;
 
 #[derive(Default)]
 struct RunStats {
@@ -299,6 +302,49 @@ fn script_assistant_display(format: ScriptFormat, terminal: bool, color: bool) -
     }
 }
 
+fn format_tool_started(call: &ToolCall, color: bool) -> String {
+    let tag = styled_tag("tool>", TagColor::Yellow, color);
+    match tool_detail(call) {
+        Some(detail) => format!("{tag} {} — {detail}", call.name),
+        None => format!("{tag} {}", call.name),
+    }
+}
+
+fn tool_detail(call: &ToolCall) -> Option<String> {
+    let field = match call.name.as_str() {
+        "shell" | "process_start" => "command",
+        "read_file" | "edit_file" | "write_file" => "path",
+        "process_read" | "process_stop" => "process_id",
+        "read_tool_result" => "handle",
+        _ => return None,
+    };
+    let value = call.arguments.get(field)?;
+    let value = value
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| value.to_string());
+    Some(bounded_single_line(&value, MAX_TOOL_DETAIL_BYTES))
+}
+
+fn bounded_single_line(value: &str, max_bytes: usize) -> String {
+    let mut output = String::with_capacity(value.len().min(max_bytes));
+    for character in value.chars() {
+        let escaped = match character {
+            '\r' => "\\r".to_string(),
+            '\n' => "\\n".to_string(),
+            '\t' => "\\t".to_string(),
+            character if character.is_control() => format!("\\u{{{:x}}}", character as u32),
+            character => character.to_string(),
+        };
+        if output.len().saturating_add(escaped.len()) > max_bytes.saturating_sub('…'.len_utf8()) {
+            output.push('…');
+            break;
+        }
+        output.push_str(&escaped);
+    }
+    output
+}
+
 impl Observer for TerminalObserver {
     fn observe(&mut self, event: &Event) {
         match event {
@@ -341,11 +387,7 @@ impl Observer for TerminalObserver {
             }
             Event::ToolStarted { call } => {
                 self.end_stream();
-                self.target.line(&format!(
-                    "{} {}",
-                    styled_tag("tool>", TagColor::Yellow, self.color),
-                    call.name
-                ));
+                self.target.line(&format_tool_started(call, self.color));
             }
             Event::ToolFinished {
                 content, is_error, ..

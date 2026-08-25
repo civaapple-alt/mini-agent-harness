@@ -53,3 +53,5 @@ standalone server. `status --json` separates `mcp_stdio_servers` and
 
 An HTTP server can also fail because a referenced header environment variable
 is missing. Use `${NAME:-}` only when an empty value is valid for that server.
+If a connection was denied or startup failed transiently, enter `/mcp` in the
+same interactive session to retry. Existing conversation history is preserved.

@@ -36,6 +36,7 @@ const MAX_EXPOSED_NAME_BYTES: usize = 64;
 
 pub struct LoadResult {
     pub tools: Vec<Box<dyn Tool>>,
+    pub loaded_servers: BTreeSet<String>,
     pub diagnostics: Vec<String>,
 }
 
@@ -84,6 +85,7 @@ pub fn load(servers: &[McpServerConfig], approval: ApprovalController) -> LoadRe
     }
 
     let mut tools: Vec<Box<dyn Tool>> = Vec::new();
+    let mut loaded_servers = BTreeSet::new();
     let mut exposed_names = BTreeSet::new();
     for server in pending {
         let remote_tools = match server.startup.recv_timeout(server.startup_wait) {
@@ -100,12 +102,17 @@ pub fn load(servers: &[McpServerConfig], approval: ApprovalController) -> LoadRe
                 continue;
             }
         };
+        loaded_servers.insert(server.label.clone());
         for remote in remote_tools {
             if tools.len() >= MAX_MCP_TOOLS {
                 diagnostics.push(format!(
                     "MCP tool limit reached ({MAX_MCP_TOOLS}); remaining tools were skipped"
                 ));
-                return LoadResult { tools, diagnostics };
+                return LoadResult {
+                    tools,
+                    loaded_servers,
+                    diagnostics,
+                };
             }
             let Some(name) = exposed_tool_name(&server.label, &remote.name) else {
                 diagnostics.push(format!(
@@ -134,7 +141,11 @@ pub fn load(servers: &[McpServerConfig], approval: ApprovalController) -> LoadRe
             }));
         }
     }
-    LoadResult { tools, diagnostics }
+    LoadResult {
+        tools,
+        loaded_servers,
+        diagnostics,
+    }
 }
 
 impl Tool for McpTool {

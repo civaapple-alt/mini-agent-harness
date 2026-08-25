@@ -32,6 +32,7 @@ fn selects_only_local_marketplace_plugins() {
     assert_eq!(discovery.marketplace_count, 1);
     assert_eq!(discovery.plugins.len(), 1);
     assert_eq!(discovery.plugins[0].name, "local");
+    assert!(discovery.plugins[0].is_plugin);
     assert!(
         discovery
             .diagnostics
@@ -138,6 +139,7 @@ fn selects_a_root_marketplace_skill_by_directory_name() {
     assert_eq!(discovery.marketplace_count, 1);
     assert_eq!(discovery.plugins.len(), 1);
     assert_eq!(discovery.plugins[0].name, "skill-creator");
+    assert!(!discovery.plugins[0].is_plugin);
     assert_eq!(
         discovery.plugins[0].root,
         marketplace.canonicalize().unwrap()
@@ -180,6 +182,7 @@ fn direct_marketplace_skill_wins_over_same_named_plugin_bundle() {
     let discovery = discover(&root.canonicalize().unwrap());
 
     assert_eq!(discovery.plugins.len(), 1);
+    assert!(!discovery.plugins[0].is_plugin);
     assert_eq!(
         discovery.plugins[0].explicit_skills,
         Some(vec![skill.canonicalize().unwrap()])

@@ -151,6 +151,10 @@ impl<M: Model> Harness<M> {
         self.config = config;
     }
 
+    pub fn extend_tools(&mut self, tools: Vec<Box<dyn crate::Tool>>) {
+        self.tools.extend(tools);
+    }
+
     pub async fn run<O: Observer + Send>(
         &mut self,
         prompt: impl Into<String>,
