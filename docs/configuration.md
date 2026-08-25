@@ -4,7 +4,13 @@ mini-agent resolves provider settings in this order:
 
 1. process environment;
 2. `.env` in the startup workspace;
-3. a built-in default, where one exists.
+3. `~/.mini-agent/.env` (`%USERPROFILE%\.mini-agent\.env` on Windows);
+4. a built-in default, where one exists.
+
+A PATH-installed binary should keep credentials in the user file so they are
+not copied into every workspace. A workspace `.env` still overrides the user
+file when a project needs a different key or model. `status` reports the
+non-secret source of each value.
 
 | Variable | Required | Meaning |
 | --- | --- | --- |

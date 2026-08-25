@@ -7,6 +7,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Added
 
+- User-level provider settings at `~/.mini-agent/.env`, below process
+  environment and workspace `.env`, so a PATH-installed binary can keep
+  credentials out of project directories.
 - Minimal project-scoped Agent Skills and Agent Plugins 1.0.0 discovery with
   progressive skill disclosure and approval-gated stdio MCP tools via RMCP.
 - Cloned skill collections, Claude/Grok plugins and explicitly selected local

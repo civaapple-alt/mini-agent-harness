@@ -13,9 +13,11 @@ mini-agent status
 
 `mini-agent --version`, `status`, and `demo` work without credentials. `doctor`
 prints a structured report and exits non-zero until `OPENAI_API_KEY` and
-`OPENAI_MODEL` are set. Copy `.env.demo` to `.env`, set `OPENAI_API_KEY`, and
-confirm `OPENAI_MODEL` and `OPENAI_BASE_URL`. Process environment values
-override `.env` values.
+`OPENAI_MODEL` are set. For a downloaded binary, create
+`~/.mini-agent/.env` (`%USERPROFILE%\.mini-agent\.env` on Windows), copy
+`.env.demo` into it, and fill `OPENAI_API_KEY`. A workspace `.env` overrides
+the user file; process environment values override both. `status` shows the
+source without printing the secret.
 
 ## AGENTS.md is too large
 

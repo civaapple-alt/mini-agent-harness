@@ -125,11 +125,20 @@ non-zero while `OPENAI_API_KEY` or `OPENAI_MODEL` is missing; `status` still
 prints the snapshot. `demo` runs the deterministic model → tool → model →
 answer path locally.
 
-Copy `.env.demo` to `.env` and fill in `OPENAI_API_KEY` before `ask`, the
-interactive terminal, `auto`, or mentor commands. The template defaults to
-DeepSeek's Responses API with `deepseek-v4-flash`. Process environment values
-take precedence over `.env`. This repository ignores `.env`; verify the same
-before using it in another workspace, and prefer process secrets in CI.
+Before `ask`, the interactive terminal, `auto`, or mentor commands, set
+`OPENAI_API_KEY` and `OPENAI_MODEL`. For a PATH-installed binary, keep secrets
+in the user file rather than a project directory. On Windows that file is
+`%USERPROFILE%\.mini-agent\.env`; on Unix it is `~/.mini-agent/.env`:
+
+```dotenv
+OPENAI_API_KEY=
+OPENAI_MODEL=deepseek-v4-flash
+OPENAI_BASE_URL=https://api.deepseek.com
+```
+
+A workspace `.env` overrides the user file; process environment values override
+both. This repository ignores `.env`; verify the same before using a workspace
+file elsewhere, and prefer process secrets in CI.
 
 Set `MENTOR_OPENAI_MODEL` to enable mentor commands. The mentor inherits the
 primary key and base URL by default; `MENTOR_OPENAI_API_KEY` and

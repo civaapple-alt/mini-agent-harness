@@ -39,6 +39,7 @@ struct ResolvedSetting {
 enum SettingSource {
     Process,
     EnvFile,
+    UserEnv,
     BuiltIn,
 }
 
@@ -52,20 +53,26 @@ impl RuntimeConfig {
     pub fn load() -> Result<Self, String> {
         let workspace = env::current_dir()
             .map_err(|error| format!("cannot resolve current directory: {error}"))?;
-        let environment = Environment::load(workspace.join(".env"))?;
-        let api_key = environment.resolve("OPENAI_API_KEY");
-        let model = environment.resolve("OPENAI_MODEL");
-        let base_url = environment
-            .resolve("OPENAI_BASE_URL")
+        Self::load_from(workspace, user_env_path())
+    }
+
+    fn load_from(workspace: PathBuf, user_env: Option<PathBuf>) -> Result<Self, String> {
+        let workspace_env = Environment::load(workspace.join(".env"))?;
+        let user_env = match user_env {
+            Some(path) => Environment::load(path)?,
+            None => Environment::default(),
+        };
+        let api_key = resolve_value("OPENAI_API_KEY", &workspace_env, &user_env);
+        let model = resolve_value("OPENAI_MODEL", &workspace_env, &user_env);
+        let base_url = resolve_value("OPENAI_BASE_URL", &workspace_env, &user_env)
             .map(ResolvedSetting::from_environment)
             .unwrap_or_else(|| ResolvedSetting {
                 value: DEFAULT_BASE_URL.to_string(),
                 source: SettingSource::BuiltIn,
             });
-        let mentor_api_key = environment.resolve("MENTOR_OPENAI_API_KEY");
-        let mentor_model = environment.resolve("MENTOR_OPENAI_MODEL");
-        let mentor_base_url = environment
-            .resolve("MENTOR_OPENAI_BASE_URL")
+        let mentor_api_key = resolve_value("MENTOR_OPENAI_API_KEY", &workspace_env, &user_env);
+        let mentor_model = resolve_value("MENTOR_OPENAI_MODEL", &workspace_env, &user_env);
+        let mentor_base_url = resolve_value("MENTOR_OPENAI_BASE_URL", &workspace_env, &user_env)
             .map(ResolvedSetting::from_environment);
         Ok(Self {
             workspace,
@@ -82,13 +89,17 @@ impl RuntimeConfig {
         let api_key = self
             .api_key
             .as_ref()
-            .ok_or_else(|| "OPENAI_API_KEY is required".to_string())?
+            .ok_or_else(|| {
+                "OPENAI_API_KEY is required (process, .env, or ~/.mini-agent/.env)".to_string()
+            })?
             .value
             .clone();
         let model = self
             .model
             .as_ref()
-            .ok_or_else(|| "OPENAI_MODEL is required".to_string())?
+            .ok_or_else(|| {
+                "OPENAI_MODEL is required (process, .env, or ~/.mini-agent/.env)".to_string()
+            })?
             .value
             .clone();
         validate_base_url(&self.base_url.value)?;
@@ -107,7 +118,10 @@ impl RuntimeConfig {
         let model = self
             .mentor_model
             .as_ref()
-            .ok_or_else(|| "MENTOR_OPENAI_MODEL is required for mentor commands".to_string())?
+            .ok_or_else(|| {
+                "MENTOR_OPENAI_MODEL is required for mentor commands (process, .env, or ~/.mini-agent/.env)"
+                    .to_string()
+            })?
             .value
             .clone();
         let api_key = self
@@ -182,6 +196,7 @@ impl RuntimeConfig {
             "session_persistence": false,
             "session_persistence_available": true,
             "session_directory": self.workspace.join(".agents/sessions"),
+            "user_config_directory": user_config_dir(),
             "command_sandbox": false,
             "world": world.status_json()
         })
@@ -231,6 +246,13 @@ impl RuntimeConfig {
             format!(
                 "session_directory: {}",
                 self.workspace.join(".agents/sessions").display()
+            ),
+            format!(
+                "user_config_directory: {}",
+                user_config_dir().map_or_else(
+                    || "unavailable".to_string(),
+                    |path| path.display().to_string()
+                )
             ),
             "command_sandbox: disabled".to_string(),
         ];
@@ -399,6 +421,7 @@ impl ResolvedSetting {
             source: match value.source {
                 ValueSource::Process => SettingSource::Process,
                 ValueSource::EnvFile => SettingSource::EnvFile,
+                ValueSource::UserEnv => SettingSource::UserEnv,
             },
         }
     }
@@ -462,10 +485,41 @@ fn shell_available() -> Result<String, String> {
     }
 }
 
+fn resolve_value(name: &str, workspace: &Environment, user: &Environment) -> Option<ResolvedValue> {
+    workspace.resolve(name).or_else(|| {
+        user.get(name).map(|value| ResolvedValue {
+            value: value.to_string(),
+            source: ValueSource::UserEnv,
+        })
+    })
+}
+
+fn user_config_dir() -> Option<PathBuf> {
+    home_dir().map(|home| home.join(".mini-agent"))
+}
+
+fn user_env_path() -> Option<PathBuf> {
+    user_config_dir().map(|directory| directory.join(".env"))
+}
+
+fn home_dir() -> Option<PathBuf> {
+    let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    env::var_os(key)
+        .or_else(|| {
+            if cfg!(windows) {
+                env::var_os("HOME")
+            } else {
+                None
+            }
+        })
+        .map(PathBuf::from)
+}
+
 fn source_name(source: ValueSource) -> &'static str {
     match source {
         ValueSource::Process => "process",
         ValueSource::EnvFile => ".env",
+        ValueSource::UserEnv => "~/.mini-agent/.env",
     }
 }
 
@@ -473,6 +527,7 @@ fn setting_source_name(source: SettingSource) -> &'static str {
     match source {
         SettingSource::Process => "process",
         SettingSource::EnvFile => ".env",
+        SettingSource::UserEnv => "~/.mini-agent/.env",
         SettingSource::BuiltIn => "built_in",
     }
 }
@@ -480,6 +535,7 @@ fn setting_source_name(source: SettingSource) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn validates_absolute_http_urls() {
@@ -495,5 +551,67 @@ mod tests {
             display_base_url("https://user:secret@example.com/v1?token=private#fragment"),
             "https://example.com/v1"
         );
+    }
+
+    #[test]
+    fn user_env_fills_provider_settings_when_workspace_env_is_absent() {
+        let workspace = unique_dir("workspace");
+        let user_env = unique_dir("user").join(".env");
+        fs::write(
+            &user_env,
+            "OPENAI_API_KEY=user-key\nOPENAI_MODEL=deepseek-v4-flash\nOPENAI_BASE_URL=https://api.deepseek.com\n",
+        )
+        .unwrap();
+
+        let config = RuntimeConfig::load_from(workspace, Some(user_env)).unwrap();
+
+        let provider = config.provider_settings().unwrap();
+        assert_eq!(provider.api_key, "user-key");
+        assert_eq!(provider.model, "deepseek-v4-flash");
+        assert_eq!(
+            source_name(config.api_key.as_ref().unwrap().source),
+            "~/.mini-agent/.env"
+        );
+        assert_eq!(
+            setting_source_name(config.base_url.source),
+            "~/.mini-agent/.env"
+        );
+    }
+
+    #[test]
+    fn workspace_env_overrides_user_env() {
+        let workspace = unique_dir("workspace");
+        fs::write(
+            workspace.join(".env"),
+            "OPENAI_API_KEY=workspace-key\nOPENAI_MODEL=workspace-model\n",
+        )
+        .unwrap();
+        let user_env = unique_dir("user").join(".env");
+        fs::write(
+            &user_env,
+            "OPENAI_API_KEY=user-key\nOPENAI_MODEL=user-model\n",
+        )
+        .unwrap();
+
+        let config = RuntimeConfig::load_from(workspace, Some(user_env)).unwrap();
+
+        assert_eq!(config.api_key.as_ref().unwrap().value, "workspace-key");
+        assert_eq!(source_name(config.api_key.as_ref().unwrap().source), ".env");
+    }
+
+    fn unique_dir(label: &str) -> PathBuf {
+        use std::sync::atomic::AtomicU64;
+        use std::sync::atomic::Ordering;
+        use std::time::SystemTime;
+        use std::time::UNIX_EPOCH;
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+        let root = env::temp_dir().join(format!("mini-agent-config-{label}-{nonce}-{sequence}"));
+        fs::create_dir(&root).unwrap();
+        root
     }
 }

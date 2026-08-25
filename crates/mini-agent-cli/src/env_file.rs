@@ -13,6 +13,8 @@ pub struct Environment {
 pub enum ValueSource {
     Process,
     EnvFile,
+    #[allow(dead_code)]
+    UserEnv,
 }
 
 pub struct ResolvedValue {
@@ -31,6 +33,13 @@ impl Environment {
         parse(&source).map(|file_values| Self { file_values })
     }
 
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.file_values
+            .get(name)
+            .map(String::as_str)
+            .filter(|value| !value.trim().is_empty())
+    }
+
     pub fn resolve(&self, name: &str) -> Option<ResolvedValue> {
         env::var(name)
             .ok()
@@ -40,14 +49,10 @@ impl Environment {
                 source: ValueSource::Process,
             })
             .or_else(|| {
-                self.file_values
-                    .get(name)
-                    .filter(|value| !value.trim().is_empty())
-                    .cloned()
-                    .map(|value| ResolvedValue {
-                        value,
-                        source: ValueSource::EnvFile,
-                    })
+                self.get(name).map(|value| ResolvedValue {
+                    value: value.to_string(),
+                    source: ValueSource::EnvFile,
+                })
             })
     }
 }

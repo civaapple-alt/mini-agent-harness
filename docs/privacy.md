@@ -9,9 +9,9 @@ tool or file output already added to that conversation. The workspace is not
 uploaded wholesale, but selected content can leave the machine when the model
 reads it through a tool or it appears in command output.
 
-This repository ignores `.env`, but mini-agent cannot guarantee another
-workspace's ignore rules. Never commit provider credentials; prefer the process
-environment or a CI secret manager. Event traces are created only when
+Provider credentials belong in the process environment, CI secrets, or
+`~/.mini-agent/.env`. This repository ignores `.env`, but mini-agent cannot
+guarantee another workspace's ignore rules. Never commit provider credentials. Event traces are created only when
 `--trace PATH` is provided, use create-new semantics, and may contain prompts,
 model output, tool arguments, file content, commands, and errors. Review and
 redact traces before sharing them.

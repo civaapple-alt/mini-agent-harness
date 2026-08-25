@@ -46,8 +46,7 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
         "---\nname: release-review\ndescription: Review release readiness when preparing a release.\n---\nFULL SKILL BODY LOADS ON DEMAND.\n",
     )
     .unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-        .current_dir(&root)
+    let mut child = mini_agent(&root)
         .args(["ask", "--json"])
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
@@ -135,8 +134,7 @@ fn ask_prints_the_final_answer_once() {
         ),
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-        .current_dir(&root)
+    let output = mini_agent(&root)
         .args(["ask", "answer once"])
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
@@ -160,8 +158,7 @@ fn ask_prints_the_final_answer_once() {
 fn status_json_remains_structured_when_env_file_is_invalid() {
     let root = test_root();
     fs::write(root.join(".env"), "NOT VALID\n").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-        .current_dir(&root)
+    let output = mini_agent(&root)
         .args(["status", "--json"])
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
@@ -184,8 +181,7 @@ fn status_json_remains_structured_when_env_file_is_invalid() {
 fn interactive_prints_banner_before_initialization_error() {
     let root = test_root();
     fs::write(root.join(".env"), "NOT VALID\n").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-        .current_dir(&root)
+    let output = mini_agent(&root)
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
@@ -217,8 +213,7 @@ fn interactive_mcp_command_reports_when_nothing_needs_retry() {
         "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=https://example.invalid\n",
     )
     .unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-        .current_dir(&root)
+    let mut child = mini_agent(&root)
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
@@ -354,6 +349,30 @@ fn first_use_status_reports_non_secret_snapshot() {
 }
 
 #[test]
+fn first_use_status_reads_user_env_without_workspace_file() {
+    let root = test_root();
+    fs::create_dir(root.join(".mini-agent")).unwrap();
+    fs::write(
+        root.join(".mini-agent/.env"),
+        "OPENAI_API_KEY=user-secret-key\nOPENAI_MODEL=deepseek-v4-flash\nOPENAI_BASE_URL=https://api.deepseek.com\n",
+    )
+    .unwrap();
+    let output = first_use_command(&root, &["status", "--json"]);
+    fs::remove_dir_all(&root).unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json_out = stdout(&output);
+    let body: Value = serde_json::from_str(json_out.trim()).unwrap();
+    assert_eq!(body["credential"], "configured");
+    assert_eq!(body["credential_source"], "~/.mini-agent/.env");
+    assert_eq!(body["model"], "deepseek-v4-flash");
+    assert_eq!(body["model_source"], "~/.mini-agent/.env");
+    assert_eq!(body["base_url"], "https://api.deepseek.com");
+    assert_eq!(body["base_url_source"], "~/.mini-agent/.env");
+    assert!(!json_out.contains("user-secret-key"), "{json_out}");
+}
+
+#[test]
 fn first_use_status_reads_env_demo_without_a_secret() {
     let root = test_root();
     let template = env_demo_template();
@@ -407,8 +426,7 @@ fn ask_keeps_bounded_head_and_tail_of_oversized_agents_md() {
         ),
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-        .current_dir(&root)
+    let output = mini_agent(&root)
         .args(["ask", "hello"])
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
@@ -486,8 +504,7 @@ fn interactive_terminal_keeps_history_until_new() {
         ),
     )
     .unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-        .current_dir(&root)
+    let mut child = mini_agent(&root)
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
@@ -567,12 +584,8 @@ fn durable_session_resumes_settled_history_after_restart() {
     )
     .unwrap();
     let run = |arguments: &[&str], input: &[u8]| {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-            .current_dir(&root)
+        let mut child = mini_agent(&root)
             .args(arguments)
-            .env_remove("OPENAI_API_KEY")
-            .env_remove("OPENAI_MODEL")
-            .env_remove("OPENAI_BASE_URL")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -637,15 +650,8 @@ fn mentor_reviews_a_settled_checkpoint_without_polluting_primary_history() {
     )
     .unwrap();
     let command = |arguments: &[&str], input: Option<&[u8]>| {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-            .current_dir(&root)
+        let mut child = mini_agent(&root)
             .args(arguments)
-            .env_remove("OPENAI_API_KEY")
-            .env_remove("OPENAI_MODEL")
-            .env_remove("OPENAI_BASE_URL")
-            .env_remove("MENTOR_OPENAI_API_KEY")
-            .env_remove("MENTOR_OPENAI_MODEL")
-            .env_remove("MENTOR_OPENAI_BASE_URL")
             .stdin(if input.is_some() {
                 Stdio::piped()
             } else {
@@ -803,8 +809,7 @@ fn auto_mode_executes_shell_without_approval() {
         ),
     )
     .unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-        .current_dir(&root)
+    let mut child = mini_agent(&root)
         .args(["auto", "inspect the workspace"])
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
@@ -898,8 +903,7 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
         "Keep the stable project contract.\n",
     )
     .unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mini-agent"))
-        .current_dir(&root)
+    let mut child = mini_agent(&root)
         .arg("auto")
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
@@ -1121,18 +1125,23 @@ fn test_root() -> std::path::PathBuf {
     root
 }
 
-fn first_use_command(root: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_mini-agent"))
+fn mini_agent(root: &Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mini-agent"));
+    command
         .current_dir(root)
-        .args(args)
+        .env("HOME", root)
+        .env("USERPROFILE", root)
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
         .env_remove("MENTOR_OPENAI_MODEL")
         .env_remove("MENTOR_OPENAI_API_KEY")
-        .env_remove("MENTOR_OPENAI_BASE_URL")
-        .output()
-        .unwrap()
+        .env_remove("MENTOR_OPENAI_BASE_URL");
+    command
+}
+
+fn first_use_command(root: &Path, args: &[&str]) -> std::process::Output {
+    mini_agent(root).args(args).output().unwrap()
 }
 
 fn stdout(output: &std::process::Output) -> String {
