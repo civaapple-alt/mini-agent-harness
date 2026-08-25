@@ -7,6 +7,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Added
 
+- `mini-agent --version` and the REPL welcome include the git revision, for
+  example `mini-agent 0.1.0 (c0ffee12abcd)`.
 - User-level provider settings at `~/.mini-agent/.env`, below process
   environment and workspace `.env`, so a PATH-installed binary can keep
   credentials out of project directories.

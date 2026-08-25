@@ -102,6 +102,7 @@ pub async fn run(
     let (worker_tx, worker_rx) = mpsc::channel();
     let worker = spawn_worker(initial_mode, approval, session_request, worker_rx, event_tx);
 
+    println!("{}", crate::version_line());
     println!("mini-agent — /auto /world /session /mcp /queue /new /help /exit");
     if initial_mode == ApprovalMode::Automatic {
         print_auto_warning();

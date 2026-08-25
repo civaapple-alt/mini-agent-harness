@@ -192,8 +192,16 @@ fn interactive_prints_banner_before_initialization_error() {
 
     assert_eq!(output.status.code(), Some(2));
     let stdout = String::from_utf8(output.stdout).unwrap();
+    let mut lines = stdout.lines();
+    let version = lines.next().unwrap_or_default();
     assert!(
-        stdout.starts_with("mini-agent — /auto /world /session /mcp /queue /new /help /exit\n")
+        version.starts_with(&format!("mini-agent {} (", env!("CARGO_PKG_VERSION"))),
+        "{version}"
+    );
+    assert!(version.ends_with(')'), "{version}");
+    assert_eq!(
+        lines.next().unwrap_or_default(),
+        "mini-agent — /auto /world /session /mcp /queue /new /help /exit"
     );
     assert!(stdout.contains("world> "));
     assert!(stdout.contains("default | approval per_action"));
@@ -275,10 +283,13 @@ fn first_use_version_prints_the_package_version() {
     fs::remove_dir_all(&root).unwrap();
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
-    assert_eq!(
-        stdout(&output).trim(),
-        format!("mini-agent {}", env!("CARGO_PKG_VERSION"))
+    let stdout = stdout(&output);
+    let line = stdout.trim();
+    assert!(
+        line.starts_with(&format!("mini-agent {} (", env!("CARGO_PKG_VERSION"))),
+        "{line}"
     );
+    assert!(line.ends_with(')'), "{line}");
 }
 
 #[test]

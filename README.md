@@ -255,7 +255,9 @@ See [configuration](docs/configuration.md) and the copyable
 
 ## Operational contract
 
-- `mini-agent --version` reports the Cargo release version.
+- `mini-agent --version` reports the Cargo release version and git revision,
+  for example `mini-agent 0.1.0 (c0ffee12abcd)`. The interactive welcome prints
+  the same line.
 - `mini-agent status [--json]` reports effective non-secret startup settings.
 - `mini-agent doctor [--json]` validates configuration, workspace, and shell
   availability without contacting a model provider.

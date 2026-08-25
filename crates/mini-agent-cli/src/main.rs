@@ -61,6 +61,14 @@ const VERSION_HELP: &str =
     "mini-agent version\n\nUSAGE:\n    mini-agent version\n    mini-agent --version";
 const AUTO_MAX_STEPS: usize = 128;
 
+pub(crate) fn version_line() -> String {
+    format!("mini-agent {} ({})", env!("CARGO_PKG_VERSION"), git_sha())
+}
+
+pub(crate) fn git_sha() -> &'static str {
+    option_env!("GIT_SHA").unwrap_or("unknown")
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let invocation = match parse_args(env::args().skip(1).collect()) {
@@ -104,7 +112,7 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Command::Version => {
-            println!("mini-agent {}", env!("CARGO_PKG_VERSION"));
+            println!("{}", version_line());
             ExitCode::SUCCESS
         }
         Command::Status => run_status(invocation.json),

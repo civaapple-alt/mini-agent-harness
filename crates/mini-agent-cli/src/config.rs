@@ -157,6 +157,7 @@ impl RuntimeConfig {
         let (extensions, world) = self.status_snapshot();
         json!({
             "version": env!("CARGO_PKG_VERSION"),
+            "git_sha": crate::git_sha(),
             "workspace": self.workspace,
             "provider": "openai_responses",
             "model": self.model.as_ref().map(|value| value.value.as_str()),
@@ -206,7 +207,11 @@ impl RuntimeConfig {
         let display_base_url = display_base_url(&self.base_url.value);
         let (extensions, world) = self.status_snapshot();
         let mut lines = vec![
-            format!("version: {}", env!("CARGO_PKG_VERSION")),
+            format!(
+                "version: {} ({})",
+                env!("CARGO_PKG_VERSION"),
+                crate::git_sha()
+            ),
             format!("workspace: {}", self.workspace.display()),
             "provider: openai_responses".to_string(),
             format!(
