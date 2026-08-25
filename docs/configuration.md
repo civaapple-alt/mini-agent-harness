@@ -8,9 +8,12 @@ mini-agent resolves provider settings in this order:
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | yes | Bearer credential for the Responses endpoint |
-| `OPENAI_MODEL` | yes | Provider model identifier |
+| `OPENAI_API_KEY` | for primary commands | Bearer credential for the Responses endpoint |
+| `OPENAI_MODEL` | for primary commands | Provider model identifier |
 | `OPENAI_BASE_URL` | no | API root; defaults to `https://api.openai.com/v1` |
+| `MENTOR_OPENAI_MODEL` | for mentor commands | Independent mentor model identifier |
+| `MENTOR_OPENAI_API_KEY` | no | Mentor credential override; otherwise inherits `OPENAI_API_KEY` |
+| `MENTOR_OPENAI_BASE_URL` | no | Mentor API root override; otherwise inherits `OPENAI_BASE_URL` |
 
 The adapter appends `/responses` to `OPENAI_BASE_URL`. DeepSeek's Responses API
 therefore uses:
@@ -45,6 +48,22 @@ Interactive sessions remain in-memory by default. Start one with
 `mini-agent sessions`, and restore one with `mini-agent resume SESSION_ID`.
 Settled records live under `.agents/sessions/` in the startup workspace. No
 provider setting enables persistence implicitly.
+
+## Mentor insight and verification
+
+Set `MENTOR_OPENAI_MODEL`, then analyze the latest settled checkpoint of a
+durable session:
+
+```sh
+mini-agent mentor insight SESSION_ID
+mini-agent mentor verify SESSION_ID -- "the requested tests passed and the diff is clean"
+```
+
+Both commands accept `--json` and `--trace PATH`. The mentor inherits the
+primary credential and endpoint unless the mentor-specific overrides are set.
+It has a separate system role, exactly one model step, and an empty tool
+catalog. Its output is appended as a derived item linked to the immutable source
+checkpoint; it is not inserted into the primary thread's replay history.
 
 ## Project extensions
 

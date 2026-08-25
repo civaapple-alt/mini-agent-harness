@@ -69,6 +69,8 @@ Host tools add their own effect-side bounds before results reach core:
 | rendered world-state snapshot | 8 KiB; fixed command catalog and capped path |
 | durable session file / JSONL record | 32 MiB / 512 KiB |
 | listed durable sessions | 128 project-local files |
+| mentor verification criteria | 32 KiB |
+| mentor execution | 1 model step, 0 tool calls |
 | discovered skill or compatible plugin instructions | 64; 16 KiB combined metadata catalog |
 | skill, plugin, or MCP metadata file | 64 KiB |
 | marketplace manifest | 256 KiB |
@@ -105,3 +107,10 @@ increasing sequence numbers and restores only the newest complete checkpoint.
 An incomplete final JSONL line is treated as a torn write and truncated before
 new records are appended. One lock file prevents concurrent writers; a stale
 lock is never ignored automatically.
+
+Mentor analysis restores only the newest settled checkpoint under the same
+session lock. It uses the normal 256 KiB context and 64 KiB response ceilings,
+rejects any proposed tool call, and appends its result under the existing
+512 KiB record and 32 MiB session limits. Its deterministic FNV-1a source
+fingerprint is a change-detection aid, not a cryptographic integrity proof; the
+monotonic checkpoint sequence is the authoritative source reference.

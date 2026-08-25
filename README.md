@@ -84,6 +84,12 @@ The append-only JSONL record distinguishes session, thread, turn, and item
 identities and stores a checkpoint only after settlement. It deliberately does
 not replay a turn interrupted during a provider or tool effect.
 
+`mentor insight SESSION_ID` and `mentor verify SESSION_ID CRITERIA` run an
+independently configured, tool-free model against that session's latest settled
+checkpoint. The result is appended to the same JSONL file as a derived item
+linked to the source checkpoint sequence and fingerprint. It is never replayed
+into the primary conversation.
+
 ## Install
 
 Prebuilt archives are produced for Linux x86_64, macOS x86_64 and arm64, and
@@ -109,6 +115,11 @@ values take precedence over `.env`. This repository ignores `.env`; verify the
 same before using it in another
 workspace, and prefer process secrets in CI.
 
+Set `MENTOR_OPENAI_MODEL` to enable mentor commands. The mentor inherits the
+primary key and base URL by default; `MENTOR_OPENAI_API_KEY` and
+`MENTOR_OPENAI_BASE_URL` provide explicit overrides. This permits a distinct
+model or provider without coupling it to normal agent turns.
+
 ```sh
 mini-agent doctor
 mini-agent status
@@ -120,6 +131,8 @@ mini-agent auto "inspect this repository, improve it, and run the tests"
 mini-agent --persist
 mini-agent sessions
 mini-agent resume SESSION_ID
+mini-agent mentor insight SESSION_ID
+mini-agent mentor verify SESSION_ID -- "tests pass and requested behavior is evidenced"
 mini-agent --trace trace.jsonl
 ```
 
@@ -240,6 +253,8 @@ See [configuration](docs/configuration.md) and the copyable
 - Shell execution is approval-gated but not sandboxed.
 - Interactive sessions are process-local by default; `--persist` and `resume`
   opt into project-local settled-turn persistence.
+- Mentor insight and verification require a durable settled checkpoint, expose
+  no tools, and append only a non-replayed derived item.
 
 See [configuration](docs/configuration.md),
 [troubleshooting](docs/troubleshooting.md), [data and privacy](docs/privacy.md),

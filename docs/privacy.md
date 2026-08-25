@@ -24,6 +24,14 @@ checkpoints. They can contain source code or secrets exposed during a turn.
 Review workspace ignore rules and session contents before sharing or committing
 `.agents`. Session files are neither encrypted nor uploaded by mini-agent.
 
+Mentor commands send the complete latest settled checkpoint to the effective
+mentor endpoint, which may differ from `OPENAI_BASE_URL`. This can include all
+of the durable content described above. The bounded mentor criteria, model
+output, producer model, and source checkpoint fingerprint are appended to the
+session as a derived item. Mentor output is not sent to later primary turns
+unless a user explicitly copies it into the conversation. Mentor traces have
+the same sensitive-data properties as normal traces.
+
 Result handles, the input queue, in-flight turns, and managed-process records
 remain process-local. Managed child process trees are stopped when the CLI
 exits. Persistence does not make an interrupted external effect replay-safe.

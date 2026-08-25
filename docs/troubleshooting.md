@@ -43,6 +43,18 @@ After confirming no mini-agent process is using that session, a lock left by a
 crash can be removed from `.agents/sessions/<SESSION_ID>.lock`; the JSONL data
 file remains untouched. Mini-agent never removes a stale lock automatically.
 
+Mentor commands acquire this same lock so they cannot derive from a checkpoint
+while another process mutates the session. Exit the interactive owner before
+running `mentor insight` or `mentor verify`.
+
+## A mentor command reports missing configuration
+
+Set `MENTOR_OPENAI_MODEL`. The mentor uses `OPENAI_API_KEY` and
+`OPENAI_BASE_URL` unless `MENTOR_OPENAI_API_KEY` or
+`MENTOR_OPENAI_BASE_URL` overrides them. `mini-agent status` reports whether
+the mentor is enabled without printing credentials; `doctor` validates the
+effective mentor endpoint when the model is configured.
+
 ## A cloned marketplace skill or plugin is missing
 
 Cloning a marketplace does not enable every entry. Put the clone under

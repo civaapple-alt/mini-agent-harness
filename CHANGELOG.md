@@ -27,6 +27,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Opt-in project-local durable sessions with append-only session, thread, turn,
   and item records, settled checkpoints, bounded listing, torn-tail recovery,
   `/session`, `--persist`, `sessions`, and `resume SESSION_ID`.
+- Independent `mentor insight` and `mentor verify` commands with a dedicated
+  model profile, zero tools, bounded criteria, source-linked derived items, and
+  strict isolation from primary conversation replay.
 
 ### Fixed
 

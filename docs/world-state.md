@@ -52,41 +52,45 @@ session
       ordered item
 ```
 
-A session owns provider profiles and creation metadata. A thread owns one
+A session identifies one append-only project log. A thread identifies one
 conversation lineage. A turn owns one user-initiated run and its settled
-status. Items form the replayable append-only record: user input, context
-snapshot, reasoning, assistant output, tool intent, tool settlement,
-compaction, mentor insight, and verification.
+status. Message items preserve user input, context snapshots, reasoning,
+assistant output, tool proposals, and tool settlements. Derived mentor items
+share the ordered log but are not replayable conversation messages.
 
-Every durable item has a stable ID, thread and turn IDs, an increasing
-sequence, kind, bounded payload, timestamp, and settled state. Tool intent and
-tool settlement remain distinct in settled message items. A full bounded
-checkpoint is appended only after a turn settles and is the sole resume
-authority. Torn final writes fall back to the previous checkpoint.
+Records have a strictly increasing sequence and bounded payload. Message and
+derived items also have stable item IDs, thread identity, kind, and timestamp;
+turn-owned messages carry a turn ID. A full bounded checkpoint is appended only
+after a turn settles and is the sole resume authority. Torn final writes fall
+back to the previous checkpoint.
 
 This is conversation persistence, not operation recovery. A process crash can
 still occur between tool intent and effect settlement; the interrupted turn is
 not replayed. A future Pi-style operation register must make that uncertain
-state explicit before safe/unsafe replay policies are introduced. Content
-hashes, compaction lineage, and branch indexes are also not implemented yet.
+state explicit before safe/unsafe replay policies are introduced. Compaction
+lineage, branch indexes, and live operation recovery are not
+implemented.
 
 ## Mentor and verifier boundary
 
 A mentor is a separately configured model profile, not a hidden second voice
-inside the primary turn. It reads a settled persisted item range and writes a
-derived `mentor_insight` or `verification` item linked to:
+inside the primary turn. It reads the latest settled checkpoint and writes a
+derived `mentor_insight` or `mentor_verification` item linked to:
 
-- the source session, thread, turn, and item range;
-- the mentor provider/model/profile revision;
-- the source-range hash and world-state hash;
-- a bounded verdict, evidence references, and optional recommendations.
+- the source session, thread, and authoritative checkpoint sequence;
+- a deterministic fingerprint of the exact checkpoint messages;
+- the mentor provider and model;
+- bounded criteria, insight or verification output.
 
-The mentor cannot edit the primary transcript, approve effects, or make tool
-calls through the primary harness. Insight may advise a later turn;
+The mentor uses a separate harness with an empty tool catalog, a zero tool-call
+limit, and one model step. It cannot edit the primary transcript, approve
+effects, or make tool calls. Insight may advise a later turn;
 verification evaluates arrival criteria against immutable evidence. This
 keeps mentor output reproducible and makes disagreement inspectable rather
 than allowing an auxiliary model to mutate live state invisibly.
 
-The settled append-only store and cross-process replay now provide the input
-boundary for mentor work. Mentor execution should follow only after a source
-range can be selected and hashed without provider calls.
+The derived record is intentionally ignored by normal resume, so repeated
+mentor runs do not contaminate the evidence seen by later primary turns. World
+state is already part of the checkpoint and therefore covered by its
+fingerprint. The FNV-1a fingerprint is non-cryptographic change detection; the
+checkpoint sequence remains the authoritative immutable reference.
