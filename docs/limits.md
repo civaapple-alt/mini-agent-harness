@@ -67,6 +67,8 @@ Host tools add their own effect-side bounds before results reach core:
 | queued REPL operations | 16 |
 | root `AGENTS.md` | 16 KiB; reject if larger or invalid UTF-8 |
 | rendered world-state snapshot | 8 KiB; fixed command catalog and capped path |
+| durable session file / JSONL record | 32 MiB / 512 KiB |
+| listed durable sessions | 128 project-local files |
 | discovered skill or compatible plugin instructions | 64; 16 KiB combined metadata catalog |
 | skill, plugin, or MCP metadata file | 64 KiB |
 | marketplace manifest | 256 KiB |
@@ -97,3 +99,9 @@ The OpenAI adapter applies a 10-second connection timeout and a 120-second
 deadline to the complete streaming request. It enforces the harness response
 byte limit while accumulating text and tool calls, before returning them to
 core, and retains at most 4 KiB from an HTTP error body.
+
+Durable sessions are opt-in and append-only. Resume validates strictly
+increasing sequence numbers and restores only the newest complete checkpoint.
+An incomplete final JSONL line is treated as a torn write and truncated before
+new records are appended. One lock file prevents concurrent writers; a stale
+lock is never ignored automatically.

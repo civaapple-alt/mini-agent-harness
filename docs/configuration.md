@@ -38,6 +38,14 @@ the current snapshot and `/world refresh` after installing a command or
 changing root project files. World-state items are bounded and contain no
 environment values or command output.
 
+## Durable sessions
+
+Interactive sessions remain in-memory by default. Start one with
+`mini-agent --persist`, copy the displayed session ID, list known IDs with
+`mini-agent sessions`, and restore one with `mini-agent resume SESSION_ID`.
+Settled records live under `.agents/sessions/` in the startup workspace. No
+provider setting enables persistence implicitly.
+
 ## Project extensions
 
 All extension paths are relative to the startup workspace and must remain

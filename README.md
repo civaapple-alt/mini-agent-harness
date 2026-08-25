@@ -54,10 +54,10 @@ scope. Mini Agent Harness keeps only three lessons at the foundation:
 2. the current run state is explicit rather than inferred from missing data;
 3. passive events observe execution but cannot alter it.
 
-Durable storage, conversation trees, lanes, queues, hooks, schema migration,
-and crash recovery are separate experiments. None enters core until an
-experiment demonstrates that its benefit justifies its permanent cost. The
-explicit auto mode is that experiment for context compaction: it summarizes a
+Durable settled-turn storage is an opt-in CLI-host experiment. Conversation
+trees, lanes, hooks, operation registers, and effect recovery remain separate;
+they do not enter core until an experiment justifies their permanent cost. The
+explicit auto mode is the context-compaction experiment: it summarizes a
 settled conversation before the next sampling request when history reaches
 half of the hard context ceiling.
 
@@ -75,6 +75,14 @@ snapshot when it changes. If an MCP server is denied or fails during startup,
 `/mcp` retries it without clearing conversation history. The welcome block lists a
 bounded set of discovered skill and plugin names and shows configured MCP
 servers as inactive until connection approval succeeds.
+
+Interactive history remains in-memory by default. `--persist` creates a
+project-local durable session, `sessions` lists bounded session files, and
+`resume SESSION_ID` restores the latest completely settled checkpoint. `/new`
+starts a new thread inside a durable session; `/session` shows its identity.
+The append-only JSONL record distinguishes session, thread, turn, and item
+identities and stores a checkpoint only after settlement. It deliberately does
+not replay a turn interrupted during a provider or tool effect.
 
 ## Install
 
@@ -109,6 +117,9 @@ mini-agent ask "summarize this repository"
 mini-agent ask --json "summarize the current changes"
 mini-agent help ask
 mini-agent auto "inspect this repository, improve it, and run the tests"
+mini-agent --persist
+mini-agent sessions
+mini-agent resume SESSION_ID
 mini-agent --trace trace.jsonl
 ```
 
@@ -158,9 +169,9 @@ returned as a short head/tail preview plus a process-local handle that
 `read_tool_result` can inspect by byte range or literal query. Long-lived
 services should use `process_start`, `process_read`, `process_list`, and
 `process_stop`; their logs and process count are bounded, and remaining process
-trees are stopped when the CLI exits. Conversation, result handles, queued
-input, and managed processes deliberately remain non-durable: auto mode
-survives long context growth, not process termination.
+trees are stopped when the CLI exits. Result handles, queued input, running
+operations, and managed processes remain non-durable. Opt-in sessions retain
+settled conversation checkpoints, not live effects or process state.
 
 ## Skills, plugins, marketplaces, and MCP
 
@@ -227,7 +238,8 @@ See [configuration](docs/configuration.md) and the copyable
   not rewrite conversation history.
 - Mini Agent Harness sends no telemetry, update checks, or crash reports.
 - Shell execution is approval-gated but not sandboxed.
-- Interactive sessions are process-local in v0.1 and cannot yet be resumed.
+- Interactive sessions are process-local by default; `--persist` and `resume`
+  opt into project-local settled-turn persistence.
 
 See [configuration](docs/configuration.md),
 [troubleshooting](docs/troubleshooting.md), [data and privacy](docs/privacy.md),

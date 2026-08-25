@@ -36,6 +36,13 @@ watchers instead of a foreground shell command.
 Trace creation refuses to overwrite files. Choose a new path or explicitly
 move the existing trace first.
 
+## A durable session is locked
+
+Only one process may write a session. Exit the other process before resuming.
+After confirming no mini-agent process is using that session, a lock left by a
+crash can be removed from `.agents/sessions/<SESSION_ID>.lock`; the JSONL data
+file remains untouched. Mini-agent never removes a stale lock automatically.
+
 ## A cloned marketplace skill or plugin is missing
 
 Cloning a marketplace does not enable every entry. Put the clone under

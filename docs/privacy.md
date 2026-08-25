@@ -16,9 +16,17 @@ environment or a CI secret manager. Event traces are created only when
 model output, tool arguments, file content, commands, and errors. Review and
 redact traces before sharing them.
 
-Conversation history, result handles, the input queue, and managed-process
-records are process-local and are not persisted. Managed child process trees
-are stopped when the CLI exits.
+Conversation history is process-local unless the user starts an interactive
+session with `--persist` or resumes an existing session. Durable JSONL files
+under `.agents/sessions/` contain prompts, world-state context, reasoning,
+assistant messages, tool calls and results, errors, and complete settled
+checkpoints. They can contain source code or secrets exposed during a turn.
+Review workspace ignore rules and session contents before sharing or committing
+`.agents`. Session files are neither encrypted nor uploaded by mini-agent.
+
+Result handles, the input queue, in-flight turns, and managed-process records
+remain process-local. Managed child process trees are stopped when the CLI
+exits. Persistence does not make an interrupted external effect replay-safe.
 
 Project skills and compatible plugin instructions contribute only bounded
 metadata until the model chooses to read an instruction file or resource.

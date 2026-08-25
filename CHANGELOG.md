@@ -24,6 +24,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   `status`, `/world`, and `/world refresh`.
 - Typed context messages mapped to Responses API developer items and retained
   across context compaction.
+- Opt-in project-local durable sessions with append-only session, thread, turn,
+  and item records, settled checkpoints, bounded listing, torn-tail recovery,
+  `/session`, `--persist`, `sessions`, and `resume SESSION_ID`.
 
 ### Fixed
 

@@ -41,9 +41,9 @@ diff rendering like Codex rather than mutable system-prompt rewriting.
 
 ## Durable item boundary
 
-World state makes the need for durable ordered items visible, but persistence
-still belongs in a host adapter rather than `mini-agent-core`. A future store
-should preserve these identities and relationships:
+World state makes the need for durable ordered items visible. The opt-in JSONL
+store now lives in the CLI host rather than `mini-agent-core` and preserves
+these identities and relationships:
 
 ```text
 session
@@ -58,13 +58,17 @@ status. Items form the replayable append-only record: user input, context
 snapshot, reasoning, assistant output, tool intent, tool settlement,
 compaction, mentor insight, and verification.
 
-Every durable item needs a stable ID, thread and turn IDs, an increasing
+Every durable item has a stable ID, thread and turn IDs, an increasing
 sequence, kind, bounded payload, timestamp, and settled state. Tool intent and
-tool settlement must remain distinct so crash recovery never infers an effect
-from missing data. Compaction records a derived item and the exact item range
-it replaces; it does not silently rewrite stored history. World-state items
-record a schema version and content hash so replay and cache behavior can be
-verified.
+tool settlement remain distinct in settled message items. A full bounded
+checkpoint is appended only after a turn settles and is the sole resume
+authority. Torn final writes fall back to the previous checkpoint.
+
+This is conversation persistence, not operation recovery. A process crash can
+still occur between tool intent and effect settlement; the interrupted turn is
+not replayed. A future Pi-style operation register must make that uncertain
+state explicit before safe/unsafe replay policies are introduced. Content
+hashes, compaction lineage, and branch indexes are also not implemented yet.
 
 ## Mentor and verifier boundary
 
@@ -83,7 +87,6 @@ verification evaluates arrival criteria against immutable evidence. This
 keeps mentor output reproducible and makes disagreement inspectable rather
 than allowing an auxiliary model to mutate live state invisibly.
 
-The next persistence experiment should implement the append-only store and
-replay first. Mentor execution should follow only after replay proves that a
-settled turn, its effective world state, and tool effects can be reconstructed
-without provider calls.
+The settled append-only store and cross-process replay now provide the input
+boundary for mentor work. Mentor execution should follow only after a source
+range can be selected and hashed without provider calls.
