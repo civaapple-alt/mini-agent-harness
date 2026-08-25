@@ -720,7 +720,7 @@ fn bounded_names(names: &[String]) -> String {
 
 fn print_help() {
     println!(
-        "/auto      unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS, compact); tools already run without approval"
+        "/auto      unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS, compact keeps recent tool work); tools already run without approval"
     );
     println!("/auto off  require approval for writes, shell, and MCP");
     println!("/mcp       retry configured MCP servers that are not enabled");

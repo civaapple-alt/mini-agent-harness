@@ -57,9 +57,10 @@ scope. Mini Agent Harness keeps only three lessons at the foundation:
 Durable settled-turn storage is an opt-in CLI-host experiment. Conversation
 trees, lanes, hooks, operation registers, and effect recovery remain separate;
 they do not enter core until an experiment justifies their permanent cost. The
-explicit auto mode is the context-compaction experiment: it summarizes a
-settled conversation before the next sampling request when history reaches
-half of the hard context ceiling.
+explicit auto mode is the context-compaction experiment: it summarizes the
+older prefix of a settled conversation before the next sampling request when
+history reaches half of the hard context ceiling, while keeping the latest
+world-state item and a bounded recent tail of tool work.
 
 The deterministic demo proves the complete model -> tool -> model -> answer
 path without network or credentials. The default command opens a small
@@ -183,9 +184,10 @@ shell is not sandboxed. `/auto off` restores per-action prompts. `auto` without
 a prompt starts the REPL in the copilot loop; `/auto` enables that loop in any
 interactive session. `auto` with a prompt remains a one-shot copilot. Copilot
 mode runs until the model finishes, unless `MINI_AGENT_MAX_STEPS` sets a
-positive cap (`0` is unlimited), and compact context between settled tool
-batches. It prints a warning because process execution is not sandboxed and
-can escape the workspace even though direct file tools cannot.
+positive cap (`0` is unlimited), and compacts older context between settled
+tool batches while keeping recent tool work. It prints a warning because
+process execution is not sandboxed and can escape the workspace even though
+direct file tools cannot.
 
 At startup mini-agent detects a fixed, bounded set of local command
 capabilities such as `git`, `rg`, `fd`, `tree`, `curl`, Cargo, Java/Maven,

@@ -95,8 +95,9 @@ Reasoning display, the terminal input queue, result handles, and managed
 processes stay in the CLI/provider host rather than becoming core scheduling or
 persistence concepts. Context compaction is present as one direct loop branch
 but remains disabled by default. When compaction runs, the latest typed context
-item is retained so a summary cannot silently erase current execution
-authority.
+item and a bounded recent tail of assistant/tool groups stay verbatim so a
+summary cannot silently erase current execution authority or the last tool
+batch.
 
 Each omission is reversible. Adding all of them preemptively is not.
 
@@ -112,10 +113,12 @@ A proposed core feature must answer all four questions:
 If those answers are missing, the feature stays outside core.
 
 The auto-copilot experiment admits compaction under this test: its hypothesis
-is that bounded summaries let an unattended tool loop continue past raw-history
-growth; `context_compaction_started` and `context_compaction_finished` make the
-intervention observable; it must live in core because it replaces the exact
-message sequence used by the next model request; and it adds no persistence,
-queue, hook, or generic policy layer. Its auxiliary request keeps the normal
-system prompt, tool catalog, and message prefix byte-stable, then appends the
-compaction instruction as the final user message so prefix caches remain useful.
+is that summarizing only the older prefix, while keeping a bounded recent tail,
+lets an unattended tool loop continue past raw-history growth without
+forgetting the last tool batch; `context_compaction_started` and
+`context_compaction_finished` make the intervention observable; it must live in
+core because it replaces the exact message sequence used by the next model
+request; and it adds no persistence, queue, hook, or generic policy layer. Its
+auxiliary request keeps the normal system prompt and tool catalog byte-stable,
+summarizes only the older message prefix, and may drop the oldest prefix
+messages so the compaction request itself fits.

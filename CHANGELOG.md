@@ -65,6 +65,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Copilot/auto no longer stops at 128 model steps. `max_steps = 0` means no
   step cap; set `MINI_AGENT_MAX_STEPS` to impose one. Context compaction still
   keeps long runs inside the 1 MiB request ceiling.
+- Auto context compaction keeps the latest world-state item and the last two
+  model-step groups (capped at 128 KiB) verbatim. Only the older prefix is
+  summarized. If the compaction request would exceed the 1 MiB ceiling, oldest
+  prefix messages are dropped until it fits. Empty or unhelpful summaries fall
+  back to mechanical prefix trim instead of aborting the run.
 - Durable sessions live under `~/.mini-agent/sessions/<workspace>/<session-id>/`
   instead of `.agents/sessions/` in the project tree.
 - Skill discovery reads only a bounded YAML frontmatter prefix, so an oversized

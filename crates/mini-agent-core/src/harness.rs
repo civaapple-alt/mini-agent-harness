@@ -15,6 +15,8 @@ use std::fmt;
 const TRUNCATION_MARKER: &str = "\n[truncated]";
 const COMPACTION_PREFIX: &str = "[Compacted conversation context]";
 const COMPACTION_PROMPT: &str = "Summarize the conversation state for another coding agent that must continue the work. Preserve the user's active goal, constraints, decisions, files changed, commands and tests already run, failures, unresolved work, and the exact next actions. Be concise but do not omit information needed to continue. Output only the summary and do not call tools.";
+const COMPACT_TAIL_GROUPS: usize = 2;
+const COMPACT_TAIL_MAX_BYTES: usize = 128 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContextLimitBehavior {
@@ -389,24 +391,28 @@ impl<M: Model> Harness<M> {
         observer: &mut O,
     ) -> Result<(), HarnessError<M::Error>> {
         let before_bytes = self.context_bytes(&self.config.system_prompt, tool_specs);
-        let mut compaction_messages = self.messages.clone();
+        let compact_at = self.config.max_context_bytes / 2;
+        let (mut prefix, context, tail) = split_compaction_parts(&self.messages);
+        if prefix.is_empty() {
+            return Ok(());
+        }
+        observer.observe(&Event::ContextCompactionStarted { before_bytes });
+        trim_prefix_to_fit(
+            &mut prefix,
+            COMPACTION_PROMPT,
+            &self.config.system_prompt,
+            tool_specs,
+            self.config.max_context_bytes,
+        );
+        if prefix.is_empty() {
+            let compacted = assemble_compacted(None, context, tail);
+            return self.finish_compacted(compacted, before_bytes, None, tool_specs, observer);
+        }
+        let mut compaction_messages = prefix.clone();
         compaction_messages.push(Message::User {
             text: COMPACTION_PROMPT.to_string(),
         });
-        let compaction_bytes =
-            context_bytes_for(&self.config.system_prompt, &compaction_messages, tool_specs);
-        if compaction_bytes > self.config.max_context_bytes {
-            return Err(fail_limit(
-                LimitExceeded {
-                    kind: LimitKind::ContextBytes,
-                    limit: self.config.max_context_bytes,
-                    actual: compaction_bytes,
-                },
-                observer,
-            ));
-        }
-        observer.observe(&Event::ContextCompactionStarted { before_bytes });
-        let response = self
+        let response = match self
             .model
             .respond(
                 ModelRequest {
@@ -418,12 +424,15 @@ impl<M: Model> Harness<M> {
                 &mut SilentModelEvents,
             )
             .await
-            .map_err(|error| {
+        {
+            Ok(response) => response,
+            Err(error) => {
                 observer.observe(&Event::RunFailed {
                     reason: crate::RunFailure::Model,
                 });
-                HarnessError::Model(error)
-            })?;
+                return Err(HarnessError::Model(error));
+            }
+        };
         let response_bytes = model_response_bytes(&response);
         if response_bytes > self.config.max_model_response_bytes {
             return Err(fail_limit(
@@ -435,32 +444,43 @@ impl<M: Model> Harness<M> {
                 observer,
             ));
         }
-        if !response.tool_calls.is_empty() {
-            return Err(fail_compaction(
-                "model returned tool calls while compacting".to_string(),
-                observer,
-            ));
-        }
         let summary = response.text.trim();
-        if summary.is_empty() {
-            return Err(fail_compaction(
-                "model returned an empty summary".to_string(),
-                observer,
-            ));
+        let mut compacted = None;
+        if response.tool_calls.is_empty() && !summary.is_empty() {
+            let candidate = assemble_compacted(Some(summary), context.clone(), tail.clone());
+            let after_bytes = context_bytes_for(&self.config.system_prompt, &candidate, tool_specs);
+            if after_bytes < before_bytes && after_bytes <= self.config.max_context_bytes {
+                compacted = Some(candidate);
+            }
         }
-        let mut compacted_messages = vec![Message::User {
-            text: format!("{COMPACTION_PREFIX}\n{summary}"),
-        }];
-        if let Some(context) = self
-            .messages
-            .iter()
-            .rev()
-            .find(|message| matches!(message, Message::Context { .. }))
-        {
-            compacted_messages.push(context.clone());
-        }
-        let after_bytes =
-            context_bytes_for(&self.config.system_prompt, &compacted_messages, tool_specs);
+        let compacted = compacted.unwrap_or_else(|| {
+            mechanical_compact(
+                prefix,
+                context,
+                tail,
+                compact_at,
+                &self.config.system_prompt,
+                tool_specs,
+            )
+        });
+        self.finish_compacted(
+            compacted,
+            before_bytes,
+            response.usage,
+            tool_specs,
+            observer,
+        )
+    }
+
+    fn finish_compacted<O: Observer + Send>(
+        &mut self,
+        compacted: Vec<Message>,
+        before_bytes: usize,
+        usage: Option<crate::ModelUsage>,
+        tool_specs: &[crate::ToolSpec],
+        observer: &mut O,
+    ) -> Result<(), HarnessError<M::Error>> {
+        let after_bytes = context_bytes_for(&self.config.system_prompt, &compacted, tool_specs);
         if after_bytes >= before_bytes {
             return Err(fail_compaction(
                 format!("summary did not reduce context: {before_bytes} -> {after_bytes} bytes"),
@@ -477,13 +497,123 @@ impl<M: Model> Harness<M> {
                 observer,
             ));
         }
-        self.messages = compacted_messages;
+        self.messages = compacted;
         observer.observe(&Event::ContextCompactionFinished {
             before_bytes,
             after_bytes,
-            usage: response.usage,
+            usage,
         });
         Ok(())
+    }
+}
+
+fn split_compaction_parts(messages: &[Message]) -> (Vec<Message>, Option<Message>, Vec<Message>) {
+    let (without_context, context) = take_latest_context(messages);
+    let (prefix, tail) = split_prefix_tail(&without_context);
+    (prefix, context, tail)
+}
+
+fn take_latest_context(messages: &[Message]) -> (Vec<Message>, Option<Message>) {
+    let Some(index) = messages
+        .iter()
+        .rposition(|message| matches!(message, Message::Context { .. }))
+    else {
+        return (messages.to_vec(), None);
+    };
+    let context = messages[index].clone();
+    let mut rest = Vec::with_capacity(messages.len().saturating_sub(1));
+    rest.extend_from_slice(&messages[..index]);
+    rest.extend_from_slice(&messages[index + 1..]);
+    (rest, Some(context))
+}
+
+fn split_prefix_tail(messages: &[Message]) -> (Vec<Message>, Vec<Message>) {
+    let starts = assistant_starts(messages);
+    if starts.is_empty() {
+        return (messages.to_vec(), Vec::new());
+    }
+    let group_count = starts.len().min(COMPACT_TAIL_GROUPS);
+    let mut tail_start = starts[starts.len() - group_count];
+    let mut tail = messages[tail_start..].to_vec();
+    while assistant_starts(&tail).len() > 1 && serialized_len(&tail) > COMPACT_TAIL_MAX_BYTES {
+        let inner = assistant_starts(&tail);
+        tail_start += inner[1];
+        tail = messages[tail_start..].to_vec();
+    }
+    (messages[..tail_start].to_vec(), tail)
+}
+
+fn assistant_starts(messages: &[Message]) -> Vec<usize> {
+    messages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, message)| {
+            matches!(message, Message::Assistant { .. }).then_some(index)
+        })
+        .collect()
+}
+
+fn serialized_len(messages: &[Message]) -> usize {
+    serde_json::to_vec(messages)
+        .expect("messages must serialize")
+        .len()
+}
+
+fn trim_prefix_to_fit(
+    prefix: &mut Vec<Message>,
+    prompt: &str,
+    system_prompt: &str,
+    tool_specs: &[crate::ToolSpec],
+    max_bytes: usize,
+) {
+    while !prefix.is_empty() {
+        let mut request = prefix.clone();
+        request.push(Message::User {
+            text: prompt.to_string(),
+        });
+        if context_bytes_for(system_prompt, &request, tool_specs) <= max_bytes {
+            return;
+        }
+        prefix.remove(0);
+    }
+}
+
+fn assemble_compacted(
+    summary: Option<&str>,
+    context: Option<Message>,
+    tail: Vec<Message>,
+) -> Vec<Message> {
+    let mut compacted = Vec::new();
+    if let Some(summary) = summary {
+        compacted.push(Message::User {
+            text: format!("{COMPACTION_PREFIX}\n{summary}"),
+        });
+    }
+    if let Some(context) = context {
+        compacted.push(context);
+    }
+    compacted.extend(tail);
+    compacted
+}
+
+fn mechanical_compact(
+    mut prefix: Vec<Message>,
+    context: Option<Message>,
+    tail: Vec<Message>,
+    compact_at: usize,
+    system_prompt: &str,
+    tool_specs: &[crate::ToolSpec],
+) -> Vec<Message> {
+    loop {
+        let compacted = assemble_compacted(None, context.clone(), tail.clone());
+        let mut candidate = prefix.clone();
+        candidate.extend(compacted.iter().cloned());
+        if prefix.is_empty()
+            || context_bytes_for(system_prompt, &candidate, tool_specs) < compact_at
+        {
+            return candidate;
+        }
+        prefix.remove(0);
     }
 }
 

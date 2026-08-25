@@ -472,11 +472,9 @@ async fn compacts_context_and_continues_the_tool_loop() {
         .append_context("<world_state>rust,cargo</world_state>")
         .unwrap();
     let mut events = RecordingObserver::default();
+    let prompt = format!("perform the long operation {}", "n".repeat(400));
 
-    let outcome = harness
-        .run("perform the long operation", &mut events)
-        .await
-        .unwrap();
+    let outcome = harness.run(&prompt, &mut events).await.unwrap();
 
     assert_eq!(outcome.stop_reason, StopReason::Completed);
     assert_eq!(outcome.steps, 2);
@@ -486,15 +484,20 @@ async fn compacts_context_and_continues_the_tool_loop() {
         [
             Message::User { text },
             Message::Context { text: context },
+            Message::Assistant { tool_calls, .. },
+            Message::Tool { name, content, .. },
             Message::Assistant {
                 text: answer,
-                tool_calls,
+                tool_calls: final_calls,
                 ..
             }
         ] if text.starts_with(COMPACTION_PREFIX)
             && context == "<world_state>rust,cargo</world_state>"
+            && !tool_calls.is_empty()
+            && name == "uppercase"
+            && content.contains('X')
             && answer == "Long operation completed."
-            && tool_calls.is_empty()
+            && final_calls.is_empty()
     ));
     assert!(events.0.iter().any(|event| matches!(
         event,
@@ -514,18 +517,29 @@ async fn compacts_context_and_continues_the_tool_loop() {
     assert_eq!(compaction.tools, first.tools);
     assert_eq!(continuation.system_prompt, first.system_prompt);
     assert_eq!(continuation.tools, first.tools);
-    assert_eq!(
-        &compaction.messages[..first.messages.len()],
-        first.messages.as_slice()
-    );
     assert!(matches!(
-        compaction.messages.last(),
-        Some(Message::User { text }) if text == COMPACTION_PROMPT
+        compaction.messages.as_slice(),
+        [
+            Message::User { text: compacted_prompt },
+            Message::User { text: instruction },
+        ] if compacted_prompt == prompt.as_str() && instruction == COMPACTION_PROMPT
+    ));
+    assert!(matches!(
+        continuation.messages.as_slice(),
+        [
+            Message::User { text },
+            Message::Context { .. },
+            Message::Assistant { tool_calls, .. },
+            Message::Tool { name, content, .. },
+        ] if text.starts_with(COMPACTION_PREFIX)
+            && !tool_calls.is_empty()
+            && name == "uppercase"
+            && content.contains('X')
     ));
 }
 
 #[tokio::test]
-async fn failed_compaction_preserves_existing_history() {
+async fn empty_summary_falls_back_to_mechanical_trim() {
     let model = ScriptedModel {
         responses: VecDeque::from([
             ModelResponse {
@@ -544,6 +558,12 @@ async fn failed_compaction_preserves_existing_history() {
                 tool_calls: Vec::new(),
                 usage: None,
             },
+            ModelResponse {
+                reasoning: String::new(),
+                text: "Long operation completed.".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            },
         ]),
     };
     let config = HarnessConfig {
@@ -556,26 +576,269 @@ async fn failed_compaction_preserves_existing_history() {
     let mut harness = Harness::new(model, ToolRegistry::new(vec![Box::new(Uppercase)]), config);
     let mut events = RecordingObserver::default();
 
-    let error = harness
+    let outcome = harness
         .run("perform the long operation", &mut events)
         .await
-        .unwrap_err();
+        .unwrap();
 
-    assert!(matches!(
-        error,
-        HarnessError::Compaction(reason) if reason == "model returned an empty summary"
-    ));
-    assert_eq!(harness.messages().len(), 3);
-    assert!(matches!(
-        harness.messages().first(),
-        Some(Message::User { text }) if text == "perform the long operation"
-    ));
-    assert_eq!(
-        events.0.last(),
-        Some(&Event::RunFailed {
+    assert_eq!(outcome.stop_reason, StopReason::Completed);
+    assert_eq!(outcome.final_text, "Long operation completed.");
+    assert!(outcome.messages.iter().any(|message| matches!(
+        message,
+        Message::Tool { name, content, .. } if name == "uppercase" && content.contains('X')
+    )));
+    assert!(events.0.iter().any(|event| matches!(
+        event,
+        Event::ContextCompactionFinished {
+            before_bytes,
+            after_bytes,
+            ..
+        } if after_bytes < before_bytes
+    )));
+    assert!(!events.0.iter().any(|event| matches!(
+        event,
+        Event::RunFailed {
             reason: crate::RunFailure::Compaction,
-        })
+        }
+    )));
+}
+
+#[tokio::test]
+async fn trims_over_budget_compaction_prefix_and_continues() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let model = RecordingModel {
+        responses: VecDeque::from([
+            ModelResponse {
+                reasoning: String::new(),
+                text: "Older turns covered padding and the latest user asked to continue."
+                    .to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: "Continued.".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            },
+        ]),
+        requests: Arc::clone(&requests),
+    };
+    let padding = "p".repeat(300);
+    let history = vec![
+        Message::User {
+            text: format!("old:{padding}"),
+        },
+        Message::User {
+            text: format!("mid:{padding}"),
+        },
+        Message::User {
+            text: format!("recent:{padding}"),
+        },
+    ];
+    let system_prompt = HarnessConfig::default().system_prompt;
+    let history_bytes = context_bytes_for(&system_prompt, &history, &[]);
+    let config = HarnessConfig {
+        max_context_bytes: history_bytes,
+        context_limit_behavior: ContextLimitBehavior::Compact,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(model, ToolRegistry::default(), config.clone());
+    harness.restore_history(history).unwrap();
+    let mut events = RecordingObserver::default();
+
+    let outcome = harness.run("continue", &mut events).await.unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Completed);
+    assert_eq!(outcome.final_text, "Continued.");
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    let compaction = &requests[0];
+    assert!(matches!(
+        compaction.messages.last(),
+        Some(Message::User { text }) if text == COMPACTION_PROMPT
+    ));
+    assert!(
+        !compaction
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::User { text } if text.starts_with("old:")))
     );
+    assert!(
+        context_bytes_for(
+            &compaction.system_prompt,
+            &compaction.messages,
+            &compaction.tools
+        ) <= config.max_context_bytes
+    );
+    assert!(events.0.iter().any(|event| matches!(
+        event,
+        Event::ContextCompactionFinished {
+            before_bytes,
+            after_bytes,
+            ..
+        } if after_bytes < before_bytes
+    )));
+}
+
+#[test]
+fn split_prefix_tail_keeps_last_two_assistant_groups() {
+    let assistant = |text: &str| Message::Assistant {
+        reasoning: String::new(),
+        text: text.to_string(),
+        tool_calls: Vec::new(),
+    };
+    let messages = vec![
+        Message::User {
+            text: "one".to_string(),
+        },
+        assistant("a1"),
+        Message::User {
+            text: "two".to_string(),
+        },
+        assistant("a2"),
+        Message::User {
+            text: "three".to_string(),
+        },
+        assistant("a3"),
+    ];
+
+    let (prefix, tail) = split_prefix_tail(&messages);
+
+    assert_eq!(
+        prefix,
+        vec![
+            Message::User {
+                text: "one".to_string(),
+            },
+            assistant("a1"),
+            Message::User {
+                text: "two".to_string(),
+            },
+        ]
+    );
+    assert_eq!(
+        tail,
+        vec![
+            assistant("a2"),
+            Message::User {
+                text: "three".to_string(),
+            },
+            assistant("a3"),
+        ]
+    );
+}
+
+#[test]
+fn split_prefix_tail_drops_older_group_when_tail_exceeds_cap() {
+    let group = |id: &str, size: usize| -> Vec<Message> {
+        vec![
+            Message::Assistant {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: id.to_string(),
+                    name: "t".to_string(),
+                    arguments: json!({}),
+                }],
+            },
+            Message::Tool {
+                call_id: id.to_string(),
+                name: "t".to_string(),
+                content: "x".repeat(size),
+                is_error: false,
+            },
+        ]
+    };
+    let mut messages = vec![Message::User {
+        text: "go".to_string(),
+    }];
+    messages.extend(group("1", 80 * 1024));
+    messages.extend(group("2", 80 * 1024));
+    let both_groups = messages[1..].to_vec();
+
+    let (prefix, tail) = split_prefix_tail(&messages);
+
+    assert!(serialized_len(&both_groups) > COMPACT_TAIL_MAX_BYTES);
+    assert!(
+        prefix
+            .iter()
+            .any(|message| matches!(message, Message::Tool { call_id, .. } if call_id == "1"))
+    );
+    assert!(matches!(
+        tail.as_slice(),
+        [
+            Message::Assistant { .. },
+            Message::Tool { call_id, .. },
+        ] if call_id == "2"
+    ));
+    assert!(serialized_len(&tail) <= COMPACT_TAIL_MAX_BYTES);
+}
+
+#[test]
+fn split_prefix_tail_keeps_a_single_oversize_group() {
+    let tail_group = vec![
+        Message::Assistant {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "big".to_string(),
+                name: "t".to_string(),
+                arguments: json!({}),
+            }],
+        },
+        Message::Tool {
+            call_id: "big".to_string(),
+            name: "t".to_string(),
+            content: "x".repeat(200 * 1024),
+            is_error: false,
+        },
+    ];
+    let mut messages = vec![Message::User {
+        text: "go".to_string(),
+    }];
+    messages.extend(tail_group.clone());
+
+    let (prefix, tail) = split_prefix_tail(&messages);
+
+    assert_eq!(
+        prefix,
+        vec![Message::User {
+            text: "go".to_string(),
+        }]
+    );
+    assert_eq!(tail, tail_group);
+    assert!(serialized_len(&tail) > COMPACT_TAIL_MAX_BYTES);
+}
+
+#[test]
+fn trim_prefix_to_fit_drops_oldest_until_request_fits() {
+    let system = "sys";
+    let tools: &[ToolSpec] = &[];
+    let prompt = "SUMMARIZE";
+    let mut prefix = vec![
+        Message::User {
+            text: format!("old-{}", "a".repeat(400)),
+        },
+        Message::User {
+            text: format!("keep-{}", "b".repeat(40)),
+        },
+    ];
+    let fitting = vec![
+        prefix[1].clone(),
+        Message::User {
+            text: prompt.to_string(),
+        },
+    ];
+    let max_bytes = context_bytes_for(system, &fitting, tools);
+
+    trim_prefix_to_fit(&mut prefix, prompt, system, tools, max_bytes);
+
+    assert_eq!(prefix.len(), 1);
+    assert!(matches!(
+        &prefix[0],
+        Message::User { text } if text.starts_with("keep-")
+    ));
 }
 
 #[test]

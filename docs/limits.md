@@ -42,14 +42,25 @@ process environment, workspace `.env`, or `~/.mini-agent/.env` to impose a
 positive cap; `0` remains unlimited. It can be selected by starting `auto`
 with or without a prompt or by entering `/auto` in an interactive session;
 `/auto off` restores per-action approval and the 8-step defaults. Before a
-normal sampling request, settled history at or above half of the 1 MiB ceiling is sent to the
-same model with the unchanged system prompt and tool catalog, followed by one
-appended compaction user message. This preserves the previous request prefix for
-provider KV-cache reuse. The returned summary must be non-empty, contain no tool
+normal sampling request, settled history at or above half of the 1 MiB ceiling
+is compacted. The newest context item and a bounded recent tail stay verbatim:
+the last two model-step groups (each an assistant message plus its following
+tool results, or a final tool-less assistant), capped at 128 KiB serialized.
+Only the older prefix is sent to the same model with the unchanged system
+prompt and tool catalog, followed by one appended compaction user message. If
+that compaction request would exceed 1 MiB, the oldest prefix messages are
+dropped until it fits. The returned summary must be non-empty, contain no tool
 calls, reduce context size, and fit the existing response and request ceilings.
-Compaction has its own trace events and does not consume an agent step. A
-pathological single step can still exceed the hard context ceiling and fail
-rather than sending an oversized request.
+If it does not, the harness drops oldest prefix messages until the request is
+under the compact threshold, instead of aborting the run. Compaction has its
+own trace events and does not consume an agent step. A pathological single step
+can still exceed the hard context ceiling and fail rather than sending an
+oversized request.
+
+Skill catalog text, root `AGENTS.md`, MCP tool schemas, and the latest
+world-state context item sit in the stable request prefix. They are re-supplied
+on every turn, including compaction, so compact cannot reclaim that budget.
+Opening more MCP tools therefore makes long auto runs worse, not better.
 
 The host currently uses context items for full world-state snapshots. The
 latest snapshot is retained across compaction and restored after `/new`.
