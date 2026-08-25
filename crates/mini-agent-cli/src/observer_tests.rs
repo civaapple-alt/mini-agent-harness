@@ -100,11 +100,12 @@ fn file_tool_start_only_displays_the_path() {
 #[test]
 fn tool_finished_stays_on_one_bounded_line() {
     assert_eq!(
-        format_tool_finished("MAKE THIS LOUD", false, false),
+        format_tool_finished("read_file", "MAKE THIS LOUD", false, false),
         "tool[ok]> MAKE THIS LOUD"
     );
     assert_eq!(
         format_tool_finished(
+            "read_file",
             "use crate::config::RuntimeConfig;\nuse crate::observer::RunObserver;",
             false,
             false
@@ -113,10 +114,23 @@ fn tool_finished_stays_on_one_bounded_line() {
     );
 
     let long = "x".repeat(MAX_TOOL_DETAIL_BYTES + 8);
-    let line = format_tool_finished(&long, false, false);
+    let line = format_tool_finished("read_file", &long, false, false);
     assert!(line.starts_with("tool[ok]> "));
     assert!(line.ends_with('…'));
     assert!(line.len() <= "tool[ok]> ".len() + MAX_TOOL_DETAIL_BYTES);
+}
+
+#[test]
+fn shell_tool_finished_prints_full_stdout() {
+    let output = "ok: workspace\nerror: credential\n";
+    assert_eq!(
+        format_tool_finished("shell", output, false, false),
+        "tool[ok]> ok: workspace\nerror: credential\n"
+    );
+    let long = "x".repeat(MAX_TOOL_DETAIL_BYTES + 8);
+    let line = format_tool_finished("shell", &long, false, false);
+    assert_eq!(line, format!("tool[ok]> {long}"));
+    assert!(!line.contains('…'));
 }
 
 #[test]
