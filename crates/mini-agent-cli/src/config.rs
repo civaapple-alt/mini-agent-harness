@@ -107,8 +107,14 @@ impl RuntimeConfig {
             "base_url_source": setting_source_name(self.base_url.source),
             "credential": if self.api_key.is_some() { "configured" } else { "missing" },
             "credential_source": self.api_key.as_ref().map(|value| source_name(value.source)),
-            "skills": extensions.len(),
+            "instructions": extensions.len(),
+            "skills": extensions.skill_count(),
+            "plugin_agents": extensions.plugin_agent_count(),
+            "plugins": extensions.plugin_count(),
+            "marketplaces": extensions.marketplace_count(),
             "mcp_servers": extensions.mcp_server_count(),
+            "mcp_stdio_servers": extensions.stdio_mcp_server_count(),
+            "mcp_http_servers": extensions.http_mcp_server_count(),
             "telemetry": false,
             "session_persistence": false,
             "command_sandbox": false
@@ -145,8 +151,14 @@ impl RuntimeConfig {
                         source_name(value.source)
                     ))
             ),
-            format!("skills: {}", extensions.len()),
+            format!("instructions: {}", extensions.len()),
+            format!("skills: {}", extensions.skill_count()),
+            format!("plugin_agents: {}", extensions.plugin_agent_count()),
+            format!("plugins: {}", extensions.plugin_count()),
+            format!("marketplaces: {}", extensions.marketplace_count()),
             format!("mcp_servers: {}", extensions.mcp_server_count()),
+            format!("mcp_stdio_servers: {}", extensions.stdio_mcp_server_count()),
+            format!("mcp_http_servers: {}", extensions.http_mcp_server_count()),
             "telemetry: disabled".to_string(),
             "session_persistence: disabled".to_string(),
             "command_sandbox: disabled".to_string(),
@@ -206,9 +218,13 @@ impl RuntimeConfig {
                 "extensions",
                 true,
                 format!(
-                    "{} project skills and {} stdio MCP servers discovered",
+                    "{} instructions, {} plugins, {} marketplaces, and {} MCP servers ({} stdio, {} HTTP) discovered",
                     skill_discovery.len(),
-                    skill_discovery.mcp_server_count()
+                    skill_discovery.plugin_count(),
+                    skill_discovery.marketplace_count(),
+                    skill_discovery.mcp_server_count(),
+                    skill_discovery.stdio_mcp_server_count(),
+                    skill_discovery.http_mcp_server_count()
                 ),
             )
         } else {

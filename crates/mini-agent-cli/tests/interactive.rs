@@ -7,6 +7,8 @@ use std::net::TcpListener;
 use std::net::TcpStream;
 use std::process::Command;
 use std::process::Stdio;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -600,11 +602,13 @@ fn wait_for_child(child: &mut std::process::Child) -> std::process::ExitStatus {
 }
 
 fn test_root() -> std::path::PathBuf {
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("mini-agent-interactive-{nonce}"));
+    let sequence = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("mini-agent-interactive-{nonce}-{sequence}"));
     fs::create_dir(&root).unwrap();
     root
 }

@@ -33,7 +33,7 @@ fn discovers_project_and_plugin_skills_with_progressive_disclosure() {
 }
 
 #[test]
-fn discovers_stdio_mcp_and_isolates_unsupported_transport() {
+fn discovers_stdio_and_http_mcp_transports() {
     let root = test_root();
     let plugin = root.join(".agents/plugins/tools");
     write_plugin_manifest(&plugin, "example.tools");
@@ -61,7 +61,9 @@ fn discovers_stdio_mcp_and_isolates_unsupported_transport() {
 
     let discovery = discover(&root);
 
-    assert_eq!(discovery.mcp_server_count(), 1);
+    assert_eq!(discovery.mcp_server_count(), 2);
+    assert_eq!(discovery.stdio_mcp_server_count(), 1);
+    assert_eq!(discovery.http_mcp_server_count(), 1);
     assert_eq!(
         discovery.mcp_servers()[0],
         McpServerConfig {
@@ -73,17 +75,171 @@ fn discovers_stdio_mcp_and_isolates_unsupported_transport() {
                 .canonicalize()
                 .unwrap()
                 .join(".agents/plugin-data/example.tools"),
-            command: "example-server".to_string(),
-            args: vec!["--root".to_string(), "${PLUGIN_ROOT}".to_string()],
-            env: BTreeMap::from([("DATA".to_string(), "${PLUGIN_DATA}/cache".to_string(),)]),
-            cwd: Some("${PLUGIN_ROOT}".to_string()),
+            connect_timeout: DEFAULT_CONNECT_TIMEOUT,
+            transport: McpTransportConfig::Stdio {
+                command: "example-server".to_string(),
+                args: vec!["--root".to_string(), "${PLUGIN_ROOT}".to_string()],
+                env: BTreeMap::from([("DATA".to_string(), "${PLUGIN_DATA}/cache".to_string(),)]),
+                cwd: Some("${PLUGIN_ROOT}".to_string()),
+            },
         }
     );
-    assert!(
+    assert!(discovery.diagnostics().is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn discovers_skillsets_legacy_plugins_agents_and_standalone_mcp() {
+    let root = test_root();
+    write_skill(
+        &root.join(".agents/skillsets/vercel/skills/react-best-practices"),
+        "vercel-react-best-practices",
+        "Review React code.",
+        "collection",
+    );
+    let plugin = root.join(".agents/plugins/code-simplifier");
+    fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
+    fs::write(
+        plugin.join(".claude-plugin/plugin.json"),
+        serde_json::to_vec(&json!({"name": "code-simplifier"})).unwrap(),
+    )
+    .unwrap();
+    fs::create_dir_all(plugin.join("agents")).unwrap();
+    fs::write(
+        plugin.join("agents/code-simplifier.md"),
+        "---\nname: code-simplifier\ndescription: Simplify recently changed code.\n---\nbody\n",
+    )
+    .unwrap();
+    fs::write(
+        plugin.join(".mcp.json"),
+        serde_json::to_vec(&json!({
+            "formatter": {
+                "command": "bun",
+                "args": ["run", "--cwd", "${CLAUDE_PLUGIN_ROOT}", "start"]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::create_dir_all(root.join(".agents/mcp")).unwrap();
+    fs::write(
+        root.join(".agents/mcp/context7.json"),
+        serde_json::to_vec_pretty(&json!({
+            "name": "context7",
+            "transport": "stdio",
+            "enabled": true,
+            "command": "npx",
+            "args": ["-y", "@upstash/context7-mcp"],
+            "connect_timeout_ms": 60_000
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let discovery = discover(&root);
+    let prompt = discovery.augment_system_prompt("base").unwrap();
+
+    assert_eq!(discovery.len(), 2);
+    assert_eq!(discovery.plugin_count(), 1);
+    assert_eq!(discovery.mcp_server_count(), 2);
+    assert_eq!(discovery.stdio_mcp_server_count(), 2);
+    assert!(prompt.contains("vercel-react-best-practices"));
+    assert!(prompt.contains("plugin-agent"));
+    assert!(prompt.contains("agents/code-simplifier.md"));
+    assert_eq!(
         discovery
-            .diagnostics()
+            .mcp_servers()
             .iter()
-            .any(|message| message.contains("streamable-http"))
+            .find(|server| server.server_name == "context7")
+            .unwrap()
+            .connect_timeout,
+        Duration::from_secs(60)
+    );
+    assert!(discovery.diagnostics().is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn discovers_claude_and_grok_marketplace_plugins_selected_explicitly() {
+    let root = test_root();
+    let claude = root.join(".agents/marketplaces/anthropic");
+    fs::create_dir_all(claude.join(".claude-plugin")).unwrap();
+    write_skill(
+        &claude.join("skills/pdf"),
+        "pdf",
+        "Work with PDF files.",
+        "pdf",
+    );
+    fs::write(
+        claude.join(".claude-plugin/marketplace.json"),
+        serde_json::to_vec_pretty(&json!({
+            "name": "anthropic-agent-skills",
+            "plugins": [{
+                "name": "document-skills",
+                "source": "./",
+                "strict": false,
+                "skills": ["./skills/pdf"]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let grok = root.join(".agents/marketplaces/xai/external_plugins/neon");
+    fs::create_dir_all(grok.join(".grok-plugin")).unwrap();
+    fs::create_dir_all(root.join(".agents/marketplaces/xai/.grok-plugin")).unwrap();
+    fs::write(
+        grok.join(".grok-plugin/plugin.json"),
+        serde_json::to_vec(&json!({"name": "neon"})).unwrap(),
+    )
+    .unwrap();
+    write_skill(
+        &grok.join("skills/neon"),
+        "neon",
+        "Work with Neon Postgres.",
+        "neon",
+    );
+    fs::write(
+        grok.join(".mcp.json"),
+        serde_json::to_vec(&json!({
+            "mcpServers": {"neon": {"type": "http", "url": "https://mcp.neon.tech/mcp"}}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agents/marketplaces/xai/.grok-plugin/marketplace.json"),
+        serde_json::to_vec(&json!({
+            "name": "xai-official",
+            "plugins": [{
+                "name": "neon",
+                "source": {"type": "local", "path": "./external_plugins/neon"}
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agents/marketplaces.json"),
+        serde_json::to_vec(&json!({
+            "marketplaces": {
+                "anthropic": ["document-skills"],
+                "xai": ["neon"]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let discovery = discover(&root);
+
+    assert_eq!(discovery.len(), 2);
+    assert_eq!(discovery.marketplace_count(), 2);
+    assert_eq!(discovery.plugin_count(), 2);
+    assert_eq!(discovery.http_mcp_server_count(), 1);
+    assert!(
+        discovery.diagnostics().is_empty(),
+        "{:?}",
+        discovery.diagnostics()
     );
     fs::remove_dir_all(root).unwrap();
 }

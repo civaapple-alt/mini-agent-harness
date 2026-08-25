@@ -1,0 +1,8 @@
+{
+  "name": "context7",
+  "transport": "stdio",
+  "enabled": true,
+  "command": "npx",
+  "args": ["-y", "@upstash/context7-mcp"],
+  "connect_timeout_ms": 60000
+}

@@ -9,6 +9,12 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 - Minimal project-scoped Agent Skills and Agent Plugins 1.0.0 discovery with
   progressive skill disclosure and approval-gated stdio MCP tools via RMCP.
+- Cloned skill collections, Claude/Grok plugins and explicitly selected local
+  plugin marketplaces, including compatible plugin-agent instructions.
+- Standalone project MCP configuration and approval-gated streamable HTTP MCP
+  with bounded headers, environment placeholders, and connection timeouts.
+- Individual immediate skills can be selected from cloned marketplaces without
+  enabling their containing plugin bundle.
 
 ### Fixed
 

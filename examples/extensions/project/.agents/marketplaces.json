@@ -1,0 +1,5 @@
+{
+  "marketplaces": {
+    "example-marketplace": ["marketplace-review"]
+  }
+}

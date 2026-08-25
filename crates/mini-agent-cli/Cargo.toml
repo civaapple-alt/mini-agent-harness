@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 eventsource-stream.workspace = true
 futures-util.workspace = true
+http.workspace = true
 mini-agent-core = { version = "0.1.0", path = "../mini-agent-core" }
 reqwest.workspace = true
 rmcp.workspace = true

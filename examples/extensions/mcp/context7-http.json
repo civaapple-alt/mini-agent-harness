@@ -1,0 +1,10 @@
+{
+  "name": "context7",
+  "transport": "http",
+  "enabled": true,
+  "url": "https://mcp.context7.com/mcp",
+  "headers": {
+    "Authorization": "${CONTEXT7_API_KEY:-}"
+  },
+  "connect_timeout_ms": 60000
+}

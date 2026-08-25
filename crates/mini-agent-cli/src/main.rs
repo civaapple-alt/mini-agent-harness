@@ -1,6 +1,7 @@
 mod ask;
 mod config;
 mod env_file;
+mod marketplaces;
 mod mcp;
 mod observer;
 mod openai;

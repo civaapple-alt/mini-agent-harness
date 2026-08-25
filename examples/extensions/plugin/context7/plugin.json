@@ -1,0 +1,7 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "context7",
+  "version": "1.0.0",
+  "description": "Current library documentation through Context7",
+  "license": "MIT"
+}

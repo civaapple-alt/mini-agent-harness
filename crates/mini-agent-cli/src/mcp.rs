@@ -1,5 +1,8 @@
 use crate::skills::McpServerConfig;
+use crate::skills::McpTransportConfig;
 use crate::workspace::ApprovalController;
+use http::HeaderName;
+use http::HeaderValue;
 use mini_agent_core::Tool;
 use mini_agent_core::ToolError;
 use mini_agent_core::ToolSpec;
@@ -7,11 +10,13 @@ use rmcp::ClientLifecycleMode;
 use rmcp::ClientServiceExt;
 use rmcp::model::CallToolRequestParams;
 use rmcp::model::PaginatedRequestParams;
-use rmcp::model::ProtocolVersion;
+use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::TokioChildProcess;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::which_command;
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
@@ -22,8 +27,6 @@ use tokio::process::Command;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::time::timeout;
 
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
-const STARTUP_WAIT: Duration = Duration::from_secs(22);
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 const PROTOCOL_CALL_TIMEOUT: Duration = Duration::from_secs(118);
 const MAX_MCP_TOOLS: usize = 32;
@@ -40,6 +43,7 @@ struct PendingServer {
     label: String,
     commands: tokio_mpsc::UnboundedSender<ServerCommand>,
     startup: mpsc::Receiver<Result<Vec<RemoteTool>, String>>,
+    startup_wait: Duration,
 }
 
 struct RemoteTool {
@@ -69,7 +73,7 @@ pub fn load(servers: &[McpServerConfig], approval: ApprovalController) -> LoadRe
     let mut pending = Vec::new();
     for server in servers {
         let label = format!("{}/{}", server.plugin_name, server.server_name);
-        if let Err(error) = approval.approve(&format!("start MCP server {label:?}")) {
+        if let Err(error) = approval.approve(&format!("connect MCP server {label:?}")) {
             diagnostics.push(format!("MCP server {label} was not started: {error}"));
             continue;
         }
@@ -82,7 +86,7 @@ pub fn load(servers: &[McpServerConfig], approval: ApprovalController) -> LoadRe
     let mut tools: Vec<Box<dyn Tool>> = Vec::new();
     let mut exposed_names = BTreeSet::new();
     for server in pending {
-        let remote_tools = match server.startup.recv_timeout(STARTUP_WAIT) {
+        let remote_tools = match server.startup.recv_timeout(server.startup_wait) {
             Ok(Ok(tools)) => tools,
             Ok(Err(error)) => {
                 diagnostics.push(format!("MCP server {} failed: {error}", server.label));
@@ -164,6 +168,9 @@ impl Tool for McpTool {
 
 fn start_server(config: McpServerConfig) -> Result<PendingServer, String> {
     let label = format!("{}/{}", config.plugin_name, config.server_name);
+    let startup_wait = config
+        .connect_timeout
+        .saturating_add(Duration::from_secs(2));
     let thread_name = format!("mcp-{}", sanitize_name(&label));
     let (commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
     let (startup_tx, startup_rx) = mpsc::sync_channel(1);
@@ -175,6 +182,7 @@ fn start_server(config: McpServerConfig) -> Result<PendingServer, String> {
         label,
         commands: commands_tx,
         startup: startup_rx,
+        startup_wait,
     })
 }
 
@@ -194,7 +202,7 @@ fn run_server(
         }
     };
     runtime.block_on(async move {
-        let connected = timeout(CONNECT_TIMEOUT, connect(&config)).await;
+        let connected = timeout(config.connect_timeout, connect(&config)).await;
         let (client, tools) = match connected {
             Ok(Ok(connected)) => connected,
             Ok(Err(error)) => {
@@ -241,19 +249,23 @@ async fn connect(
     ),
     String,
 > {
-    let command = build_command(config)?;
-    let transport = TokioChildProcess::new(command)
-        .map_err(|error| format!("cannot spawn stdio transport: {error}"))?;
-    let client = ()
-        .serve_with_lifecycle(
-            transport,
-            ClientLifecycleMode::Auto {
-                preferred_versions: vec![ProtocolVersion::V_2026_07_28],
-                legacy_version: Some(ProtocolVersion::V_2025_11_25),
-            },
-        )
-        .await
-        .map_err(|error| format!("MCP handshake failed: {error}"))?;
+    let client = match &config.transport {
+        McpTransportConfig::Stdio { .. } => {
+            let command = build_command(config)?;
+            let transport = TokioChildProcess::new(command)
+                .map_err(|error| format!("cannot spawn stdio transport: {error}"))?;
+            ().serve_with_lifecycle(transport, client_lifecycle()).await
+        }
+        McpTransportConfig::StreamableHttp { url, headers } => {
+            let headers = http_headers(headers)?;
+            let transport_config = StreamableHttpClientTransportConfig::with_uri(url.clone())
+                .custom_headers(headers)
+                .max_sse_event_size(MAX_TOOL_RESULT_BYTES);
+            let transport = StreamableHttpClientTransport::from_config(transport_config);
+            ().serve_with_lifecycle(transport, client_lifecycle()).await
+        }
+    }
+    .map_err(|error| format!("MCP handshake failed: {error}"))?;
     let mut cursor = None;
     let mut tools = Vec::new();
     loop {
@@ -292,28 +304,42 @@ async fn connect(
     Ok((client, tools))
 }
 
+fn client_lifecycle() -> ClientLifecycleMode {
+    ClientLifecycleMode::Initialize
+}
+
 fn build_command(config: &McpServerConfig) -> Result<Command, String> {
+    let McpTransportConfig::Stdio {
+        command: command_name,
+        args,
+        env,
+        cwd,
+    } = &config.transport
+    else {
+        return Err("cannot build a command for an HTTP MCP server".to_string());
+    };
     let plugin_data = prepare_plugin_data(config)?;
     let plugin_root = path_text(&config.plugin_root, "PLUGIN_ROOT")?;
     let plugin_data_text = path_text(&plugin_data, "PLUGIN_DATA")?;
-    let mut command = if let Some(relative) = config.command.strip_prefix("./") {
+    let mut command = if let Some(relative) = command_name.strip_prefix("./") {
+        let path = contained_existing_path(&config.plugin_root, relative, false)?;
+        Command::new(path)
+    } else if let Some(relative) = command_name.strip_prefix("${CLAUDE_PLUGIN_ROOT}/") {
         let path = contained_existing_path(&config.plugin_root, relative, false)?;
         Command::new(path)
     } else {
-        if Path::new(&config.command).components().count() != 1 {
+        if Path::new(command_name).components().count() != 1 {
             return Err("bare MCP command must be a single executable name".to_string());
         }
-        which_command(&config.command)
-            .map_err(|error| format!("cannot resolve executable {:?}: {error}", config.command))?
+        which_command(command_name)
+            .map_err(|error| format!("cannot resolve executable {command_name:?}: {error}"))?
     };
     apply_safe_environment(&mut command);
     command.args(
-        config
-            .args
-            .iter()
+        args.iter()
             .map(|arg| expand_placeholders(arg, plugin_root, plugin_data_text)),
     );
-    for (key, value) in &config.env {
+    for (key, value) in env {
         command.env(
             key,
             expand_placeholders(value, plugin_root, plugin_data_text),
@@ -321,7 +347,8 @@ fn build_command(config: &McpServerConfig) -> Result<Command, String> {
     }
     command.env("PLUGIN_ROOT", &config.plugin_root);
     command.env("PLUGIN_DATA", &plugin_data);
-    let cwd = match &config.cwd {
+    command.env("CLAUDE_PLUGIN_ROOT", &config.plugin_root);
+    let cwd = match cwd {
         None => config.plugin_root.clone(),
         Some(cwd) => resolve_cwd(cwd, &config.plugin_root, &plugin_data)?,
     };
@@ -402,6 +429,10 @@ fn resolve_cwd(value: &str, plugin_root: &Path, plugin_data: &Path) -> Result<Pa
         (plugin_data, "")
     } else if let Some(relative) = value.strip_prefix("${PLUGIN_DATA}/") {
         (plugin_data, relative)
+    } else if value == "${CLAUDE_PLUGIN_ROOT}" {
+        (plugin_root, "")
+    } else if let Some(relative) = value.strip_prefix("${CLAUDE_PLUGIN_ROOT}/") {
+        (plugin_root, relative)
     } else {
         return Err("invalid MCP cwd".to_string());
     };
@@ -481,6 +512,7 @@ fn bounded_result(result: &rmcp::model::CallToolResult) -> Result<String, String
 fn expand_placeholders(value: &str, plugin_root: &str, plugin_data: &str) -> String {
     const ROOT: &str = "${PLUGIN_ROOT}";
     const DATA: &str = "${PLUGIN_DATA}";
+    const CLAUDE_ROOT: &str = "${CLAUDE_PLUGIN_ROOT}";
     let mut expanded = String::with_capacity(value.len());
     let mut remaining = value;
     while !remaining.is_empty() {
@@ -490,6 +522,9 @@ fn expand_placeholders(value: &str, plugin_root: &str, plugin_data: &str) -> Str
         } else if let Some(rest) = remaining.strip_prefix(DATA) {
             expanded.push_str(plugin_data);
             remaining = rest;
+        } else if let Some(rest) = remaining.strip_prefix(CLAUDE_ROOT) {
+            expanded.push_str(plugin_root);
+            remaining = rest;
         } else {
             let character = remaining.chars().next().expect("remaining is non-empty");
             expanded.push(character);
@@ -497,6 +532,60 @@ fn expand_placeholders(value: &str, plugin_root: &str, plugin_data: &str) -> Str
         }
     }
     expanded
+}
+
+fn http_headers(
+    values: &std::collections::BTreeMap<String, String>,
+) -> Result<HashMap<HeaderName, HeaderValue>, String> {
+    values
+        .iter()
+        .map(|(name, value)| {
+            let name = HeaderName::from_bytes(name.as_bytes())
+                .map_err(|error| format!("invalid MCP HTTP header name: {error}"))?;
+            let value = expand_environment(value)?;
+            let value = HeaderValue::from_str(&value)
+                .map_err(|error| format!("invalid MCP HTTP header value: {error}"))?;
+            Ok((name, value))
+        })
+        .collect()
+}
+
+fn expand_environment(value: &str) -> Result<String, String> {
+    let mut expanded = String::with_capacity(value.len());
+    let mut remaining = value;
+    while let Some(start) = remaining.find("${") {
+        expanded.push_str(&remaining[..start]);
+        let after_open = &remaining[start + 2..];
+        let end = after_open
+            .find('}')
+            .ok_or_else(|| "unterminated environment placeholder in MCP header".to_string())?;
+        let token = &after_open[..end];
+        let expression = token.strip_prefix("env:").unwrap_or(token);
+        let (name, default) = expression
+            .split_once(":-")
+            .map_or((expression, None), |(name, default)| (name, Some(default)));
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(format!("invalid environment placeholder {expression:?}"));
+        }
+        match std::env::var(name) {
+            Ok(value) if value.is_empty() => expanded.push_str(default.unwrap_or_default()),
+            Ok(value) => expanded.push_str(&value),
+            Err(std::env::VarError::NotPresent) => match default {
+                Some(default) => expanded.push_str(default),
+                None => return Err(format!("environment variable {name} is not configured")),
+            },
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(format!("environment variable {name} is not UTF-8"));
+            }
+        }
+        remaining = &after_open[end + 1..];
+    }
+    expanded.push_str(remaining);
+    Ok(expanded)
 }
 
 fn path_text<'a>(path: &'a Path, name: &str) -> Result<&'a str, String> {

@@ -1,7 +1,11 @@
 use super::*;
 use crate::workspace::ApprovalMode;
+use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Read;
+use std::io::Write;
+use std::net::TcpListener;
 use std::process::Command as StdCommand;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -54,13 +58,11 @@ import sys
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
-    if method == "server/discover":
+    if method == "initialize":
         result = {
-            "resultType": "complete",
-            "supportedVersions": ["2026-07-28"],
+            "protocolVersion": "2025-06-18",
             "capabilities": {"tools": {}},
-            "ttlMs": 0,
-            "cacheScope": "private",
+            "serverInfo": {"name": "fixture", "version": "1.0.0"},
         }
     elif method == "tools/list":
         result = {
@@ -100,10 +102,13 @@ for line in sys.stdin:
             .canonicalize()
             .unwrap()
             .join(".agents/plugin-data/fixture.tools"),
-        command: python,
-        args: vec![script.to_string_lossy().into_owned()],
-        env: BTreeMap::new(),
-        cwd: None,
+        connect_timeout: Duration::from_secs(20),
+        transport: McpTransportConfig::Stdio {
+            command: python,
+            args: vec![script.to_string_lossy().into_owned()],
+            env: BTreeMap::new(),
+            cwd: None,
+        },
     };
 
     let mut loaded = load(&[config], ApprovalController::new(ApprovalMode::Automatic));
@@ -115,6 +120,46 @@ for line in sys.stdin:
     let output = tool.execute(&serde_json::json!({"text": "hello"})).unwrap();
     let value: Value = serde_json::from_str(&output).unwrap();
     assert_eq!(value["content"][0]["text"], "echo:hello");
+    drop(tool);
+    remove_test_root(&root);
+}
+
+#[test]
+fn loads_and_calls_streamable_http_server_with_expanded_headers() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || serve_http_mcp(listener));
+    let root = test_root();
+    fs::create_dir(root.join(".agents")).unwrap();
+    let config = McpServerConfig {
+        plugin_name: "fixture.http".to_string(),
+        server_name: "fixture".to_string(),
+        workspace_root: root.canonicalize().unwrap(),
+        plugin_root: root.canonicalize().unwrap(),
+        plugin_data: root
+            .canonicalize()
+            .unwrap()
+            .join(".agents/plugin-data/fixture.http"),
+        connect_timeout: Duration::from_secs(20),
+        transport: McpTransportConfig::StreamableHttp {
+            url: format!("http://{address}/mcp"),
+            headers: BTreeMap::from([(
+                "x-mini-agent-test".to_string(),
+                "${MINI_AGENT_UNSET_TEST_HEADER:-present}".to_string(),
+            )]),
+        },
+    };
+
+    let mut loaded = load(&[config], ApprovalController::new(ApprovalMode::Automatic));
+
+    assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+    assert_eq!(loaded.tools.len(), 1);
+    let tool = loaded.tools.pop().unwrap();
+    assert_eq!(tool.spec().name, "mcp__fixture_http_fixture__echo");
+    let output = tool.execute(&serde_json::json!({"text": "hello"})).unwrap();
+    let value: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(value["content"][0]["text"], "echo:hello");
+    assert!(server.join().unwrap());
     drop(tool);
     remove_test_root(&root);
 }
@@ -133,10 +178,13 @@ fn approval_denial_prevents_server_start_and_data_creation() {
         workspace_root: root.canonicalize().unwrap(),
         plugin_root: root.canonicalize().unwrap(),
         plugin_data: plugin_data.clone(),
-        command: "must-not-run".to_string(),
-        args: Vec::new(),
-        env: BTreeMap::new(),
-        cwd: None,
+        connect_timeout: Duration::from_secs(20),
+        transport: McpTransportConfig::Stdio {
+            command: "must-not-run".to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            cwd: None,
+        },
     };
     let approval = ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false));
 
@@ -184,4 +232,105 @@ fn remove_test_root(root: &Path) {
         }
     }
     fs::remove_dir_all(root).unwrap();
+}
+
+fn serve_http_mcp(listener: TcpListener) -> bool {
+    let mut saw_header = false;
+    loop {
+        let (mut stream, _) = listener.accept().unwrap();
+        let (headers, body) = read_http_request(&mut stream);
+        saw_header |= headers
+            .lines()
+            .any(|line| line.eq_ignore_ascii_case("x-mini-agent-test: present"));
+        let request: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        let method = request.get("method").and_then(Value::as_str);
+        let Some(id) = request.get("id") else {
+            write!(
+                stream,
+                "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            stream.flush().unwrap();
+            continue;
+        };
+        let result = match method {
+            Some("initialize") => json!({
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "fixture", "version": "1.0.0"}
+            }),
+            Some("tools/list") => json!({
+                "resultType": "complete",
+                "tools": [{
+                    "name": "echo",
+                    "description": "Echo text",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"text": {"type": "string"}},
+                        "required": ["text"]
+                    }
+                }]
+            }),
+            Some("tools/call") => json!({
+                "resultType": "complete",
+                "content": [{
+                    "type": "text",
+                    "text": format!(
+                        "echo:{}",
+                        request["params"]["arguments"]["text"].as_str().unwrap_or("")
+                    )
+                }],
+                "isError": false
+            }),
+            _ => continue,
+        };
+        let response = serde_json::to_vec(&json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result
+        }))
+        .unwrap();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            response.len()
+        )
+        .unwrap();
+        stream.write_all(&response).unwrap();
+        stream.flush().unwrap();
+        if method == Some("tools/call") {
+            return saw_header;
+        }
+    }
+}
+
+fn read_http_request(stream: &mut std::net::TcpStream) -> (String, Vec<u8>) {
+    let mut received = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    let header_end = loop {
+        let count = stream.read(&mut buffer).unwrap();
+        assert!(count > 0, "connection ended before HTTP headers");
+        received.extend_from_slice(&buffer[..count]);
+        if let Some(index) = received.windows(4).position(|window| window == b"\r\n\r\n") {
+            break index + 4;
+        }
+    };
+    let headers = String::from_utf8(received[..header_end].to_vec()).unwrap();
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().unwrap())
+        })
+        .unwrap_or(0);
+    while received.len() - header_end < content_length {
+        let count = stream.read(&mut buffer).unwrap();
+        assert!(count > 0, "connection ended before HTTP body");
+        received.extend_from_slice(&buffer[..count]);
+    }
+    (
+        headers,
+        received[header_end..header_end + content_length].to_vec(),
+    )
 }

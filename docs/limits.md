@@ -60,11 +60,13 @@ Host tools add their own effect-side bounds before results reach core:
 | managed-process log | 256 KiB per stream |
 | queued REPL operations | 16 |
 | root `AGENTS.md` | 16 KiB; reject if larger or invalid UTF-8 |
-| discovered Agent Skills | 32; 16 KiB combined metadata catalog |
+| discovered skill or compatible plugin instructions | 64; 16 KiB combined metadata catalog |
 | skill, plugin, or MCP metadata file | 64 KiB |
-| Agent Plugin MCP servers | 8 configured `stdio` servers |
+| marketplace manifest | 256 KiB |
+| marketplaces / enabled selectors per marketplace | 16 / 32 |
+| MCP servers | 8 configured stdio or streamable HTTP servers |
 | MCP tools | 32 total; 16 KiB input schema per tool |
-| MCP startup / tool call | 22 seconds / 120 seconds |
+| MCP connection / tool call | 20 seconds default (120 seconds max) / 120 seconds |
 | serialized MCP result | 64 KiB before the core 16 KiB projection |
 
 Shell streams are drained concurrently with a hard capture limit, so a noisy
@@ -77,11 +79,12 @@ On foreground timeout the host terminates the shell process tree. Process
 execution is still not an isolation boundary. Interactive and `run` modes
 require approval; the explicitly selected `auto` mode does not.
 
-Project skill and plugin discovery scans only immediate children at fixed
-locations and at most 128 directory entries per location. Filesystem-resolved
-plugin paths must remain inside the plugin root. MCP servers run as local
-processes with a small ambient environment allowlist; they are not sandboxed
-and may still access resources available to the current user.
+Project extension discovery scans only immediate children at fixed locations
+and at most 128 directory entries per location. Filesystem-resolved skill,
+plugin, and marketplace paths must remain inside their package or workspace
+root. Stdio MCP servers run as local processes with a small ambient environment
+allowlist; they are not sandboxed. HTTP MCP connects only to its configured
+absolute URL and applies bounded SSE events and tool results.
 
 The OpenAI adapter applies a 10-second connection timeout and a 120-second
 deadline to the complete streaming request. It enforces the harness response

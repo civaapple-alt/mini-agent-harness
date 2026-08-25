@@ -149,33 +149,53 @@ trees are stopped when the CLI exits. Conversation, result handles, queued
 input, and managed processes deliberately remain non-durable: auto mode
 survives long context growth, not process termination.
 
-## Portable skills and plugins
+## Skills, plugins, marketplaces, and MCP
 
-Mini Agent Harness discovers project-scoped [Agent Skills](https://agentskills.io/)
-from `.agents/skills/<skill>/SKILL.md`. It also loads
-[Agent Plugins 1.0.0](https://agent-plugins.org/) from
-`.agents/plugins/<plugin>/plugin.json`, including skills at the plugin's fixed
-`skills/` location. Discovery injects only each valid skill's name,
-description, and workspace-relative location into the stable system prompt.
-The model reads the complete `SKILL.md` with the existing `read_file` tool only
-when a task matches, so skill instructions and resources remain progressively
-disclosed.
+Mini Agent Harness provides one bounded, project-scoped compatibility layer:
 
-Plugins may expose MCP servers through root `mcp.json`. The minimal client
-supports the standard `stdio` transport through the official Rust MCP SDK and
-negotiates MCP 2026-07-28 with fallback for older servers. Server startup and
-every MCP tool call require approval unless auto mode is explicitly enabled.
-MCP tools are exposed as `mcp__<plugin>_<server>__<tool>` and remain subject to
-the harness's bounded tool-result context. Plugin subprocesses receive a small
-allowlist of ambient OS variables plus declared `env`, `PLUGIN_ROOT`, and a
-persistent `.agents/plugin-data/<plugin>` directory; provider credentials are
-not inherited implicitly.
+| Capability | Project location | Supported formats |
+| --- | --- | --- |
+| installed skill | `.agents/skills/<skill>/SKILL.md` | Agent Skills, standards-strict |
+| cloned skill collection | `.agents/skillsets/<repo>/` | root `SKILL.md` or immediate `skills/*/SKILL.md` |
+| installed plugin | `.agents/plugins/<plugin>/` | Agent Plugins v1, Claude plugin, or Grok plugin |
+| cloned marketplace | `.agents/marketplaces/<repo>/` | Claude or Grok marketplace, selected by `.agents/marketplaces.json` |
+| standalone MCP | `.agents/mcp.json` or `.agents/mcp/<server>.json` | aggregate or one-server configuration |
 
-This first adapter is deliberately project-only. It does not install or update
-packages, load user-global directories, implement client extensions, or
-support `streamable-http` and legacy `sse` transports. Unsupported and invalid
-components are reported and isolated without hiding valid sibling skills or
-servers.
+[Agent Plugins 1.0.0](https://agent-plugins.org/) use root `plugin.json`,
+`skills/`, and `mcp.json`. Claude and Grok plugins use their native hidden
+manifest, `skills/`, compatible `agents/*.md` instructions, and `.mcp.json`.
+Client-specific commands, hooks, LSP, UI, and nested-agent execution are not
+emulated. A compatible plugin agent becomes on-demand instructions for the
+main harness and is labeled `plugin-agent` in model-visible metadata.
+
+Marketplace repositories are inert until local selectors are named in
+`.agents/marketplaces.json`. A selector first matches an immediate
+`skills/<name>/SKILL.md`, allowing one skill to be enabled from a collection;
+otherwise it matches a marketplace plugin entry. Mini-agent resolves string
+sources such as `./plugins/name` and Grok `{ "type": "local", "path": "..." }`
+sources, including marketplace entries with explicit `skills` arrays. It
+deliberately does not download remote `url` or `git-subdir` entries.
+
+Discovery injects only each instruction's name, description, kind, and
+workspace-relative location into the stable system prompt. The model reads the
+complete file only when the task matches, preserving progressive disclosure.
+Skill collections and legacy ecosystems accept real-world install names that
+differ from source folder names; direct skills and portable plugins retain the
+stricter Agent Skills rule.
+
+MCP supports `stdio` plus modern `http` / `streamable-http` through the official
+Rust MCP SDK; legacy SSE is rejected. HTTP configs may declare headers with
+`${NAME}`, `${env:NAME}`, or `${NAME:-default}` environment placeholders.
+Interactive OAuth browser flows are not implemented; use an anonymous endpoint
+or provide an already-issued credential through an explicit header.
+Connection and every MCP tool call require approval unless auto mode is
+explicitly enabled. Tools are exposed as `mcp__<plugin>_<server>__<tool>` and
+remain bounded. Stdio servers receive a small ambient environment allowlist,
+declared `env`, `PLUGIN_ROOT`, `CLAUDE_PLUGIN_ROOT`, and persistent
+`.agents/plugin-data/<plugin>`; provider credentials are not inherited.
+
+See [configuration](docs/configuration.md) and the copyable
+[extension examples](examples/extensions/README.md).
 
 ## Operational contract
 
@@ -185,7 +205,7 @@ servers.
   availability without contacting a model provider.
 - A UTF-8 root `AGENTS.md` is appended once to the stable system prompt with a
   16 KiB hard limit.
-- Project Agent Skills and Agent Plugins use fixed `.agents/` locations and do
+- Project skills, plugins, marketplaces, and MCP use fixed `.agents/` locations and do
   not rewrite conversation history.
 - Mini Agent Harness sends no telemetry, update checks, or crash reports.
 - Shell execution is approval-gated but not sandboxed.

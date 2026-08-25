@@ -35,3 +35,21 @@ watchers instead of a foreground shell command.
 
 Trace creation refuses to overwrite files. Choose a new path or explicitly
 move the existing trace first.
+
+## A cloned marketplace skill or plugin is missing
+
+Cloning a marketplace does not enable every entry. Put the clone under
+`.agents/marketplaces/<directory>`, add the desired immediate skill directory or
+plugin name to `.agents/marketplaces.json`, then run `mini-agent doctor`. Only
+local marketplace sources are loaded. Remote `url` and `git-subdir` entries must
+be installed or cloned locally first.
+
+## An MCP server is not discovered
+
+Use plugin-root `mcp.json` for Agent Plugins v1, plugin-root `.mcp.json` for a
+Claude/Grok plugin, or `.agents/mcp.json` / `.agents/mcp/<server>.json` for a
+standalone server. `status --json` separates `mcp_stdio_servers` and
+`mcp_http_servers`. Legacy SSE is unsupported; use streamable HTTP or stdio.
+
+An HTTP server can also fail because a referenced header environment variable
+is missing. Use `${NAME:-}` only when an empty value is valid for that server.
