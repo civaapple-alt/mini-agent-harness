@@ -51,15 +51,15 @@ use workspace::ApprovalMode;
 use workspace::workspace_tools_with_read_roots;
 use world::WorldState;
 
-const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--security-preset PRESET] [--sandbox KIND] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent fork SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--persist] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
-const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is unsandboxed. `/auto off` restores prompts. --persist creates a resumable session under ~/.mini-agent/sessions.";
+const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent fork SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval and persist settled checkpoints under ~/.mini-agent/sessions by default. Use `--ephemeral` for temporary in-memory sessions. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
+const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--ephemeral] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is unsandboxed. Settled checkpoints are saved under ~/.mini-agent/sessions by default; use `--ephemeral` for temporary in-memory sessions. `/auto off` restores prompts.";
 const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SESSION_ID [--trace PATH]\n\nResumes the latest settled checkpoint of a durable session for this workspace.";
 const FORK_HELP: &str = "mini-agent fork\n\nUSAGE:\n    mini-agent fork SESSION_ID [--trace PATH]\n\nForks a new independent session from the latest settled checkpoint of an existing session.";
 const SESSIONS_HELP: &str = "mini-agent sessions\n\nUSAGE:\n    mini-agent sessions\n\nLists bounded durable sessions for the current workspace under ~/.mini-agent/sessions.";
 const MENTOR_HELP: &str = "mini-agent mentor\n\nUSAGE:\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n\nRuns a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.\n\nCONFIGURATION:\n    MENTOR_OPENAI_MODEL      Required dedicated mentor model\n    MENTOR_OPENAI_API_KEY    Optional; falls back to OPENAI_API_KEY\n    MENTOR_OPENAI_BASE_URL   Optional; falls back to OPENAI_BASE_URL";
 const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.\nOn a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto`.\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto        Permit sensitive tools without a TTY\n    --json        Emit a machine-readable final result\n    --trace PATH  Write JSONL observation events";
 const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--auto] [--json] [--trace PATH] [--] <PROMPT>\n\nAlias of `ask`. Prefer `ask` in scripts and docs.";
-const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, unlimited model steps (MINI_AGENT_MAX_STEPS, 0 = unlimited), and context compaction that keeps recent tool work.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
+const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--ephemeral] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, unlimited model steps (MINI_AGENT_MAX_STEPS, 0 = unlimited), and context compaction that keeps recent tool work.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
 const DEMO_HELP: &str = "mini-agent demo\n\nUSAGE:\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
 const TRACE_HELP: &str = "mini-agent trace\n\nUSAGE:\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n\nReplays and analyzes deterministic JSONL observation traces offline without contacting model providers.";
 const STATUS_HELP: &str = "mini-agent status\n\nUSAGE:\n    mini-agent status [--json]\n\nPrints effective non-secret startup configuration.";
@@ -87,10 +87,10 @@ async fn main() -> ExitCode {
     };
     match invocation.command {
         Command::Interactive => {
-            let request = if invocation.persist {
-                SessionRequest::New
-            } else {
+            let request = if invocation.ephemeral {
                 SessionRequest::Disabled
+            } else {
+                SessionRequest::New
             };
             repl::run(invocation.trace, ApprovalMode::Automatic, false, request).await
         }
@@ -116,10 +116,10 @@ async fn main() -> ExitCode {
             .await
         }
         Command::Auto if invocation.prompt.is_empty() => {
-            let request = if invocation.persist {
-                SessionRequest::New
-            } else {
+            let request = if invocation.ephemeral {
                 SessionRequest::Disabled
+            } else {
+                SessionRequest::New
             };
             repl::run(invocation.trace, ApprovalMode::Automatic, true, request).await
         }
@@ -189,7 +189,9 @@ struct Invocation {
     trace: Option<PathBuf>,
     json: bool,
     automatic: bool,
+    #[allow(dead_code)]
     persist: bool,
+    ephemeral: bool,
     security_preset: SecurityPreset,
     #[allow(dead_code)]
     sandbox_kind: SandboxKind,
@@ -217,7 +219,9 @@ enum HelpTopic {
 fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut args = args.into_iter().peekable();
     let command = match args.peek().map(String::as_str) {
-        None | Some("--trace" | "--persist") => Command::Interactive,
+        None | Some("--trace" | "--persist" | "--ephemeral" | "--no-persist") => {
+            Command::Interactive
+        }
         Some("help") => {
             args.next();
             let topic = match args.next() {
@@ -315,6 +319,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             json: false,
             automatic: false,
             persist: false,
+            ephemeral: false,
             security_preset: SecurityPreset::Default,
             sandbox_kind: SandboxKind::Native,
             help_topic: HelpTopic::Root,
@@ -327,6 +332,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut json = false;
     let mut automatic = false;
     let mut persist = false;
+    let mut ephemeral = false;
     let mut security_preset = SecurityPreset::Default;
     let mut sandbox_kind = SandboxKind::Native;
     let mut options = true;
@@ -356,6 +362,11 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 return Err("--persist may be provided only once".to_string());
             }
             persist = true;
+        } else if options && (argument == "--ephemeral" || argument == "--no-persist") {
+            if ephemeral {
+                return Err(format!("{argument} may be provided only once"));
+            }
+            ephemeral = true;
         } else if options && argument == "--security-preset" {
             let value = args
                 .next()
@@ -424,10 +435,18 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if trace.is_some() && matches!(command, Command::TraceReplay | Command::TraceSummary) {
         return Err("--trace is not supported by trace subcommands".to_string());
     }
+    if persist && ephemeral {
+        return Err("--persist and --ephemeral cannot be combined".to_string());
+    }
     if persist
         && !(command == Command::Interactive || command == Command::Auto && prompt.is_empty())
     {
         return Err("--persist is supported only by interactive sessions".to_string());
+    }
+    if ephemeral
+        && !(command == Command::Interactive || command == Command::Auto && prompt.is_empty())
+    {
+        return Err("--ephemeral is supported only by interactive sessions".to_string());
     }
     Ok(Invocation {
         command,
@@ -436,6 +455,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         json,
         automatic,
         persist,
+        ephemeral,
         security_preset,
         sandbox_kind,
         help_topic: HelpTopic::Root,
@@ -450,6 +470,7 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         json: false,
         automatic: false,
         persist: false,
+        ephemeral: false,
         security_preset: SecurityPreset::Default,
         sandbox_kind: SandboxKind::Native,
         help_topic,
@@ -877,11 +898,18 @@ mod tests {
     #[test]
     fn parses_durable_session_commands() {
         let persistent = parse_args(vec!["--persist".to_string()]).unwrap();
+        let ephemeral = parse_args(vec!["--ephemeral".to_string()]).unwrap();
+        let no_persist = parse_args(vec!["--no-persist".to_string()]).unwrap();
         let resume = parse_args(vec!["resume".to_string(), "s-123".to_string()]).unwrap();
         let sessions = parse_args(vec!["sessions".to_string()]).unwrap();
 
         assert_eq!(persistent.command, Command::Interactive);
         assert!(persistent.persist);
+        assert!(!persistent.ephemeral);
+        assert_eq!(ephemeral.command, Command::Interactive);
+        assert!(ephemeral.ephemeral);
+        assert_eq!(no_persist.command, Command::Interactive);
+        assert!(no_persist.ephemeral);
         assert_eq!(resume.command, Command::Resume);
         assert_eq!(resume.prompt, "s-123");
         assert_eq!(sessions.command, Command::Sessions);

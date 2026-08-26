@@ -610,7 +610,7 @@ fn durable_session_resumes_settled_history_after_restart() {
         String::from_utf8(output.stdout).unwrap()
     };
 
-    let first_stdout = run(&["--persist"], b"first question\n/exit\n");
+    let first_stdout = run(&[], b"first question\n/exit\n");
     let session_id = first_stdout
         .lines()
         .find_map(|line| line.strip_prefix("session> new "))

@@ -77,8 +77,9 @@ snapshot when it changes. If an MCP server is denied or fails during startup,
 bounded set of discovered skill and plugin names and shows configured MCP
 servers as inactive until connection approval succeeds.
 
-Interactive history remains in-memory by default. `--persist` creates a
-durable session under `~/.mini-agent/sessions/<workspace>/<session-id>/`,
+Interactive history is durable by default. Each interactive session automatically
+provisions a durable session record under `~/.mini-agent/sessions/<workspace>/<session-id>/`.
+`--ephemeral` (or `--no-persist`) opts out into a temporary in-memory session.
 `sessions` lists bounded session files for the current workspace,
 `resume SESSION_ID` restores the latest completely settled checkpoint, and
 `fork SESSION_ID` branches an existing checkpoint into an independent session
@@ -163,12 +164,12 @@ model or provider without coupling it to normal agent turns.
 
 ```sh
 mini-agent
+mini-agent --ephemeral
 mini-agent ask "summarize this repository"
 mini-agent ask --json "summarize the current changes"
 mini-agent ask --security-preset turbomode --sandbox native "cargo test"
 mini-agent help ask
 mini-agent auto "inspect this repository, improve it, and run the tests"
-mini-agent --persist
 mini-agent sessions
 mini-agent resume SESSION_ID
 mini-agent fork SESSION_ID
@@ -302,8 +303,7 @@ See [configuration](docs/configuration.md) and the copyable
   not rewrite conversation history.
 - Mini Agent Harness sends no telemetry, update checks, or crash reports.
 - Shell execution is approval-gated by default (`--security-preset`) and protected by native process containment (`JobObject` on Windows, process groups on Unix) or Docker isolation (`--sandbox`).
-- Interactive sessions are process-local by default; `--persist`, `resume`, and `fork`
-  opt into settled-turn persistence and branch lanes under `~/.mini-agent/sessions/`.
+- Interactive sessions are durable by default under `~/.mini-agent/sessions/`; `--ephemeral` provides in-memory scratch sessions, and `resume` / `fork` restore and branch settled checkpoints.
 - Trace replay and summary allow offline, deterministic playback and metrics calculation over JSONL observation logs.
 - Mentor insight and verification require a durable settled checkpoint, expose
   no tools, and append only a non-replayed derived item.
