@@ -257,11 +257,6 @@ impl Workspace {
             ));
         }
         if path.is_absolute() {
-            if self.extra_read_roots.is_empty() {
-                return Err(ToolError(
-                    "path must be relative, remain in the workspace, and avoid .git".to_string(),
-                ));
-            }
             return Ok(path.to_path_buf());
         }
         if path.components().any(|component| {
@@ -707,8 +702,13 @@ mod tests {
             read.execute(&json!({"path": "note.txt"})).unwrap(),
             "hello world"
         );
+        let abs_path = root.join("note.txt").to_string_lossy().to_string();
+        assert_eq!(
+            read.execute(&json!({"path": abs_path})).unwrap(),
+            "hello world"
+        );
         edit.execute(&json!({
-            "path": "note.txt",
+            "path": abs_path,
             "old_text": "world",
             "new_text": "agent"
         }))
@@ -724,12 +724,18 @@ mod tests {
     #[test]
     fn rejects_escape_and_git_paths() {
         let root = test_root();
-        let workspace = Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::new(ApprovalMode::Automatic),
-            Vec::new(),
-        )
-        .unwrap();
+        let other = test_root();
+        fs::write(other.join("secret.txt"), "secret data").unwrap();
+        let outside_abs = other.join("secret.txt").to_string_lossy().to_string();
+
+        let workspace = Arc::new(
+            Workspace::with_read_roots(
+                root.clone(),
+                ApprovalController::new(ApprovalMode::Automatic),
+                Vec::new(),
+            )
+            .unwrap(),
+        );
 
         assert!(workspace.candidate(&json!({"path": "../secret"})).is_err());
         assert!(
@@ -743,7 +749,12 @@ mod tests {
                 .is_err()
         );
 
+        let read = ReadFile(Arc::clone(&workspace));
+        let err = read.execute(&json!({"path": outside_abs})).unwrap_err();
+        assert!(err.0.contains("escapes the workspace"));
+
         fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(other).unwrap();
     }
 
     #[test]
