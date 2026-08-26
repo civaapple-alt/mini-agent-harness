@@ -22,13 +22,18 @@ impl SandboxKind {
         }
     }
 
-    #[allow(dead_code)]
     pub fn name(self) -> &'static str {
         match self {
             Self::Native => "native",
             Self::None => "none",
             Self::Docker => "docker",
         }
+    }
+}
+
+impl std::fmt::Display for SandboxKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
     }
 }
 

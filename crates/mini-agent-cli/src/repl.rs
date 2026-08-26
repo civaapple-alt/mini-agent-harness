@@ -51,6 +51,7 @@ enum ReplEvent {
 enum WorkerCommand {
     Prompt(String),
     ClearHistory,
+    ShowStatus,
     ShowWorld,
     RefreshWorld,
     ShowSession,
@@ -76,6 +77,7 @@ pub async fn run(
     copilot: bool,
     session_request: SessionRequest,
     preset: crate::security::SecurityPreset,
+    sandbox_kind: crate::sandbox::SandboxKind,
 ) -> ExitCode {
     let (event_tx, event_rx) = mpsc::sync_channel(EVENT_BUFFER);
     let approval_events = event_tx.clone();
@@ -109,10 +111,18 @@ pub async fn run(
         .map(|workspace| WorldState::detect(workspace, initial_approval, copilot));
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
-    let worker = spawn_worker(copilot, approval, session_request, worker_rx, event_tx);
+    let worker = spawn_worker(
+        copilot,
+        approval,
+        session_request,
+        preset,
+        sandbox_kind,
+        worker_rx,
+        event_tx,
+    );
 
     println!("{}", crate::version_line());
-    println!("mini-agent — /auto /world /session /mcp /queue /new /help /exit");
+    println!("mini-agent — /auto /status /world /session /mcp /queue /new /help /exit");
     print_auto_warning();
     if copilot {
         println!("auto mode on");
@@ -164,6 +174,9 @@ pub async fn run(
                     }
                     "/new" => {
                         queue_work(&worker_tx, WorkerCommand::ClearHistory, &mut pending_work)
+                    }
+                    "/status" | "/info" => {
+                        queue_work(&worker_tx, WorkerCommand::ShowStatus, &mut pending_work)
                     }
                     "/world" => queue_work(&worker_tx, WorkerCommand::ShowWorld, &mut pending_work),
                     "/world refresh" => {
@@ -266,6 +279,8 @@ fn spawn_worker(
     copilot: bool,
     approval: ApprovalController,
     session_request: SessionRequest,
+    preset: crate::security::SecurityPreset,
+    sandbox_kind: crate::sandbox::SandboxKind,
     commands: mpsc::Receiver<WorkerCommand>,
     events: mpsc::SyncSender<ReplEvent>,
 ) -> thread::JoinHandle<()> {
@@ -446,6 +461,47 @@ fn spawn_worker(
                             )));
                         }
                     }
+                }
+                WorkerCommand::ShowStatus => {
+                    let mode_str = match approval.mode() {
+                        ApprovalMode::Automatic => "automatic (auto-approve)",
+                        ApprovalMode::Interactive => "interactive (prompt on shell/sensitive)",
+                    };
+                    let copilot_str = if copilot {
+                        "on (unlimited steps)"
+                    } else {
+                        "off"
+                    };
+                    let session_str = if let Some(opened) = &durable {
+                        format!(
+                            "{} (thread {}) [durable: {}]",
+                            opened.store.session_id(),
+                            opened.store.thread_id(),
+                            opened.store.path().display()
+                        )
+                    } else {
+                        "ephemeral (in-memory)".to_string()
+                    };
+                    let workspace_str = world.workspace().display().to_string();
+
+                    let _ = events.send(ReplEvent::Notice(format!(
+                        "status> workspace:        {workspace_str}"
+                    )));
+                    let _ = events.send(ReplEvent::Notice(format!(
+                        "status> security-preset:  {preset}"
+                    )));
+                    let _ = events.send(ReplEvent::Notice(format!(
+                        "status> sandbox:          {sandbox_kind}"
+                    )));
+                    let _ = events.send(ReplEvent::Notice(format!(
+                        "status> approval:         {mode_str}"
+                    )));
+                    let _ = events.send(ReplEvent::Notice(format!(
+                        "status> copilot mode:     {copilot_str}"
+                    )));
+                    let _ = events.send(ReplEvent::Notice(format!(
+                        "status> session:          {session_str}"
+                    )));
                 }
                 WorkerCommand::ShowWorld => {
                     for line in world.status_lines() {
@@ -728,6 +784,9 @@ fn print_help() {
         "/auto      unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS, compact keeps recent tool work); tools already run without approval"
     );
     println!("/auto off  require approval for writes, shell, and MCP");
+    println!(
+        "/status    show current runtime status (security preset, sandbox, session, approval)"
+    );
     println!("/mcp       retry configured MCP servers that are not enabled");
     println!("/world     show detected environment, mode, and command capabilities");
     println!("/world refresh  detect changes and append a new world-state item");

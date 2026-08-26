@@ -201,7 +201,7 @@ fn interactive_prints_banner_before_initialization_error() {
     assert!(version.ends_with(')'), "{version}");
     assert_eq!(
         lines.next().unwrap_or_default(),
-        "mini-agent — /auto /world /session /mcp /queue /new /help /exit"
+        "mini-agent — /auto /status /world /session /mcp /queue /new /help /exit"
     );
     assert!(stdout.contains("world> "));
     assert!(stdout.contains("default | approval automatic"));
@@ -261,6 +261,44 @@ fn interactive_mcp_command_reports_when_nothing_needs_retry() {
 }
 
 #[test]
+fn interactive_status_command_reports_runtime_security_and_sandbox() {
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\n",
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .args(["--security-preset", "turbomode", "--sandbox", "native"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"/status\n/exit\n")
+        .unwrap();
+    let status = child.wait().unwrap();
+    let mut stdout = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(status.success());
+    assert!(stdout.contains("status> security-preset:  turbomode"));
+    assert!(stdout.contains("status> sandbox:          native"));
+    assert!(stdout.contains("status> approval:         automatic (auto-approve)"));
+    assert!(stdout.contains("status> session:"));
+}
+
+#[test]
 fn subcommand_help_succeeds_without_configuration() {
     let root = test_root();
     let output = first_use_command(&root, &["ask", "--help"]);
@@ -270,7 +308,7 @@ fn subcommand_help_succeeds_without_configuration() {
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("mini-agent ask"));
-    assert!(stdout.contains("--auto"));
+    assert!(stdout.contains("--auto-approve"));
     assert!(stdout.contains("32 KiB"));
 }
 
@@ -548,7 +586,9 @@ fn interactive_terminal_keeps_history_until_new() {
     fs::remove_dir_all(root).unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-agent — /auto /world /session /mcp /queue /new /help /exit"));
+    assert!(
+        stdout.contains("mini-agent — /auto /status /world /session /mcp /queue /new /help /exit")
+    );
     assert!(stdout.contains("assistant> reply-one"));
     assert!(stdout.contains("thinking> inspect carefully"));
     assert!(stdout.contains("queued ("));
@@ -1084,7 +1124,9 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     server.join().unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-agent — /auto /world /session /mcp /queue /new /help /exit"));
+    assert!(
+        stdout.contains("mini-agent — /auto /status /world /session /mcp /queue /new /help /exit")
+    );
     assert!(stdout.contains("auto mode on"));
     assert!(stdout.contains("auto-started"));
     assert!(stdout.contains("auto mode off; writes and shell commands require approval"));

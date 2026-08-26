@@ -23,7 +23,6 @@ impl SecurityPreset {
         }
     }
 
-    #[allow(dead_code)]
     pub fn name(self) -> &'static str {
         match self {
             Self::Default => "default",
@@ -31,6 +30,12 @@ impl SecurityPreset {
             Self::Turbomode => "turbomode",
             Self::Custom => "custom",
         }
+    }
+}
+
+impl std::fmt::Display for SecurityPreset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
     }
 }
 

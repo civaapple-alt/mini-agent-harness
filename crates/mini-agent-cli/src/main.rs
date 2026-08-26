@@ -51,15 +51,15 @@ use workspace::ApprovalMode;
 use workspace::workspace_tools_with_read_roots;
 use world::WorldState;
 
-const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent fork SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval and persist settled checkpoints under ~/.mini-agent/sessions by default. Use `--ephemeral` for temporary in-memory sessions. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
-const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--ephemeral] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is unsandboxed. Settled checkpoints are saved under ~/.mini-agent/sessions by default; use `--ephemeral` for temporary in-memory sessions. `/auto off` restores prompts.";
+const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent fork SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto-approve|-y] [--json] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval and persist settled checkpoints under ~/.mini-agent/sessions by default. Use `--ephemeral` for temporary in-memory sessions. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto-approve` (or `-y`) when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
+const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is protected by sandbox. Settled checkpoints are saved under ~/.mini-agent/sessions by default; use `--ephemeral` for temporary in-memory sessions. `/auto off` restores prompts.";
 const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SESSION_ID [--trace PATH]\n\nResumes the latest settled checkpoint of a durable session for this workspace.";
 const FORK_HELP: &str = "mini-agent fork\n\nUSAGE:\n    mini-agent fork SESSION_ID [--trace PATH]\n\nForks a new independent session from the latest settled checkpoint of an existing session.";
 const SESSIONS_HELP: &str = "mini-agent sessions\n\nUSAGE:\n    mini-agent sessions\n\nLists bounded durable sessions for the current workspace under ~/.mini-agent/sessions.";
 const MENTOR_HELP: &str = "mini-agent mentor\n\nUSAGE:\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n\nRuns a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.\n\nCONFIGURATION:\n    MENTOR_OPENAI_MODEL      Required dedicated mentor model\n    MENTOR_OPENAI_API_KEY    Optional; falls back to OPENAI_API_KEY\n    MENTOR_OPENAI_BASE_URL   Optional; falls back to OPENAI_BASE_URL";
-const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto-approve|-y|--auto] [--json] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.\nOn a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`/`--auto`).\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto-approve, -y, --auto   Permit sensitive tools non-interactively (auto-approve)\n    --security-preset PRESET     Security policy preset: default, turbomode, full-machine\n    --sandbox KIND               Execution sandbox: native (Win32 JobObject/process groups), docker\n    --json                       Emit a machine-readable final result\n    --trace PATH                 Write JSONL observation events";
-const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--auto] [--json] [--trace PATH] [--] <PROMPT>\n\nAlias of `ask`. Prefer `ask` in scripts and docs.";
-const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--ephemeral] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, unlimited model steps (MINI_AGENT_MAX_STEPS, 0 = unlimited), and context compaction that keeps recent tool work.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
+const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto-approve|-y] [--json] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.\nOn a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto-approve, -y           Permit sensitive tools non-interactively (auto-approve)\n    --security-preset PRESET     Security policy preset: default, turbomode, full-machine\n    --sandbox KIND               Execution sandbox: native (Win32 JobObject/process groups), docker\n    --json                       Emit a machine-readable final result\n    --trace PATH                 Write JSONL observation events";
+const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--auto-approve|-y] [--json] [--trace PATH] [--] <PROMPT>\n\nAlias of `ask`. Prefer `ask` in scripts and docs.";
+const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, unlimited model steps (MINI_AGENT_MAX_STEPS, 0 = unlimited), and context compaction that keeps recent tool work.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
 const DEMO_HELP: &str = "mini-agent demo\n\nUSAGE:\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
 const TRACE_HELP: &str = "mini-agent trace\n\nUSAGE:\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n\nReplays and analyzes deterministic JSONL observation traces offline without contacting model providers.";
 const STATUS_HELP: &str = "mini-agent status\n\nUSAGE:\n    mini-agent status [--json]\n\nPrints effective non-secret startup configuration.";
@@ -78,10 +78,11 @@ pub(crate) fn git_sha() -> &'static str {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    let invocation = match parse_args(env::args().skip(1).collect()) {
+    let invocation = match parse_args(std::env::args().skip(1).collect()) {
         Ok(invocation) => invocation,
         Err(error) => {
-            eprintln!("error: {error}\n\n{HELP}");
+            eprintln!("error: {error}\n");
+            println!("{}", help_text(HelpTopic::Root));
             return ExitCode::from(2);
         }
     };
@@ -98,6 +99,7 @@ async fn main() -> ExitCode {
                 false,
                 request,
                 invocation.security_preset,
+                invocation.sandbox_kind,
             )
             .await
         }
@@ -134,6 +136,7 @@ async fn main() -> ExitCode {
                 true,
                 request,
                 invocation.security_preset,
+                invocation.sandbox_kind,
             )
             .await
         }
@@ -155,6 +158,7 @@ async fn main() -> ExitCode {
                 false,
                 SessionRequest::Resume(invocation.prompt),
                 invocation.security_preset,
+                invocation.sandbox_kind,
             )
             .await
         }
@@ -165,6 +169,7 @@ async fn main() -> ExitCode {
                 false,
                 SessionRequest::Fork(invocation.prompt),
                 invocation.security_preset,
+                invocation.sandbox_kind,
             )
             .await
         }
@@ -368,15 +373,17 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             }
             json = true;
         } else if options
-            && (argument == "--auto"
-                || argument == "--auto-approve"
-                || argument == "-y"
-                || argument == "--yes")
+            && (argument == "--auto-approve" || argument == "-y" || argument == "--yes")
         {
             if automatic {
                 return Err(format!("{argument} may be provided only once"));
             }
             automatic = true;
+        } else if options && argument == "--auto" {
+            return Err(
+                "unknown option: --auto (use '--auto-approve' or '-y' in ask mode, or use 'mini-agent auto')"
+                    .to_string(),
+            );
         } else if options && argument == "--persist" {
             if persist {
                 return Err("--persist may be provided only once".to_string());
@@ -442,7 +449,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         );
     }
     if automatic && !matches!(command, Command::Ask | Command::Run) {
-        return Err("--auto is supported only by ask".to_string());
+        return Err("--auto-approve is supported only by ask".to_string());
     }
     if trace.is_some()
         && matches!(
@@ -977,7 +984,7 @@ mod tests {
     fn parses_script_ask_options() {
         let invocation = parse_args(vec![
             "ask".to_string(),
-            "--auto".to_string(),
+            "--auto-approve".to_string(),
             "--json".to_string(),
             "inspect".to_string(),
         ])
@@ -988,14 +995,6 @@ mod tests {
         assert!(invocation.automatic);
         assert!(invocation.json);
 
-        let auto_approve = parse_args(vec![
-            "ask".to_string(),
-            "--auto-approve".to_string(),
-            "test".to_string(),
-        ])
-        .unwrap();
-        assert!(auto_approve.automatic);
-
         let yes_flag = parse_args(vec![
             "ask".to_string(),
             "-y".to_string(),
@@ -1003,6 +1002,14 @@ mod tests {
         ])
         .unwrap();
         assert!(yes_flag.automatic);
+
+        let auto_err = parse_args(vec![
+            "ask".to_string(),
+            "--auto".to_string(),
+            "test".to_string(),
+        ])
+        .unwrap_err();
+        assert!(auto_err.contains("unknown option: --auto"));
     }
 
     #[test]
