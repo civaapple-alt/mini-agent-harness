@@ -134,6 +134,12 @@ If a proposed approach is rejected during review:
 
 ### Historical Archive (`archived/`)
 
-#### Architecture (`archived/architecture/`)
-| Date | Title | Status & Rationale |
+#### Experiments (`archived/experiments/`)
+| Date | Title | Focus |
 |---|---|---|
+| 2026-08-24 | [Unknown-Tool Recovery](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-unknown-tool.md) | Recovery-capable model passes by projecting tool failure back to context |
+| 2026-08-24 | [Edit Surface Comparison](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-edit-surface.md) | Exact unique replacement preserves collateral content over full rewrite |
+| 2026-08-24 | [Tool-Output Retention](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-tool-output-retention.md) | Head-plus-tail truncation preserves both orientation and final verdict |
+| 2026-08-24 | [Effect Recovery Boundary](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-effect-recovery.md) | Replay safety simulation across non-idempotent crash boundaries |
+| 2026-08-24 | [Prompt Weight Protocol](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-prompt-weight.md) | Benchmark protocol comparing minimal vs expanded operational system prompts |
+

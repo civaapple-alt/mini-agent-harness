@@ -12,5 +12,5 @@ Add persistent database traits, transaction logs, and execution checkpointing in
 
 ## Rationale for Rejection
 
-1. **Inability to Settle Non-Idempotent Effects**: Crash-boundary simulations ([docs/experiments/effect-recovery.md](file:///D:/gh-ws/codex-ws/mini-codex/docs/experiments/effect-recovery.md)) demonstrated that while intent logs detect uncertainty, they cannot settle or safely rollback non-idempotent real-world side effects (such as deleted files or external HTTP requests).
+1. **Inability to Settle Non-Idempotent Effects**: Crash-boundary simulations ([Effect Recovery Boundary](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-effect-recovery.md)) demonstrated that while intent logs detect uncertainty, they cannot settle or safely rollback non-idempotent real-world side effects (such as deleted files or external HTTP requests).
 2. **Microkernel Violation**: Adding persistence violates core separation of concerns. Persistence is a host-level integration requirement that belongs at the CLI/edge layer ([`crates/mini-agent-cli/src/session.rs`](file:///D:/gh-ws/codex-ws/mini-codex/crates/mini-agent-cli/src/session.rs)).

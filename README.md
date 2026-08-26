@@ -295,13 +295,7 @@ See [configuration](docs/configuration.md),
 [release procedure](docs/releasing.md). The durable item and mentor direction
 is recorded in [world state](docs/world-state.md).
 
-See [the experiment protocol](docs/experiments.md), the
-[unknown-tool comparison](docs/experiments/unknown-tool.md), the
-[edit-surface comparison](docs/experiments/edit-surface.md), the
-[tool-output comparison](docs/experiments/tool-output-retention.md), the
-[real-model prompt-weight protocol](docs/experiments/prompt-weight.md), the
-[effect-recovery comparison](docs/experiments/effect-recovery.md), and the
-[harness boundary](docs/harness-boundary.md). The exact defaults and failure
-behavior are listed in [harness limits](docs/limits.md).
+Architecture and design decisions are recorded in [Agent Notes](.agents/notes/README.md).
+The exact defaults and failure behavior are listed in [harness limits](docs/limits.md).
 
 Licensed under the [MIT License](LICENSE).
