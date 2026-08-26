@@ -82,7 +82,7 @@ If a proposed approach is rejected during review:
 #### Architecture (`proposed/architecture/`)
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-26 | [Local Sandbox Adapter](.agents/notes/proposed/architecture/2026-08-26-local-sandbox-adapter.md) | Pluggable container sandbox isolation and multi-tier security permissions matrix |
+| 2026-08-26 | [Tool Orchestrator & Sandbox Adapter](.agents/notes/proposed/architecture/2026-08-26-local-sandbox-adapter.md) | Codex-inspired 5-stage tool orchestrator, security presets, and pluggable sandboxing |
 
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
