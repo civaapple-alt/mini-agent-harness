@@ -79,18 +79,32 @@ servers as inactive until connection approval succeeds.
 
 Interactive history remains in-memory by default. `--persist` creates a
 durable session under `~/.mini-agent/sessions/<workspace>/<session-id>/`,
-`sessions` lists bounded session files for the current workspace, and
-`resume SESSION_ID` restores the latest completely settled checkpoint. `/new`
-starts a new thread inside a durable session; `/session` shows its identity.
-The append-only JSONL record distinguishes session, thread, turn, and item
-identities and stores a checkpoint only after settlement. It deliberately does
-not replay a turn interrupted during a provider or tool effect.
+`sessions` lists bounded session files for the current workspace,
+`resume SESSION_ID` restores the latest completely settled checkpoint, and
+`fork SESSION_ID` branches an existing checkpoint into an independent session
+for speculative exploration. `/new` starts a new thread inside a durable
+session; `/session` shows its identity. The append-only JSONL record
+distinguishes session, thread, turn, and item identities and stores a checkpoint
+only after settlement. It deliberately does not replay a turn interrupted
+during a provider or tool effect.
+
+`trace replay PATH` and `trace summary PATH` replay and compute metrics over
+deterministic JSONL observation event logs offline without making provider
+calls.
 
 `mentor insight SESSION_ID` and `mentor verify SESSION_ID CRITERIA` run an
 independently configured, tool-free model against that session's latest settled
 checkpoint. The result is appended to the same JSONL file as a derived item
 linked to the source checkpoint sequence and fingerprint. It is never replayed
 into the primary conversation.
+
+Tool execution is governed by a 5-stage `ToolOrchestrator` supporting security
+presets (`default`, `full-machine`, `turbomode`, `custom`), session-level
+decision caching (`ApprovalStore`), and native process sandboxing. On Windows,
+spawned shells are contained within Win32 `JobObject` guards to guarantee atomic
+subprocess tree destruction (Zero-Zombie guarantee). Remote HTTP MCP servers
+include circuit breaking to fail fast during outages. Autonomous copilot runs
+include loop detection warnings to prevent repetitive invocation stalls.
 
 ## Install
 
@@ -151,14 +165,18 @@ model or provider without coupling it to normal agent turns.
 mini-agent
 mini-agent ask "summarize this repository"
 mini-agent ask --json "summarize the current changes"
+mini-agent ask --security-preset turbomode --sandbox native "cargo test"
 mini-agent help ask
 mini-agent auto "inspect this repository, improve it, and run the tests"
 mini-agent --persist
 mini-agent sessions
 mini-agent resume SESSION_ID
+mini-agent fork SESSION_ID
 mini-agent mentor insight SESSION_ID
 mini-agent mentor verify SESSION_ID -- "tests pass and requested behavior is evidenced"
 mini-agent --trace trace.jsonl
+mini-agent trace replay trace.jsonl
+mini-agent trace summary trace.jsonl --json
 ```
 
 Use `--` before a prompt that begins with `-`, for example
@@ -283,9 +301,10 @@ See [configuration](docs/configuration.md) and the copyable
 - Project skills, plugins, marketplaces, and MCP use fixed `.agents/` locations and do
   not rewrite conversation history.
 - Mini Agent Harness sends no telemetry, update checks, or crash reports.
-- Shell execution is approval-gated but not sandboxed.
-- Interactive sessions are process-local by default; `--persist` and `resume`
-  opt into settled-turn persistence under `~/.mini-agent/sessions/`.
+- Shell execution is approval-gated by default (`--security-preset`) and protected by native process containment (`JobObject` on Windows, process groups on Unix) or Docker isolation (`--sandbox`).
+- Interactive sessions are process-local by default; `--persist`, `resume`, and `fork`
+  opt into settled-turn persistence and branch lanes under `~/.mini-agent/sessions/`.
+- Trace replay and summary allow offline, deterministic playback and metrics calculation over JSONL observation logs.
 - Mentor insight and verification require a durable settled checkpoint, expose
   no tools, and append only a non-replayed derived item.
 
