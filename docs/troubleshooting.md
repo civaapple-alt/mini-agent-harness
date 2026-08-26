@@ -97,3 +97,18 @@ An HTTP server can also fail because a referenced header environment variable
 is missing. Use `${NAME:-}` only when an empty value is valid for that server.
 If a connection was denied or startup failed transiently, enter `/mcp` in the
 same interactive session to retry. Existing conversation history is preserved.
+
+## File tools and workspace paths
+
+`read_file`, `edit_file`, and `write_file` accept paths located inside the active
+workspace, whether given as relative paths (e.g. `src/main.rs`) or absolute paths
+(e.g. `D:\workspace\src\main.rs`). Paths that escape the workspace (such as
+`../secret` or external directories) or point to `.git` are strictly rejected.
+
+## Real-time web search and network data
+
+By default, mini-agent enables built-in Responses API `web_search` (`{"type": "web_search"}`)
+so the model can query the internet without writing raw local shell/PowerShell scrape scripts.
+To disable web search, pass `--no-web-search` (or `--no-search`) or set `MINI_AGENT_WEB_SEARCH=false`
+in `.env`.
+

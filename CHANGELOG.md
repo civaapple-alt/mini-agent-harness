@@ -55,6 +55,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Fixed
 
+- `read_file`, `edit_file`, and `write_file` accept in-workspace absolute paths
+  (e.g. `D:\path\to\workspace\file.txt`) without error, automatically resolving
+  and validating them within the workspace security boundary.
 - Interactive `read_file` (and other non-shell) `tool[ok]>` lines stay on one
   bounded preview. `shell`, `process_read`, and `read_tool_result` still print
   their full stdout/stderr in the terminal.

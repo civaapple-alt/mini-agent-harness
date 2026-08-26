@@ -195,12 +195,13 @@ environment. `run` is an alias of `ask`.
 
 The real modes expose `read_file`, `edit_file`, `write_file`, `shell`,
 `read_tool_result`, and managed-process tools. Reads and direct file writes are
-confined to the current workspace; `.git` is protected. `edit_file` makes one
-exact unique replacement; `write_file` creates new files and refuses to replace
-existing ones. Reads never prompt. The interactive REPL and TTY `ask` run
-writes, shell commands, process starts, and MCP without per-step approval;
-process execution is protected by the sandbox (`--sandbox native|docker`).
-`/status` displays active security preset, sandbox, session, and approval state.
+confined to the current workspace (supporting both relative paths and in-workspace absolute paths);
+`.git` is protected. `edit_file` makes one exact unique replacement; `write_file` creates
+new files and refuses to replace existing ones. Reads never prompt. Built-in Responses API `web_search`
+is enabled by default (toggle via `--web-search|--no-web-search` or `MINI_AGENT_WEB_SEARCH=true|false`).
+The interactive REPL and TTY `ask` run writes, shell commands, process starts, and MCP without per-step
+approval; process execution is protected by the sandbox (`--sandbox native|docker`).
+`/status` displays active security preset, sandbox, web search, session, and approval state.
 `/auto off` restores per-action prompts. `auto` without a prompt starts the REPL
 in the copilot loop; `/auto` enables that loop in any interactive session.
 `auto` with a prompt remains a one-shot copilot. Copilot mode runs until the model
