@@ -319,6 +319,7 @@ fn spawn_worker(
             mcp_tool_count,
             mut retry_mcp_servers,
         } = build;
+        let mut copilot = copilot;
         let mut durable = match session_request {
             SessionRequest::Disabled => None,
             request => match SessionStore::open(world.workspace(), request) {
@@ -478,9 +479,13 @@ fn spawn_worker(
                         ApprovalMode::Interactive => "interactive (prompt on shell/sensitive)",
                     };
                     let copilot_str = if copilot {
-                        "on (unlimited steps)"
+                        if auto_max_steps == 0 {
+                            "on (unlimited steps)".to_string()
+                        } else {
+                            format!("on (max {auto_max_steps} steps)")
+                        }
                     } else {
-                        "off"
+                        "off".to_string()
                     };
                     let session_str = if let Some(opened) = &durable {
                         format!(
@@ -620,8 +625,9 @@ fn spawn_worker(
                 },
                 WorkerCommand::SetExecution {
                     approval: mode,
-                    copilot,
+                    copilot: new_copilot,
                 } => {
+                    copilot = new_copilot;
                     approval.set_mode(mode);
                     let mut config = harness_config_auto(copilot, auto_max_steps);
                     config.system_prompt.clone_from(&stable_system_prompt);

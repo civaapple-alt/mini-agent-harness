@@ -279,7 +279,7 @@ fn interactive_status_command_reports_runtime_security_and_sandbox() {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"/status\n/exit\n")
+        .write_all(b"/status\n/auto\n/status\n/exit\n")
         .unwrap();
     let status = child.wait().unwrap();
     let mut stdout = String::new();
@@ -296,6 +296,8 @@ fn interactive_status_command_reports_runtime_security_and_sandbox() {
     assert!(stdout.contains("status> sandbox:          native"));
     assert!(stdout.contains("status> approval:         automatic (auto-approve)"));
     assert!(stdout.contains("status> web search:       enabled (built-in responses web_search)"));
+    assert!(stdout.contains("status> copilot mode:     off"));
+    assert!(stdout.contains("status> copilot mode:     on (unlimited steps)"));
     assert!(stdout.contains("status> session:"));
 }
 
