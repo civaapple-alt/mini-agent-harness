@@ -3,10 +3,10 @@
 Mini Agent Harness is a small native agent harness for studying why some
 harnesses help a model and others get in its way. Its command is `mini-agent`.
 
-Version 0.1 is the first supported release contract: a native interactive CLI,
-a script-facing `ask` command, bounded workspace tools, deterministic tests,
-diagnostics, and reproducible release archives. It intentionally does not claim
-feature parity with Codex, Pi, fx, or Qi.
+Version 0.2 expands the native harness with durable sessions, independent
+mentor reviews, offline trace replay and metrics, security presets, native Win32
+JobObject sandboxing, Responses API built-in web search, and enhanced MCP/marketplace tools.
+It intentionally does not claim feature parity with Codex, Pi, fx, or Qi.
 
 The working definition is deliberately narrow:
 
@@ -289,7 +289,7 @@ See [configuration](docs/configuration.md) and the copyable
 ## Operational contract
 
 - `mini-agent --version` reports the Cargo release version and git revision,
-  for example `mini-agent 0.1.0 (c0ffee12abcd)`. The interactive welcome prints
+  for example `mini-agent 0.2.0 (c0ffee12abcd)`. The interactive welcome prints
   the same line.
 - `mini-agent status [--json]` reports effective non-secret startup settings.
 - `mini-agent doctor [--json]` validates configuration, workspace, and shell

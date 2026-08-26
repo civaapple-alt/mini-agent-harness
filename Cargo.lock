@@ -711,7 +711,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mini-agent-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eventsource-stream",
  "futures-util",
@@ -727,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "mini-agent-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
