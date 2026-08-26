@@ -12,7 +12,7 @@ The project defines `agent = model + harness` with an uncompromising boundary be
 
 1. **`mini-agent-core`**:
    - Owns the explicit agent run loop (`prepare -> model -> tool -> observer`).
-   - Owns pure contracts for [`Model`](file:///D:/gh-ws/codex-ws/mini-codex/crates/mini-agent-core/src/model.rs), [`Tool`](file:///D:/gh-ws/codex-ws/mini-codex/crates/mini-agent-core/src/tool.rs), and [`Observer`](file:///D:/gh-ws/codex-ws/mini-codex/crates/mini-agent-core/src/event.rs).
+   - Owns pure contracts for [`Model`](crates/mini-agent-core/src/model.rs), [`Tool`](crates/mini-agent-core/src/tool.rs), and [`Observer`](crates/mini-agent-core/src/event.rs).
    - Enforces hard limits, stop classification, and immutable observation event emitting.
    - Strictly contains **no** provider HTTP clients, filesystem access, process spawning, MCP protocol implementations, TUI frameworks, or persistence storage.
 

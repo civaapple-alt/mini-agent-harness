@@ -11,7 +11,7 @@ Current shell execution runs unsandboxed directly on the host machine (`pwsh` on
 Define a lightweight sandbox execution interface in `mini-agent-cli/src/workspace.rs`:
 1. Support an optional `--sandbox [docker|bubblewrap|none]` flag.
 2. Isolate file system mutations and network calls strictly inside container mounts.
-3. Keep the [`Tool`](file:///D:/gh-ws/codex-ws/mini-codex/crates/mini-agent-core/src/tool.rs) contract in `mini-agent-core` completely agnostic of container orchestration.
+3. Keep the [`Tool`](crates/mini-agent-core/src/tool.rs) contract in `mini-agent-core` completely agnostic of container orchestration.
 
 ## Acceptance Criteria
 

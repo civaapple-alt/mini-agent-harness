@@ -8,7 +8,7 @@ In complex agent architectures like Codex, tasks progress through an event-drive
 
 ## Decision
 
-The harness adopts a pure, passive event-driven architecture based on [`Observer`](file:///D:/gh-ws/codex-ws/mini-codex/crates/mini-agent-core/src/event.rs):
+The harness adopts a pure, passive event-driven architecture based on [`Observer`](crates/mini-agent-core/src/event.rs):
 
 1. **Passive Immutable Observers**:
    - `Observer::observe(&mut self, event: &Event)` accepts strictly immutable references.

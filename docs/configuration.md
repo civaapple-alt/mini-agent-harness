@@ -192,4 +192,4 @@ Stdio configurations accept `command`, `args`, `env`, and `cwd`. Portable
 placeholders are supported without invoking a shell.
 
 Copyable skill, plugin, marketplace, HTTP MCP, and stdio MCP examples live in
-[`examples/extensions`](../examples/extensions/README.md).
+[`examples/extensions`](examples/extensions/README.md).

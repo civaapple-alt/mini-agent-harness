@@ -8,7 +8,7 @@ Autonomous coding agents require robust safety boundaries before executing poten
 
 ## Decision
 
-The host tool orchestration layer implements a comprehensive safety and permission matrix via [`ApprovalController`](file:///D:/gh-ws/codex-ws/mini-codex/crates/mini-agent-cli/src/workspace.rs#L46-L90):
+The host tool orchestration layer implements a comprehensive safety and permission matrix via [`ApprovalController`](crates/mini-agent-cli/src/workspace.rs):
 
 1. **Fail-Closed by Default**:
    - In non-interactive (non-TTY) environments, sensitive tools (shell commands, file modifications, MCP actions) immediately fail closed with an explicit error unless `--auto` is explicitly provided.

@@ -12,5 +12,5 @@ Use full-file overwriting (`write_file`) as the primary code modification mechan
 
 ## Rationale for Rejection
 
-1. **Unrelated Code Loss**: Experimental validation ([Edit Surface Comparison](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-edit-surface.md)) showed that while whole-file rewrites and precise search-and-replace both reach target changes in three steps, full-file rewrites frequently drop unrelated lines, comments, and imports in larger files.
+1. **Unrelated Code Loss**: Experimental validation ([Edit Surface Comparison](.agents/notes/archived/experiments/2026-08-24-edit-surface.md)) showed that while whole-file rewrites and precise search-and-replace both reach target changes in three steps, full-file rewrites frequently drop unrelated lines, comments, and imports in larger files.
 2. **Standard Separation**: The workspace strictly exposes `edit_file` (unique string match replacement) for modifications, and reserves `write_file` exclusively for creating new files or explicit full rewrites.

@@ -82,16 +82,16 @@ If a proposed approach is rejected during review:
 #### Architecture (`proposed/architecture/`)
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-26 | [Session Branching Lanes](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/proposed/architecture/2026-08-26-session-branching-lanes.md) | Multi-branch tree conversations and speculative exploration lanes |
-| 2026-08-26 | [Local Sandbox Adapter](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/proposed/architecture/2026-08-26-local-sandbox-adapter.md) | Pluggable container and sandbox isolation for shell tool execution |
-| 2026-08-26 | [Event Stream Rollout Replay](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/proposed/architecture/2026-08-26-event-stream-rollout-replay.md) | Deterministic offline replay, diffing, and inspection of JSONL traces |
+| 2026-08-26 | [Session Branching Lanes](.agents/notes/proposed/architecture/2026-08-26-session-branching-lanes.md) | Multi-branch tree conversations and speculative exploration lanes |
+| 2026-08-26 | [Local Sandbox Adapter](.agents/notes/proposed/architecture/2026-08-26-local-sandbox-adapter.md) | Pluggable container and sandbox isolation for shell tool execution |
+| 2026-08-26 | [Event Stream Rollout Replay](.agents/notes/proposed/architecture/2026-08-26-event-stream-rollout-replay.md) | Deterministic offline replay, diffing, and inspection of JSONL traces |
 
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-26 | [Prompt Weight Evaluation](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/proposed/feature/2026-08-26-prompt-weight-evaluation.md) | Real-model evaluation of minimal vs verbose system prompt policies |
-| 2026-08-26 | [MCP Circuit Breaker](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/proposed/feature/2026-08-26-mcp-circuit-breaker.md) | Circuit breaking and graceful degradation for failing remote HTTP MCP servers |
-| 2026-08-26 | [Autonomous Goal Mode](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/proposed/feature/2026-08-26-autonomous-goal-mode.md) | Long-running goal execution with convergence gates and loop detection |
+| 2026-08-26 | [Prompt Weight Evaluation](.agents/notes/proposed/feature/2026-08-26-prompt-weight-evaluation.md) | Real-model evaluation of minimal vs verbose system prompt policies |
+| 2026-08-26 | [MCP Circuit Breaker](.agents/notes/proposed/feature/2026-08-26-mcp-circuit-breaker.md) | Circuit breaking and graceful degradation for failing remote HTTP MCP servers |
+| 2026-08-26 | [Autonomous Goal Mode](.agents/notes/proposed/feature/2026-08-26-autonomous-goal-mode.md) | Long-running goal execution with convergence gates and loop detection |
 
 ---
 
@@ -100,24 +100,24 @@ If a proposed approach is rejected during review:
 #### Architecture (`implemented/architecture/`)
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-24 | [Core Harness Boundary](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/implemented/architecture/2026-08-24-core-harness-boundary.md) | Strict boundary between pure microkernel core and host CLI adapters |
-| 2026-08-24 | [Hard Limits System](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/implemented/architecture/2026-08-24-hard-limits-system.md) | Hard bounds on context, responses, step count, and UTF-8 head/tail truncation |
-| 2026-08-26 | [Event-Driven Reactive Loop](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/implemented/architecture/2026-08-26-event-driven-reactive-loop.md) | Passive immutable observers driving live client UI and rollout audit traces |
+| 2026-08-24 | [Core Harness Boundary](.agents/notes/implemented/architecture/2026-08-24-core-harness-boundary.md) | Strict boundary between pure microkernel core and host CLI adapters |
+| 2026-08-24 | [Hard Limits System](.agents/notes/implemented/architecture/2026-08-24-hard-limits-system.md) | Hard bounds on context, responses, step count, and UTF-8 head/tail truncation |
+| 2026-08-26 | [Event-Driven Reactive Loop](.agents/notes/implemented/architecture/2026-08-26-event-driven-reactive-loop.md) | Passive immutable observers driving live client UI and rollout audit traces |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-24 | [Context Compaction](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/implemented/feature/2026-08-24-context-compaction.md) | Prefix compaction preserving latest world state and recent tool work verbatim |
-| 2026-08-24 | [Durable Sessions & Recovery](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/implemented/feature/2026-08-24-durable-sessions-and-recovery.md) | Append-only JSONL session checkpoints with torn-tail auto recovery |
-| 2026-08-24 | [Independent Mentor System](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/implemented/feature/2026-08-24-independent-mentor-system.md) | Tool-free independent verification model with isolated derived items |
-| 2026-08-24 | [MCP & Skills Integration](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/implemented/feature/2026-08-24-mcp-and-skills-integration.md) | Stdio and HTTP MCP support with progressive skill discovery |
-| 2026-08-24 | [Explicit World State](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/implemented/feature/2026-08-24-explicit-world-state.md) | Deterministic host environment detection and context injection |
-| 2026-08-26 | [Fail-Closed Approval](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/implemented/feature/2026-08-26-fail-closed-approval-and-tool-orchestration.md) | Permission matrix, interactive TTY approval, and path containment |
+| 2026-08-24 | [Context Compaction](.agents/notes/implemented/feature/2026-08-24-context-compaction.md) | Prefix compaction preserving latest world state and recent tool work verbatim |
+| 2026-08-24 | [Durable Sessions & Recovery](.agents/notes/implemented/feature/2026-08-24-durable-sessions-and-recovery.md) | Append-only JSONL session checkpoints with torn-tail auto recovery |
+| 2026-08-24 | [Independent Mentor System](.agents/notes/implemented/feature/2026-08-24-independent-mentor-system.md) | Tool-free independent verification model with isolated derived items |
+| 2026-08-24 | [MCP & Skills Integration](.agents/notes/implemented/feature/2026-08-24-mcp-and-skills-integration.md) | Stdio and HTTP MCP support with progressive skill discovery |
+| 2026-08-24 | [Explicit World State](.agents/notes/implemented/feature/2026-08-24-explicit-world-state.md) | Deterministic host environment detection and context injection |
+| 2026-08-26 | [Fail-Closed Approval](.agents/notes/implemented/feature/2026-08-26-fail-closed-approval-and-tool-orchestration.md) | Permission matrix, interactive TTY approval, and path containment |
 
 #### Simplification (`implemented/simplification/`)
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-24 | [Source Code Line Budget](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/implemented/simplification/2026-08-24-source-code-line-budget.md) | Strict line budgets (20k core / 30k workspace) to prevent abstraction bloat |
+| 2026-08-24 | [Source Code Line Budget](.agents/notes/implemented/simplification/2026-08-24-source-code-line-budget.md) | Strict line budgets (20k core / 30k workspace) to prevent abstraction bloat |
 
 ---
 
@@ -126,13 +126,13 @@ If a proposed approach is rejected during review:
 #### Architecture (`rejected/architecture/`)
 | Date | Title | Rationale |
 |---|---|---|
-| 2026-08-24 | [Generic Persistence in Core](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/rejected/architecture/2026-08-24-generic-persistence-in-core.md) | Cannot settle non-idempotent external effects; persistence belongs at edge |
+| 2026-08-24 | [Generic Persistence in Core](.agents/notes/rejected/architecture/2026-08-24-generic-persistence-in-core.md) | Cannot settle non-idempotent external effects; persistence belongs at edge |
 
 #### Features & Extensions (`rejected/feature/`)
 | Date | Title | Rationale |
 |---|---|---|
-| 2026-08-24 | [Un-Settled Effect Replay](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/rejected/feature/2026-08-24-un-settled-effect-replay.md) | Replaying interrupted effects produces duplicate non-idempotent actions |
-| 2026-08-24 | [Unrestricted Whole-File Rewrite](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/rejected/feature/2026-08-24-unrestricted-whole-file-rewrite.md) | Full rewrites drop unrelated code in long contexts; exact replacement is safer |
+| 2026-08-24 | [Un-Settled Effect Replay](.agents/notes/rejected/feature/2026-08-24-un-settled-effect-replay.md) | Replaying interrupted effects produces duplicate non-idempotent actions |
+| 2026-08-24 | [Unrestricted Whole-File Rewrite](.agents/notes/rejected/feature/2026-08-24-unrestricted-whole-file-rewrite.md) | Full rewrites drop unrelated code in long contexts; exact replacement is safer |
 
 ---
 
@@ -141,9 +141,9 @@ If a proposed approach is rejected during review:
 #### Experiments (`archived/experiments/`)
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-24 | [Unknown-Tool Recovery](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-unknown-tool.md) | Recovery-capable model passes by projecting tool failure back to context |
-| 2026-08-24 | [Edit Surface Comparison](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-edit-surface.md) | Exact unique replacement preserves collateral content over full rewrite |
-| 2026-08-24 | [Tool-Output Retention](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-tool-output-retention.md) | Head-plus-tail truncation preserves both orientation and final verdict |
-| 2026-08-24 | [Effect Recovery Boundary](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-effect-recovery.md) | Replay safety simulation across non-idempotent crash boundaries |
-| 2026-08-24 | [Prompt Weight Protocol](file:///D:/gh-ws/codex-ws/mini-codex/.agents/notes/archived/experiments/2026-08-24-prompt-weight.md) | Benchmark protocol comparing minimal vs expanded operational system prompts |
+| 2026-08-24 | [Unknown-Tool Recovery](.agents/notes/archived/experiments/2026-08-24-unknown-tool.md) | Recovery-capable model passes by projecting tool failure back to context |
+| 2026-08-24 | [Edit Surface Comparison](.agents/notes/archived/experiments/2026-08-24-edit-surface.md) | Exact unique replacement preserves collateral content over full rewrite |
+| 2026-08-24 | [Tool-Output Retention](.agents/notes/archived/experiments/2026-08-24-tool-output-retention.md) | Head-plus-tail truncation preserves both orientation and final verdict |
+| 2026-08-24 | [Effect Recovery Boundary](.agents/notes/archived/experiments/2026-08-24-effect-recovery.md) | Replay safety simulation across non-idempotent crash boundaries |
+| 2026-08-24 | [Prompt Weight Protocol](.agents/notes/archived/experiments/2026-08-24-prompt-weight.md) | Benchmark protocol comparing minimal vs expanded operational system prompts |
 

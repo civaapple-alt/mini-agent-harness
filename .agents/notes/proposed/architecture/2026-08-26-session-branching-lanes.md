@@ -11,7 +11,7 @@ Current durable sessions are linear append-only sequences of turns per thread. I
 Extend session storage to support explicit tree-structured branching:
 1. Allow `mini-agent fork <CHECKPOINT_ID>` to initialize a new lane referencing a parent checkpoint fingerprint.
 2. Store branches as discrete thread IDs within the same workspace session file.
-3. Keep the core run loop unchanged by feeding only the linear path from root to active branch tip into [`Harness::restore_history`](file:///D:/gh-ws/codex-ws/mini-codex/crates/mini-agent-core/src/harness.rs).
+3. Keep the core run loop unchanged by feeding only the linear path from root to active branch tip into [`Harness::restore_history`](crates/mini-agent-core/src/harness.rs).
 
 ## Acceptance Criteria
 

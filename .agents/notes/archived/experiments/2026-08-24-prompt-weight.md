@@ -20,7 +20,7 @@ Does an expanded operational system prompt improve tool-use correctness enough t
 - treatment order alternated across tasks and repetitions;
 - full ordered events, latency, and reported token usage in JSONL.
 
-Only the system prompt changes. The prompt fixtures are [minimal](file:///D:/gh-ws/codex-ws/mini-codex/docs/experiments/fixtures/prompt-weight-minimal.txt) and [expanded](file:///D:/gh-ws/codex-ws/mini-codex/docs/experiments/fixtures/prompt-weight-expanded.txt). They have aligned operational intent but are not claimed to be logically identical.
+Only the system prompt changes. The prompt fixtures are [minimal](docs/experiments/fixtures/prompt-weight-minimal.txt) and [expanded](docs/experiments/fixtures/prompt-weight-expanded.txt). They have aligned operational intent but are not claimed to be logically identical.
 
 ## Run
 
