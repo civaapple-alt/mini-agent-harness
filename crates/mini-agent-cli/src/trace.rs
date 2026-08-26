@@ -30,22 +30,170 @@ pub struct TraceSummary {
     pub compactions: usize,
 }
 
+use mini_agent_core::Message;
+use serde_json::Value;
+
 pub fn load_events(path: &Path) -> Result<Vec<Event>, String> {
     let file =
         File::open(path).map_err(|e| format!("cannot open trace file {}: {e}", path.display()))?;
     let reader = BufReader::new(file);
-    let mut events = Vec::new();
+    let mut raw_lines = Vec::new();
     for (line_no, line) in reader.lines().enumerate() {
         let line = line.map_err(|e| format!("error reading line {}: {e}", line_no + 1))?;
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
+        let trimmed = line.trim().to_string();
+        if !trimmed.is_empty() {
+            raw_lines.push(trimmed);
         }
-        let event: Event = serde_json::from_str(line)
-            .map_err(|e| format!("error parsing event at line {}: {e}", line_no + 1))?;
-        events.push(event);
     }
-    Ok(events)
+
+    if raw_lines.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Try parsing as native observation trace events
+    let mut trace_events = Vec::new();
+    let mut trace_err = None;
+    for (line_no, line) in raw_lines.iter().enumerate() {
+        match serde_json::from_str::<Event>(line) {
+            Ok(event) => trace_events.push(event),
+            Err(e) => {
+                trace_err = Some(format!("error parsing event at line {}: {e}", line_no + 1));
+                break;
+            }
+        }
+    }
+
+    if trace_err.is_none() {
+        return Ok(trace_events);
+    }
+
+    // If native event parsing failed, check if this is a durable session.jsonl file
+    if let Some(session_events) = try_load_session_events(&raw_lines) {
+        return Ok(session_events);
+    }
+
+    Err(trace_err.unwrap())
+}
+
+fn try_load_session_events(lines: &[String]) -> Option<Vec<Event>> {
+    if lines.is_empty() {
+        return None;
+    }
+    let first_val: Value = serde_json::from_str(&lines[0]).ok()?;
+    if first_val.get("session_id").is_none() && first_val.get("kind").is_none() {
+        return None;
+    }
+
+    let mut events = Vec::new();
+    let mut step = 1usize;
+
+    for line in lines {
+        let record: Value = match serde_json::from_str(line) {
+            Ok(val) => val,
+            Err(_) => continue,
+        };
+        let kind = record.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+        match kind {
+            "session_created" => {
+                let session_id = record
+                    .get("session_id")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("");
+                events.push(Event::RunStarted {
+                    prompt: format!("session created: {session_id}"),
+                });
+            }
+            "turn_started" => {
+                if let Some(prompt) = record.get("prompt").and_then(|p| p.as_str()) {
+                    events.push(Event::RunStarted {
+                        prompt: prompt.to_string(),
+                    });
+                }
+            }
+            "turn_completed" => {
+                let steps = record.get("steps").and_then(|s| s.as_u64()).unwrap_or(1) as usize;
+                if let Some(messages) = record.get("messages").and_then(|m| m.as_array()) {
+                    for msg in messages {
+                        if let Ok(msg) = serde_json::from_value::<Message>(msg.clone()) {
+                            match msg {
+                                Message::Assistant {
+                                    reasoning,
+                                    text,
+                                    tool_calls,
+                                } => {
+                                    events.push(Event::ModelStarted { step });
+                                    if !reasoning.is_empty() {
+                                        events.push(Event::AssistantReasoningDelta {
+                                            delta: reasoning.clone(),
+                                        });
+                                    }
+                                    if !text.is_empty() {
+                                        events.push(Event::AssistantTextDelta {
+                                            delta: text.clone(),
+                                        });
+                                    }
+                                    events.push(Event::ModelResponded {
+                                        reasoning,
+                                        text,
+                                        tool_calls,
+                                        usage: None,
+                                    });
+                                    step = step.saturating_add(1);
+                                }
+                                Message::Tool {
+                                    call_id,
+                                    name,
+                                    content,
+                                    is_error,
+                                } => {
+                                    events.push(Event::ToolFinished {
+                                        call_id,
+                                        name,
+                                        content,
+                                        is_error,
+                                        truncated: false,
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                events.push(Event::RunFinished {
+                    stop_reason: StopReason::Completed,
+                    steps,
+                });
+            }
+            "derived" => {
+                let summary = record.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+                events.push(Event::RunStarted {
+                    prompt: "mentor verification".to_string(),
+                });
+                events.push(Event::ModelStarted { step });
+                events.push(Event::AssistantTextDelta {
+                    delta: summary.to_string(),
+                });
+                events.push(Event::ModelResponded {
+                    reasoning: String::new(),
+                    text: summary.to_string(),
+                    tool_calls: vec![],
+                    usage: None,
+                });
+                events.push(Event::RunFinished {
+                    stop_reason: StopReason::Completed,
+                    steps: 1,
+                });
+                step = step.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+
+    if events.is_empty() {
+        None
+    } else {
+        Some(events)
+    }
 }
 
 pub fn compute_summary(path: &Path, events: &[Event]) -> TraceSummary {
@@ -444,5 +592,52 @@ mod tests {
         assert_eq!(summary.cached_input_tokens, 20);
         assert_eq!(summary.output_tokens, 50);
         assert_eq!(summary.prompt, Some("test task".to_string()));
+    }
+
+    #[test]
+    fn parses_session_jsonl_records() {
+        let lines = vec![
+            json!({"seq": 1, "kind": "session_created", "session_id": "s-123"}).to_string(),
+            json!({"seq": 2, "kind": "turn_started", "prompt": "hello agent"}).to_string(),
+            json!({
+                "seq": 3,
+                "kind": "turn_completed",
+                "prompt": "hello agent",
+                "steps": 1,
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "reasoning": "let me think",
+                        "text": "here is my answer",
+                        "tool_calls": []
+                    }
+                ]
+            })
+            .to_string(),
+        ];
+
+        let events = try_load_session_events(&lines).unwrap();
+        assert_eq!(events.len(), 7);
+        assert!(
+            matches!(&events[0], Event::RunStarted { prompt } if prompt.contains("session created: s-123"))
+        );
+        assert!(matches!(&events[1], Event::RunStarted { prompt } if prompt == "hello agent"));
+        assert!(matches!(&events[2], Event::ModelStarted { step: 1 }));
+        assert!(
+            matches!(&events[3], Event::AssistantReasoningDelta { delta } if delta == "let me think")
+        );
+        assert!(
+            matches!(&events[4], Event::AssistantTextDelta { delta } if delta == "here is my answer")
+        );
+        assert!(
+            matches!(&events[5], Event::ModelResponded { reasoning, text, .. } if reasoning == "let me think" && text == "here is my answer")
+        );
+        assert!(matches!(
+            &events[6],
+            Event::RunFinished {
+                stop_reason: StopReason::Completed,
+                steps: 1
+            }
+        ));
     }
 }
