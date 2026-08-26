@@ -135,16 +135,66 @@ To unify ergonomics and strict safety, the CLI supports predefined operational p
 
 ---
 
-## 3. Acceptance Criteria
+## 3. Integration with Harness Operational Modes
+
+The `ToolOrchestrator` cleanly harmonizes with all three CLI execution modes:
+
+```
++----------------------------------------------------------------------------------------------------+
+|                                      Harness Execution Modes                                       |
+|                                                                                                    |
+|  +---------------------------+  +-------------------------------+  +----------------------------+  |
+|  |     interactive (REPL)    |  |         ask (Script)          |  |         auto (Copilot)     |  |
+|  |                           |  |                               |  |                            |  |
+|  | - Preset: default         |  | - Preset: default (FailClosed)|  | - Preset: turbomode/custom |  |
+|  | - Human-in-the-loop       |  | - Bounded 8 steps, no compact |  | - Unbounded steps, compact |  |
+|  | - Interactive TTY prompts |  | - TTY: prompts / Non-TTY: deny|  | - Loop detection active    |  |
+|  | - Session approval cache  |  | - --auto flag lifts deny gate |  | - Safe inside Sandbox      |  |
+|  +---------------------------+  +-------------------------------+  +----------------------------+  |
++----------------------------------------------------------------------------------------------------+
+                                                  |
+                                                  v
++----------------------------------------------------------------------------------------------------+
+|                                 ToolOrchestrator & Sandbox Engine                                  |
+|         (Approval Policy Evaluator -> Network Verifier -> Sandbox Attempt Driver -> Result)        |
++----------------------------------------------------------------------------------------------------+
+```
+
+### 1. `interactive` Mode (REPL Pair Programming)
+- **Workflow**: Developer interacts step-by-step with the agent in a terminal.
+- **Security Policy**: Default preset (`default`).
+- **Approval Flow**: Tools run automatically by default; sensitive operations (writing outside project directory, unknown commands) trigger interactive TTY prompts. Approvals can be remembered for the entire session in `ApprovalStore`.
+- **Sandbox Synergy**: When `--sandbox docker` is specified, shell tools execute in the container by default. If a command needs host access, it triggers an interactive approval prompt to escalate outside the sandbox.
+
+### 2. `ask` Mode (Single Script Turn & CI/CD Pipelines)
+- **Workflow**: Deterministic, machine-ingestible execution (`mini-agent ask [--json] "prompt"` or stdin piping).
+- **Execution Limits**: Bounded (8 steps, no compaction), clean output formatting.
+- **Fail-Closed Governance**:
+  - **On TTY**: Interactive confirmation fallback if an action requires approval.
+  - **Non-TTY (Pipes/CI)**: **Fails closed (`deny`)** on any sensitive file write, shell command, or unapproved network call unless explicitly overridden by `--auto`.
+- **Sandbox Synergy**: In CI environments, `mini-agent ask --auto --sandbox docker "run tests"` grants the agent full execution freedom inside the ephemeral container while guaranteeing zero host contamination.
+
+### 3. `auto` Mode (Long-Running Autonomous Copilot & Goal Execution)
+- **Workflow**: Unattended execution across complex multi-file refactoring, debugging, or test iteration.
+- **Execution Capabilities**: Unlimited steps (`MINI_AGENT_MAX_STEPS`, default 0), dynamic prefix compaction preserving recent tool work, and repetitive tool loop detection.
+- **Security Challenge & Sandbox Resolution**:
+  - Running unattended autonomous agents natively on host OS risks destructive side-effects.
+  - **The Sandbox Solution**: In `auto` mode, the orchestrator pairs `turbomode` execution *inside* the sandbox container (`--sandbox docker`). The model operates at maximum velocity (running builds, formatting, tests) inside the isolated container, while the host filesystem and environment are 100% safeguarded.
+  - Unattended sandbox escape (`Commands Outside Sandbox`) is strictly evaluated against whitelist rules; unlisted escape actions fail closed immediately without hanging.
+
+---
+
+## 4. Acceptance Criteria
 
 1. **Strict Core Boundary**: `mini-agent-core` requires zero modifications; all orchestration and sandboxing code lives in `mini-agent-cli`.
 2. **Deterministic Sandboxing**: When `--sandbox docker` is specified, shell tools execute within the container mount and cannot escape to host paths.
 3. **Session Approval Cache**: User approvals with "always allow for this session" cache cleanly in `ApprovalStore` and do not re-prompt on identical tool calls.
 4. **Fail-Closed Guarantee**: Any tool call triggering a `deny` rule or requiring ungranted approval fails closed with a clear, descriptive `ToolError`.
+5. **Mode Consistency**: `ask` in non-TTY fails closed without `--auto`, while `auto --sandbox docker` operates autonomously within container boundaries.
 
 ---
 
-## 4. Implementation Plan & Work Breakdown
+## 5. Implementation Plan & Work Breakdown
 
 1. **`crates/mini-agent-cli/src/security/`**:
    - `mod.rs`: `SecurityPreset`, `PermissionProfile`, and `SecurityConfig` loader.
