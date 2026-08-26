@@ -99,15 +99,105 @@ fn try_load_session_events(lines: &[String]) -> Option<Vec<Event>> {
                     .get("session_id")
                     .and_then(|s| s.as_str())
                     .unwrap_or("");
-                events.push(Event::RunStarted {
-                    prompt: format!("session created: {session_id}"),
-                });
+                if events.is_empty() {
+                    events.push(Event::RunStarted {
+                        prompt: format!("session created: {session_id}"),
+                    });
+                }
             }
             "turn_started" => {
                 if let Some(prompt) = record.get("prompt").and_then(|p| p.as_str()) {
-                    events.push(Event::RunStarted {
-                        prompt: prompt.to_string(),
-                    });
+                    if events.len() == 1
+                        && matches!(&events[0], Event::RunStarted { prompt: p } if p.starts_with("session created:"))
+                    {
+                        events[0] = Event::RunStarted {
+                            prompt: prompt.to_string(),
+                        };
+                    } else {
+                        events.push(Event::RunStarted {
+                            prompt: prompt.to_string(),
+                        });
+                    }
+                }
+            }
+            "item" => {
+                if let Some(msg_val) = record.get("message")
+                    && let Ok(msg) = serde_json::from_value::<Message>(msg_val.clone())
+                {
+                    match msg {
+                        Message::Assistant {
+                            reasoning,
+                            text,
+                            tool_calls,
+                        } => {
+                            events.push(Event::ModelStarted { step });
+                            if !reasoning.is_empty() {
+                                events.push(Event::AssistantReasoningDelta {
+                                    delta: reasoning.clone(),
+                                });
+                            }
+                            if !text.is_empty() {
+                                events.push(Event::AssistantTextDelta {
+                                    delta: text.clone(),
+                                });
+                            }
+                            events.push(Event::ModelResponded {
+                                reasoning,
+                                text,
+                                tool_calls,
+                                usage: None,
+                            });
+                            step = step.saturating_add(1);
+                        }
+                        Message::Tool {
+                            call_id,
+                            name,
+                            content,
+                            is_error,
+                        } => {
+                            events.push(Event::ToolStarted {
+                                call: ToolCall {
+                                    id: call_id.clone(),
+                                    name: name.clone(),
+                                    arguments: serde_json::json!({}),
+                                },
+                            });
+                            events.push(Event::ToolFinished {
+                                call_id,
+                                name,
+                                content,
+                                is_error,
+                                truncated: false,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "turn_settled" => {
+                let status = record
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("completed");
+                let steps = record.get("steps").and_then(|s| s.as_u64()).unwrap_or(1) as usize;
+                match status {
+                    "failed" => {
+                        events.push(Event::RunFailed {
+                            reason: RunFailure::Model,
+                        });
+                    }
+                    "step_limit" => {
+                        events.push(Event::RunFinished {
+                            stop_reason: StopReason::StepLimit,
+                            steps,
+                        });
+                    }
+                    _ => {
+                        events.push(Event::RunFinished {
+                            stop_reason: StopReason::Completed,
+                            steps,
+                        });
+                    }
                 }
             }
             "turn_completed" => {
@@ -601,43 +691,49 @@ mod tests {
             json!({"seq": 2, "kind": "turn_started", "prompt": "hello agent"}).to_string(),
             json!({
                 "seq": 3,
-                "kind": "turn_completed",
-                "prompt": "hello agent",
-                "steps": 1,
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "reasoning": "let me think",
-                        "text": "here is my answer",
-                        "tool_calls": []
-                    }
-                ]
+                "kind": "item",
+                "message": {
+                    "role": "assistant",
+                    "reasoning": "let me think",
+                    "text": "here is my answer",
+                    "tool_calls": []
+                }
+            })
+            .to_string(),
+            json!({
+                "seq": 4,
+                "kind": "turn_settled",
+                "status": "completed",
+                "steps": 1
             })
             .to_string(),
         ];
 
         let events = try_load_session_events(&lines).unwrap();
-        assert_eq!(events.len(), 7);
+        assert_eq!(events.len(), 6);
+        assert!(matches!(&events[0], Event::RunStarted { prompt } if prompt == "hello agent"));
+        assert!(matches!(&events[1], Event::ModelStarted { step: 1 }));
         assert!(
-            matches!(&events[0], Event::RunStarted { prompt } if prompt.contains("session created: s-123"))
-        );
-        assert!(matches!(&events[1], Event::RunStarted { prompt } if prompt == "hello agent"));
-        assert!(matches!(&events[2], Event::ModelStarted { step: 1 }));
-        assert!(
-            matches!(&events[3], Event::AssistantReasoningDelta { delta } if delta == "let me think")
+            matches!(&events[2], Event::AssistantReasoningDelta { delta } if delta == "let me think")
         );
         assert!(
-            matches!(&events[4], Event::AssistantTextDelta { delta } if delta == "here is my answer")
+            matches!(&events[3], Event::AssistantTextDelta { delta } if delta == "here is my answer")
         );
         assert!(
-            matches!(&events[5], Event::ModelResponded { reasoning, text, .. } if reasoning == "let me think" && text == "here is my answer")
+            matches!(&events[4], Event::ModelResponded { reasoning, text, .. } if reasoning == "let me think" && text == "here is my answer")
         );
         assert!(matches!(
-            &events[6],
+            &events[5],
             Event::RunFinished {
                 stop_reason: StopReason::Completed,
                 steps: 1
             }
         ));
+
+        let summary = compute_summary(std::path::Path::new("session.jsonl"), &events);
+        assert_eq!(summary.prompt, Some("hello agent".to_string()));
+        assert_eq!(summary.steps, 1);
+        assert_eq!(summary.model_requests, 1);
+        assert!(summary.completed);
     }
 }
