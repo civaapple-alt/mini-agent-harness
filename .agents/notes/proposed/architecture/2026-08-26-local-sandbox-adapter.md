@@ -78,17 +78,27 @@ For network-enabled tools (e.g. `read_url`, HTTP MCP tools):
 - Validates the target URL/domain against host policy.
 - Blocks sensitive internal metadata endpoints (e.g. `169.254.169.254`, `localhost` in restricted presets).
 
-### Step 3: Sandbox Strategy Selection (`SandboxAttempt`)
-The orchestrator determines the execution environment based on tool requirements and configuration:
-- **Sandbox Preference**: Tools declare whether they require sandboxing (e.g. `ShellTool` defaults to sandboxed; `WorkspaceFileTool` uses path containment).
-- **Driver Selection**:
-  - `Docker`: Spawns commands inside a scoped, volume-mounted container with stripped host credentials.
-  - `Bubblewrap` (Linux) / `AppContainer` (Windows): Lightweight OS namespace and process token isolation.
-  - `Native Host`: Direct execution via `pwsh`/`sh`.
+### Step 3: Sandbox Strategy Selection & Multi-Tier Drivers (`SandboxAttempt`)
+The orchestrator determines the execution environment based on tool requirements, OS capabilities, and configuration:
+- **Sandbox Preference**: Tools declare their isolation profile (e.g. `ShellTool` defaults to sandboxed; `WorkspaceFileTool` enforces strict path containment).
+- **Pluggable Multi-Tier Driver Matrix**:
+  1. **Tier 1: Container Isolation (`--sandbox docker`)**:
+     - Spawns commands inside a scoped, volume-mounted container (`docker` / `podman`) with stripped host credentials and isolated network bridge.
+  2. **Tier 2: OS-Native Lightweight Sandbox (`--sandbox native`)**:
+     - **Windows (`codex-windows-sandbox` pattern)**: Combines **NTFS ACL permission masking** (restricting writes strictly to workspace roots, explicitly denying read/write on user profiles/SSH keys), **Restricted User Tokens** (stripping admin privileges), and **Windows Filtering Platform (WFP)** network boundaries.
+     - **Linux (`bubblewrap` / `landlock` pattern)**: Combines unprivileged user namespaces, read-only root overlays, and kernel-level Landlock filesystem restrictions.
+  3. **Tier 3: Host Execution with Watchdog Bounding (`--sandbox none`)**:
+     - Direct execution on host shell (`pwsh`/`sh`) guarded by approval controller and path containment.
 
-### Step 4: Execution & Escalation
-- Executes the tool inside the selected sandbox attempt.
-- If a sandboxed command fails due to sandbox constraints (e.g. needs access to host tools declared under `Commands Outside Sandbox`), the orchestrator prompts the user for sandbox escalation to run on the native host.
+### Step 4: Execution, Process Lifecycle & Sandbox Escalation
+- **Deterministic Process Lifecycle & Zero-Zombie Guarantee (Codex `JobObject` Pattern)**:
+  - Long-running or runaway commands spawned by the agent are bound to OS-level containment groups:
+    - **Windows**: Enclosed within a dedicated `JobObject` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. When a step times out, the turn is cancelled, or the harness exits, the Windows kernel atomically kills all recursive descendant processes, preventing orphaned background daemons.
+    - **Linux**: Enclosed within process groups (`PR_SET_PDEATHSIG` / cgroups) for atomic process tree destruction.
+- **ConPTY / Pseudo-Console Support**:
+  - Provides a real pseudo-terminal (ConPTY on Windows, PTY on Unix) to stream interactive ANSI outputs and handle piped stdin/stdout seamlessly.
+- **Sandbox Escalation**:
+  - If a sandboxed command fails due to sandbox constraints (e.g. requires access to host tools declared under `Commands Outside Sandbox`), the orchestrator prompts the user for sandbox escalation to execute on the native host.
 
 ### Step 5: Result Bounding & Observation
 - Tool outputs are bounded by UTF-8 head/tail limits ([Hard Limits](.agents/notes/implemented/architecture/2026-08-24-hard-limits-system.md)).
