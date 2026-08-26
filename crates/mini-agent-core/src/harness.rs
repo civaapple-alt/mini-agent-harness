@@ -235,6 +235,8 @@ impl<M: Model> Harness<M> {
         }
         let mut final_text = String::new();
         let mut step = 0usize;
+        let mut consecutive_duplicate_tool_batches = 0usize;
+        let mut last_tool_batch: Option<Vec<(String, serde_json::Value)>> = None;
 
         loop {
             step = step.saturating_add(1);
@@ -321,6 +323,19 @@ impl<M: Model> Harness<M> {
                 ));
             }
 
+            let current_batch: Vec<(String, serde_json::Value)> = response
+                .tool_calls
+                .iter()
+                .map(|call| (call.name.clone(), call.arguments.clone()))
+                .collect();
+            if last_tool_batch.as_ref() == Some(&current_batch) {
+                consecutive_duplicate_tool_batches =
+                    consecutive_duplicate_tool_batches.saturating_add(1);
+            } else {
+                consecutive_duplicate_tool_batches = 0;
+                last_tool_batch = Some(current_batch);
+            }
+
             for call in response.tool_calls {
                 observer.observe(&Event::ToolStarted { call: call.clone() });
                 let result = self.tools.execute(&call.name, &call.arguments);
@@ -345,6 +360,13 @@ impl<M: Model> Harness<M> {
                     is_error,
                 });
             }
+
+            if consecutive_duplicate_tool_batches >= 2 {
+                let _ = self.append_context(
+                    "[Loop warning: identical tool calls were repeated without progress. Please adjust arguments or try an alternate strategy.]",
+                );
+            }
+
             if let Err(limit) = self.ensure_context_limit(&tool_specs) {
                 return Err(fail_limit(limit, observer));
             }

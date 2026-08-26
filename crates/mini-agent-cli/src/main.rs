@@ -12,6 +12,7 @@ mod repl;
 mod result_store;
 mod session;
 mod skills;
+mod trace;
 mod workspace;
 mod world;
 
@@ -46,7 +47,7 @@ use workspace::ApprovalMode;
 use workspace::workspace_tools_with_read_roots;
 use world::WorldState;
 
-const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
+const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
 const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is unsandboxed. `/auto off` restores prompts. --persist creates a resumable session under ~/.mini-agent/sessions.";
 const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SESSION_ID [--trace PATH]\n\nResumes the latest settled checkpoint of a durable session for this workspace.";
 const SESSIONS_HELP: &str = "mini-agent sessions\n\nUSAGE:\n    mini-agent sessions\n\nLists bounded durable sessions for the current workspace under ~/.mini-agent/sessions.";
@@ -55,6 +56,7 @@ const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto] [-
 const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--auto] [--json] [--trace PATH] [--] <PROMPT>\n\nAlias of `ask`. Prefer `ask` in scripts and docs.";
 const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, unlimited model steps (MINI_AGENT_MAX_STEPS, 0 = unlimited), and context compaction that keeps recent tool work.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
 const DEMO_HELP: &str = "mini-agent demo\n\nUSAGE:\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
+const TRACE_HELP: &str = "mini-agent trace\n\nUSAGE:\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n\nReplays and analyzes deterministic JSONL observation traces offline without contacting model providers.";
 const STATUS_HELP: &str = "mini-agent status\n\nUSAGE:\n    mini-agent status [--json]\n\nPrints effective non-secret startup configuration.";
 const DOCTOR_HELP: &str = "mini-agent doctor\n\nUSAGE:\n    mini-agent doctor [--json]\n\nChecks local configuration without contacting the model provider.";
 const VERSION_HELP: &str =
@@ -136,6 +138,12 @@ async fn main() -> ExitCode {
         }
         Command::Sessions => run_sessions(),
         Command::Mentor => mentor::run(invocation.prompt, invocation.trace, invocation.json).await,
+        Command::TraceReplay => {
+            trace::replay(std::path::Path::new(&invocation.prompt), invocation.json)
+        }
+        Command::TraceSummary => {
+            trace::summary(std::path::Path::new(&invocation.prompt), invocation.json)
+        }
     }
 }
 
@@ -149,6 +157,8 @@ enum Command {
     Resume,
     Sessions,
     Mentor,
+    TraceReplay,
+    TraceSummary,
     Status,
     Doctor,
     Help,
@@ -177,6 +187,7 @@ enum HelpTopic {
     Sessions,
     Mentor,
     Demo,
+    Trace,
     Status,
     Doctor,
     Version,
@@ -211,6 +222,16 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         Some("demo") => {
             args.next();
             Command::Demo
+        }
+        Some("trace") => {
+            args.next();
+            match args.next().as_deref() {
+                Some("replay") => Command::TraceReplay,
+                Some("summary") => Command::TraceSummary,
+                Some("--help" | "-h") => return Ok(help_invocation(HelpTopic::Trace)),
+                Some(other) => return Err(format!("unknown trace subcommand: {other}")),
+                None => return Ok(help_invocation(HelpTopic::Trace)),
+            }
         }
         Some("run") => {
             args.next();
@@ -328,13 +349,24 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if command == Command::Resume && prompt.len() != 1 {
         return Err("resume requires exactly one SESSION_ID".to_string());
     }
+    if matches!(command, Command::TraceReplay | Command::TraceSummary) && prompt.len() != 1 {
+        return Err("trace subcommand requires exactly one PATH".to_string());
+    }
     if json
         && !matches!(
             command,
-            Command::Ask | Command::Run | Command::Mentor | Command::Status | Command::Doctor
+            Command::Ask
+                | Command::Run
+                | Command::Mentor
+                | Command::Status
+                | Command::Doctor
+                | Command::TraceReplay
+                | Command::TraceSummary
         )
     {
-        return Err("--json is supported only by ask, mentor, status, and doctor".to_string());
+        return Err(
+            "--json is supported only by ask, mentor, status, doctor, and trace".to_string(),
+        );
     }
     if automatic && !matches!(command, Command::Ask | Command::Run) {
         return Err("--auto is supported only by ask".to_string());
@@ -346,6 +378,9 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         )
     {
         return Err("--trace is not supported by status, doctor, or sessions".to_string());
+    }
+    if trace.is_some() && matches!(command, Command::TraceReplay | Command::TraceSummary) {
+        return Err("--trace is not supported by trace subcommands".to_string());
     }
     if persist
         && !(command == Command::Interactive || command == Command::Auto && prompt.is_empty())
@@ -385,6 +420,7 @@ fn help_topic(name: &str) -> Result<HelpTopic, String> {
         "sessions" => Ok(HelpTopic::Sessions),
         "mentor" => Ok(HelpTopic::Mentor),
         "demo" => Ok(HelpTopic::Demo),
+        "trace" => Ok(HelpTopic::Trace),
         "status" => Ok(HelpTopic::Status),
         "doctor" => Ok(HelpTopic::Doctor),
         "version" => Ok(HelpTopic::Version),
@@ -402,6 +438,7 @@ fn help_topic_for(command: Command) -> HelpTopic {
         Command::Sessions => HelpTopic::Sessions,
         Command::Mentor => HelpTopic::Mentor,
         Command::Demo => HelpTopic::Demo,
+        Command::TraceReplay | Command::TraceSummary => HelpTopic::Trace,
         Command::Status => HelpTopic::Status,
         Command::Doctor => HelpTopic::Doctor,
         Command::Version => HelpTopic::Version,
@@ -420,6 +457,7 @@ fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::Sessions => SESSIONS_HELP,
         HelpTopic::Mentor => MENTOR_HELP,
         HelpTopic::Demo => DEMO_HELP,
+        HelpTopic::Trace => TRACE_HELP,
         HelpTopic::Status => STATUS_HELP,
         HelpTopic::Doctor => DOCTOR_HELP,
         HelpTopic::Version => VERSION_HELP,
@@ -933,5 +971,33 @@ mod tests {
 
         assert_eq!(invocation.command, Command::Auto);
         assert_eq!(invocation.prompt, "");
+    }
+
+    #[test]
+    fn parses_trace_commands() {
+        let replay = parse_args(vec![
+            "trace".to_string(),
+            "replay".to_string(),
+            "trace.jsonl".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(replay.command, Command::TraceReplay);
+        assert_eq!(replay.prompt, "trace.jsonl");
+
+        let summary = parse_args(vec![
+            "trace".to_string(),
+            "summary".to_string(),
+            "trace.jsonl".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(summary.command, Command::TraceSummary);
+        assert_eq!(summary.prompt, "trace.jsonl");
+        assert!(summary.json);
+
+        assert_eq!(
+            parse_args(vec!["trace".to_string(), "unknown".to_string()]).unwrap_err(),
+            "unknown trace subcommand: unknown"
+        );
     }
 }

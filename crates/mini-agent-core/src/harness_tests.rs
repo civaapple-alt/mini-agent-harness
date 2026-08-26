@@ -1011,6 +1011,82 @@ fn default_ceilings_remain_bounded_under_deepseek_v4_windows() {
     assert_eq!(config.max_model_response_bytes, 384 * 1024);
 }
 
+#[tokio::test]
+async fn repetitive_tool_calls_trigger_loop_warning() {
+    struct EchoTool;
+    impl Tool for EchoTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "echo".to_string(),
+                description: "echo input".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": { "msg": { "type": "string" } },
+                    "required": ["msg"],
+                    "additionalProperties": false
+                }),
+            }
+        }
+        fn execute(&self, _args: &Value) -> Result<String, ToolError> {
+            Ok("same output".to_string())
+        }
+    }
+
+    let tools = ToolRegistry::new(vec![Box::new(EchoTool)]);
+
+    let model = ScriptedModel {
+        responses: VecDeque::from(vec![
+            ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: json!({"msg": "hello"}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call2".to_string(),
+                    name: "echo".to_string(),
+                    arguments: json!({"msg": "hello"}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call3".to_string(),
+                    name: "echo".to_string(),
+                    arguments: json!({"msg": "hello"}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: "done after warning".to_string(),
+                tool_calls: vec![],
+                usage: None,
+            },
+        ]),
+    };
+
+    let mut harness = Harness::new(model, tools, HarnessConfig::default());
+    let outcome = harness.run("start", &mut ()).await.unwrap();
+
+    assert_eq!(outcome.final_text, "done after warning");
+    // Verify that loop warning was injected into messages
+    let has_loop_warning = harness.messages().iter().any(|msg| match msg {
+        Message::Context { text } => text.contains("Loop warning"),
+        _ => false,
+    });
+    assert!(has_loop_warning, "Expected loop warning in harness context");
+}
+
 #[derive(Default)]
 struct RecordingObserver(Vec<Event>);
 

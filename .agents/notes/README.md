@@ -84,14 +84,12 @@ If a proposed approach is rejected during review:
 |---|---|---|
 | 2026-08-26 | [Session Branching Lanes](.agents/notes/proposed/architecture/2026-08-26-session-branching-lanes.md) | Multi-branch tree conversations and speculative exploration lanes |
 | 2026-08-26 | [Local Sandbox Adapter](.agents/notes/proposed/architecture/2026-08-26-local-sandbox-adapter.md) | Pluggable container and sandbox isolation for shell tool execution |
-| 2026-08-26 | [Event Stream Rollout Replay](.agents/notes/proposed/architecture/2026-08-26-event-stream-rollout-replay.md) | Deterministic offline replay, diffing, and inspection of JSONL traces |
 
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-26 | [Prompt Weight Evaluation](.agents/notes/proposed/feature/2026-08-26-prompt-weight-evaluation.md) | Real-model evaluation of minimal vs verbose system prompt policies |
 | 2026-08-26 | [MCP Circuit Breaker](.agents/notes/proposed/feature/2026-08-26-mcp-circuit-breaker.md) | Circuit breaking and graceful degradation for failing remote HTTP MCP servers |
-| 2026-08-26 | [Autonomous Goal Mode](.agents/notes/proposed/feature/2026-08-26-autonomous-goal-mode.md) | Long-running goal execution with convergence gates and loop detection |
 
 ---
 
@@ -103,6 +101,7 @@ If a proposed approach is rejected during review:
 | 2026-08-24 | [Core Harness Boundary](.agents/notes/implemented/architecture/2026-08-24-core-harness-boundary.md) | Strict boundary between pure microkernel core and host CLI adapters |
 | 2026-08-24 | [Hard Limits System](.agents/notes/implemented/architecture/2026-08-24-hard-limits-system.md) | Hard bounds on context, responses, step count, and UTF-8 head/tail truncation |
 | 2026-08-26 | [Event-Driven Reactive Loop](.agents/notes/implemented/architecture/2026-08-26-event-driven-reactive-loop.md) | Passive immutable observers driving live client UI and rollout audit traces |
+| 2026-08-26 | [Event Stream Rollout Replay](.agents/notes/implemented/architecture/2026-08-26-event-stream-rollout-replay.md) | Deterministic offline replay, playback, and inspection of JSONL traces |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |
@@ -113,6 +112,7 @@ If a proposed approach is rejected during review:
 | 2026-08-24 | [MCP & Skills Integration](.agents/notes/implemented/feature/2026-08-24-mcp-and-skills-integration.md) | Stdio and HTTP MCP support with progressive skill discovery |
 | 2026-08-24 | [Explicit World State](.agents/notes/implemented/feature/2026-08-24-explicit-world-state.md) | Deterministic host environment detection and context injection |
 | 2026-08-26 | [Fail-Closed Approval](.agents/notes/implemented/feature/2026-08-26-fail-closed-approval-and-tool-orchestration.md) | Permission matrix, interactive TTY approval, and path containment |
+| 2026-08-26 | [Autonomous Goal Mode](.agents/notes/implemented/feature/2026-08-26-autonomous-goal-mode.md) | Long-running goal execution with convergence gates and loop detection |
 
 #### Simplification (`implemented/simplification/`)
 | Date | Title | Focus |
