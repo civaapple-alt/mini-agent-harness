@@ -295,6 +295,7 @@ fn interactive_status_command_reports_runtime_security_and_sandbox() {
     assert!(stdout.contains("status> security-preset:  turbomode"));
     assert!(stdout.contains("status> sandbox:          native"));
     assert!(stdout.contains("status> approval:         automatic (auto-approve)"));
+    assert!(stdout.contains("status> web search:       enabled (built-in responses web_search)"));
     assert!(stdout.contains("status> session:"));
 }
 
@@ -379,6 +380,7 @@ fn first_use_status_reports_non_secret_snapshot() {
         "{plain_out}"
     );
     assert!(plain_out.contains("credential: missing"), "{plain_out}");
+    assert!(plain_out.contains("web_search: enabled"), "{plain_out}");
     assert!(
         !plain_out.to_ascii_lowercase().contains("sk-"),
         "{plain_out}"
@@ -390,6 +392,7 @@ fn first_use_status_reports_non_secret_snapshot() {
     assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(body["provider"], "openai_responses");
     assert_eq!(body["credential"], "missing");
+    assert_eq!(body["web_search"], true);
     assert!(body["model"].is_null());
     assert_eq!(body["telemetry"], false);
     assert!(!json_out.to_ascii_lowercase().contains("sk-"), "{json_out}");

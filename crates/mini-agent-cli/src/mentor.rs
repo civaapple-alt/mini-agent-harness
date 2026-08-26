@@ -58,8 +58,12 @@ pub(crate) async fn run(arguments: String, trace: Option<PathBuf>, json_output: 
         Ok(fingerprint) => fingerprint,
         Err(error) => return preflight_error(json_output, &error),
     };
-    let model = match OpenAiModel::new(provider.api_key, provider.model.clone(), provider.base_url)
-    {
+    let model = match OpenAiModel::new(
+        provider.api_key,
+        provider.model.clone(),
+        provider.base_url,
+        provider.web_search,
+    ) {
         Ok(model) => model,
         Err(error) => return preflight_error(json_output, &error.to_string()),
     };

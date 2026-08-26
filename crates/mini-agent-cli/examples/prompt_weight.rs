@@ -167,6 +167,7 @@ async fn run_case(
         api_key.to_string(),
         model_name.to_string(),
         base_url.to_string(),
+        false,
     ) {
         Ok(model) => model,
         Err(error) => return error_record(repetition, task, treatment, error.to_string()),

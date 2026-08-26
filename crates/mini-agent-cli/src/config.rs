@@ -24,12 +24,14 @@ pub struct RuntimeConfig {
     mentor_model: Option<ResolvedValue>,
     mentor_base_url: Option<ResolvedSetting>,
     max_agent_steps: Option<usize>,
+    web_search: bool,
 }
 
 pub struct ProviderSettings {
     pub api_key: String,
     pub model: String,
     pub base_url: String,
+    pub web_search: bool,
 }
 
 struct ResolvedSetting {
@@ -81,6 +83,12 @@ impl RuntimeConfig {
             Some(value) => Some(parse_max_agent_steps(&value.value)?),
             None => None,
         };
+        let web_search = match resolve_value("MINI_AGENT_WEB_SEARCH", &workspace_env, &user_env)
+            .or_else(|| resolve_value("OPENAI_WEB_SEARCH", &workspace_env, &user_env))
+        {
+            Some(value) => parse_bool_setting("MINI_AGENT_WEB_SEARCH", &value.value)?,
+            None => true,
+        };
         Ok(Self {
             workspace,
             api_key,
@@ -90,6 +98,7 @@ impl RuntimeConfig {
             mentor_model,
             mentor_base_url,
             max_agent_steps,
+            web_search,
         })
     }
 
@@ -115,6 +124,7 @@ impl RuntimeConfig {
             api_key,
             model,
             base_url: self.base_url.value.clone(),
+            web_search: self.web_search,
         })
     }
 
@@ -124,6 +134,15 @@ impl RuntimeConfig {
 
     pub fn copilot_max_steps(&self) -> usize {
         self.max_agent_steps.unwrap_or(0)
+    }
+
+    pub fn web_search(&self) -> bool {
+        self.web_search
+    }
+
+    pub fn with_web_search(mut self, enabled: bool) -> Self {
+        self.web_search = enabled;
+        self
     }
 
     pub fn mentor_provider_settings(&self) -> Result<ProviderSettings, String> {
@@ -157,6 +176,7 @@ impl RuntimeConfig {
             api_key,
             model,
             base_url,
+            web_search: false,
         })
     }
 
@@ -178,6 +198,7 @@ impl RuntimeConfig {
             "base_url_source": setting_source_name(self.base_url.source),
             "credential": if self.api_key.is_some() { "configured" } else { "missing" },
             "credential_source": self.api_key.as_ref().map(|value| source_name(value.source)),
+            "web_search": self.web_search,
             "mentor": {
                 "enabled": self.mentor_model.is_some(),
                 "model": self.mentor_model.as_ref().map(|value| value.value.as_str()),
@@ -281,6 +302,14 @@ impl RuntimeConfig {
             format!(
                 "auto_max_agent_steps: {}",
                 display_max_agent_steps(self.copilot_max_steps())
+            ),
+            format!(
+                "web_search: {}",
+                if self.web_search {
+                    "enabled (built-in responses web_search)"
+                } else {
+                    "disabled"
+                }
             ),
             "command_sandbox: disabled".to_string(),
         ];
@@ -517,6 +546,16 @@ fn parse_max_agent_steps(value: &str) -> Result<usize, String> {
     value.parse::<usize>().map_err(|_| {
         "MINI_AGENT_MAX_STEPS must be a non-negative integer (0 = unlimited)".to_string()
     })
+}
+
+fn parse_bool_setting(name: &str, value: &str) -> Result<bool, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" | "enable" | "enabled" => Ok(true),
+        "false" | "0" | "no" | "off" | "disable" | "disabled" => Ok(false),
+        _ => Err(format!(
+            "{name} must be a boolean (true/false, 1/0, on/off)"
+        )),
+    }
 }
 
 fn display_max_agent_steps(steps: usize) -> String {

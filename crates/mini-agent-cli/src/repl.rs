@@ -71,6 +71,7 @@ impl Observer for ChannelObserver {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     trace: Option<PathBuf>,
     initial_approval: ApprovalMode,
@@ -78,6 +79,7 @@ pub async fn run(
     session_request: SessionRequest,
     preset: crate::security::SecurityPreset,
     sandbox_kind: crate::sandbox::SandboxKind,
+    web_search_override: Option<bool>,
 ) -> ExitCode {
     let (event_tx, event_rx) = mpsc::sync_channel(EVENT_BUFFER);
     let approval_events = event_tx.clone();
@@ -117,6 +119,7 @@ pub async fn run(
         session_request,
         preset,
         sandbox_kind,
+        web_search_override,
         worker_rx,
         event_tx,
     );
@@ -275,32 +278,39 @@ pub async fn run(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_worker(
     copilot: bool,
     approval: ApprovalController,
     session_request: SessionRequest,
     preset: crate::security::SecurityPreset,
     sandbox_kind: crate::sandbox::SandboxKind,
+    web_search_override: Option<bool>,
     commands: mpsc::Receiver<WorkerCommand>,
     events: mpsc::SyncSender<ReplEvent>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let (build, auto_max_steps) = match RuntimeConfig::load().and_then(|runtime| {
-            let auto_max_steps = runtime.copilot_max_steps();
-            crate::prepare_openai_harness(
-                &runtime,
-                approval.clone(),
-                harness_config_auto(copilot, auto_max_steps),
-            )
-            .map(|build| (build, auto_max_steps))
-        }) {
-            Ok(loaded) => loaded,
-            Err(error) => {
-                let _ = events.send(ReplEvent::InitializationFailed(error));
-                let _ = events.send(ReplEvent::Exited);
-                return;
-            }
-        };
+        let (build, auto_max_steps, web_search_enabled) =
+            match RuntimeConfig::load().and_then(|mut runtime| {
+                if let Some(enabled) = web_search_override {
+                    runtime = runtime.with_web_search(enabled);
+                }
+                let web_search_enabled = runtime.web_search();
+                let auto_max_steps = runtime.copilot_max_steps();
+                crate::prepare_openai_harness(
+                    &runtime,
+                    approval.clone(),
+                    harness_config_auto(copilot, auto_max_steps),
+                )
+                .map(|build| (build, auto_max_steps, web_search_enabled))
+            }) {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    let _ = events.send(ReplEvent::InitializationFailed(error));
+                    let _ = events.send(ReplEvent::Exited);
+                    return;
+                }
+            };
         let crate::HarnessBuild {
             mut harness,
             stable_system_prompt,
@@ -495,6 +505,14 @@ fn spawn_worker(
                     )));
                     let _ = events.send(ReplEvent::Notice(format!(
                         "status> approval:         {mode_str}"
+                    )));
+                    let web_search_str = if web_search_enabled {
+                        "enabled (built-in responses web_search)"
+                    } else {
+                        "disabled"
+                    };
+                    let _ = events.send(ReplEvent::Notice(format!(
+                        "status> web search:       {web_search_str}"
                     )));
                     let _ = events.send(ReplEvent::Notice(format!(
                         "status> copilot mode:     {copilot_str}"

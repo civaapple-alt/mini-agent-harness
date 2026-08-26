@@ -17,6 +17,7 @@ non-secret source of each value.
 | `OPENAI_API_KEY` | for primary commands | Bearer credential for the Responses endpoint |
 | `OPENAI_MODEL` | for primary commands | Provider model identifier |
 | `OPENAI_BASE_URL` | no | API root; defaults to `https://api.openai.com/v1` |
+| `MINI_AGENT_WEB_SEARCH` | no | Enable built-in Responses `web_search` tool (default `true`) |
 | `MENTOR_OPENAI_MODEL` | for mentor commands | Independent mentor model identifier |
 | `MENTOR_OPENAI_API_KEY` | no | Mentor credential override; otherwise inherits `OPENAI_API_KEY` |
 | `MENTOR_OPENAI_BASE_URL` | no | Mentor API root override; otherwise inherits `OPENAI_BASE_URL` |

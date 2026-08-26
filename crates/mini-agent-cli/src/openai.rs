@@ -24,10 +24,16 @@ pub struct OpenAiModel {
     api_key: String,
     model: String,
     endpoint: String,
+    web_search: bool,
 }
 
 impl OpenAiModel {
-    pub fn new(api_key: String, model: String, base_url: String) -> Result<Self, OpenAiError> {
+    pub fn new(
+        api_key: String,
+        model: String,
+        base_url: String,
+        web_search: bool,
+    ) -> Result<Self, OpenAiError> {
         let base_url = base_url.trim().trim_end_matches('/');
         if base_url.is_empty() {
             return Err(OpenAiError::Protocol(
@@ -44,6 +50,7 @@ impl OpenAiModel {
             api_key,
             model,
             endpoint: format!("{base_url}/responses"),
+            web_search,
         })
     }
 }
@@ -56,7 +63,7 @@ impl Model for OpenAiModel {
         request: ModelRequest<'a>,
         events: &'a mut (dyn ModelEventSink + Send),
     ) -> Result<ModelResponse, Self::Error> {
-        let body = request_body(&self.model, &request);
+        let body = request_body(&self.model, &request, self.web_search);
         let response = self
             .client
             .post(&self.endpoint)
@@ -130,13 +137,13 @@ async fn bounded_error_body(response: reqwest::Response) -> String {
     }
 }
 
-fn request_body(model: &str, request: &ModelRequest<'_>) -> Value {
+fn request_body(model: &str, request: &ModelRequest<'_>, web_search: bool) -> Value {
     let input = request
         .messages
         .iter()
         .flat_map(message_items)
         .collect::<Vec<_>>();
-    let tools = request
+    let mut tools = request
         .tools
         .iter()
         .map(|tool| {
@@ -149,6 +156,12 @@ fn request_body(model: &str, request: &ModelRequest<'_>) -> Value {
             })
         })
         .collect::<Vec<_>>();
+
+    if web_search {
+        tools.push(json!({
+            "type": "web_search"
+        }));
+    }
 
     json!({
         "model": model,
@@ -456,6 +469,7 @@ mod tests {
                 tools: &tools,
                 max_response_bytes: config.max_model_response_bytes,
             },
+            true,
         );
 
         assert_eq!(body["model"], "test-model");
@@ -465,7 +479,20 @@ mod tests {
         assert_eq!(body["input"][3]["type"], "function_call");
         assert_eq!(body["input"][4]["type"], "function_call_output");
         assert_eq!(body["tools"][0]["name"], "lookup");
+        assert_eq!(body["tools"][1]["type"], "web_search");
         assert_eq!(body["parallel_tool_calls"], false);
+
+        let body_no_search = request_body(
+            "test-model",
+            &ModelRequest {
+                system_prompt: &config.system_prompt,
+                messages: &messages,
+                tools: &tools,
+                max_response_bytes: config.max_model_response_bytes,
+            },
+            false,
+        );
+        assert_eq!(body_no_search["tools"].as_array().unwrap().len(), 1);
     }
 
     #[test]

@@ -24,15 +24,19 @@ pub async fn run(
     json_output: bool,
     automatic: bool,
     preset: SecurityPreset,
+    web_search_override: Option<bool>,
 ) -> ExitCode {
     let prompt = match resolve_prompt(prompt) {
         Ok(prompt) => prompt,
         Err(error) => return preflight_error(json_output, &error),
     };
-    let runtime_config = match RuntimeConfig::load() {
+    let mut runtime_config = match RuntimeConfig::load() {
         Ok(config) => config,
         Err(error) => return preflight_error(json_output, &error),
     };
+    if let Some(enabled) = web_search_override {
+        runtime_config = runtime_config.with_web_search(enabled);
+    }
     let model_name = runtime_config.model().unwrap_or_default().to_string();
     let tty = io::stdin().is_terminal();
     let mode = if automatic || tty {

@@ -51,15 +51,15 @@ use workspace::ApprovalMode;
 use workspace::workspace_tools_with_read_roots;
 use world::WorldState;
 
-const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent fork SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto-approve|-y] [--json] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval and persist settled checkpoints under ~/.mini-agent/sessions by default. Use `--ephemeral` for temporary in-memory sessions. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto-approve` (or `-y`) when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
-const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is protected by sandbox. Settled checkpoints are saved under ~/.mini-agent/sessions by default; use `--ephemeral` for temporary in-memory sessions. `/auto off` restores prompts.";
+const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent fork SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto-approve|-y] [--json] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval, enable built-in Responses web_search by default, and persist settled checkpoints under ~/.mini-agent/sessions. Use `--ephemeral` for temporary in-memory sessions. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto-approve` (or `-y`) when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_WEB_SEARCH    Enable/disable built-in Responses web_search (default true)\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
+const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is protected by sandbox. Settled checkpoints are saved under ~/.mini-agent/sessions by default; use `--ephemeral` for temporary in-memory sessions. `/auto off` restores prompts.";
 const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SESSION_ID [--trace PATH]\n\nResumes the latest settled checkpoint of a durable session for this workspace.";
 const FORK_HELP: &str = "mini-agent fork\n\nUSAGE:\n    mini-agent fork SESSION_ID [--trace PATH]\n\nForks a new independent session from the latest settled checkpoint of an existing session.";
 const SESSIONS_HELP: &str = "mini-agent sessions\n\nUSAGE:\n    mini-agent sessions\n\nLists bounded durable sessions for the current workspace under ~/.mini-agent/sessions.";
 const MENTOR_HELP: &str = "mini-agent mentor\n\nUSAGE:\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n\nRuns a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.\n\nCONFIGURATION:\n    MENTOR_OPENAI_MODEL      Required dedicated mentor model\n    MENTOR_OPENAI_API_KEY    Optional; falls back to OPENAI_API_KEY\n    MENTOR_OPENAI_BASE_URL   Optional; falls back to OPENAI_BASE_URL";
-const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto-approve|-y] [--json] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.\nOn a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto-approve, -y           Permit sensitive tools non-interactively (auto-approve)\n    --security-preset PRESET     Security policy preset: default, turbomode, full-machine\n    --sandbox KIND               Execution sandbox: native (Win32 JobObject/process groups), docker\n    --json                       Emit a machine-readable final result\n    --trace PATH                 Write JSONL observation events";
+const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto-approve|-y] [--json] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.\nOn a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto-approve, -y           Permit sensitive tools non-interactively (auto-approve)\n    --security-preset PRESET     Security policy preset: default, turbomode, full-machine\n    --sandbox KIND               Execution sandbox: native (Win32 JobObject/process groups), docker\n    --web-search, --search       Enable built-in Responses web_search (default: true)\n    --no-web-search, --no-search Disable built-in Responses web_search\n    --json                       Emit a machine-readable final result\n    --trace PATH                 Write JSONL observation events";
 const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--auto-approve|-y] [--json] [--trace PATH] [--] <PROMPT>\n\nAlias of `ask`. Prefer `ask` in scripts and docs.";
-const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, unlimited model steps (MINI_AGENT_MAX_STEPS, 0 = unlimited), and context compaction that keeps recent tool work.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
+const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, unlimited model steps (MINI_AGENT_MAX_STEPS, 0 = unlimited), and context compaction that keeps recent tool work.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
 const DEMO_HELP: &str = "mini-agent demo\n\nUSAGE:\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
 const TRACE_HELP: &str = "mini-agent trace\n\nUSAGE:\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n\nReplays and analyzes deterministic JSONL observation traces offline without contacting model providers.";
 const STATUS_HELP: &str = "mini-agent status\n\nUSAGE:\n    mini-agent status [--json]\n\nPrints effective non-secret startup configuration.";
@@ -100,6 +100,7 @@ async fn main() -> ExitCode {
                 request,
                 invocation.security_preset,
                 invocation.sandbox_kind,
+                invocation.web_search,
             )
             .await
         }
@@ -111,6 +112,7 @@ async fn main() -> ExitCode {
                 invocation.json,
                 invocation.automatic,
                 invocation.security_preset,
+                invocation.web_search,
             )
             .await
         }
@@ -121,6 +123,7 @@ async fn main() -> ExitCode {
                 invocation.json,
                 invocation.automatic,
                 invocation.security_preset,
+                invocation.web_search,
             )
             .await
         }
@@ -137,10 +140,11 @@ async fn main() -> ExitCode {
                 request,
                 invocation.security_preset,
                 invocation.sandbox_kind,
+                invocation.web_search,
             )
             .await
         }
-        Command::Auto => run_auto(invocation.prompt, invocation.trace).await,
+        Command::Auto => run_auto(invocation.prompt, invocation.trace, invocation.web_search).await,
         Command::Help => {
             println!("{}", help_text(invocation.help_topic));
             ExitCode::SUCCESS
@@ -159,6 +163,7 @@ async fn main() -> ExitCode {
                 SessionRequest::Resume(invocation.prompt),
                 invocation.security_preset,
                 invocation.sandbox_kind,
+                invocation.web_search,
             )
             .await
         }
@@ -170,6 +175,7 @@ async fn main() -> ExitCode {
                 SessionRequest::Fork(invocation.prompt),
                 invocation.security_preset,
                 invocation.sandbox_kind,
+                invocation.web_search,
             )
             .await
         }
@@ -216,6 +222,7 @@ struct Invocation {
     security_preset: SecurityPreset,
     #[allow(dead_code)]
     sandbox_kind: SandboxKind,
+    web_search: Option<bool>,
     help_topic: HelpTopic,
 }
 
@@ -342,6 +349,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             ephemeral: false,
             security_preset: SecurityPreset::Default,
             sandbox_kind: SandboxKind::Native,
+            web_search: None,
             help_topic: HelpTopic::Root,
         });
     }
@@ -355,6 +363,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut ephemeral = false;
     let mut security_preset = SecurityPreset::Default;
     let mut sandbox_kind = SandboxKind::Native;
+    let mut web_search = None;
     let mut options = true;
     while let Some(argument) = args.next() {
         if options && argument == "--" {
@@ -404,6 +413,16 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 .next()
                 .ok_or_else(|| "--sandbox requires a sandbox kind".to_string())?;
             sandbox_kind = SandboxKind::parse(&value)?;
+        } else if options && (argument == "--web-search" || argument == "--search") {
+            if web_search.is_some() {
+                return Err(format!("{argument} may be provided only once"));
+            }
+            web_search = Some(true);
+        } else if options && (argument == "--no-web-search" || argument == "--no-search") {
+            if web_search.is_some() {
+                return Err(format!("{argument} may be provided only once"));
+            }
+            web_search = Some(false);
         } else if options && argument.starts_with('-') {
             return Err(format!("unknown option: {argument}"));
         } else {
@@ -485,6 +504,7 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         ephemeral,
         security_preset,
         sandbox_kind,
+        web_search,
         help_topic: HelpTopic::Root,
     })
 }
@@ -500,6 +520,7 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         ephemeral: false,
         security_preset: SecurityPreset::Default,
         sandbox_kind: SandboxKind::Native,
+        web_search: None,
         help_topic,
     }
 }
@@ -651,21 +672,29 @@ async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
     }
 }
 
-async fn run_auto(prompt: String, trace: Option<PathBuf>) -> ExitCode {
+async fn run_auto(
+    prompt: String,
+    trace: Option<PathBuf>,
+    web_search_override: Option<bool>,
+) -> ExitCode {
     print_auto_warning();
     let approval = ApprovalController::new(ApprovalMode::Automatic);
-    let runtime = match RuntimeConfig::load() {
+    let mut runtime = match RuntimeConfig::load() {
         Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::from(2);
         }
     };
-    let mut harness = match openai_harness(
+    if let Some(enabled) = web_search_override {
+        runtime = runtime.with_web_search(enabled);
+    }
+    let mut harness = match prepare_openai_harness(
+        &runtime,
         approval,
         harness_config_auto(true, runtime.copilot_max_steps()),
     ) {
-        Ok(harness) => harness,
+        Ok(build) => build.harness,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::from(2);
@@ -707,13 +736,6 @@ async fn run_with_observer<M: Model>(
     }
 }
 
-fn openai_harness(
-    approval: ApprovalController,
-    config: HarnessConfig,
-) -> Result<Harness<OpenAiModel>, String> {
-    Ok(prepare_openai_harness(&RuntimeConfig::load()?, approval, config)?.harness)
-}
-
 struct HarnessBuild {
     harness: Harness<OpenAiModel>,
     stable_system_prompt: String,
@@ -730,7 +752,12 @@ fn prepare_openai_harness(
 ) -> Result<HarnessBuild, String> {
     let provider = runtime_config.provider_settings()?;
     let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
-    let model = match OpenAiModel::new(provider.api_key, provider.model, provider.base_url) {
+    let model = match OpenAiModel::new(
+        provider.api_key,
+        provider.model,
+        provider.base_url,
+        provider.web_search,
+    ) {
         Ok(model) => model,
         Err(error) => return Err(error.to_string()),
     };
@@ -1161,5 +1188,27 @@ mod tests {
         assert_eq!(interactive_inv.command, Command::Interactive);
         assert_eq!(interactive_inv.security_preset, SecurityPreset::Turbomode);
         assert_eq!(interactive_inv.sandbox_kind, SandboxKind::Native);
+    }
+
+    #[test]
+    fn parses_web_search_options() {
+        let default_inv = parse_args(vec!["ask".to_string(), "hello".to_string()]).unwrap();
+        assert_eq!(default_inv.web_search, None);
+
+        let enabled_inv = parse_args(vec![
+            "ask".to_string(),
+            "--web-search".to_string(),
+            "hello".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(enabled_inv.web_search, Some(true));
+
+        let disabled_inv = parse_args(vec![
+            "ask".to_string(),
+            "--no-web-search".to_string(),
+            "hello".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(disabled_inv.web_search, Some(false));
     }
 }

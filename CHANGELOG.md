@@ -47,6 +47,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Multi-branch durable session forking (`mini-agent fork <SESSION_ID>`) to branch settled checkpoints into independent exploration lanes.
 - Offline deterministic trace replay (`mini-agent trace replay <PATH> [--json]`) and metrics computation (`mini-agent trace summary <PATH> [--json]`) over JSONL observation event logs and durable `session.jsonl` files.
 - Interactive `/status` slash command in REPL displaying current workspace, active security preset, sandbox containment, approval mode, copilot loop status, and durable session metadata.
+- Built-in Responses API web search integration enabled by default (passed as `{"type": "web_search"}` tool to DeepSeek/OpenAI Responses API), with `--web-search`, `--no-web-search`, and `MINI_AGENT_WEB_SEARCH=true|false` configuration options.
 - Non-interactive script approval flags `--auto-approve`, `-y`, and `--yes` on `mini-agent ask`.
 - Ephemeral session opt-out flags `--ephemeral` / `--no-persist` for memory-only interactive REPL and auto sessions.
 - Repetitive tool-call loop detection warning in the harness run loop to prevent unattended stalls in autonomous copilot runs.
