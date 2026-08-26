@@ -2,4 +2,5 @@
 .env
 .tmp/
 /scripts/__pycache__/
-.agents/
+.agents/*
+!.agents/notes/
