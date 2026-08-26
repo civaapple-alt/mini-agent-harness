@@ -805,20 +805,22 @@ fn bounded_names(names: &[String]) -> String {
 
 fn print_help() {
     println!(
-        "/auto      unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS, compact keeps recent tool work); tools already run without approval"
+        "/auto          Enable autonomous copilot loop (unlimited steps, automatic context compaction)"
     );
-    println!("/auto off  require approval for writes, shell, and MCP");
     println!(
-        "/status    show current runtime status (security preset, sandbox, session, approval)"
+        "/auto off      Switch to manual mode (require per-step approval for writes/shell/MCP)"
     );
-    println!("/mcp       retry configured MCP servers that are not enabled");
-    println!("/world     show detected environment, mode, and command capabilities");
-    println!("/world refresh  detect changes and append a new world-state item");
-    println!("/session    show current in-memory or durable session identity");
-    println!("/queue     show pending operations");
-    println!("/new       clear this in-memory conversation");
-    println!("/help      show local commands");
-    println!("/exit      finish queued operations and quit");
+    println!(
+        "/status        Display runtime status (security preset, sandbox, web search, session, approval)"
+    );
+    println!("/world         Show detected host, shell, and command capabilities");
+    println!("/world refresh Re-scan environment and append updated world state to context");
+    println!("/session       Show durable session ID, thread ID, and JSONL persistence path");
+    println!("/mcp           Retry connecting configured MCP servers that are currently inactive");
+    println!("/queue         Show number of pending operations in input queue");
+    println!("/new           Clear conversation history and start a fresh context");
+    println!("/help          Display this list of interactive slash commands");
+    println!("/exit          Finish queued work and quit");
 }
 
 fn print_prompt() {

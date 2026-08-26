@@ -51,21 +51,210 @@ use workspace::ApprovalMode;
 use workspace::workspace_tools_with_read_roots;
 use world::WorldState;
 
-const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent fork SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto-approve|-y] [--json] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval, enable built-in Responses web_search by default, and persist settled checkpoints under ~/.mini-agent/sessions. Use `--ephemeral` for temporary in-memory sessions. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto-approve` (or `-y`) when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_WEB_SEARCH    Enable/disable built-in Responses web_search (default true)\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
-const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is protected by sandbox. Settled checkpoints are saved under ~/.mini-agent/sessions by default; use `--ephemeral` for temporary in-memory sessions. `/auto off` restores prompts.";
-const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SESSION_ID [--trace PATH]\n\nResumes the latest settled checkpoint of a durable session for this workspace.";
-const FORK_HELP: &str = "mini-agent fork\n\nUSAGE:\n    mini-agent fork SESSION_ID [--trace PATH]\n\nForks a new independent session from the latest settled checkpoint of an existing session.";
-const SESSIONS_HELP: &str = "mini-agent sessions\n\nUSAGE:\n    mini-agent sessions\n\nLists bounded durable sessions for the current workspace under ~/.mini-agent/sessions.";
-const MENTOR_HELP: &str = "mini-agent mentor\n\nUSAGE:\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n\nRuns a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.\n\nCONFIGURATION:\n    MENTOR_OPENAI_MODEL      Required dedicated mentor model\n    MENTOR_OPENAI_API_KEY    Optional; falls back to OPENAI_API_KEY\n    MENTOR_OPENAI_BASE_URL   Optional; falls back to OPENAI_BASE_URL";
-const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto-approve|-y] [--json] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.\nOn a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto-approve, -y           Permit sensitive tools non-interactively (auto-approve)\n    --security-preset PRESET     Security policy preset: default, turbomode, full-machine\n    --sandbox KIND               Execution sandbox: native (Win32 JobObject/process groups), docker\n    --web-search, --search       Enable built-in Responses web_search (default: true)\n    --no-web-search, --no-search Disable built-in Responses web_search\n    --json                       Emit a machine-readable final result\n    --trace PATH                 Write JSONL observation events";
-const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--auto-approve|-y] [--json] [--trace PATH] [--] <PROMPT>\n\nAlias of `ask`. Prefer `ask` in scripts and docs.";
-const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, unlimited model steps (MINI_AGENT_MAX_STEPS, 0 = unlimited), and context compaction that keeps recent tool work.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
-const DEMO_HELP: &str = "mini-agent demo\n\nUSAGE:\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
-const TRACE_HELP: &str = "mini-agent trace\n\nUSAGE:\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n\nReplays and analyzes deterministic JSONL observation traces offline without contacting model providers.";
-const STATUS_HELP: &str = "mini-agent status\n\nUSAGE:\n    mini-agent status [--json]\n\nPrints effective non-secret startup configuration.";
-const DOCTOR_HELP: &str = "mini-agent doctor\n\nUSAGE:\n    mini-agent doctor [--json]\n\nChecks local configuration without contacting the model provider.";
-const VERSION_HELP: &str =
-    "mini-agent version\n\nUSAGE:\n    mini-agent version\n    mini-agent --version";
+const HELP: &str =
+    "mini-agent — Native AI coding-agent harness with bounded tools and Responses API
+
+USAGE:
+    mini-agent [OPTIONS]
+    mini-agent auto [OPTIONS] [--] [PROMPT]
+    mini-agent ask [OPTIONS] [--] [PROMPT]
+    mini-agent resume SESSION_ID [--trace PATH]
+    mini-agent fork SESSION_ID [--trace PATH]
+    mini-agent sessions
+    mini-agent status [--json]
+    mini-agent doctor [--json]
+    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]
+    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>
+    mini-agent trace replay PATH [--json]
+    mini-agent trace summary PATH [--json]
+    mini-agent demo [--trace PATH] [--] <PROMPT>
+    mini-agent help [COMMAND]
+    mini-agent --version
+
+COMMANDS:
+    (default)       Start interactive REPL session (persisted under ~/.mini-agent/sessions)
+    auto            Autonomous copilot loop (unlimited steps unless capped, compacts context)
+    ask             Run a single script-facing turn (8 steps, no compaction; alias: run)
+    resume          Resume an existing session from its latest settled checkpoint
+    fork            Branch an existing session into a new independent session
+    sessions        List durable sessions stored for the current workspace
+    status          Inspect effective non-secret configuration, preset, and sandbox
+    doctor          Diagnose local prerequisites (credentials, shell, AGENTS.md, tools)
+    mentor          Run an independent, tool-free review model on a settled checkpoint
+    trace           Replay or summarize deterministic JSONL execution traces offline
+    demo            Run deterministic offline local demo without API keys
+
+GLOBAL OPTIONS:
+    --security-preset PRESET
+        Security policy preset [default: default]
+        Values:
+          default       Block dangerous system/disk operations; allow standard project tools
+          turbomode     Relax prompts for faster automated workflows
+          full-machine  Permit full system access without restriction (for containers)
+
+    --sandbox KIND
+        Process containment sandbox [default: native]
+        Values:
+          native        Win32 JobObject process tree isolation (Windows) / process groups (Unix)
+          docker        Execute commands inside an isolated Docker container
+
+    --web-search, --search
+        Enable built-in Responses API web search tool [default: enabled]
+
+    --no-web-search, --no-search
+        Disable built-in Responses API web search tool
+
+    --ephemeral, --no-persist
+        Run temporary in-memory session without saving to ~/.mini-agent/sessions
+
+    --auto-approve, -y
+        Bypass per-step approval in non-interactive ask scripts
+
+    --json
+        Emit machine-readable structured JSON output
+
+    --trace PATH
+        Record detailed JSONL observation events to specified file
+
+ENVIRONMENT:
+    OPENAI_API_KEY           Bearer API credential for Responses endpoint (or ~/.mini-agent/.env)
+    OPENAI_MODEL             Model identifier (e.g. deepseek-v4-flash, gpt-4o)
+    OPENAI_BASE_URL          API root; defaults to https://api.openai.com/v1
+    MINI_AGENT_WEB_SEARCH    Enable/disable built-in Responses web_search (default: true)
+    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default: 0)
+    MENTOR_OPENAI_MODEL      Dedicated independent model for mentor commands
+    MENTOR_OPENAI_API_KEY    Mentor credential override (falls back to OPENAI_API_KEY)
+    MENTOR_OPENAI_BASE_URL   Mentor endpoint override (falls back to OPENAI_BASE_URL)
+
+Run `mini-agent help COMMAND` or `mini-agent COMMAND --help` for subcommand details.";
+
+const INTERACTIVE_HELP: &str = "mini-agent interactive
+
+USAGE:
+    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH]
+
+Starts the interactive REPL. Tools run without per-step approval; shell is protected by the sandbox.
+Settled checkpoints are saved under ~/.mini-agent/sessions by default; use `--ephemeral` for temporary in-memory sessions.
+Use `/auto` to enter copilot mode; `/auto off` restores per-action prompts.
+
+OPTIONS:
+    --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]
+    --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
+    --web-search, --search       Enable built-in Responses web_search [default: enabled]
+    --no-web-search, --no-search Disable built-in Responses web_search
+    --ephemeral, --no-persist    Run in-memory without persisting session to disk
+    --trace PATH                 Write JSONL observation events to file";
+
+const RESUME_HELP: &str = "mini-agent resume
+
+USAGE:
+    mini-agent resume SESSION_ID [--trace PATH]
+
+Resumes the latest settled checkpoint of a durable session for this workspace.";
+
+const FORK_HELP: &str = "mini-agent fork
+
+USAGE:
+    mini-agent fork SESSION_ID [--trace PATH]
+
+Forks a new independent session from the latest settled checkpoint of an existing session.";
+
+const SESSIONS_HELP: &str = "mini-agent sessions
+
+USAGE:
+    mini-agent sessions
+
+Lists bounded durable sessions for the current workspace under ~/.mini-agent/sessions.";
+
+const MENTOR_HELP: &str = "mini-agent mentor
+
+USAGE:
+    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]
+    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>
+
+Runs a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.
+
+CONFIGURATION:
+    MENTOR_OPENAI_MODEL      Required dedicated mentor model
+    MENTOR_OPENAI_API_KEY    Optional; falls back to OPENAI_API_KEY
+    MENTOR_OPENAI_BASE_URL   Optional; falls back to OPENAI_BASE_URL";
+
+const ASK_HELP: &str = "mini-agent ask
+
+USAGE:
+    mini-agent ask [--auto-approve|-y] [--json] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]
+
+Runs one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.
+On a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).
+Progress is written to stderr and the final result to stdout.
+
+OPTIONS:
+    --auto-approve, -y           Permit sensitive tools non-interactively (auto-approve)
+    --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]
+    --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
+    --web-search, --search       Enable built-in Responses web_search [default: enabled]
+    --no-web-search, --no-search Disable built-in Responses web_search
+    --json                       Emit a machine-readable final result
+    --trace PATH                 Write JSONL observation events";
+
+const RUN_HELP: &str = "mini-agent run
+
+USAGE:
+    mini-agent run [--auto-approve|-y] [--json] [--trace PATH] [--] <PROMPT>
+
+Alias of `ask`. Prefer `ask` in scripts and docs.";
+
+const AUTO_HELP: &str = "mini-agent auto
+
+USAGE:
+    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]
+
+Unattended copilot: runs continuous model/tool cycles without per-step approval, unlimited steps (unless capped by MINI_AGENT_MAX_STEPS), and automatic context compaction that preserves recent tool work.
+With a prompt, runs one autonomous copilot turn to completion.
+Without a prompt, starts the interactive REPL in copilot mode.
+
+OPTIONS:
+    --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]
+    --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
+    --web-search, --search       Enable built-in Responses web_search [default: enabled]
+    --no-web-search, --no-search Disable built-in Responses web_search
+    --ephemeral, --no-persist    Run in-memory without persisting session to disk
+    --trace PATH                 Write JSONL observation events";
+
+const DEMO_HELP: &str = "mini-agent demo
+
+USAGE:
+    mini-agent demo [--trace PATH] [--] <PROMPT>
+
+Runs the deterministic local demo without provider credentials.";
+
+const TRACE_HELP: &str = "mini-agent trace
+
+USAGE:
+    mini-agent trace replay PATH [--json]
+    mini-agent trace summary PATH [--json]
+
+Replays and analyzes deterministic JSONL observation traces offline without contacting model providers.";
+
+const STATUS_HELP: &str = "mini-agent status
+
+USAGE:
+    mini-agent status [--json]
+
+Prints effective non-secret startup configuration, active preset, sandbox, and world state.";
+
+const DOCTOR_HELP: &str = "mini-agent doctor
+
+USAGE:
+    mini-agent doctor [--json]
+
+Checks local configuration and environment prerequisites without contacting the model provider.";
+
+const VERSION_HELP: &str = "mini-agent version
+
+USAGE:
+    mini-agent version
+    mini-agent --version";
 const AUTO_MAX_STEPS: usize = 0;
 
 pub(crate) fn version_line() -> String {
