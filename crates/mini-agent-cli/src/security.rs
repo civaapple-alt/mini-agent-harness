@@ -41,6 +41,8 @@ pub enum SecurityDecision {
     Deny,
 }
 
+const MAX_CACHED_APPROVALS: usize = 1024;
+
 #[derive(Clone, Default)]
 pub struct ApprovalStore(Arc<Mutex<HashSet<String>>>);
 
@@ -56,6 +58,9 @@ impl ApprovalStore {
 
     pub fn remember_approval(&self, key: &str) {
         let mut store = self.0.lock().unwrap();
+        if store.len() >= MAX_CACHED_APPROVALS {
+            store.clear();
+        }
         store.insert(key.to_string());
     }
 
@@ -142,7 +147,7 @@ impl SecurityPolicy {
 
     #[allow(dead_code)]
     pub fn check_file_access(&self, path: &Path, is_write: bool) -> SecurityDecision {
-        let path_str = path.to_string_lossy();
+        let path_str = path.to_string_lossy().replace('\\', "/");
         let action = format!(
             "file:{}:{}",
             if is_write { "write" } else { "read" },
