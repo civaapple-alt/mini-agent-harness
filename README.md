@@ -189,8 +189,8 @@ end. Redirected stdout and `--json` hold the assistant answer until completion
 so machine output remains valid. It also accepts a bounded prompt from stdin.
 `ask --json` emits one JSON object containing output, exit code, model, steps,
 usage, and tool-call statuses. On a TTY, `ask` runs tools without per-step
-approval. When stdin is not a TTY, sensitive tool calls fail closed; `ask --auto`
-permits them and should be used only in a trusted or disposable execution
+approval. When stdin is not a TTY, sensitive tool calls fail closed; `ask --auto-approve`
+(or `-y`) permits them and should be used only in a trusted or disposable execution
 environment. `run` is an alias of `ask`.
 
 The real modes expose `read_file`, `edit_file`, `write_file`, `shell`,
@@ -199,14 +199,13 @@ confined to the current workspace; `.git` is protected. `edit_file` makes one
 exact unique replacement; `write_file` creates new files and refuses to replace
 existing ones. Reads never prompt. The interactive REPL and TTY `ask` run
 writes, shell commands, process starts, and MCP without per-step approval;
-shell is not sandboxed. `/auto off` restores per-action prompts. `auto` without
-a prompt starts the REPL in the copilot loop; `/auto` enables that loop in any
-interactive session. `auto` with a prompt remains a one-shot copilot. Copilot
-mode runs until the model finishes, unless `MINI_AGENT_MAX_STEPS` sets a
-positive cap (`0` is unlimited), and compacts older context between settled
-tool batches while keeping recent tool work. It prints a warning because
-process execution is not sandboxed and can escape the workspace even though
-direct file tools cannot.
+process execution is protected by the sandbox (`--sandbox native|docker`).
+`/status` displays active security preset, sandbox, session, and approval state.
+`/auto off` restores per-action prompts. `auto` without a prompt starts the REPL
+in the copilot loop; `/auto` enables that loop in any interactive session.
+`auto` with a prompt remains a one-shot copilot. Copilot mode runs until the model
+finishes, unless `MINI_AGENT_MAX_STEPS` sets a positive cap (`0` is unlimited),
+and compacts older context between settled tool batches while keeping recent tool work.
 
 At startup mini-agent detects a fixed, bounded set of local command
 capabilities such as `git`, `rg`, `fd`, `tree`, `curl`, Cargo, Java/Maven,

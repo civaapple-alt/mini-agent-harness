@@ -45,7 +45,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Tool execution orchestrator with security presets (`--security-preset default|full-machine|turbomode|custom`), priority rule evaluation (`deny > ask > allow`), and session-level approval decision caching (`ApprovalStore`).
 - Windows-first native Win32 `JobObjectGuard` process containment (`--sandbox native`) with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` guaranteeing atomic child process tree destruction and zero orphaned zombie processes.
 - Multi-branch durable session forking (`mini-agent fork <SESSION_ID>`) to branch settled checkpoints into independent exploration lanes.
-- Offline deterministic trace replay (`mini-agent trace replay <PATH> [--json]`) and metrics computation (`mini-agent trace summary <PATH> [--json]`) over JSONL observation event logs.
+- Offline deterministic trace replay (`mini-agent trace replay <PATH> [--json]`) and metrics computation (`mini-agent trace summary <PATH> [--json]`) over JSONL observation event logs and durable `session.jsonl` files.
+- Interactive `/status` slash command in REPL displaying current workspace, active security preset, sandbox containment, approval mode, copilot loop status, and durable session metadata.
+- Non-interactive script approval flags `--auto-approve`, `-y`, and `--yes` on `mini-agent ask`.
+- Ephemeral session opt-out flags `--ephemeral` / `--no-persist` for memory-only interactive REPL and auto sessions.
 - Repetitive tool-call loop detection warning in the harness run loop to prevent unattended stalls in autonomous copilot runs.
 - Remote HTTP MCP server circuit breaker with fail-fast open circuit and half-open probe recovery during backend outages.
 
@@ -82,6 +85,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   `SKILL.md` can still be selected. `read_file` accepts up to 128 KiB so those
   instruction files can be opened.
 
+- Interactive REPL and Auto sessions are durable by default under `~/.mini-agent/sessions/`; `--ephemeral` provides memory-only scratch sessions.
+- Disambiguated `auto` CLI semantics: `mini-agent auto` exclusively represents the autonomous copilot loop, while `mini-agent ask` uses `--auto-approve` / `-y` for non-interactive approval bypass.
 - Default interactive sessions and TTY `ask` run tools without per-step
   approval. `/auto` is the copilot loop; `/auto off` restores prompts.
   `run` is an alias of `ask`.

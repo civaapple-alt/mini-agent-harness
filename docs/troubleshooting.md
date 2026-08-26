@@ -35,7 +35,7 @@ PowerShell 7 and confirm `pwsh` is on `PATH`; `mini-agent doctor` checks this.
 ## A noninteractive tool call is denied
 
 `ask` cannot stop a script to obtain approval when stdin is not a terminal.
-Use `ask --auto` only inside a workspace and execution environment you trust.
+Use `ask --auto-approve` (or `-y`) only inside a workspace and execution environment you trust.
 The interactive REPL does not prompt by default; `/auto off` turns prompts on.
 
 ## A command produces too much output

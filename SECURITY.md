@@ -13,10 +13,10 @@ a private channel before publishing details.
 
 ## Runtime boundary
 
-Mini Agent Harness does not sandbox shell commands. Reads never prompt. The
+Mini Agent Harness provides sandbox process containment (`--sandbox native|docker`). Reads never prompt. The
 default interactive session and TTY `ask` run writes, shell commands,
 managed-process starts, and MCP without per-step approval. `/auto off` restores
-prompts. Noninteractive `ask` fails closed on those tools unless `ask --auto`.
+prompts. Noninteractive `ask` fails closed on those tools unless `ask --auto-approve` (or `-y`).
 Unattended `auto` (unlimited steps unless `MINI_AGENT_MAX_STEPS`, compact) also skips prompts. Use `/auto off` when
 you want to review each effect; use auto-approval only in a workspace you trust.
 
