@@ -1,6 +1,6 @@
 # Tool Orchestrator and Pluggable Local Sandbox Execution Architecture
 
-Status: proposed
+Status: implemented
 
 ## Context
 
@@ -18,7 +18,7 @@ Model ToolCall
               └── 5. Result Truncation & Event Settlement
 ```
 
-This proposal establishes a cohesive **Tool Orchestrator & Sandbox Adapter Architecture** tailored for `mini-agent-harness`, faithfully adapting Codex's proven orchestrator model while honoring our strict microkernel boundaries.
+This decision establishes a cohesive **Tool Orchestrator & Sandbox Adapter Architecture** tailored for `mini-agent-harness`, adapting Codex's orchestrator model while honoring our strict microkernel boundaries.
 
 ---
 
@@ -33,8 +33,8 @@ This proposal establishes a cohesive **Tool Orchestrator & Sandbox Adapter Archi
 |  |                                                                             |  |
 |  |  +---------------------------+  +-------------------+  +-----------------+  |  |
 |  |  |    Approval Controller    |  |  Network Approver |  | Sandbox Manager |  |  |
-|  |  | - Presets (default/turbo) |  | - Domain whitelist|  | - Docker driver |  |  |
-|  |  | - File/Cmd Rule Evaluator |  | - Immediate/Defer |  | - Bwrap driver  |  |  |
+|  |  | - Presets (default/turbo) |  | - Domain whitelist|  | - Windows Job   |  |  |
+|  |  | - File/Cmd Rule Evaluator |  | - Immediate/Defer |  | - Docker driver |  |  |
 |  |  | - Session Decision Cache  |  | - SSRF Deny rules |  | - Native Host   |  |  |
 |  |  +---------------------------+  +-------------------+  +-----------------+  |  |
 |  +-----------------------------------------------------------------------------+  |
@@ -115,33 +115,9 @@ To unify ergonomics and strict safety, the CLI supports predefined operational p
 | Preset | Terminal Commands | File Access | Network Policy | Typical Use Case |
 |---|---|---|---|---|
 | `default` | Requires TTY approval | Restricted to workspace directory; outside paths require approval | Approval required | Standard daily interactive development |
-| `full machine` | Requires TTY approval | Unrestricted read/write across local filesystem | Standard approval | System-wide refactoring or cross-workspace maintenance |
+| `full-machine` | Requires TTY approval | Unrestricted read/write across local filesystem | Standard approval | System-wide refactoring or cross-workspace maintenance |
 | `turbomode` | Automatic execution (no prompts) | Unrestricted read/write | Unrestricted | Isolated Docker containers, ephemeral CI/CD environments |
 | `custom` | Defined by rules | Defined by rules | Defined by rules | Enterprise policies and custom project rules |
-
-### Custom Rule Dimensions (`.mini-agent/security.json`)
-```json
-{
-  "preset": "custom",
-  "files": {
-    "read": { "allow": ["crates/**", "docs/**"], "deny": ["**/.env", "**/*.pem"] },
-    "write": { "allow": ["src/**", "tests/**"], "deny": [".git/**", ".github/**"] }
-  },
-  "terminal": {
-    "allow": ["cargo *", "git diff*", "git status*"],
-    "ask": ["git push*", "npm publish*"],
-    "deny": ["rm -rf /*", "gh auth *"]
-  },
-  "sandbox": {
-    "driver": "docker",
-    "allow_outside_sandbox": ["curl", "git fetch"]
-  },
-  "mcp": {
-    "allow": ["mcp__filesystem__*"],
-    "ask": ["mcp__postgres__write_query"]
-  }
-}
-```
 
 ---
 
@@ -194,25 +170,10 @@ The `ToolOrchestrator` cleanly harmonizes with all three CLI execution modes:
 
 ---
 
-## 4. Acceptance Criteria
+## 4. Verification
 
-1. **Strict Core Boundary**: `mini-agent-core` requires zero modifications; all orchestration and sandboxing code lives in `mini-agent-cli`.
-2. **Deterministic Sandboxing**: When `--sandbox docker` is specified, shell tools execute within the container mount and cannot escape to host paths.
-3. **Session Approval Cache**: User approvals with "always allow for this session" cache cleanly in `ApprovalStore` and do not re-prompt on identical tool calls.
+1. **Strict Core Boundary**: `mini-agent-core` required zero modifications; all orchestration and sandboxing code lives in `mini-agent-cli`.
+2. **Deterministic Windows JobObject Sandboxing**: `JobObjectGuard` creates Win32 Job Objects with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` to terminate subprocess trees atomically on timeout or abort.
+3. **Session Approval Cache**: User approvals cache cleanly in `ApprovalStore` and do not re-prompt on identical tool calls.
 4. **Fail-Closed Guarantee**: Any tool call triggering a `deny` rule or requiring ungranted approval fails closed with a clear, descriptive `ToolError`.
 5. **Mode Consistency**: `ask` in non-TTY fails closed without `--auto`, while `auto --sandbox docker` operates autonomously within container boundaries.
-
----
-
-## 5. Implementation Plan & Work Breakdown
-
-1. **`crates/mini-agent-cli/src/security/`**:
-   - `mod.rs`: `SecurityPreset`, `PermissionProfile`, and `SecurityConfig` loader.
-   - `approvals.rs`: `ApprovalStore` with session decision caching.
-   - `rules.rs`: Path, command regex, and network URL matching evaluators.
-2. **`crates/mini-agent-cli/src/sandbox/`**:
-   - `mod.rs`: `SandboxDriver` trait and `SandboxAttempt` context.
-   - `docker.rs`: Container lifecycle and bind-mount management.
-   - `native.rs`: Host process execution with scrubbed environment.
-3. **`crates/mini-agent-cli/src/orchestrator.rs`**:
-   - Central `ToolOrchestrator` wrapping tool invocations with approval, network checks, and sandbox dispatch.

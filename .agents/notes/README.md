@@ -79,11 +79,6 @@ If a proposed approach is rejected during review:
 
 ### Proposed Notes Under Review (`proposed/`)
 
-#### Architecture (`proposed/architecture/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-26 | [Tool Orchestrator & Sandbox Adapter](.agents/notes/proposed/architecture/2026-08-26-local-sandbox-adapter.md) | Codex-inspired 5-stage tool orchestrator, security presets, and pluggable sandboxing |
-
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
 |---|---|---|
@@ -101,6 +96,7 @@ If a proposed approach is rejected during review:
 | 2026-08-26 | [Event-Driven Reactive Loop](.agents/notes/implemented/architecture/2026-08-26-event-driven-reactive-loop.md) | Passive immutable observers driving live client UI and rollout audit traces |
 | 2026-08-26 | [Event Stream Rollout Replay](.agents/notes/implemented/architecture/2026-08-26-event-stream-rollout-replay.md) | Deterministic offline replay, playback, and inspection of JSONL traces |
 | 2026-08-26 | [Session Branching Lanes](.agents/notes/implemented/architecture/2026-08-26-session-branching-lanes.md) | Multi-branch tree conversations and speculative exploration lanes |
+| 2026-08-26 | [Local Sandbox Adapter](.agents/notes/implemented/architecture/2026-08-26-local-sandbox-adapter.md) | Codex-inspired 5-stage tool orchestrator, security presets, and Windows JobObject sandboxing |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |

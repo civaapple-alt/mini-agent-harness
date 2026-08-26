@@ -2,6 +2,12 @@ use crate::processes::ProcessManager;
 use crate::processes::process_tools;
 use crate::result_store::ReadToolResult;
 use crate::result_store::ResultStore;
+use crate::sandbox::ProcessSandbox;
+use crate::sandbox::SandboxKind;
+use crate::security::ApprovalStore;
+use crate::security::SecurityDecision;
+use crate::security::SecurityPolicy;
+use crate::security::SecurityPreset;
 use mini_agent_core::Tool;
 use mini_agent_core::ToolError;
 use mini_agent_core::ToolSpec;
@@ -45,20 +51,44 @@ type ApprovalCallback = dyn Fn(&str) -> Result<bool, ToolError> + Send + Sync;
 #[derive(Clone)]
 pub struct ApprovalController {
     automatic: Arc<AtomicBool>,
+    policy: Arc<SecurityPolicy>,
+    store: ApprovalStore,
     callback: Arc<ApprovalCallback>,
 }
 
 impl ApprovalController {
     pub fn new(mode: ApprovalMode) -> Self {
-        Self::with_callback(mode, terminal_approval)
+        Self::with_policy_and_callback(
+            mode,
+            SecurityPolicy::for_preset(SecurityPreset::Default),
+            terminal_approval,
+        )
+    }
+
+    pub fn with_preset(mode: ApprovalMode, preset: SecurityPreset) -> Self {
+        Self::with_policy_and_callback(mode, SecurityPolicy::for_preset(preset), terminal_approval)
     }
 
     pub(crate) fn with_callback(
         mode: ApprovalMode,
         callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,
     ) -> Self {
+        Self::with_policy_and_callback(
+            mode,
+            SecurityPolicy::for_preset(SecurityPreset::Default),
+            callback,
+        )
+    }
+
+    pub(crate) fn with_policy_and_callback(
+        mode: ApprovalMode,
+        policy: SecurityPolicy,
+        callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,
+    ) -> Self {
         Self {
             automatic: Arc::new(AtomicBool::new(matches!(mode, ApprovalMode::Automatic))),
+            policy: Arc::new(policy),
+            store: ApprovalStore::new(),
             callback: Arc::new(callback),
         }
     }
@@ -76,12 +106,28 @@ impl ApprovalController {
             .store(matches!(mode, ApprovalMode::Automatic), Ordering::Relaxed);
     }
 
+    #[allow(dead_code)]
+    pub fn store(&self) -> &ApprovalStore {
+        &self.store
+    }
+
     pub(crate) fn approve(&self, action: &str) -> Result<(), ToolError> {
+        match self.policy.evaluate(action) {
+            SecurityDecision::Deny => {
+                return Err(ToolError(format!("forbidden by security policy: {action}")));
+            }
+            SecurityDecision::Allow => return Ok(()),
+            SecurityDecision::Ask => {}
+        }
+        if self.store.is_approved(action) {
+            return Ok(());
+        }
         match self.mode() {
             ApprovalMode::Automatic => return Ok(()),
             ApprovalMode::Interactive => {}
         }
         if (self.callback)(action)? {
+            self.store.remember_approval(action);
             Ok(())
         } else {
             Err(ToolError(format!("user denied: {action}")))
@@ -455,26 +501,8 @@ pub(crate) fn shell_command(command: &str) -> Command {
 }
 
 pub(crate) fn terminate_process_tree(child: &mut std::process::Child) -> io::Result<ExitStatus> {
-    let process_id = child.id().to_string();
-    let killed = if cfg!(windows) {
-        Command::new("taskkill")
-            .args(["/PID", &process_id, "/T", "/F"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
-    } else {
-        Command::new("kill")
-            .args(["-KILL", "--", &format!("-{process_id}")])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
-    };
-    if !killed && child.try_wait()?.is_none() {
-        child.kill()?;
-    }
-    child.wait()
+    let sandbox = ProcessSandbox::new(SandboxKind::Native);
+    sandbox.terminate(child)
 }
 
 struct CommandOutput {
@@ -484,12 +512,14 @@ struct CommandOutput {
 }
 
 fn run_shell(command: &str, root: &Path, timeout: Duration) -> Result<CommandOutput, ToolError> {
+    let sandbox = ProcessSandbox::new(SandboxKind::Native);
     let mut child = shell_command(command)
         .current_dir(root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(io_error)?;
+    sandbox.attach_child(&child);
     let stdout = child
         .stdout
         .take()
@@ -507,7 +537,7 @@ fn run_shell(command: &str, root: &Path, timeout: Duration) -> Result<CommandOut
             break (status, false);
         }
         if started.elapsed() >= timeout {
-            break (terminate_process_tree(&mut child).map_err(io_error)?, true);
+            break (sandbox.terminate(&mut child).map_err(io_error)?, true);
         }
         thread::sleep(Duration::from_millis(10));
     };

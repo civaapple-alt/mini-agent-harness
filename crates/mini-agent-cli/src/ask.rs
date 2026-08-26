@@ -5,6 +5,7 @@ use crate::observer::ScriptFormat;
 use crate::observer::print_final_answer;
 use crate::prepare_openai_harness;
 use crate::print_auto_warning;
+use crate::security::SecurityPreset;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
 use mini_agent_core::StopReason;
@@ -22,6 +23,7 @@ pub async fn run(
     trace: Option<PathBuf>,
     json_output: bool,
     automatic: bool,
+    preset: SecurityPreset,
 ) -> ExitCode {
     let prompt = match resolve_prompt(prompt) {
         Ok(prompt) => prompt,
@@ -39,7 +41,7 @@ pub async fn run(
     } else {
         ApprovalMode::Interactive
     };
-    let approval = ApprovalController::new(mode);
+    let approval = ApprovalController::with_preset(mode, preset);
     let mut harness = match prepare_openai_harness(&runtime_config, approval, harness_config(false))
     {
         Ok(build) => build.harness,

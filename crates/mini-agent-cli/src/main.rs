@@ -10,6 +10,8 @@ mod processes;
 mod project_context;
 mod repl;
 mod result_store;
+mod sandbox;
+mod security;
 mod session;
 mod skills;
 mod trace;
@@ -41,13 +43,15 @@ use std::process::ExitCode;
 use config::RuntimeConfig;
 use observer::RunObserver;
 use openai::OpenAiModel;
+use sandbox::SandboxKind;
+use security::SecurityPreset;
 use session::SessionRequest;
 use workspace::ApprovalController;
 use workspace::ApprovalMode;
 use workspace::workspace_tools_with_read_roots;
 use world::WorldState;
 
-const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent fork SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--persist] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
+const HELP: &str = "mini-agent\n\nUSAGE:\n    mini-agent [--persist] [--security-preset PRESET] [--sandbox KIND] [--trace PATH]\n    mini-agent resume SESSION_ID [--trace PATH]\n    mini-agent fork SESSION_ID [--trace PATH]\n    mini-agent sessions\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n    mini-agent ask [--auto] [--json] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent auto [--persist] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n    mini-agent trace replay PATH [--json]\n    mini-agent trace summary PATH [--json]\n    mini-agent status [--json]\n    mini-agent doctor [--json]\n    mini-agent help [COMMAND]\n    mini-agent --version\n\nInteractive sessions run tools without per-step approval. Use `/auto off` to prompt for writes, shell, and MCP. `ask` is one script turn; add `--auto` when stdin is not a TTY. `auto` is the unattended copilot loop (unlimited steps unless MINI_AGENT_MAX_STEPS is set, compact).\n\nRun `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.\nUse `--` before a prompt that starts with `-`.\n\nENVIRONMENT:\n    OPENAI_API_KEY           Required by primary commands unless mentor overrides it\n    OPENAI_MODEL             Required by primary model commands\n    OPENAI_BASE_URL          Optional; defaults to https://api.openai.com/v1\n    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default 0)\n    MENTOR_OPENAI_MODEL      Enables mentor commands with a dedicated model\n    MENTOR_OPENAI_API_KEY    Optional mentor credential override\n    MENTOR_OPENAI_BASE_URL   Optional mentor endpoint override";
 const INTERACTIVE_HELP: &str = "mini-agent interactive\n\nUSAGE:\n    mini-agent [--persist] [--trace PATH]\n\nStarts the interactive REPL. Tools run without per-step approval; shell is unsandboxed. `/auto off` restores prompts. --persist creates a resumable session under ~/.mini-agent/sessions.";
 const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SESSION_ID [--trace PATH]\n\nResumes the latest settled checkpoint of a durable session for this workspace.";
 const FORK_HELP: &str = "mini-agent fork\n\nUSAGE:\n    mini-agent fork SESSION_ID [--trace PATH]\n\nForks a new independent session from the latest settled checkpoint of an existing session.";
@@ -97,6 +101,7 @@ async fn main() -> ExitCode {
                 invocation.trace,
                 invocation.json,
                 invocation.automatic,
+                invocation.security_preset,
             )
             .await
         }
@@ -106,6 +111,7 @@ async fn main() -> ExitCode {
                 invocation.trace,
                 invocation.json,
                 invocation.automatic,
+                invocation.security_preset,
             )
             .await
         }
@@ -184,6 +190,9 @@ struct Invocation {
     json: bool,
     automatic: bool,
     persist: bool,
+    security_preset: SecurityPreset,
+    #[allow(dead_code)]
+    sandbox_kind: SandboxKind,
     help_topic: HelpTopic,
 }
 
@@ -306,6 +315,8 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             json: false,
             automatic: false,
             persist: false,
+            security_preset: SecurityPreset::Default,
+            sandbox_kind: SandboxKind::Native,
             help_topic: HelpTopic::Root,
         });
     }
@@ -316,6 +327,8 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut json = false;
     let mut automatic = false;
     let mut persist = false;
+    let mut security_preset = SecurityPreset::Default;
+    let mut sandbox_kind = SandboxKind::Native;
     let mut options = true;
     while let Some(argument) = args.next() {
         if options && argument == "--" {
@@ -343,6 +356,16 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 return Err("--persist may be provided only once".to_string());
             }
             persist = true;
+        } else if options && argument == "--security-preset" {
+            let value = args
+                .next()
+                .ok_or_else(|| "--security-preset requires a preset name".to_string())?;
+            security_preset = SecurityPreset::parse(&value)?;
+        } else if options && argument == "--sandbox" {
+            let value = args
+                .next()
+                .ok_or_else(|| "--sandbox requires a sandbox kind".to_string())?;
+            sandbox_kind = SandboxKind::parse(&value)?;
         } else if options && argument.starts_with('-') {
             return Err(format!("unknown option: {argument}"));
         } else {
@@ -413,6 +436,8 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         json,
         automatic,
         persist,
+        security_preset,
+        sandbox_kind,
         help_topic: HelpTopic::Root,
     })
 }
@@ -425,6 +450,8 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         json: false,
         automatic: false,
         persist: false,
+        security_preset: SecurityPreset::Default,
+        sandbox_kind: SandboxKind::Native,
         help_topic,
     }
 }
@@ -1033,5 +1060,23 @@ mod tests {
             parse_args(vec!["fork".to_string()]).unwrap_err(),
             "fork requires exactly one SESSION_ID"
         );
+    }
+
+    #[test]
+    fn parses_security_preset_and_sandbox_options() {
+        let invocation = parse_args(vec![
+            "ask".to_string(),
+            "--security-preset".to_string(),
+            "turbomode".to_string(),
+            "--sandbox".to_string(),
+            "native".to_string(),
+            "list files".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(invocation.command, Command::Ask);
+        assert_eq!(invocation.security_preset, SecurityPreset::Turbomode);
+        assert_eq!(invocation.sandbox_kind, SandboxKind::Native);
+        assert_eq!(invocation.prompt, "list files");
     }
 }
