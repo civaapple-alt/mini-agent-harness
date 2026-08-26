@@ -38,7 +38,7 @@ Before adding a core concept, identify:
 3. why the feature cannot live in a host adapter;
 4. the permanent complexity it adds.
 
-If these are unclear, do not add it.
+If these are unclear, do not add it. Consult `.agents/notes/README.md` for architecture decisions and guardrails, and `docs/` for current specifications.
 
 ## Verification
 
