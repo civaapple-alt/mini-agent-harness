@@ -98,6 +98,9 @@ Host tools add their own effect-side bounds before results reach core:
 | MCP tools | 32 total; 16 KiB input schema per tool |
 | MCP connection / tool call | 20 seconds default (120 seconds max) / 120 seconds |
 | serialized MCP result | 64 KiB before the core 16 KiB projection |
+| HTTP MCP circuit breaker | 3 consecutive failures | 30s cooldown before probe |
+| cached session approvals (`ApprovalStore`) | 1024 entries | FIFO/clear on capacity limit |
+| repetitive tool-call loop threshold | 2 consecutive identical batches | injects advisory guidance warning |
 
 Shell streams are drained concurrently with a hard capture limit, so a noisy
 process cannot accumulate unbounded captured output or deadlock on a full pipe.

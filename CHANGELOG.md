@@ -42,6 +42,12 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Independent `mentor insight` and `mentor verify` commands with a dedicated
   model profile, zero tools, bounded criteria, source-linked derived items, and
   strict isolation from primary conversation replay.
+- Tool execution orchestrator with security presets (`--security-preset default|full-machine|turbomode|custom`), priority rule evaluation (`deny > ask > allow`), and session-level approval decision caching (`ApprovalStore`).
+- Windows-first native Win32 `JobObjectGuard` process containment (`--sandbox native`) with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` guaranteeing atomic child process tree destruction and zero orphaned zombie processes.
+- Multi-branch durable session forking (`mini-agent fork <SESSION_ID>`) to branch settled checkpoints into independent exploration lanes.
+- Offline deterministic trace replay (`mini-agent trace replay <PATH> [--json]`) and metrics computation (`mini-agent trace summary <PATH> [--json]`) over JSONL observation event logs.
+- Repetitive tool-call loop detection warning in the harness run loop to prevent unattended stalls in autonomous copilot runs.
+- Remote HTTP MCP server circuit breaker with fail-fast open circuit and half-open probe recovery during backend outages.
 
 ### Fixed
 

@@ -26,8 +26,8 @@ The local reference repositories map to mini-agent as follows:
 | --- | --- | --- |
 | `taste-skill` | `.agents/marketplaces/taste-skill` | `{ "skills": ["minimalist-skill"] }`, or clone under `skillsets` to load the whole `skills/` collection |
 | `context7` | `.agents/marketplaces/context7` | `{ "plugins": ["context7"] }` for its Claude marketplace entry; alternatively copy `plugins/agent-plugins/context7` into `.agents/plugins/context7` |
-| `anthropics-skills` | `path` in `.agents/marketplaces.json` or `.agents/skillsets.json` | `{ "path": "D:/gh-ws/skill-ws/anthropics-skills", "skills": ["skill-creator"] }` |
-| `agent-skills` | `path` in `.agents/skillsets.json` | `{ "path": "D:/gh-ws/skill-ws/agent-skills", "skills": ["react-best-practices"] }`; omit json to load a cloned `.agents/skillsets/agent-skills` in full |
+| `anthropics-skills` | `path` in `.agents/marketplaces.json` or `.agents/skillsets.json` | `{ "path": "../shared-skills/anthropics-skills", "skills": ["skill-creator"] }` |
+| `agent-skills` | `path` in `.agents/skillsets.json` | `{ "path": "../shared-skills/agent-skills", "skills": ["react-best-practices"] }`; omit json to load a cloned `.agents/skillsets/agent-skills` in full |
 | `claude-plugins-official` | `.agents/marketplaces/claude-plugins-official` | enable only selected local Claude plugins |
 | `xai-org-plugin-marketplace` | `.agents/marketplaces/xai-org-plugin-marketplace` | enable selected local Grok plugins such as `neon` |
 
@@ -44,7 +44,7 @@ The local reference repositories map to mini-agent as follows:
   {
     "skillsets": {
       "agent-skills": {
-        "path": "D:/gh-ws/skill-ws/agent-skills",
+        "path": "../shared-skills/agent-skills",
         "skills": ["react-best-practices"]
       }
     }
@@ -78,10 +78,10 @@ downloaded by mini-agent. Copy `skillsets.json` to `.agents/skillsets.json` to
 enable named skills from a local collection without loading every skill.
 
 ```powershell
-git clone D:\gh-ws\skill-ws\taste-skill .agents\marketplaces\taste-skill
-git clone D:\gh-ws\skill-ws\anthropics-skills .agents\marketplaces\anthropics-skills
-git clone D:\gh-ws\skill-ws\claude-plugins-official .agents\marketplaces\claude-plugins-official
-git clone D:\gh-ws\skill-ws\xai-org-plugin-marketplace .agents\marketplaces\xai-org-plugin-marketplace
+git clone https://github.com/example/taste-skill .agents\marketplaces\taste-skill
+git clone https://github.com/example/anthropics-skills .agents\marketplaces\anthropics-skills
+git clone https://github.com/example/claude-plugins-official .agents\marketplaces\claude-plugins-official
+git clone https://github.com/example/xai-org-plugin-marketplace .agents\marketplaces\xai-org-plugin-marketplace
 Copy-Item examples\extensions\marketplaces.json .agents\marketplaces.json
 ```
 

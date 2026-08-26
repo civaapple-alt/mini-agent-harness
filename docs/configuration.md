@@ -98,7 +98,7 @@ enabled:
 {
   "skillsets": {
     "anthropics-skills": {
-      "path": "D:/gh-ws/skill-ws/anthropics-skills",
+      "path": "../shared-skills/anthropics-skills",
       "skills": ["frontend-design", "skill-creator"]
     }
   }
@@ -135,13 +135,13 @@ local directory; omit it to use `.agents/marketplaces/<key>`:
   "marketplaces": {
     "taste-skill": { "skills": ["minimalist-skill"] },
     "anthropics-skills": {
-      "path": "D:/gh-ws/skill-ws/anthropics-skills",
+      "path": "../shared-marketplaces/anthropics-skills",
       "skills": ["skill-creator"]
     },
     "claude-plugins-official": { "plugins": ["code-simplifier"] },
     "xai-org-plugin-marketplace": { "plugins": ["neon"] },
     "cursor-plugins": {
-      "path": "D:/gh-ws/skill-ws/cursor-plugins",
+      "path": "../shared-marketplaces/cursor-plugins",
       "skills": ["thermo-nuclear-code-quality-review"]
     }
   }
