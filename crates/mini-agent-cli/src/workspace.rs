@@ -69,6 +69,7 @@ impl ApprovalController {
         Self::with_policy_and_callback(mode, SecurityPolicy::for_preset(preset), terminal_approval)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_callback(
         mode: ApprovalMode,
         callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,

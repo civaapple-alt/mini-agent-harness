@@ -75,19 +75,24 @@ pub async fn run(
     initial_approval: ApprovalMode,
     copilot: bool,
     session_request: SessionRequest,
+    preset: crate::security::SecurityPreset,
 ) -> ExitCode {
     let (event_tx, event_rx) = mpsc::sync_channel(EVENT_BUFFER);
     let approval_events = event_tx.clone();
     let interactive_terminal = io::stdin().is_terminal();
-    let approval = ApprovalController::with_callback(initial_approval, move |action| {
-        if interactive_terminal {
-            request_approval(&approval_events, action)
-        } else {
-            Err(ToolError(format!(
-                "denied non-interactive action: {action}"
-            )))
-        }
-    });
+    let approval = ApprovalController::with_policy_and_callback(
+        initial_approval,
+        crate::security::SecurityPolicy::for_preset(preset),
+        move |action| {
+            if interactive_terminal {
+                request_approval(&approval_events, action)
+            } else {
+                Err(ToolError(format!(
+                    "denied non-interactive action: {action}"
+                )))
+            }
+        },
+    );
     let mut observer = match RunObserver::new(trace) {
         Ok(observer) => observer,
         Err(error) => {

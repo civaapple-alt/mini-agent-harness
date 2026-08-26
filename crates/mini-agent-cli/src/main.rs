@@ -92,7 +92,14 @@ async fn main() -> ExitCode {
             } else {
                 SessionRequest::New
             };
-            repl::run(invocation.trace, ApprovalMode::Automatic, false, request).await
+            repl::run(
+                invocation.trace,
+                ApprovalMode::Automatic,
+                false,
+                request,
+                invocation.security_preset,
+            )
+            .await
         }
         Command::Demo => run_demo(invocation.prompt, invocation.trace).await,
         Command::Run => {
@@ -121,7 +128,14 @@ async fn main() -> ExitCode {
             } else {
                 SessionRequest::New
             };
-            repl::run(invocation.trace, ApprovalMode::Automatic, true, request).await
+            repl::run(
+                invocation.trace,
+                ApprovalMode::Automatic,
+                true,
+                request,
+                invocation.security_preset,
+            )
+            .await
         }
         Command::Auto => run_auto(invocation.prompt, invocation.trace).await,
         Command::Help => {
@@ -140,6 +154,7 @@ async fn main() -> ExitCode {
                 ApprovalMode::Automatic,
                 false,
                 SessionRequest::Resume(invocation.prompt),
+                invocation.security_preset,
             )
             .await
         }
@@ -149,6 +164,7 @@ async fn main() -> ExitCode {
                 ApprovalMode::Automatic,
                 false,
                 SessionRequest::Fork(invocation.prompt),
+                invocation.security_preset,
             )
             .await
         }
@@ -219,9 +235,6 @@ enum HelpTopic {
 fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut args = args.into_iter().peekable();
     let command = match args.peek().map(String::as_str) {
-        None | Some("--trace" | "--persist" | "--ephemeral" | "--no-persist") => {
-            Command::Interactive
-        }
         Some("help") => {
             args.next();
             let topic = match args.next() {
@@ -294,6 +307,8 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             args.next();
             Command::Doctor
         }
+        None => Command::Interactive,
+        Some(other) if other.starts_with('-') => Command::Interactive,
         Some(other) => return Err(format!("unknown command: {other}")),
     };
     let remaining = args.collect::<Vec<_>>();
@@ -1092,7 +1107,7 @@ mod tests {
 
     #[test]
     fn parses_security_preset_and_sandbox_options() {
-        let invocation = parse_args(vec![
+        let ask_inv = parse_args(vec![
             "ask".to_string(),
             "--security-preset".to_string(),
             "turbomode".to_string(),
@@ -1102,9 +1117,21 @@ mod tests {
         ])
         .unwrap();
 
-        assert_eq!(invocation.command, Command::Ask);
-        assert_eq!(invocation.security_preset, SecurityPreset::Turbomode);
-        assert_eq!(invocation.sandbox_kind, SandboxKind::Native);
-        assert_eq!(invocation.prompt, "list files");
+        assert_eq!(ask_inv.command, Command::Ask);
+        assert_eq!(ask_inv.security_preset, SecurityPreset::Turbomode);
+        assert_eq!(ask_inv.sandbox_kind, SandboxKind::Native);
+        assert_eq!(ask_inv.prompt, "list files");
+
+        let interactive_inv = parse_args(vec![
+            "--security-preset".to_string(),
+            "turbomode".to_string(),
+            "--sandbox".to_string(),
+            "native".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(interactive_inv.command, Command::Interactive);
+        assert_eq!(interactive_inv.security_preset, SecurityPreset::Turbomode);
+        assert_eq!(interactive_inv.sandbox_kind, SandboxKind::Native);
     }
 }
