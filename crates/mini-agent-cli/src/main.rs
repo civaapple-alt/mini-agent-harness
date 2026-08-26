@@ -57,7 +57,7 @@ const RESUME_HELP: &str = "mini-agent resume\n\nUSAGE:\n    mini-agent resume SE
 const FORK_HELP: &str = "mini-agent fork\n\nUSAGE:\n    mini-agent fork SESSION_ID [--trace PATH]\n\nForks a new independent session from the latest settled checkpoint of an existing session.";
 const SESSIONS_HELP: &str = "mini-agent sessions\n\nUSAGE:\n    mini-agent sessions\n\nLists bounded durable sessions for the current workspace under ~/.mini-agent/sessions.";
 const MENTOR_HELP: &str = "mini-agent mentor\n\nUSAGE:\n    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]\n    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>\n\nRuns a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.\n\nCONFIGURATION:\n    MENTOR_OPENAI_MODEL      Required dedicated mentor model\n    MENTOR_OPENAI_API_KEY    Optional; falls back to OPENAI_API_KEY\n    MENTOR_OPENAI_BASE_URL   Optional; falls back to OPENAI_BASE_URL";
-const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto] [--json] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.\nOn a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto`.\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto        Permit sensitive tools without a TTY\n    --json        Emit a machine-readable final result\n    --trace PATH  Write JSONL observation events";
+const ASK_HELP: &str = "mini-agent ask\n\nUSAGE:\n    mini-agent ask [--auto-approve|-y|--auto] [--json] [--security-preset PRESET] [--sandbox KIND] [--trace PATH] [--] [PROMPT]\n\nRuns one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.\nOn a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`/`--auto`).\nProgress is written to stderr and the final result to stdout.\n\nOPTIONS:\n    --auto-approve, -y, --auto   Permit sensitive tools non-interactively (auto-approve)\n    --security-preset PRESET     Security policy preset: default, turbomode, full-machine\n    --sandbox KIND               Execution sandbox: native (Win32 JobObject/process groups), docker\n    --json                       Emit a machine-readable final result\n    --trace PATH                 Write JSONL observation events";
 const RUN_HELP: &str = "mini-agent run\n\nUSAGE:\n    mini-agent run [--auto] [--json] [--trace PATH] [--] <PROMPT>\n\nAlias of `ask`. Prefer `ask` in scripts and docs.";
 const AUTO_HELP: &str = "mini-agent auto\n\nUSAGE:\n    mini-agent auto [--ephemeral] [--trace PATH] [--] [PROMPT]\n\nUnattended copilot: no per-step approval, unlimited model steps (MINI_AGENT_MAX_STEPS, 0 = unlimited), and context compaction that keeps recent tool work.\nWith a prompt, runs one copilot turn. Without a prompt, starts the REPL in copilot mode.";
 const DEMO_HELP: &str = "mini-agent demo\n\nUSAGE:\n    mini-agent demo [--trace PATH] [--] <PROMPT>\n\nRuns the deterministic local demo without provider credentials.";
@@ -367,9 +367,14 @@ fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 return Err("--json may be provided only once".to_string());
             }
             json = true;
-        } else if options && argument == "--auto" {
+        } else if options
+            && (argument == "--auto"
+                || argument == "--auto-approve"
+                || argument == "-y"
+                || argument == "--yes")
+        {
             if automatic {
-                return Err("--auto may be provided only once".to_string());
+                return Err(format!("{argument} may be provided only once"));
             }
             automatic = true;
         } else if options && argument == "--persist" {
@@ -982,6 +987,22 @@ mod tests {
         assert_eq!(invocation.prompt, "inspect");
         assert!(invocation.automatic);
         assert!(invocation.json);
+
+        let auto_approve = parse_args(vec![
+            "ask".to_string(),
+            "--auto-approve".to_string(),
+            "test".to_string(),
+        ])
+        .unwrap();
+        assert!(auto_approve.automatic);
+
+        let yes_flag = parse_args(vec![
+            "ask".to_string(),
+            "-y".to_string(),
+            "test".to_string(),
+        ])
+        .unwrap();
+        assert!(yes_flag.automatic);
     }
 
     #[test]
