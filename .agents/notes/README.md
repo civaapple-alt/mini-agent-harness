@@ -82,14 +82,12 @@ If a proposed approach is rejected during review:
 #### Architecture (`proposed/architecture/`)
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-26 | [Session Branching Lanes](.agents/notes/proposed/architecture/2026-08-26-session-branching-lanes.md) | Multi-branch tree conversations and speculative exploration lanes |
 | 2026-08-26 | [Local Sandbox Adapter](.agents/notes/proposed/architecture/2026-08-26-local-sandbox-adapter.md) | Pluggable container and sandbox isolation for shell tool execution |
 
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-26 | [Prompt Weight Evaluation](.agents/notes/proposed/feature/2026-08-26-prompt-weight-evaluation.md) | Real-model evaluation of minimal vs verbose system prompt policies |
-| 2026-08-26 | [MCP Circuit Breaker](.agents/notes/proposed/feature/2026-08-26-mcp-circuit-breaker.md) | Circuit breaking and graceful degradation for failing remote HTTP MCP servers |
 
 ---
 
@@ -102,6 +100,7 @@ If a proposed approach is rejected during review:
 | 2026-08-24 | [Hard Limits System](.agents/notes/implemented/architecture/2026-08-24-hard-limits-system.md) | Hard bounds on context, responses, step count, and UTF-8 head/tail truncation |
 | 2026-08-26 | [Event-Driven Reactive Loop](.agents/notes/implemented/architecture/2026-08-26-event-driven-reactive-loop.md) | Passive immutable observers driving live client UI and rollout audit traces |
 | 2026-08-26 | [Event Stream Rollout Replay](.agents/notes/implemented/architecture/2026-08-26-event-stream-rollout-replay.md) | Deterministic offline replay, playback, and inspection of JSONL traces |
+| 2026-08-26 | [Session Branching Lanes](.agents/notes/implemented/architecture/2026-08-26-session-branching-lanes.md) | Multi-branch tree conversations and speculative exploration lanes |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |
@@ -113,6 +112,7 @@ If a proposed approach is rejected during review:
 | 2026-08-24 | [Explicit World State](.agents/notes/implemented/feature/2026-08-24-explicit-world-state.md) | Deterministic host environment detection and context injection |
 | 2026-08-26 | [Fail-Closed Approval](.agents/notes/implemented/feature/2026-08-26-fail-closed-approval-and-tool-orchestration.md) | Permission matrix, interactive TTY approval, and path containment |
 | 2026-08-26 | [Autonomous Goal Mode](.agents/notes/implemented/feature/2026-08-26-autonomous-goal-mode.md) | Long-running goal execution with convergence gates and loop detection |
+| 2026-08-26 | [MCP Circuit Breaker](.agents/notes/implemented/feature/2026-08-26-mcp-circuit-breaker.md) | Circuit breaking and graceful degradation for failing remote HTTP MCP servers |
 
 #### Simplification (`implemented/simplification/`)
 | Date | Title | Focus |

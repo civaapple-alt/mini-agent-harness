@@ -175,6 +175,27 @@ fn stores_sessions_under_the_user_config_directory() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn forks_an_existing_session_into_a_new_session() {
+    let (root, _home) = test_root();
+    let mut parent = SessionStore::open(&root, SessionRequest::New).unwrap();
+    let parent_id = parent.store.session_id().to_string();
+    let context = Message::Context {
+        text: "<initial_state />".to_string(),
+    };
+    let initial = vec![context.clone()];
+    parent.store.record_context(&context, &initial).unwrap();
+    drop(parent);
+
+    // Fork the parent session
+    let forked = SessionStore::open(&root, SessionRequest::Fork(parent_id.clone())).unwrap();
+    assert_ne!(forked.store.session_id(), parent_id);
+    assert!(forked.resumed);
+    assert_eq!(forked.messages, vec![context]);
+    drop(forked);
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn test_root() -> (PathBuf, HomeGuard) {
     let lock = HOME_LOCK
         .lock()

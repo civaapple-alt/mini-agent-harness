@@ -32,6 +32,7 @@ pub(crate) enum SessionRequest {
     Disabled,
     New,
     Resume(String),
+    Fork(String),
 }
 
 pub(crate) struct OpenedSession {
@@ -87,6 +88,7 @@ impl SessionStore {
             SessionRequest::Disabled => Err("session persistence is disabled".to_string()),
             SessionRequest::New => Self::create(workspace),
             SessionRequest::Resume(session_id) => Self::resume(workspace, &session_id),
+            SessionRequest::Fork(session_id) => Self::fork(workspace, &session_id),
         }
     }
 
@@ -240,6 +242,76 @@ impl SessionStore {
             messages: loaded.messages,
             resumed: true,
         })
+    }
+
+    fn fork(workspace: &Path, parent_session_id: &str) -> Result<OpenedSession, String> {
+        validate_session_id(parent_session_id)?;
+        let parent_dir = session_directory(workspace)?.join(parent_session_id);
+        let parent_path = parent_dir.join(SESSION_FILE_NAME);
+        let metadata = fs::metadata(&parent_path)
+            .map_err(|error| format!("cannot open parent session {parent_session_id}: {error}"))?;
+        if metadata.len() > MAX_SESSION_BYTES {
+            return Err(format!(
+                "parent session exceeds {MAX_SESSION_BYTES} byte limit"
+            ));
+        }
+        let bytes = fs::read(&parent_path)
+            .map_err(|error| format!("cannot read parent session: {error}"))?;
+        let loaded = load_records(parent_session_id, &bytes)?;
+        let parent_checkpoint_seq = loaded.checkpoint_seq;
+        let parent_messages = loaded.messages;
+
+        let project_dir = session_directory(workspace)?;
+        for _ in 0..16 {
+            let session_id = new_id("s");
+            let session_dir = project_dir.join(&session_id);
+            fs::create_dir_all(&session_dir)
+                .map_err(|error| format!("cannot create session directory: {error}"))?;
+            let path = session_dir.join(SESSION_FILE_NAME);
+            let file = match OpenOptions::new().append(true).create_new(true).open(&path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(format!("cannot create session: {error}")),
+            };
+            let lock = acquire_lock(&session_dir, SESSION_LOCK_NAME)?;
+            let thread_id = new_id("t");
+            let mut store = Self {
+                session_id: session_id.clone(),
+                thread_id: thread_id.clone(),
+                path,
+                file,
+                bytes: 0,
+                next_seq: 1,
+                checkpoint_seq: 0,
+                _lock: lock,
+            };
+            store.append_records(vec![
+                json!({
+                    "kind": "session_created",
+                    "schema_version": SCHEMA_VERSION,
+                    "session_id": session_id,
+                    "workspace": workspace,
+                    "timestamp_ms": timestamp_ms(),
+                    "forked_from": {
+                        "parent_session_id": parent_session_id,
+                        "parent_checkpoint_seq": parent_checkpoint_seq,
+                    }
+                }),
+                json!({
+                    "kind": "thread_started",
+                    "thread_id": thread_id,
+                    "timestamp_ms": timestamp_ms(),
+                }),
+                store.checkpoint_record(&parent_messages),
+            ])?;
+            store.checkpoint_seq = store.next_seq.saturating_sub(1);
+            return Ok(OpenedSession {
+                store,
+                messages: parent_messages,
+                resumed: true,
+            });
+        }
+        Err("cannot allocate a unique session id".to_string())
     }
 
     fn item_record(&self, turn_id: Option<&str>, message: &Message) -> Value {

@@ -197,6 +197,42 @@ fn start_server(config: McpServerConfig) -> Result<PendingServer, String> {
     })
 }
 
+const CIRCUIT_BREAKER_THRESHOLD: usize = 3;
+const CIRCUIT_BREAKER_COOLDOWN: Duration = Duration::from_secs(30);
+
+#[derive(Default)]
+struct CircuitBreaker {
+    consecutive_failures: usize,
+    tripped_until: Option<tokio::time::Instant>,
+}
+
+impl CircuitBreaker {
+    fn can_execute(&mut self) -> Result<(), String> {
+        if let Some(until) = self.tripped_until {
+            if tokio::time::Instant::now() < until {
+                return Err(format!(
+                    "MCP server circuit breaker is open (failing fast after {} consecutive errors)",
+                    self.consecutive_failures
+                ));
+            }
+            self.tripped_until = None;
+        }
+        Ok(())
+    }
+
+    fn record_success(&mut self) {
+        self.consecutive_failures = 0;
+        self.tripped_until = None;
+    }
+
+    fn record_failure(&mut self) {
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+        if self.consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD {
+            self.tripped_until = Some(tokio::time::Instant::now() + CIRCUIT_BREAKER_COOLDOWN);
+        }
+    }
+}
+
 fn run_server(
     config: McpServerConfig,
     mut commands: tokio_mpsc::UnboundedReceiver<ServerCommand>,
@@ -229,6 +265,7 @@ fn run_server(
             let _ = client.cancel().await;
             return;
         }
+        let mut circuit_breaker = CircuitBreaker::default();
         while let Some(command) = commands.recv().await {
             match command {
                 ServerCommand::Call {
@@ -236,12 +273,25 @@ fn run_server(
                     arguments,
                     reply,
                 } => {
+                    if let Err(error) = circuit_breaker.can_execute() {
+                        let _ = reply.send(Err(error));
+                        continue;
+                    }
                     let params = CallToolRequestParams::new(name).with_arguments(arguments);
                     let result = timeout(PROTOCOL_CALL_TIMEOUT, client.call_tool(params)).await;
                     let result = match result {
-                        Ok(Ok(result)) => bounded_result(&result),
-                        Ok(Err(error)) => Err(error.to_string()),
-                        Err(_) => Err("MCP tool call timed out".to_string()),
+                        Ok(Ok(result)) => {
+                            circuit_breaker.record_success();
+                            bounded_result(&result)
+                        }
+                        Ok(Err(error)) => {
+                            circuit_breaker.record_failure();
+                            Err(error.to_string())
+                        }
+                        Err(_) => {
+                            circuit_breaker.record_failure();
+                            Err("MCP tool call timed out".to_string())
+                        }
                     };
                     let _ = reply.send(result);
                 }

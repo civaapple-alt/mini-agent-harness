@@ -355,3 +355,25 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> (String, Vec<u8>) {
         received[header_end..header_end + content_length].to_vec(),
     )
 }
+
+#[test]
+fn circuit_breaker_trips_after_failures_and_recovers() {
+    let mut cb = CircuitBreaker::default();
+    assert!(cb.can_execute().is_ok());
+
+    cb.record_failure();
+    assert!(cb.can_execute().is_ok());
+
+    cb.record_failure();
+    assert!(cb.can_execute().is_ok());
+
+    cb.record_failure();
+    // 3rd failure trips the breaker
+    assert!(cb.can_execute().is_err());
+    let err = cb.can_execute().unwrap_err();
+    assert!(err.contains("circuit breaker is open"));
+
+    // Simulate recovery after success
+    cb.record_success();
+    assert!(cb.can_execute().is_ok());
+}
