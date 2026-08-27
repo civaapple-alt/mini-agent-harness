@@ -532,7 +532,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         && !(command == Command::Interactive
             || command == Command::Ask
             || command == Command::Run
-            || (command == Command::Auto && prompt.is_empty()))
+            || command == Command::Auto)
     {
         return Err(
             "--persist is supported only by interactive, auto, and ask sessions".to_string(),
@@ -542,7 +542,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         && !(command == Command::Interactive
             || command == Command::Ask
             || command == Command::Run
-            || (command == Command::Auto && prompt.is_empty()))
+            || command == Command::Auto)
     {
         return Err(
             "--ephemeral is supported only by interactive, auto, and ask sessions".to_string(),

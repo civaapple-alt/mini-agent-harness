@@ -117,10 +117,12 @@ async fn main() -> ExitCode {
             .await
         }
         Command::Auto if invocation.prompt.is_empty() => {
-            let request = if invocation.persist && !invocation.ephemeral {
-                SessionRequest::New
-            } else {
+            let request = if invocation.ephemeral {
                 SessionRequest::Disabled
+            } else if let Some(session_id) = invocation.session_id {
+                SessionRequest::Resume(session_id)
+            } else {
+                SessionRequest::New
             };
             repl::run(
                 invocation.trace,
@@ -134,12 +136,20 @@ async fn main() -> ExitCode {
             .await
         }
         Command::Auto => {
+            let request = if invocation.ephemeral {
+                SessionRequest::Disabled
+            } else if let Some(session_id) = invocation.session_id {
+                SessionRequest::Resume(session_id)
+            } else {
+                SessionRequest::New
+            };
             run_auto(
                 invocation.prompt,
                 invocation.trace,
                 invocation.security_preset,
                 invocation.sandbox_kind,
                 invocation.web_search,
+                request,
             )
             .await
         }
@@ -284,6 +294,7 @@ async fn run_auto(
     preset: SecurityPreset,
     sandbox: SandboxKind,
     web_search_override: Option<bool>,
+    session_request: SessionRequest,
 ) -> ExitCode {
     print_auto_warning();
     let approval = ApprovalController::with_preset(ApprovalMode::Automatic, preset);
@@ -309,16 +320,92 @@ async fn run_auto(
             return ExitCode::from(2);
         }
     };
-    match run_with_observer(&mut harness, prompt, trace).await {
-        Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
+
+    let mut opened_session = match session_request {
+        SessionRequest::Disabled => None,
+        other => match session::SessionStore::open(&runtime.workspace(), other) {
+            Ok(opened) => {
+                if opened.resumed {
+                    let _ = harness.restore_history(opened.messages.clone());
+                }
+                Some(opened)
+            }
+            Err(error) => {
+                eprintln!("error: cannot open session: {error}");
+                return ExitCode::from(2);
+            }
+        },
+    };
+
+    let started_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let mut observer = match RunObserver::new(trace) {
+        Ok(observer) => observer,
+        Err(error) => {
+            eprintln!("error: cannot create trace: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let result = harness.run(prompt.clone(), &mut observer).await;
+    observer.finish();
+
+    match result {
+        Ok(outcome) if outcome.stop_reason != StopReason::StepLimit => {
+            if let Some(ref mut session) = opened_session {
+                let _ = session.store.record_turn(session::TurnCommit {
+                    started_at_ms,
+                    prompt: &prompt,
+                    status: session::TurnStatus::Completed,
+                    steps: outcome.steps,
+                    error: None,
+                    messages: harness.messages(),
+                    checkpoint: harness.messages(),
+                });
+            }
+            ExitCode::SUCCESS
+        }
+        Ok(outcome) => {
             eprintln!(
                 "error: auto mode stopped after {} model steps without completing",
                 outcome.steps
             );
+            if let Some(ref mut session) = opened_session {
+                let error = format!(
+                    "stopped after {} model steps without completing",
+                    outcome.steps
+                );
+                let _ = session.store.record_turn(session::TurnCommit {
+                    started_at_ms,
+                    prompt: &prompt,
+                    status: session::TurnStatus::StepLimit,
+                    steps: outcome.steps,
+                    error: Some(&error),
+                    messages: harness.messages(),
+                    checkpoint: harness.messages(),
+                });
+            }
             ExitCode::FAILURE
         }
-        Ok(_) => ExitCode::SUCCESS,
-        Err(code) => code,
+        Err(error) => {
+            eprintln!("error: {error}");
+            if let Some(ref mut session) = opened_session {
+                let err_str = error.to_string();
+                let _ = session.store.record_turn(session::TurnCommit {
+                    started_at_ms,
+                    prompt: &prompt,
+                    status: session::TurnStatus::Failed,
+                    steps: 1,
+                    error: Some(&err_str),
+                    messages: harness.messages(),
+                    checkpoint: harness.messages(),
+                });
+            }
+            ExitCode::FAILURE
+        }
     }
 }
 

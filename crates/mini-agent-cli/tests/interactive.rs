@@ -1050,6 +1050,80 @@ fn auto_mode_executes_shell_without_approval() {
 }
 
 #[test]
+fn auto_mode_persists_session_by_default() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let _ = read_request_body(&mut stream);
+        write_sse_response(&mut stream, "persisted auto complete");
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .args(["auto", "inspect the workspace"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    server.join().unwrap();
+
+    assert!(status.success(), "stderr: {stderr}");
+    assert!(stdout.contains("assistant> persisted auto complete"));
+
+    let sessions_dir = root.join(".mini-agent").join("sessions");
+    assert!(sessions_dir.is_dir(), "sessions directory should exist");
+    let mut session_found = false;
+    for project in fs::read_dir(&sessions_dir).unwrap() {
+        let p_path = project.unwrap().path();
+        if p_path.is_dir() {
+            for sess in fs::read_dir(&p_path).unwrap() {
+                let s_path = sess.unwrap().path();
+                if s_path.join("session.jsonl").is_file() {
+                    assert!(s_path.join("summary.json").is_file());
+                    assert!(s_path.join("signals.json").is_file());
+                    assert!(s_path.join("prompt_context.json").is_file());
+                    let session_content = fs::read_to_string(s_path.join("session.jsonl")).unwrap();
+                    assert!(session_content.contains("inspect the workspace"));
+                    session_found = true;
+                }
+            }
+        }
+    }
+    assert!(
+        session_found,
+        "auto mode should have persisted session files"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
