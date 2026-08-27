@@ -1126,6 +1126,150 @@ async fn repetitive_tool_calls_trigger_loop_warning() {
     assert!(has_loop_warning, "Expected loop warning in harness context");
 }
 
+#[tokio::test]
+async fn advancing_tool_output_with_same_arguments_does_not_trigger_loop_warning() {
+    struct AdvancingPollTool {
+        counter: std::sync::atomic::AtomicUsize,
+    }
+    impl Tool for AdvancingPollTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "poll".to_string(),
+                description: "poll status".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"],
+                    "additionalProperties": false
+                }),
+            }
+        }
+        fn execute(&self, _args: &Value) -> Result<String, ToolError> {
+            let n = self
+                .counter
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(format!("progress status={n}"))
+        }
+    }
+
+    let tools = ToolRegistry::new(vec![Box::new(AdvancingPollTool {
+        counter: std::sync::atomic::AtomicUsize::new(1),
+    })]);
+
+    let model = ScriptedModel {
+        responses: VecDeque::from(vec![
+            ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call1".to_string(),
+                    name: "poll".to_string(),
+                    arguments: json!({"id": "proc-1"}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call2".to_string(),
+                    name: "poll".to_string(),
+                    arguments: json!({"id": "proc-1"}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call3".to_string(),
+                    name: "poll".to_string(),
+                    arguments: json!({"id": "proc-1"}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: "done without warning".to_string(),
+                tool_calls: vec![],
+                usage: None,
+            },
+        ]),
+    };
+
+    let mut harness = Harness::new(model, tools, HarnessConfig::default());
+    let outcome = harness.run("start", &mut ()).await.unwrap();
+
+    assert_eq!(outcome.final_text, "done without warning");
+    let has_loop_warning = harness.messages().iter().any(|msg| match msg {
+        Message::Context { text } => text.contains("Loop warning"),
+        _ => false,
+    });
+    assert!(
+        !has_loop_warning,
+        "Expected NO loop warning for advancing tool outputs"
+    );
+}
+
+#[test]
+fn turn_atomic_trimming_drops_assistant_and_tool_groups_together() {
+    let system = "sys";
+    let tools: &[ToolSpec] = &[];
+    let prompt = "SUMMARIZE";
+    let mut prefix = vec![
+        Message::User {
+            text: "first question".to_string(),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: "calling tool".to_string(),
+            tool_calls: vec![ToolCall {
+                id: "call-1".to_string(),
+                name: "test_tool".to_string(),
+                arguments: json!({"arg": "val"}),
+            }],
+        },
+        Message::Tool {
+            call_id: "call-1".to_string(),
+            name: "test_tool".to_string(),
+            content: "x".repeat(300),
+            is_error: false,
+        },
+        Message::User {
+            text: "second question".to_string(),
+        },
+    ];
+
+    let fitting = vec![
+        prefix[3].clone(),
+        Message::User {
+            text: prompt.to_string(),
+        },
+    ];
+    let max_bytes = context_bytes_for(system, &fitting, tools);
+
+    trim_prefix_to_fit(&mut prefix, prompt, system, tools, max_bytes);
+
+    let mut pending_tool_calls: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for msg in &prefix {
+        match msg {
+            Message::Assistant { tool_calls, .. } => {
+                for call in tool_calls {
+                    pending_tool_calls.insert(call.id.clone());
+                }
+            }
+            Message::Tool { call_id, .. } => {
+                assert!(
+                    pending_tool_calls.contains(call_id.as_str()),
+                    "found orphan tool output without matching assistant call: {call_id}"
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Default)]
 struct RecordingObserver(Vec<Event>);
 

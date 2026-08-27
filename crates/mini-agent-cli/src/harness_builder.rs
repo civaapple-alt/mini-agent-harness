@@ -81,7 +81,7 @@ pub(crate) fn prepare_openai_harness(
         })
         .collect();
     let stable_system_prompt = config.system_prompt.clone();
-    let world = WorldState::detect(&workspace, approval_mode, copilot);
+    let world = WorldState::detect(&workspace, approval_mode, copilot, sandbox);
     let world_context = world.model_context()?;
     let mut harness = Harness::new(model, ToolRegistry::new(tools), config);
     harness

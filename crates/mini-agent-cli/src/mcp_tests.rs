@@ -373,7 +373,12 @@ fn circuit_breaker_trips_after_failures_and_recovers() {
     let err = cb.can_execute().unwrap_err();
     assert!(err.contains("circuit breaker is open"));
 
-    // Simulate recovery after success
+    // When cooldown expires (timestamp in the past), it allows a probe
+    cb.tripped_until = Some(tokio::time::Instant::now() - Duration::from_millis(10));
+    assert!(cb.can_execute().is_ok());
+
+    // Successful probe resets consecutive failures
     cb.record_success();
     assert!(cb.can_execute().is_ok());
+    assert_eq!(cb.consecutive_failures, 0);
 }

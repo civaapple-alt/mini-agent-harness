@@ -95,6 +95,10 @@ impl ApprovalController {
         }
     }
 
+    pub fn preset(&self) -> SecurityPreset {
+        self.policy.preset
+    }
+
     pub fn mode(&self) -> ApprovalMode {
         if self.automatic.load(Ordering::Relaxed) {
             ApprovalMode::Automatic
@@ -233,6 +237,11 @@ impl Workspace {
         self.ensure_inside(resolved)
     }
 
+    fn allows_outside_paths(&self) -> bool {
+        self.approval.preset() == SecurityPreset::FullMachine
+            || self.approval.preset() == SecurityPreset::Turbomode
+    }
+
     fn create_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
         let candidate = self.candidate(value)?;
         if candidate.exists() {
@@ -245,7 +254,7 @@ impl Workspace {
             .ok_or_else(|| ToolError("path has no parent".to_string()))?
             .canonicalize()
             .map_err(|error| ToolError(format!("parent directory must exist: {error}")))?;
-        if !parent.starts_with(&self.root) {
+        if !self.allows_outside_paths() && !parent.starts_with(&self.root) {
             return Err(ToolError("path escapes the workspace".to_string()));
         }
         let file_name = candidate
@@ -280,7 +289,13 @@ impl Workspace {
     }
 
     fn ensure_inside(&self, path: PathBuf) -> Result<PathBuf, ToolError> {
-        if path.starts_with(&self.root) && path != self.root && !has_git_component(&path) {
+        if has_git_component(&path) {
+            return Err(ToolError("path escapes the workspace".to_string()));
+        }
+        if self.allows_outside_paths() {
+            return Ok(path);
+        }
+        if path.starts_with(&self.root) && path != self.root {
             Ok(path)
         } else {
             Err(ToolError("path escapes the workspace".to_string()))
@@ -288,11 +303,14 @@ impl Workspace {
     }
 
     fn ensure_readable(&self, path: PathBuf) -> Result<PathBuf, ToolError> {
-        if let Ok(path) = self.ensure_inside(path.clone()) {
-            return Ok(path);
-        }
         if has_git_component(&path) {
             return Err(ToolError("path escapes the workspace".to_string()));
+        }
+        if self.allows_outside_paths() {
+            return Ok(path);
+        }
+        if let Ok(path) = self.ensure_inside(path.clone()) {
+            return Ok(path);
         }
         if self
             .extra_read_roots
@@ -1001,6 +1019,51 @@ mod tests {
             assert!(err.0.contains("docker sandbox is unavailable"));
         }
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn full_machine_preset_permits_paths_outside_workspace() {
+        let root = test_root();
+        let outside = test_root();
+        fs::write(outside.join("outside.txt"), "outside data").unwrap();
+        let outside_file = outside.join("outside.txt").to_string_lossy().to_string();
+
+        let default_workspace = Arc::new(
+            Workspace::with_read_roots(
+                root.clone(),
+                ApprovalController::with_preset(ApprovalMode::Automatic, SecurityPreset::Default),
+                Vec::new(),
+                SandboxKind::Native,
+            )
+            .unwrap(),
+        );
+        let default_read = ReadFile(default_workspace);
+        assert!(
+            default_read
+                .execute(&json!({"path": &outside_file}))
+                .is_err()
+        );
+
+        let full_workspace = Arc::new(
+            Workspace::with_read_roots(
+                root.clone(),
+                ApprovalController::with_preset(
+                    ApprovalMode::Automatic,
+                    SecurityPreset::FullMachine,
+                ),
+                Vec::new(),
+                SandboxKind::Native,
+            )
+            .unwrap(),
+        );
+        let full_read = ReadFile(full_workspace);
+        assert_eq!(
+            full_read.execute(&json!({"path": &outside_file})).unwrap(),
+            "outside data"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 }
 

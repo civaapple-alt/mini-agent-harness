@@ -440,4 +440,47 @@ mod tests {
         drop(manager);
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn process_stop_terminates_child_and_descendant_processes() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("mini-agent-process-descendant-{nonce}"));
+        fs::create_dir(&root).unwrap();
+        let sentinel = root.join("sentinel.txt");
+        let sentinel_str = sentinel.to_string_lossy().replace('\\', "/");
+
+        let manager = ProcessManager::new(
+            root.clone(),
+            ApprovalController::new(ApprovalMode::Automatic),
+            ResultStore::default(),
+            SandboxKind::Native,
+        );
+
+        let command = if cfg!(windows) {
+            format!(
+                "Start-Sleep -Milliseconds 800; Set-Content -Path '{sentinel_str}' -Value 'written'"
+            )
+        } else {
+            format!("sleep 0.8; echo 'written' > '{sentinel_str}'")
+        };
+
+        let started = manager.start(&command).unwrap();
+        assert!(started.contains("status=running"));
+
+        thread::sleep(Duration::from_millis(50));
+        let stopped = manager.stop(1).unwrap();
+        assert!(stopped.contains("stopped") || stopped.contains("exited"));
+
+        thread::sleep(Duration::from_millis(1000));
+        assert!(
+            !sentinel.exists(),
+            "sentinel should not exist because descendant process was killed"
+        );
+
+        drop(manager);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

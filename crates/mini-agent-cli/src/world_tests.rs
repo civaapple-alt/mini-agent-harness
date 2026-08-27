@@ -24,6 +24,7 @@ fn renders_bounded_explicit_execution_state() {
         shell: "pwsh",
         approval: ApprovalMode::Interactive,
         copilot: false,
+        sandbox: SandboxKind::Native,
         available_commands: vec!["git", "cargo"],
         unavailable_commands: vec!["rg"],
         workspace_commands: vec![],
@@ -33,17 +34,18 @@ fn renders_bounded_explicit_execution_state() {
     let context = state.model_context().unwrap();
     assert!(context.len() <= MAX_WORLD_CONTEXT_BYTES);
     assert!(context.contains("mode=\"default\" approval=\"per_action\""));
+    assert!(context.contains("command_sandbox=\"native\""));
     assert!(context.contains("<available_commands>git,cargo</available_commands>"));
     assert!(context.contains("cwd=\"repo&lt;&amp;&gt;\""));
 
-    let automatic = state.with_execution(ApprovalMode::Automatic, true);
+    let automatic = state.with_execution(ApprovalMode::Automatic, true, SandboxKind::Native);
     assert!(
         automatic
             .model_context()
             .unwrap()
             .contains("mode=\"auto\" approval=\"automatic\"")
     );
-    let default_auto = state.with_execution(ApprovalMode::Automatic, false);
+    let default_auto = state.with_execution(ApprovalMode::Automatic, false, SandboxKind::Native);
     assert!(
         default_auto
             .model_context()

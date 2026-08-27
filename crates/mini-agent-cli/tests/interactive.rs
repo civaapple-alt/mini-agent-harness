@@ -383,6 +383,11 @@ fn first_use_status_reports_non_secret_snapshot() {
     );
     assert!(plain_out.contains("credential: missing"), "{plain_out}");
     assert!(plain_out.contains("web_search: enabled"), "{plain_out}");
+    assert!(plain_out.contains("command_sandbox: native"), "{plain_out}");
+    assert!(
+        plain_out.contains("session_persistence: opt_in"),
+        "{plain_out}"
+    );
     assert!(
         !plain_out.to_ascii_lowercase().contains("sk-"),
         "{plain_out}"
@@ -395,6 +400,9 @@ fn first_use_status_reports_non_secret_snapshot() {
     assert_eq!(body["provider"], "openai_responses");
     assert_eq!(body["credential"], "missing");
     assert_eq!(body["web_search"], true);
+    assert_eq!(body["command_sandbox"], true);
+    assert_eq!(body["session_persistence"], false);
+    assert_eq!(body["world"]["command_sandbox"], "native");
     assert!(body["model"].is_null());
     assert_eq!(body["telemetry"], false);
     assert!(!json_out.to_ascii_lowercase().contains("sk-"), "{json_out}");

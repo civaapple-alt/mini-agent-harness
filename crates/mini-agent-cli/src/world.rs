@@ -1,3 +1,4 @@
+use crate::sandbox::SandboxKind;
 use crate::workspace::ApprovalMode;
 use serde_json::Value;
 use serde_json::json;
@@ -22,6 +23,7 @@ pub(crate) struct WorldState {
     shell: &'static str,
     approval: ApprovalMode,
     copilot: bool,
+    sandbox: SandboxKind,
     available_commands: Vec<&'static str>,
     unavailable_commands: Vec<&'static str>,
     workspace_commands: Vec<&'static str>,
@@ -29,7 +31,12 @@ pub(crate) struct WorldState {
 }
 
 impl WorldState {
-    pub(crate) fn detect(workspace: &Path, approval: ApprovalMode, copilot: bool) -> Self {
+    pub(crate) fn detect(
+        workspace: &Path,
+        approval: ApprovalMode,
+        copilot: bool,
+        sandbox: SandboxKind,
+    ) -> Self {
         let search_paths = env::var_os("PATH")
             .map(|path| env::split_paths(&path).collect::<Vec<_>>())
             .unwrap_or_default();
@@ -49,6 +56,7 @@ impl WorldState {
             shell: if cfg!(windows) { "pwsh" } else { "sh" },
             approval,
             copilot,
+            sandbox,
             available_commands,
             unavailable_commands,
             workspace_commands,
@@ -56,10 +64,16 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn with_execution(&self, approval: ApprovalMode, copilot: bool) -> Self {
+    pub(crate) fn with_execution(
+        &self,
+        approval: ApprovalMode,
+        copilot: bool,
+        sandbox: SandboxKind,
+    ) -> Self {
         let mut state = self.clone();
         state.approval = approval;
         state.copilot = copilot;
+        state.sandbox = sandbox;
         state
     }
 
@@ -69,6 +83,10 @@ impl WorldState {
 
     pub(crate) fn copilot(&self) -> bool {
         self.copilot
+    }
+
+    pub(crate) fn sandbox(&self) -> SandboxKind {
+        self.sandbox
     }
 
     pub(crate) fn workspace(&self) -> &Path {
@@ -93,7 +111,9 @@ impl WorldState {
         context.push_str(self.mode_name());
         context.push_str("\" approval=\"");
         context.push_str(self.approval_name());
-        context.push_str("\" command_sandbox=\"disabled\" direct_file_scope=\"workspace\" />");
+        context.push_str("\" command_sandbox=\"");
+        context.push_str(self.sandbox.as_str());
+        context.push_str("\" direct_file_scope=\"workspace\" />");
         push_list_element(&mut context, "project_kinds", &self.project_kinds);
         push_list_element(&mut context, "available_commands", &self.available_commands);
         push_list_element(
@@ -128,7 +148,7 @@ impl WorldState {
             "shell": self.shell,
             "mode": self.mode_name(),
             "approval": self.approval_name(),
-            "command_sandbox": "disabled",
+            "command_sandbox": self.sandbox.as_str(),
             "direct_file_scope": "workspace",
             "project_kinds": self.project_kinds,
             "available_commands": self.available_commands,

@@ -235,7 +235,7 @@ impl RuntimeConfig {
                 .unwrap_or(Value::Null),
             "user_config_directory": user_config_dir(),
             "auto_max_agent_steps": self.copilot_max_steps(),
-            "command_sandbox": false,
+            "command_sandbox": true,
             "world": world.status_json()
         })
     }
@@ -311,7 +311,7 @@ impl RuntimeConfig {
                     "disabled"
                 }
             ),
-            "command_sandbox: disabled".to_string(),
+            "command_sandbox: native".to_string(),
         ];
         lines.extend(world.status_lines());
         lines
@@ -446,7 +446,12 @@ impl RuntimeConfig {
     fn status_snapshot(&self) -> (skills::Discovery, WorldState) {
         (
             skills::discover(&self.workspace),
-            WorldState::detect(&self.workspace, ApprovalMode::Automatic, false),
+            WorldState::detect(
+                &self.workspace,
+                ApprovalMode::Automatic,
+                false,
+                crate::sandbox::SandboxKind::Native,
+            ),
         )
     }
 

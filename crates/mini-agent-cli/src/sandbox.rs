@@ -29,6 +29,10 @@ impl SandboxKind {
             Self::Docker => "docker",
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        self.name()
+    }
 }
 
 impl std::fmt::Display for SandboxKind {

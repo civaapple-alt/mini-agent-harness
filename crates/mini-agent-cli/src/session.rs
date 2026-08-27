@@ -694,27 +694,39 @@ pub(crate) fn timestamp_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
-pub(crate) fn try_load_session_events(lines: &[String]) -> Option<Vec<mini_agent_core::Event>> {
+pub(crate) fn try_load_session_events(
+    lines: &[String],
+) -> Result<Option<Vec<mini_agent_core::Event>>, String> {
     use mini_agent_core::Event;
     use mini_agent_core::RunFailure;
     use mini_agent_core::StopReason;
     use mini_agent_core::ToolCall;
 
     if lines.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let first_val: Value = serde_json::from_str(&lines[0]).ok()?;
+    let first_val: Value = match serde_json::from_str(&lines[0]) {
+        Ok(val) => val,
+        Err(_) => return Ok(None),
+    };
     if first_val.get("session_id").is_none() && first_val.get("kind").is_none() {
-        return None;
+        return Ok(None);
     }
 
     let mut events = Vec::new();
     let mut step = 1usize;
 
-    for line in lines {
+    for (line_idx, line) in lines.iter().enumerate() {
+        let is_last = line_idx == lines.len() - 1;
         let record: Value = match serde_json::from_str(line) {
             Ok(val) => val,
-            Err(_) => continue,
+            Err(_) if is_last => break,
+            Err(e) => {
+                return Err(format!(
+                    "error parsing session record at line {}: {e}",
+                    line_idx + 1
+                ));
+            }
         };
         let kind = record.get("kind").and_then(|k| k.as_str()).unwrap_or("");
         match kind {
@@ -904,9 +916,9 @@ pub(crate) fn try_load_session_events(lines: &[String]) -> Option<Vec<mini_agent
     }
 
     if events.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(events)
+        Ok(Some(events))
     }
 }
 

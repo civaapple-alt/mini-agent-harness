@@ -93,6 +93,7 @@ impl SecurityPolicy {
                     "**/.env*".to_string(),
                     "**/*.pem".to_string(),
                     "**/*.key".to_string(),
+                    "rm -rf *".to_string(),
                     "rm -rf /*".to_string(),
                     "gh auth *".to_string(),
                 ],
@@ -101,7 +102,7 @@ impl SecurityPolicy {
             },
             SecurityPreset::FullMachine => Self {
                 preset,
-                deny_patterns: vec!["rm -rf /*".to_string()],
+                deny_patterns: vec!["rm -rf *".to_string(), "rm -rf /*".to_string()],
                 ask_patterns: vec!["shell:*".to_string()],
                 allow_patterns: vec!["file:*".to_string()],
             },
@@ -163,8 +164,7 @@ impl SecurityPolicy {
 
     #[allow(dead_code)]
     pub fn check_command(&self, command: &str) -> SecurityDecision {
-        let action = format!("shell:{}", command.trim());
-        self.evaluate(&action)
+        self.evaluate(&format!("shell:{command}"))
     }
 }
 
@@ -189,6 +189,13 @@ fn normalize_action(action: &str) -> (Option<&str>, String) {
         return (Some("file"), path.replace('\\', "/"));
     }
     if let Some(path) = trimmed.strip_prefix("write ") {
+        let path = if let Some(idx) = path.rfind(" (")
+            && path.ends_with(" bytes)")
+        {
+            &path[..idx]
+        } else {
+            path
+        };
         return (Some("file"), path.replace('\\', "/"));
     }
     if let Some(path) = trimmed.strip_prefix("read ") {
@@ -340,11 +347,23 @@ mod tests {
             SecurityDecision::Deny
         );
         assert_eq!(
+            policy.evaluate("shell command `rm -rf /`"),
+            SecurityDecision::Deny
+        );
+        assert_eq!(
             policy.evaluate("shell command `gh auth login`"),
             SecurityDecision::Deny
         );
         assert_eq!(
             policy.evaluate("write D:\\project\\.env"),
+            SecurityDecision::Deny
+        );
+        assert_eq!(
+            policy.evaluate("write D:\\project\\.env (45 bytes)"),
+            SecurityDecision::Deny
+        );
+        assert_eq!(
+            policy.evaluate("write D:\\project\\id_rsa.key (128 bytes)"),
             SecurityDecision::Deny
         );
         assert_eq!(

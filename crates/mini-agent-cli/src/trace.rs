@@ -65,8 +65,10 @@ pub fn load_events(path: &Path) -> Result<Vec<Event>, String> {
     }
 
     // If native event parsing failed, delegate to durable session.jsonl adapter in session module
-    if let Some(session_events) = crate::session::try_load_session_events(&raw_lines) {
-        return Ok(session_events);
+    match crate::session::try_load_session_events(&raw_lines) {
+        Ok(Some(session_events)) => return Ok(session_events),
+        Err(session_err) => return Err(session_err),
+        Ok(None) => {}
     }
 
     Err(trace_err.unwrap())
@@ -410,7 +412,25 @@ fn format_tool_started(call: &ToolCall, color: bool) -> String {
     format!("{tag} {} — {}", call.name, call.arguments)
 }
 
-fn format_tool_finished(
+fn safe_prefix(s: &str, max_bytes: usize) -> &str {
+    let limit = max_bytes.min(s.len());
+    let mut end = limit;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+fn safe_suffix(s: &str, max_bytes: usize) -> &str {
+    let limit = max_bytes.min(s.len());
+    let mut start = s.len() - limit;
+    while start < s.len() && !s.is_char_boundary(start) {
+        start += 1;
+    }
+    &s[start..]
+}
+
+pub fn format_tool_finished(
     name: &str,
     content: &str,
     is_error: bool,
@@ -425,7 +445,11 @@ fn format_tool_finished(
     let tag = styled_tag(tag, tag_color, color);
     let trunc_str = if truncated { " [truncated]" } else { "" };
     let preview = if content.len() > 120 {
-        format!("{}...{}", &content[..60], &content[content.len() - 40..])
+        format!(
+            "{}...{}",
+            safe_prefix(content, 60),
+            safe_suffix(content, 40)
+        )
     } else {
         content.to_string()
     };
@@ -436,6 +460,17 @@ fn format_tool_finished(
 mod tests {
     use super::*;
     use mini_agent_core::ModelUsage;
+
+    #[test]
+    fn format_tool_finished_handles_multibyte_utf8_without_panicking() {
+        let chinese_content =
+            "这是一段用于测试中文字符截断和重放的超长输出内容，包含各种多字节字符和表情符号🦀🚀。"
+                .repeat(3);
+        assert!(chinese_content.len() > 120);
+        let formatted = format_tool_finished("test_tool", &chinese_content, false, false, false);
+        assert!(formatted.contains("test_tool: "));
+        assert!(formatted.contains("..."));
+    }
 
     #[test]
     fn calculates_metrics_from_events() {
@@ -495,7 +530,9 @@ mod tests {
             .to_string(),
         ];
 
-        let events = crate::session::try_load_session_events(&lines).unwrap();
+        let events = crate::session::try_load_session_events(&lines)
+            .unwrap()
+            .unwrap();
         assert_eq!(events.len(), 6);
         assert!(matches!(&events[0], Event::RunStarted { prompt } if prompt == "hello agent"));
         assert!(matches!(&events[1], Event::ModelStarted { step: 1 }));
@@ -521,5 +558,19 @@ mod tests {
         assert_eq!(summary.steps, 1);
         assert_eq!(summary.model_requests, 1);
         assert!(summary.completed);
+
+        // Torn final line at EOF is tolerated
+        let mut torn_lines = lines.clone();
+        torn_lines.push("{\"seq\": 5, \"kind\": \"turn_started\", \"partial".to_string());
+        let torn_events = crate::session::try_load_session_events(&torn_lines)
+            .unwrap()
+            .unwrap();
+        assert_eq!(torn_events.len(), 6);
+
+        // Middle corruption returns an error with the line number
+        let mut corrupt_lines = lines.clone();
+        corrupt_lines.insert(2, "not valid json in the middle".to_string());
+        let err = crate::session::try_load_session_events(&corrupt_lines).unwrap_err();
+        assert!(err.contains("line 3"), "expected line 3 in error: {err}");
     }
 }

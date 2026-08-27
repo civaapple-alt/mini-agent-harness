@@ -110,7 +110,7 @@ pub async fn run(
         .map(|workspace| skills::discover(workspace));
     let startup_world = workspace
         .as_ref()
-        .map(|workspace| WorldState::detect(workspace, initial_approval, copilot));
+        .map(|workspace| WorldState::detect(workspace, initial_approval, copilot, sandbox_kind));
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
     let worker = spawn_worker(
@@ -536,8 +536,12 @@ fn spawn_worker(
                     }
                 }
                 WorkerCommand::RefreshWorld => {
-                    let refreshed =
-                        WorldState::detect(world.workspace(), world.approval(), world.copilot());
+                    let refreshed = WorldState::detect(
+                        world.workspace(),
+                        world.approval(),
+                        world.copilot(),
+                        world.sandbox(),
+                    );
                     if refreshed != world {
                         match refreshed.model_context() {
                             Ok(context) => match harness.append_context(context) {
@@ -636,7 +640,7 @@ fn spawn_worker(
                     let mut config = harness_config_auto(copilot, auto_max_steps);
                     config.system_prompt.clone_from(&stable_system_prompt);
                     harness.replace_config(config);
-                    let updated_world = world.with_execution(mode, copilot);
+                    let updated_world = world.with_execution(mode, copilot, sandbox_kind);
                     if updated_world != world {
                         match updated_world.model_context() {
                             Ok(context) => match harness.append_context(context) {
