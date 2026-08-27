@@ -3,6 +3,10 @@
 All notable changes to Mini Agent Harness are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
 - Session `attachments/` for `read_image` reload on resume and copy on fork, so GLM inline vision survives process restart. Compaction auxiliary requests send an empty tool catalog (no image projection, no `web_fetch` during summarize).
 - Split the host provider adapter into Responses (`openai/responses.rs`) and Chat Completions (`openai/chat.rs`). GLM image turns use Chat Completions only when `OPENAI_CHAT_BASE_URL` is set; the Responses root is not rewritten to `…/api/coding/paas/v4`.
 - Windows `open_file` for images writes a Mark-of-the-Web-free temp copy before `start`, so Photos does not prompt that the file came from an untrusted location. HTML still opens in place.
@@ -50,7 +54,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
-- Interactive sessions default to process-local memory; `--persist` opts in to creating durable sessions (aligning with `docs/privacy.md`).
+- Interactive sessions persist under `~/.mini-agent/sessions/` by default; `--ephemeral` (`--no-persist`) keeps an in-memory session.
 - Strict `max_steps = 0` step limit evaluation halts immediately; unconstrained runs pass `usize::MAX`.
 - Adaptive `web_search` default enables web search for official OpenAI/DeepSeek endpoints while disabling it for custom local LLM endpoints unless explicitly configured.
 - Lowered default `max_model_response_bytes` to 64 KiB (~16K tokens) and bounded compaction summaries to 32 KiB (`max_user_input_bytes`).

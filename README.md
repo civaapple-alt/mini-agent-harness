@@ -5,7 +5,9 @@ harnesses help a model and others get in its way. Its command is `mini-agent`.
 
 Version 0.2 expands the native harness with durable sessions, independent
 mentor reviews, offline trace replay and metrics, security presets, native Win32
-JobObject sandboxing, Responses API built-in web search, and enhanced MCP/marketplace tools.
+JobObject sandboxing, Responses API built-in web search, host `web_fetch` /
+`read_image` / `open_file`, GLM Coding Plan (Responses text, Chat Completions
+vision), and enhanced MCP/marketplace tools.
 It intentionally does not claim feature parity with Codex, Pi, fx, or Qi.
 
 The working definition is deliberately narrow:
@@ -77,14 +79,16 @@ snapshot when it changes. If an MCP server is denied or fails during startup,
 bounded set of discovered skill and plugin names and shows configured MCP
 servers as inactive until connection approval succeeds.
 
-Conversation history is process-local by default; `--persist` opts in to creating durable session records under `~/.mini-agent/sessions/<workspace>/<session-id>/`.
+Interactive sessions persist under `~/.mini-agent/sessions/<workspace>/<session-id>/`
+by default; `--ephemeral` (or `--no-persist`) keeps history in memory only.
 `sessions` lists bounded session files for the current workspace (including legacy `.agents/sessions/`),
 `resume SESSION_ID` restores the latest completely settled checkpoint (with multi-item validation and expired process/result boundary notices), and
 `fork SESSION_ID` branches an existing checkpoint into an independent session
-for speculative exploration. `/new` starts a new thread inside a durable
+for speculative exploration (session `attachments/` for `read_image` are copied).
+`/new` starts a new thread inside a durable
 session; `/session` shows its identity. The append-only JSONL record
 distinguishes session, thread, turn, and item identities and stores a checkpoint
-only after settlement. It deliberately does not replay a turn interrupted
+only after settlement. Image pixels stay in `attachments/` and are reloaded on resume; they are not stored in JSONL. It deliberately does not replay a turn interrupted
 during a provider or tool effect.
 
 `trace replay PATH` and `trace summary PATH` replay and compute metrics over
@@ -115,7 +119,8 @@ subprocess tree destruction (Zero-Zombie guarantee). Remote HTTP MCP servers
 include circuit breaking to fail fast during outages. Autonomous copilot runs
 include settlement-aware loop detection warnings to prevent repetitive invocation stalls.
 Request context is protected by turn-atomic trimming, bounded model responses (64 KiB),
-bounded AGENTS.md (16 KiB), and request-scoped tool suppression during compaction.
+bounded AGENTS.md (16 KiB), and an empty tool catalog on compaction requests
+(no `web_fetch` / `read_image` during summarize).
 
 ## Install
 
@@ -220,8 +225,8 @@ The real modes expose `read_file`, `read_image`, `edit_file`, `write_file`, `ope
 `read_tool_result`, and managed-process tools. Reads and direct file writes are
 confined to the current workspace (supporting both relative paths and in-workspace absolute paths);
 `.git` is protected. `edit_file` makes one exact unique replacement; `write_file` creates
-new files and refuses to replace existing ones. Reads never prompt. `read_image` reads a workspace PNG/JPEG/GIF/WebP or, after approval, an absolute path on this machine (for example under Pictures); it uploads once via the Files API and later turns reuse that `file_id`. Do not copy outside images into the project. DeepSeek flash/pro requests that include images are sent as `deepseek-v4-flash-vision-exp`. `web_fetch` GETs a known
-public HTTP(S) URL or a loopback dev server (`localhost`, `127.0.0.1`) and returns bounded markdown
+new files and refuses to replace existing ones. Reads never prompt. `read_image` reads a workspace PNG/JPEG/GIF/WebP or, after approval, an absolute path on this machine (for example under Pictures). Do not copy outside images into the project. DeepSeek uploads once via Files API (`purpose=user_data`) and later turns reuse `file_id`; flash/pro image turns are sent as `deepseek-v4-flash-vision-exp`. GLM Coding Plan skips Files API and sends a user `image_url.url` data URL over `{OPENAI_CHAT_BASE_URL}/chat/completions` (set that variable explicitly; it is not inferred from `OPENAI_BASE_URL`). Session `attachments/` reload on resume and copy on fork. `web_fetch` GETs a known
+public HTTP(S) URL or a loopback dev server (`localhost`, `127.0.0.1`, `[::1]`) and returns bounded markdown
 (no JavaScript; LAN/cloud-metadata IPs stay blocked). `open_file`
 opens a workspace file or, after approval, an absolute local path (for example under Pictures)
 in the OS default app. On Windows, images are staged to a temp copy without Mark of the Web
@@ -252,7 +257,7 @@ returned as a short head/tail preview plus a process-local handle that
 services should use `process_start`, `process_read`, `process_list`, and
 `process_stop`; their logs and process count are bounded, and remaining process
 trees are stopped when the CLI exits. Result handles, queued input, running
-operations, and managed processes remain non-durable. Opt-in sessions retain
+operations, and managed processes remain non-durable. Durable sessions retain
 settled conversation checkpoints, not live effects or process state.
 
 ## Skills, plugins, marketplaces, and MCP
@@ -324,15 +329,16 @@ See [configuration](docs/configuration.md) and the copyable
 - `mini-agent doctor [--json]` validates configuration, workspace, and shell
   availability without contacting a model provider.
 - A UTF-8 root `AGENTS.md` is appended once to the stable system prompt with a
-  64 KiB hard limit. Oversized files keep a UTF-8-safe head and tail with an
+  16 KiB hard limit. Oversized files keep a UTF-8-safe head and tail with an
   explicit truncation marker; invalid UTF-8 still fails startup.
+- `mini-agent status` reports `chat_base_url` when `OPENAI_CHAT_BASE_URL` is set.
 - World state is an append-only, 8 KiB-bounded context item; `status` and
   `/world` expose the same non-secret snapshot.
 - Project skills, plugins, marketplaces, and MCP use fixed `.agents/` locations and do
   not rewrite conversation history.
 - Mini Agent Harness sends no telemetry, update checks, or crash reports.
 - Shell execution is approval-gated by default (`--security-preset`) and protected by native process containment (`JobObject` on Windows, process groups on Unix) or Docker isolation (`--sandbox`).
-- Interactive sessions are durable by default under `~/.mini-agent/sessions/`; `--ephemeral` provides in-memory scratch sessions, and `resume` / `fork` restore and branch settled checkpoints.
+- Interactive sessions are durable by default under `~/.mini-agent/sessions/`; `--ephemeral` provides in-memory scratch sessions, and `resume` / `fork` restore and branch settled checkpoints (`read_image` attachments included).
 - Trace replay and summary allow offline, deterministic playback and metrics calculation over JSONL observation logs.
 - Mentor insight and verification require a durable settled checkpoint, expose
   no tools, and append only a non-replayed derived item.
