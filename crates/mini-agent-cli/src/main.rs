@@ -2,6 +2,7 @@ mod args;
 mod ask;
 mod config;
 mod env_file;
+mod goal;
 mod harness_builder;
 mod marketplaces;
 mod mcp;

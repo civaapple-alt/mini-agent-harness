@@ -60,6 +60,8 @@ enum WorkerCommand {
         approval: ApprovalMode,
         copilot: bool,
     },
+    SetPlanMode(bool),
+    StartGoal(String),
     Shutdown,
 }
 
@@ -205,6 +207,24 @@ pub async fn run(
                         },
                         &mut pending_work,
                     ),
+                    "/plan" | "/plan on" => queue_work(
+                        &worker_tx,
+                        WorkerCommand::SetPlanMode(true),
+                        &mut pending_work,
+                    ),
+                    "/plan off" => queue_work(
+                        &worker_tx,
+                        WorkerCommand::SetPlanMode(false),
+                        &mut pending_work,
+                    ),
+                    command if command.starts_with("/goal ") => {
+                        let objective = command[6..].trim().to_string();
+                        queue_work(
+                            &worker_tx,
+                            WorkerCommand::StartGoal(objective),
+                            &mut pending_work,
+                        );
+                    }
                     command if command.starts_with('/') => {
                         eprintln!("unknown local command: {command}");
                         if ready && pending_work == 0 {
@@ -670,6 +690,65 @@ fn spawn_worker(
                         ));
                     }
                 }
+                WorkerCommand::SetPlanMode(active) => {
+                    let session_dir = durable
+                        .as_ref()
+                        .and_then(|opened| opened.store.path().parent())
+                        .unwrap_or(world.workspace());
+                    if active {
+                        match crate::goal::init_plan_mode(session_dir) {
+                            Ok(plan_file) => {
+                                let _ = harness.append_context(
+                                    "[Plan Mode active: focus on architecture exploration and living plan drafting in plan.md. Workspace modifications are locked to read-only.]",
+                                );
+                                persist_latest_context(&mut durable, &harness, &events);
+                                let _ = events.send(ReplEvent::Notice(format!(
+                                    "plan mode on: workspace modifications locked. Living plan at {}",
+                                    plan_file.display()
+                                )));
+                            }
+                            Err(e) => {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "error: cannot init plan mode: {e}"
+                                )));
+                            }
+                        }
+                    } else {
+                        let _ = crate::goal::disable_plan_mode(session_dir);
+                        let _ = events.send(ReplEvent::Notice(
+                            "plan mode off: resumed standard execution mode".to_string(),
+                        ));
+                    }
+                }
+                WorkerCommand::StartGoal(objective) => {
+                    let session_dir = durable
+                        .as_ref()
+                        .and_then(|opened| opened.store.path().parent())
+                        .unwrap_or(world.workspace());
+                    match crate::goal::init_goal_workspace(session_dir, &objective, 20) {
+                        Ok(state) => {
+                            copilot = true;
+                            approval.set_mode(ApprovalMode::Automatic);
+                            let mut config = harness_config_auto(true, auto_max_steps);
+                            config.system_prompt.clone_from(&stable_system_prompt);
+                            harness.replace_config(config);
+                            let _ = harness.append_context(format!(
+                                "[Autonomous Goal Mode active: goal_id={}. Work continuously toward acceptance criteria in goal/plan.md. Execute current milestone {}/{}.]",
+                                state.goal_id, state.current_milestone, state.total_milestones
+                            ));
+                            persist_latest_context(&mut durable, &harness, &events);
+                            let _ = events.send(ReplEvent::Notice(format!(
+                                "goal mode on [goal_id: {}]: autonomous milestone tracking in goal/state.json",
+                                state.goal_id
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = events.send(ReplEvent::Warning(format!(
+                                "error: cannot start goal mode: {e}"
+                            )));
+                        }
+                    }
+                }
                 WorkerCommand::Shutdown => break,
             }
             let _ = events.send(ReplEvent::WorkFinished);
@@ -817,6 +896,13 @@ fn print_help() {
     );
     println!(
         "/auto off      Switch to manual mode (require per-step approval for writes/shell/MCP)"
+    );
+    println!(
+        "/plan          Enable Plan Mode (lock workspace modifications, draft living plan.md)"
+    );
+    println!("/plan off      Exit Plan Mode and resume standard execution");
+    println!(
+        "/goal <goal>   Start Autonomous Goal Mode (multi-milestone loop with independent verifier)"
     );
     println!(
         "/status        Display runtime status (security preset, sandbox, web search, session, approval)"

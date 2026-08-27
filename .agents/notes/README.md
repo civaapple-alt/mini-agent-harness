@@ -103,6 +103,7 @@ If a proposed approach is rejected during review:
 | 2026-08-27 | [Subagent Trace Replay & Session Lineage](.agents/notes/implemented/architecture/2026-08-27-subagent-trace-replay-and-session-lineage.md) | Hierarchical trace rollup, nested replay drill-down, and session checkpoint graph |
 | 2026-08-27 | [Session Directory & Metadata Architecture](.agents/notes/implemented/architecture/2026-08-27-session-directory-and-metadata-architecture.md) | Modular session directory: fast summary index, goal/plan state, subagent trees, and compaction segments |
 | 2026-08-27 | [Builtin Agent & Persona Prompt System](.agents/notes/implemented/architecture/2026-08-27-builtin-agent-personas-and-file-contracts.md) | Builtin agent/persona prompts, dual-mode file contracts (review/summary), and issue state tracking |
+| 2026-08-27 | [Goal and Plan Subsystem Architecture](.agents/notes/implemented/architecture/2026-08-27-goal-and-plan-subsystem-architecture.md) | Explicit triggers, Living Plan protocol (plan.md), and autonomous verification state machine (goal/) |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |
