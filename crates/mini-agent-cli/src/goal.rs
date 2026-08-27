@@ -117,6 +117,28 @@ pub fn is_plan_md_alias(path: &Path) -> bool {
     name.is_some_and(|name| name.eq_ignore_ascii_case("plan.md"))
 }
 
+pub fn goal_relative_rest(path: &Path) -> Option<PathBuf> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => parts.push(part),
+            _ => return None,
+        }
+    }
+    let name = parts.first()?;
+    if !name.eq_ignore_ascii_case("goal") || parts.len() < 2 {
+        return None;
+    }
+    Some(parts.into_iter().skip(1).collect())
+}
+
+pub fn is_under_dir(path: &Path, dir: &Path) -> bool {
+    let path = normalize_path(path);
+    let dir = normalize_path(dir);
+    path.starts_with(&dir) && path != dir
+}
+
 fn unquote(text: &str) -> &str {
     let bytes = text.as_bytes();
     let last = bytes.last().copied();
@@ -158,7 +180,7 @@ pub fn planning_turn_prompt(request: &str) -> String {
 
 pub fn goal_turn_prompt(objective: &str, milestone: usize, total: usize) -> String {
     format!(
-        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Current milestone {milestone}/{total}. Follow goal/plan.md in the session directory. Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
+        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Current milestone {milestone}/{total}. Read and update goal/plan.md (relative path maps to the session goal file). Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
     )
 }
 
@@ -465,6 +487,15 @@ mod tests {
         assert!(is_plan_md_alias(Path::new("plan.md")));
         assert!(is_plan_md_alias(Path::new("./plan.md")));
         assert!(!is_plan_md_alias(Path::new("docs/plan.md")));
+        assert_eq!(
+            goal_relative_rest(Path::new("goal/plan.md")).as_deref(),
+            Some(Path::new("plan.md"))
+        );
+        assert_eq!(
+            goal_relative_rest(Path::new("./goal/state.json")).as_deref(),
+            Some(Path::new("state.json"))
+        );
+        assert_eq!(goal_relative_rest(Path::new("plan.md")), None);
 
         disable_plan_mode(&dir).unwrap();
         assert!(!is_plan_mode_active(&dir));

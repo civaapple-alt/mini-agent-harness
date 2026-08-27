@@ -730,6 +730,7 @@ fn spawn_worker(
                                 prompt.as_deref(),
                             ) {
                                 Ok(plan_file) => {
+                                    approval.set_goal_dir(None);
                                     approval.set_living_plan(Some(plan_file.clone()));
                                     let mut config = harness_config_auto(copilot, auto_max_steps);
                                     config.system_prompt =
@@ -774,15 +775,17 @@ fn spawn_worker(
                         match crate::goal::init_goal_workspace(session_dir, &objective, 20) {
                             Ok(state) => {
                                 approval.set_living_plan(None);
+                                let goal_dir = session_dir.join("goal");
+                                approval.set_goal_dir(Some(goal_dir.clone()));
                                 let _ = crate::goal::disable_plan_mode(session_dir);
                                 copilot = true;
                                 approval.set_mode(ApprovalMode::Automatic);
                                 let mut config = harness_config_auto(true, auto_max_steps);
                                 config.system_prompt.clone_from(&stable_system_prompt);
                                 harness.replace_config(config);
-                                let goal_plan = session_dir.join("goal").join("plan.md");
+                                let goal_plan = goal_dir.join("plan.md");
                                 let _ = harness.append_context(format!(
-                                "[Autonomous Goal Mode active: goal_id={}. Execute now. Current milestone {}/{}. Goal plan at {}. Workspace mutations are allowed.]",
+                                "[Autonomous Goal Mode active: goal_id={}. Execute now. Current milestone {}/{}. Goal plan at {}. Relative path goal/plan.md maps to that file. Workspace mutations are allowed.]",
                                 state.goal_id, state.current_milestone, state.total_milestones, goal_plan.display()
                             ));
                                 persist_latest_context(&mut durable, &harness, &events);

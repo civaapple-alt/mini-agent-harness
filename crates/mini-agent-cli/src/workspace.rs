@@ -56,6 +56,7 @@ pub struct ApprovalController {
     store: ApprovalStore,
     callback: Arc<ApprovalCallback>,
     living_plan: Arc<Mutex<Option<PathBuf>>>,
+    goal_dir: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl ApprovalController {
@@ -95,6 +96,7 @@ impl ApprovalController {
             store: ApprovalStore::new(),
             callback: Arc::new(callback),
             living_plan: Arc::new(Mutex::new(None)),
+            goal_dir: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -121,6 +123,14 @@ impl ApprovalController {
 
     pub fn living_plan(&self) -> Option<PathBuf> {
         self.living_plan.lock().unwrap().clone()
+    }
+
+    pub fn set_goal_dir(&self, path: Option<PathBuf>) {
+        *self.goal_dir.lock().unwrap() = path.map(|path| crate::goal::normalize_path(&path));
+    }
+
+    pub fn goal_dir(&self) -> Option<PathBuf> {
+        self.goal_dir.lock().unwrap().clone()
     }
 
     #[allow(dead_code)]
@@ -238,7 +248,7 @@ impl Workspace {
         let resolved = candidate
             .canonicalize()
             .map_err(|error| ToolError(format!("cannot resolve path: {error}")))?;
-        if self.is_living_plan(&resolved) {
+        if self.is_session_artifact(&resolved) {
             return Ok(resolved);
         }
         self.ensure_readable(resolved)
@@ -249,7 +259,7 @@ impl Workspace {
         let resolved = candidate
             .canonicalize()
             .map_err(|error| ToolError(format!("cannot resolve path: {error}")))?;
-        if self.is_living_plan(&resolved) {
+        if self.is_session_artifact(&resolved) {
             return Ok(resolved);
         }
         self.ensure_plan_mode_unlocked()?;
@@ -263,13 +273,13 @@ impl Workspace {
 
     fn create_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
         let candidate = self.candidate(value)?;
-        let living_plan = self.is_living_plan(&candidate);
-        if candidate.exists() && !living_plan {
+        let session_artifact = self.is_session_artifact(&candidate);
+        if candidate.exists() && !session_artifact {
             return Err(ToolError(
                 "file already exists; use edit_file for existing files".to_string(),
             ));
         }
-        if !living_plan {
+        if !session_artifact {
             self.ensure_plan_mode_unlocked()?;
         }
         let parent = candidate
@@ -277,7 +287,7 @@ impl Workspace {
             .ok_or_else(|| ToolError("path has no parent".to_string()))?
             .canonicalize()
             .map_err(|error| ToolError(format!("parent directory must exist: {error}")))?;
-        if !living_plan && !self.allows_outside_paths() && !parent.starts_with(&self.root) {
+        if !session_artifact && !self.allows_outside_paths() && !parent.starts_with(&self.root) {
             return Err(ToolError("path escapes the workspace".to_string()));
         }
         let file_name = candidate
@@ -300,6 +310,11 @@ impl Workspace {
         {
             return Ok(living);
         }
+        if let Some(goal_dir) = self.approval.goal_dir()
+            && let Some(rest) = crate::goal::goal_relative_rest(path)
+        {
+            return Ok(goal_dir.join(rest));
+        }
         if path.is_absolute() {
             return Ok(path.to_path_buf());
         }
@@ -320,6 +335,16 @@ impl Workspace {
         self.approval
             .living_plan()
             .is_some_and(|living| crate::goal::same_path(path, &living))
+    }
+
+    fn is_goal_artifact(&self, path: &Path) -> bool {
+        self.approval
+            .goal_dir()
+            .is_some_and(|dir| crate::goal::is_under_dir(path, &dir))
+    }
+
+    fn is_session_artifact(&self, path: &Path) -> bool {
+        self.is_living_plan(path) || self.is_goal_artifact(path)
     }
 
     fn ensure_plan_mode_unlocked(&self) -> Result<(), ToolError> {
@@ -472,7 +497,7 @@ impl Tool for WriteFile {
             path.display(),
             content.len()
         ))?;
-        if self.0.is_living_plan(&path) {
+        if self.0.is_session_artifact(&path) {
             fs::write(&path, content.as_bytes()).map_err(io_error)?;
         } else {
             let mut file = File::options()
@@ -999,6 +1024,56 @@ mod tests {
         }))
         .unwrap();
         assert!(fs::read_to_string(&plan).unwrap().contains("- add restore"));
+
+        fs::remove_dir_all(session).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn goal_mode_allows_session_goal_plan_reads_and_workspace_writes() {
+        let root = test_root();
+        let session = test_root();
+        let state = crate::goal::init_goal_workspace(&session, "Ship HTML intro", 5).unwrap();
+        assert_eq!(state.current_milestone, 1);
+        let goal_dir = session.join("goal");
+        let approval = ApprovalController::new(ApprovalMode::Automatic);
+        approval.set_goal_dir(Some(goal_dir.clone()));
+        let workspace = Arc::new(
+            Workspace::with_read_roots(root.clone(), approval, Vec::new(), SandboxKind::Native)
+                .unwrap(),
+        );
+        let read = ReadFile(Arc::clone(&workspace));
+        let write = WriteFile(Arc::clone(&workspace));
+
+        let plan = read.execute(&json!({"path": "goal/plan.md"})).unwrap();
+        assert!(plan.contains("Autonomous Goal Plan: Ship HTML intro"));
+        let abs = goal_dir.join("plan.md").to_string_lossy().to_string();
+        assert!(
+            read.execute(&json!({"path": abs}))
+                .unwrap()
+                .contains("Milestone 1")
+        );
+
+        write
+            .execute(&json!({
+                "path": "goal/plan.md",
+                "content": "# Autonomous Goal Plan\n- [x] Milestone 1\n"
+            }))
+            .unwrap();
+        assert!(
+            fs::read_to_string(goal_dir.join("plan.md"))
+                .unwrap()
+                .contains("Milestone 1")
+        );
+        assert!(!root.join("goal").exists());
+
+        write
+            .execute(&json!({"path": "intro.html", "content": "<html></html>"}))
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("intro.html")).unwrap(),
+            "<html></html>"
+        );
 
         fs::remove_dir_all(session).unwrap();
         fs::remove_dir_all(root).unwrap();
