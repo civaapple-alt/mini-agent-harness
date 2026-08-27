@@ -84,6 +84,7 @@ If a proposed approach is rejected during review:
 |---|---|---|
 | 2026-08-27 | [Subagent Task Scheduling & Delegation](.agents/notes/proposed/architecture/2026-08-27-subagent-task-scheduling-and-delegation.md) | Multi-tool subagent delegation, context forking, and asynchronous event waiting |
 | 2026-08-27 | [Multi-turn Interactive Subagent Sessions](.agents/notes/proposed/architecture/2026-08-27-multi-turn-interactive-subagent-sessions.md) | Stateless session-backed resumption (`send_subagent_message`) and ACP streaming protocol |
+| 2026-08-27 | [Subagent Trace Replay & Session Lineage](.agents/notes/proposed/architecture/2026-08-27-subagent-trace-replay-and-session-lineage.md) | Hierarchical trace rollup, nested replay drill-down, and session checkpoint graph |
 
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
