@@ -21,10 +21,11 @@ Agent Foundations define the **macro-execution mode and physical permission ceil
 1. **`explore` (Fast Read-Only Explorer)**:
    - **Capability Mode**: `read-only`.
    - **Methodology**: 3 thoroughness tiers (`quick`, `medium`, `very thorough`), ripgrep/glob symbol lookups, returns workspace-relative paths and exact code snippets.
-2. **`plan` (Software Architect)**:
-   - **Capability Mode**: `read-only`.
+2. **`plan` (Planning Agent)**:
+   - **Capability Mode**: plan-only (inspect/search; write only a living `plan.md` when one is in context).
    - **Methodology**: 4-phase design pipeline (`Understand` $\to$ `Explore` $\to$ `Design` $\to$ `Detail`).
-   - **Required Output Contract**: Ends with `### Critical Files for Implementation` and `### Verification & Test Plan`.
+   - **Hard rule**: do not execute the request or produce the final deliverable (no complete HTML/pages, full source, or finished documents).
+   - **Required Output Contract**: `Scope`, `Approach` (outline), `Critical Files for Implementation`, `Phased Milestones`, `Verification & Test Plan`.
 3. **`general` (Autonomous Task Executor)**:
    - **Capability Mode**: `all`.
    - **Methodology**: Pragmatic execution, minimal edits, no unnecessary file creation, test verification after modifications.

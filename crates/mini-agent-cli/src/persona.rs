@@ -45,27 +45,42 @@ Workspace boundary:
 - If not found in the workspace, explicitly report that rather than guessing external paths."#
             }
             Self::Plan => {
-                r#"You are a read-only software architect. Explore the codebase and design robust, phased implementation plans.
+                r#"You are a planning agent. Produce a plan, not the finished work.
 
-=== READ-ONLY MODE ===
-You have NO file editing permissions. Do not create, modify, or delete files.
-Execute only read-only commands for inspection.
+=== PLAN ONLY ===
+Do not execute the request and do not produce the final deliverable:
+- no complete HTML/CSS/JS pages
+- no full source files or implemented patches
+- no finished documents the user asked to create
+Do not dump the artifact in reasoning or the assistant message.
+You may inspect the workspace and search the web only to make the plan accurate.
+Cite facts and sources; do not copy full page or article content into the plan or the reply.
+If a living plan file is in context, write the plan there and reply with a short summary, risks, and open questions.
+Otherwise put the plan in the final response. Do not edit other workspace files.
 
 Process:
-1. **Understand**: Analyze the user prompt, requirements, constraints, and line budgets.
-2. **Explore**: Read current implementations, verify existing patterns, and identify dependencies.
-3. **Design**: Evaluate architectural trade-offs, minimal abstractions, and boundary separations.
-4. **Detail**: Formulate a step-by-step implementation strategy with concrete verification criteria.
+1. **Understand**: goals, constraints, non-goals.
+2. **Explore**: read or search only as needed.
+3. **Design**: approach, structure, and trade-offs as an outline.
+4. **Detail**: phased milestones and how to verify later.
 
 ## Required Output Contract
-Your final response MUST end with:
+The plan MUST include:
+
+### Scope
+- Goals / Non-goals
+
+### Approach
+- Proposed structure or architecture (outline only)
 
 ### Critical Files for Implementation
-- `path/to/file` - [Detailed reason & proposed change]
+- `path/to/file` - [reason], or "n/a" if this is not a codebase change
+
+### Phased Milestones
+- [ ] ordered steps for a later execution pass
 
 ### Verification & Test Plan
-- Unit test coverage & commands
-- Integration verification steps"#
+- How to check the work in a later execution pass"#
             }
             Self::General => {
                 r#"You are an autonomous general-purpose coding agent. Execute multi-step tasks directly, precisely, and safely.
@@ -376,6 +391,21 @@ pub fn render_subagent_prompt(
     sections.join("\n\n")
 }
 
+pub fn with_plan_foundation(base: &str) -> String {
+    let plan = AgentPromptKind::Plan.prompt_template();
+    if base.contains("=== PLAN ONLY ===") {
+        base.to_string()
+    } else {
+        format!("{base}\n\n{plan}")
+    }
+}
+
+pub fn planning_turn_prompt(request: &str) -> String {
+    format!(
+        "Follow the plan-only contract. Draft or update the living plan for this request. Do not produce the final deliverable.\n\nRequest:\n{request}"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,8 +422,22 @@ mod tests {
     #[test]
     fn render_plan_prompt_contains_critical_files() {
         let prompt = render_subagent_prompt(Some("plan"), None, "Design auth system", None, None);
+        assert!(prompt.contains("=== PLAN ONLY ==="));
+        assert!(prompt.contains("Do not execute the request"));
+        assert!(prompt.contains("no complete HTML/CSS/JS pages"));
         assert!(prompt.contains("Critical Files for Implementation"));
         assert!(prompt.contains("Verification & Test Plan"));
+        assert!(prompt.contains("Design auth system"));
+    }
+
+    #[test]
+    fn planning_turn_prompt_forbids_the_deliverable() {
+        let prompt = planning_turn_prompt("提供最新 Mac Studio 介绍的 html");
+        assert!(prompt.contains("Do not produce the final deliverable"));
+        assert!(prompt.contains("提供最新 Mac Studio 介绍的 html"));
+        let system = with_plan_foundation("You are a coding agent.");
+        assert!(system.contains("=== PLAN ONLY ==="));
+        assert_eq!(with_plan_foundation(&system), system);
     }
 
     #[test]

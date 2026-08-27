@@ -439,6 +439,11 @@ fn spawn_worker(
             loop {
                 match command {
                     WorkerCommand::Prompt(prompt) => {
+                        let prompt = if approval.living_plan().is_some() {
+                            crate::persona::planning_turn_prompt(&prompt)
+                        } else {
+                            prompt
+                        };
                         let started_at_ms = session::timestamp_ms();
                         let previous_messages = harness.messages().to_vec();
                         let mut observer = ChannelObserver(events.clone());
@@ -719,8 +724,12 @@ fn spawn_worker(
                             ) {
                                 Ok(plan_file) => {
                                     approval.set_living_plan(Some(plan_file.clone()));
+                                    let mut config = harness_config_auto(copilot, auto_max_steps);
+                                    config.system_prompt =
+                                        crate::persona::with_plan_foundation(&stable_system_prompt);
+                                    harness.replace_config(config);
                                     let _ = harness.append_context(format!(
-                                    "[Plan Mode active: draft and update the living plan at {}. Relative path plan.md maps to that file. Workspace modifications are locked to read-only.]",
+                                    "[Plan Mode active: living plan at {}. Plan only — research and update plan.md. Do not produce the final deliverable. Relative path plan.md maps to that file. Workspace modifications are locked.]",
                                     plan_file.display()
                                 ));
                                     persist_latest_context(&mut durable, &harness, &events);
@@ -742,6 +751,9 @@ fn spawn_worker(
                         } else {
                             approval.set_living_plan(None);
                             let _ = crate::goal::disable_plan_mode(session_dir);
+                            let mut config = harness_config_auto(copilot, auto_max_steps);
+                            config.system_prompt.clone_from(&stable_system_prompt);
+                            harness.replace_config(config);
                             let _ = events.send(ReplEvent::Notice(
                                 "plan mode off: resumed standard execution mode".to_string(),
                             ));
