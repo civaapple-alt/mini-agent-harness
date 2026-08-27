@@ -15,7 +15,7 @@ invocation also has:
 | Control | Default | Hard maximum |
 | --- | ---: | ---: |
 | provider requests | scenario budget | 12 |
-| output tokens per request | 256 | 512 |
+| output tokens per request | 256 | 1024 |
 | wall time per scenario | 120 seconds | 120 seconds |
 
 The request budget is reserved before each provider call, including the
@@ -32,6 +32,8 @@ started. In the JSONL, `model_steps` counts normal harness steps;
 | text | 1 | provider authentication, streaming text, response parsing, and exact final output |
 | tool | 2 | function schema, tool-call argument parsing, local tool execution, and follow-up response |
 | conversation | 2 | context retained across two harness runs |
+| persistence | 2 | settled session checkpoint, process-style reopen, and restored context |
+| vision | 3 | image tool result, provider image projection, and vision-model response |
 | compaction | 2 | auxiliary summarization, bounded context compaction, and continuation |
 
 The scenarios use short fixed prompts and deterministic verifiers. A passing
@@ -53,12 +55,12 @@ Run the tool path separately:
     cargo run --release -p mini-agent-cli --example real_llm -- \
       --allow-paid --scenario tool --max-requests 2 --max-output-tokens 128
 
-Run the full provider check, with a maximum of seven requests:
+Run the full provider check, with a maximum of twelve requests:
 
     cargo run --release -p mini-agent-cli --example real_llm -- \
-      --allow-paid --scenario all --max-requests 7 --max-output-tokens 512
+      --allow-paid --scenario all --max-requests 12 --max-output-tokens 512
 
-Use 512 output tokens for the compaction scenario: some Responses-compatible
+Use 1024 output tokens for the compaction scenario: some Responses-compatible
 models use a longer summary even when the final continuation is short.
 
 Use --output /tmp/mini-agent-real-llm.jsonl to keep machine-readable evidence.
@@ -67,9 +69,10 @@ usage but never the API key; review it before sharing because model output may
 still contain sensitive text.
 
 The runner reads OPENAI_BASE_URL and OPENAI_MODEL using the same Responses
-adapter as the CLI. It disables built-in web search so the scenario budget
-covers only the requested model calls. Use a provider/model that accepts the
-Responses API and its output-token parameter.
+adapter as the CLI. It also reads OPENAI_CHAT_BASE_URL for GLM image turns. It
+disables built-in web search so the scenario budget covers only the requested
+model calls. Use a provider/model that accepts the Responses API and its
+output-token parameter; GLM vision additionally needs a Chat Completions root.
 
 ## Evidence review
 

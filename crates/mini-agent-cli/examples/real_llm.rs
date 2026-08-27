@@ -6,8 +6,15 @@ mod env_file;
 mod image;
 #[path = "../src/openai/mod.rs"]
 mod openai;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/session.rs"]
+mod session;
 
 use env_file::Environment;
+use image::DeepSeekFiles;
+use image::FileUploader;
+use image::ImageStore;
 use mini_agent_core::ContextLimitBehavior;
 use mini_agent_core::Event;
 use mini_agent_core::Harness;
@@ -32,6 +39,8 @@ use serde_json::json;
 use std::env;
 use std::error::Error;
 use std::fmt;
+#[cfg(not(test))]
+use std::fs;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::BufWriter;
@@ -42,19 +51,32 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+#[cfg(not(test))]
+use std::time::SystemTime;
+#[cfg(not(test))]
+use std::time::UNIX_EPOCH;
 use tokio::time::timeout;
 
 const DEFAULT_MAX_OUTPUT_TOKENS: usize = 256;
-const MAX_OUTPUT_TOKENS: usize = 512;
+const MAX_OUTPUT_TOKENS: usize = 1024;
 const MAX_REQUESTS: usize = 12;
 const DEFAULT_TIMEOUT_SECONDS: u64 = 120;
-const HELP: &str = "real-llm integration checks (network and provider billing are opt-in)\n\nUSAGE:\n    cargo run -p mini-agent-cli --example real_llm -- --allow-paid [OPTIONS]\n\nOPTIONS:\n    --allow-paid                 Required acknowledgement before contacting a provider\n    --scenario LIST               text, tool, conversation, compaction, or all (default: text)\n    --max-requests N              Hard request budget, 1..12 (default: scenario budget)\n    --max-output-tokens N         Provider output cap, 16..512 (default: 256)\n    --timeout-seconds N           Per-scenario wall-clock cap, 5..120 (default: 120)\n    --output PATH                 Create a JSONL evidence file instead of stdout\n\nThe runner never runs from cargo test or CI. Every scenario uses a short fixed\nprompt and reports model steps, provider requests, usage, and a deterministic\nverifier result.";
+const TEST_PNG: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0xB5, 0x1C, 0x0C,
+    0x02, 0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x64, 0xF8, 0x0F, 0x00,
+    0x01, 0x05, 0x01, 0x01, 0x27, 0x18, 0xE3, 0x66, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,
+    0xAE, 0x42, 0x60, 0x82,
+];
+const HELP: &str = "real-llm integration checks (network and provider billing are opt-in)\n\nUSAGE:\n    cargo run -p mini-agent-cli --example real_llm -- --allow-paid [OPTIONS]\n\nOPTIONS:\n    --allow-paid                 Required acknowledgement before contacting a provider\n    --scenario LIST               text, tool, conversation, persistence, vision, compaction, or all (default: text)\n    --max-requests N              Hard request budget, 1..12 (default: scenario budget)\n    --max-output-tokens N         Provider output cap, 16..1024 (default: 256)\n    --timeout-seconds N           Per-scenario wall-clock cap, 5..120 (default: 120)\n    --output PATH                 Create a JSONL evidence file instead of stdout\n\nThe runner never runs from cargo test or CI. Every scenario uses a short fixed\nprompt and reports model steps, provider requests, usage, and a deterministic\nverifier result.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scenario {
     Text,
     Tool,
     Conversation,
+    Persistence,
+    Vision,
     Compaction,
 }
 
@@ -64,9 +86,11 @@ impl Scenario {
             "text" => Ok(Self::Text),
             "tool" => Ok(Self::Tool),
             "conversation" => Ok(Self::Conversation),
+            "persistence" => Ok(Self::Persistence),
+            "vision" => Ok(Self::Vision),
             "compaction" => Ok(Self::Compaction),
             other => Err(format!(
-                "unknown scenario {other}; choose text, tool, conversation, compaction, or all"
+                "unknown scenario {other}; choose text, tool, conversation, persistence, vision, compaction, or all"
             )),
         }
     }
@@ -76,6 +100,8 @@ impl Scenario {
             Self::Text => "text",
             Self::Tool => "tool",
             Self::Conversation => "conversation",
+            Self::Persistence => "persistence",
+            Self::Vision => "vision",
             Self::Compaction => "compaction",
         }
     }
@@ -85,6 +111,8 @@ impl Scenario {
             Self::Text => 1,
             Self::Tool => 2,
             Self::Conversation => 2,
+            Self::Persistence => 2,
+            Self::Vision => 3,
             Self::Compaction => 2,
         }
     }
@@ -171,6 +199,13 @@ impl fmt::Display for BudgetError {
 
 impl Error for BudgetError {}
 
+fn reserve_request(used: &Arc<AtomicUsize>, max_requests: usize) -> bool {
+    used.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |used| {
+        (used < max_requests).then_some(used + 1)
+    })
+    .is_ok()
+}
+
 struct BudgetedModel {
     inner: OpenAiModel,
     used: Arc<AtomicUsize>,
@@ -185,12 +220,7 @@ impl Model for BudgetedModel {
         request: ModelRequest<'a>,
         events: &'a mut (dyn ModelEventSink + Send),
     ) -> impl std::future::Future<Output = Result<ModelResponse, Self::Error>> + Send + 'a {
-        let reserved = self
-            .used
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |used| {
-                (used < self.max_requests).then_some(used + 1)
-            })
-            .is_ok();
+        let reserved = reserve_request(&self.used, self.max_requests);
         async move {
             if !reserved {
                 return Err(BudgetError::Exhausted);
@@ -200,6 +230,21 @@ impl Model for BudgetedModel {
                 .await
                 .map_err(BudgetError::Provider)
         }
+    }
+}
+
+struct BudgetedUploader {
+    inner: DeepSeekFiles,
+    used: Arc<AtomicUsize>,
+    max_requests: usize,
+}
+
+impl FileUploader for BudgetedUploader {
+    fn upload(&self, filename: &str, media_type: &str, bytes: &[u8]) -> Result<String, ToolError> {
+        if !reserve_request(&self.used, self.max_requests) {
+            return Err(ToolError("real-llm request budget exhausted".to_string()));
+        }
+        self.inner.upload(filename, media_type, bytes)
     }
 }
 
@@ -230,6 +275,42 @@ impl Tool for Lookup {
             Some(key) => Err(ToolError(format!("unexpected key: {key}"))),
             None => Err(ToolError("key must be a string".to_string())),
         }
+    }
+}
+
+struct ReadImageFixture {
+    images: ImageStore,
+    id: String,
+}
+
+impl Tool for ReadImageFixture {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "read_image".to_string(),
+            description: "Load the fixed image fixture for this integration check.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "enum": ["fixture.png"]
+                    }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        if arguments.get("path").and_then(Value::as_str) != Some("fixture.png") {
+            return Err(ToolError("path must be fixture.png".to_string()));
+        }
+        let stored = self
+            .images
+            .get(&self.id)
+            .ok_or_else(|| ToolError("image fixture is no longer available".to_string()))?;
+        Ok(image::format_envelope(&stored))
     }
 }
 
@@ -271,6 +352,9 @@ async fn run() -> Result<(), Box<dyn Error>> {
         .resolve("OPENAI_BASE_URL")
         .map(|value| value.value)
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+    let chat_base_url = environment
+        .resolve("OPENAI_CHAT_BASE_URL")
+        .map(|value| value.value);
     let required_requests = args
         .scenarios
         .iter()
@@ -302,6 +386,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
                 &api_key,
                 &model_name,
                 &base_url,
+                chat_base_url.as_deref(),
                 args.max_output_tokens,
                 Arc::clone(&used),
                 max_requests,
@@ -349,11 +434,13 @@ async fn run() -> Result<(), Box<dyn Error>> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_scenario(
     scenario: Scenario,
     api_key: &str,
     model_name: &str,
     base_url: &str,
+    chat_base_url: Option<&str>,
     max_output_tokens: usize,
     used: Arc<AtomicUsize>,
     max_requests: usize,
@@ -392,6 +479,39 @@ async fn run_scenario(
             )
             .await
         }
+        Scenario::Persistence => {
+            #[cfg(not(test))]
+            {
+                run_persistence(
+                    api_key,
+                    model_name,
+                    base_url,
+                    max_output_tokens,
+                    used,
+                    max_requests,
+                )
+                .await
+            }
+            #[cfg(test)]
+            {
+                error_record(
+                    "persistence",
+                    "persistence scenario is only available outside cargo test".to_string(),
+                )
+            }
+        }
+        Scenario::Vision => {
+            run_vision(
+                api_key,
+                model_name,
+                base_url,
+                chat_base_url,
+                max_output_tokens,
+                used,
+                max_requests,
+            )
+            .await
+        }
         Scenario::Compaction => {
             run_compaction(
                 api_key,
@@ -414,13 +534,36 @@ fn model(
     used: Arc<AtomicUsize>,
     max_requests: usize,
 ) -> Result<BudgetedModel, String> {
+    model_with_images(
+        api_key,
+        model_name,
+        base_url,
+        None,
+        max_output_tokens,
+        used,
+        max_requests,
+        ImageStore::memory_only(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn model_with_images(
+    api_key: &str,
+    model_name: &str,
+    base_url: &str,
+    chat_base_url: Option<&str>,
+    max_output_tokens: usize,
+    used: Arc<AtomicUsize>,
+    max_requests: usize,
+    images: ImageStore,
+) -> Result<BudgetedModel, String> {
     let inner = OpenAiModel::new(
         api_key.to_string(),
         model_name.to_string(),
         base_url.to_string(),
-        None,
+        chat_base_url.map(str::to_string),
         false,
-        image::ImageStore::memory_only(),
+        images,
     )
     .map_err(|error| error.to_string())?
     .with_max_output_tokens(max_output_tokens);
@@ -584,6 +727,236 @@ async fn run_conversation(
     }
 }
 
+#[cfg(not(test))]
+async fn run_persistence(
+    api_key: &str,
+    model_name: &str,
+    base_url: &str,
+    max_output_tokens: usize,
+    used: Arc<AtomicUsize>,
+    max_requests: usize,
+) -> Value {
+    let first_model = match model(
+        api_key,
+        model_name,
+        base_url,
+        max_output_tokens,
+        Arc::clone(&used),
+        max_requests,
+    ) {
+        Ok(model) => model,
+        Err(error) => return error_record("persistence", error),
+    };
+    let workspace = match env::current_dir() {
+        Ok(workspace) => workspace,
+        Err(error) => return error_record("persistence", error.to_string()),
+    };
+    let session_root = match session::session_directory(&workspace) {
+        Ok(path) => path,
+        Err(error) => return error_record("persistence", error),
+    };
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let session_id = format!("real-llm-{timestamp}-{}", used.load(Ordering::SeqCst));
+    let session_path = session_root.join(&session_id);
+    let cleanup = || {
+        let _ = fs::remove_dir_all(&session_path);
+    };
+    let mut opened = match session::SessionStore::open(
+        &workspace,
+        session::SessionRequest::Named(session_id.clone()),
+    ) {
+        Ok(opened) => opened,
+        Err(error) => return error_record("persistence", error),
+    };
+    let first_prompt =
+        "Remember the persisted codeword exactly: PERSIST-42. Reply exactly PERSIST-ACK.";
+    let mut harness = Harness::new(first_model, ToolRegistry::default(), config(1));
+    let mut observer = EvalObserver::default();
+    let first = match harness.run(first_prompt, &mut observer).await {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            let record = harness_error_record("persistence", error, &observer);
+            drop(opened);
+            cleanup();
+            return record;
+        }
+    };
+    if first.stop_reason != StopReason::Completed {
+        let record = report(
+            "persistence",
+            false,
+            &observer,
+            json!({
+                "phase": "initial_persisted_turn",
+                "final_text": first.final_text,
+                "steps": first.steps,
+            }),
+        );
+        drop(opened);
+        cleanup();
+        return record;
+    }
+    if let Err(error) = opened.store.record_turn(session::TurnCommit {
+        started_at_ms: timestamp as u64,
+        prompt: first_prompt,
+        status: session::TurnStatus::Completed,
+        steps: first.steps,
+        error: None,
+        messages: harness.messages(),
+        checkpoint: harness.messages(),
+    }) {
+        drop(opened);
+        cleanup();
+        return error_record("persistence", error);
+    }
+    drop(opened);
+
+    let mut resumed = match session::SessionStore::open(
+        &workspace,
+        session::SessionRequest::Resume(session_id.clone()),
+    ) {
+        Ok(opened) => opened,
+        Err(error) => {
+            cleanup();
+            return error_record("persistence", error);
+        }
+    };
+    let restored_messages = resumed.messages.len();
+    let model = match model(
+        api_key,
+        model_name,
+        base_url,
+        max_output_tokens,
+        used,
+        max_requests,
+    ) {
+        Ok(model) => model,
+        Err(error) => {
+            drop(resumed);
+            cleanup();
+            return error_record("persistence", error);
+        }
+    };
+    let mut resumed_harness = Harness::new(model, ToolRegistry::default(), config(1));
+    if let Err(error) = resumed_harness.restore_history(std::mem::take(&mut resumed.messages)) {
+        drop(resumed);
+        cleanup();
+        return error_record("persistence", error.to_string());
+    }
+    let second = resumed_harness
+        .run(
+            "What exact codeword was persisted in the previous process? Reply with only the codeword.",
+            &mut observer,
+        )
+        .await;
+    let record = match second {
+        Ok(outcome) => report(
+            "persistence",
+            outcome.stop_reason == StopReason::Completed
+                && outcome.final_text.trim() == "PERSIST-42"
+                && restored_messages >= 2,
+            &observer,
+            json!({
+                "session_id": session_id,
+                "restored_messages": restored_messages,
+                "final_text": outcome.final_text,
+                "steps": outcome.steps,
+            }),
+        ),
+        Err(error) => harness_error_record("persistence", error, &observer),
+    };
+    drop(resumed);
+    cleanup();
+    record
+}
+
+async fn run_vision(
+    api_key: &str,
+    model_name: &str,
+    base_url: &str,
+    chat_base_url: Option<&str>,
+    max_output_tokens: usize,
+    used: Arc<AtomicUsize>,
+    max_requests: usize,
+) -> Value {
+    let uses_files = image::uses_deepseek_files(base_url);
+    let images = if uses_files {
+        ImageStore::with_uploader(Arc::new(BudgetedUploader {
+            inner: DeepSeekFiles::new(api_key.to_string(), base_url),
+            used: Arc::clone(&used),
+            max_requests,
+        }))
+    } else {
+        ImageStore::memory_only()
+    };
+    let stored = match images.save("fixture.png", "image/png", TEST_PNG.to_vec()) {
+        Ok(stored) => stored,
+        Err(error) => return error_record("vision", error.to_string()),
+    };
+    if uses_files && stored.file_id.is_none() {
+        return error_record(
+            "vision",
+            "DeepSeek image fixture upload did not return a file_id".to_string(),
+        );
+    }
+    let model = match model_with_images(
+        api_key,
+        model_name,
+        base_url,
+        chat_base_url,
+        max_output_tokens,
+        used,
+        max_requests,
+        images.clone(),
+    ) {
+        Ok(model) => model,
+        Err(error) => return error_record("vision", error),
+    };
+    let tool = ReadImageFixture {
+        images,
+        id: stored.id,
+    };
+    let mut harness = Harness::new(model, ToolRegistry::new(vec![Box::new(tool)]), config(2));
+    let mut observer = EvalObserver::default();
+    let result = harness
+        .run(
+            "Call read_image exactly once with path fixture.png. Then reply exactly VISION-LLM-OK and no other words.",
+            &mut observer,
+        )
+        .await;
+    let call = observer.events.iter().find_map(|event| match event {
+        Event::ToolStarted { call } => Some(call),
+        _ => None,
+    });
+    match result {
+        Ok(outcome) => {
+            let argument_ok = call
+                .map(|call| {
+                    call.name == "read_image"
+                        && call.arguments.get("path").and_then(Value::as_str) == Some("fixture.png")
+                })
+                .unwrap_or(false);
+            report(
+                "vision",
+                outcome.stop_reason == StopReason::Completed
+                    && argument_ok
+                    && outcome.final_text.trim() == "VISION-LLM-OK",
+                &observer,
+                json!({
+                    "final_text": outcome.final_text,
+                    "steps": outcome.steps,
+                    "image_transport": if uses_files { "files_api" } else { "inline" },
+                    "tool_call": call.map(tool_call_value),
+                }),
+            )
+        }
+        Err(error) => harness_error_record("vision", error, &observer),
+    }
+}
+
 async fn run_compaction(
     api_key: &str,
     model_name: &str,
@@ -738,6 +1111,8 @@ fn parse_args(raw: Vec<String>) -> Result<Args, String> {
                             Scenario::Text,
                             Scenario::Tool,
                             Scenario::Conversation,
+                            Scenario::Persistence,
+                            Scenario::Vision,
                             Scenario::Compaction,
                         ];
                         break;
@@ -835,18 +1210,18 @@ mod tests {
             "--scenario".to_string(),
             "all".to_string(),
             "--max-requests".to_string(),
-            "7".to_string(),
+            "12".to_string(),
             "--max-output-tokens".to_string(),
             "64".to_string(),
         ])
         .unwrap();
-        assert_eq!(args.scenarios.len(), 4);
+        assert_eq!(args.scenarios.len(), 6);
         assert_eq!(
             args.scenarios
                 .iter()
                 .map(|scenario| scenario.request_budget())
                 .sum::<usize>(),
-            7
+            12
         );
     }
 

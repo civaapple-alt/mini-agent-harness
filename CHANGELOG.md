@@ -8,8 +8,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 ### Added
 
 - Opt-in, budgeted real-provider scenario checks for text, tools, conversation
-  history, and context compaction, with JSONL evidence and no default CI or
-  release-network calls.
+  history, persistence, vision, and context compaction, with JSONL evidence and
+  no default CI or release-network calls.
 - Explicit provider output-token caps for controlled integration checks across
   Responses and Chat Completions adapters.
 
