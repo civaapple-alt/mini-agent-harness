@@ -14,7 +14,7 @@ invocation also has:
 
 | Control | Default | Hard maximum |
 | --- | ---: | ---: |
-| provider requests | scenario budget | 12 |
+| provider requests | scenario budget | 20 |
 | output tokens per request | 256 | 1024 |
 | wall time per scenario | 120 seconds | 120 seconds |
 
@@ -35,6 +35,9 @@ started. In the JSONL, `model_steps` counts normal harness steps;
 | persistence | 2 | settled session checkpoint, process-style reopen, and restored context |
 | vision | 3 | image tool result, provider image projection, and vision-model response |
 | compaction | 2 | auxiliary summarization, bounded context compaction, and continuation |
+| mentor | 1 | independent mentor response, source checkpoint, and persisted derived insight |
+| goal | 1 | independent verifier verdict parsing, verdict persistence, and milestone advancement |
+| mcp | 2 | production MCP stdio handshake, tool discovery/call, and model tool settlement |
 
 The scenarios use short fixed prompts and deterministic verifiers. A passing
 scenario demonstrates that one provider/model combination completed that
@@ -55,13 +58,16 @@ Run the tool path separately:
     cargo run --release -p mini-agent-cli --example real_llm -- \
       --allow-paid --scenario tool --max-requests 2 --max-output-tokens 128
 
-Run the full provider check, with a maximum of twelve requests:
+Run the full provider check, with a maximum of sixteen provider requests:
 
     cargo run --release -p mini-agent-cli --example real_llm -- \
-      --allow-paid --scenario all --max-requests 12 --max-output-tokens 512
+      --allow-paid --scenario all --max-requests 16 --max-output-tokens 512
 
 Use 1024 output tokens for the compaction scenario: some Responses-compatible
-models use a longer summary even when the final continuation is short.
+models use a longer summary even when the final continuation is short. Some
+provider-compatible endpoints also reject very low `max_output_tokens` values;
+if the response reports a `max_output_tokens` validation error, retry with
+1024 and record that provider limitation in the evidence.
 
 Use --output /tmp/mini-agent-real-llm.jsonl to keep machine-readable evidence.
 The path must not already exist. The output contains model results and provider
@@ -69,10 +75,27 @@ usage but never the API key; review it before sharing because model output may
 still contain sensitive text.
 
 The runner reads OPENAI_BASE_URL and OPENAI_MODEL using the same Responses
-adapter as the CLI. It also reads OPENAI_CHAT_BASE_URL for GLM image turns. It
-disables built-in web search so the scenario budget covers only the requested
-model calls. Use a provider/model that accepts the Responses API and its
-output-token parameter; GLM vision additionally needs a Chat Completions root.
+adapter as the CLI. Mentor and Goal use MENTOR_OPENAI_MODEL, with
+MENTOR_OPENAI_API_KEY and MENTOR_OPENAI_BASE_URL optional fallbacks to the
+primary provider settings. It also reads OPENAI_CHAT_BASE_URL for GLM image
+turns. It disables built-in web search so the scenario budget covers only the
+requested model calls. Use a provider/model that accepts the Responses API and
+its output-token parameter; GLM vision additionally needs a Chat Completions
+root.
+
+On macOS and Linux, use `python3` when a local Python command is needed; on
+Windows, use `python`. The runner probes `python3` first and then `python` for
+its local MCP fixture, so the same scenario command works on both host
+families.
+
+The mentor block creates a short settled session, invokes the independent
+mentor prompt, and checks that the production derived-item record points at the
+source checkpoint. The Goal block creates a bounded temporary Goal workspace,
+uses the production verdict parser, records the verdict, and advances one
+milestone. The MCP block starts a local Python stdio fixture through the
+production MCP loader, checks discovery and a preflight call, then lets the
+real model call the exposed MCP tool. The fixture is local and does not add a
+network service or provider charge.
 
 ## Evidence review
 
@@ -90,7 +113,7 @@ constant. The existing prompt_weight example is a separate paid experiment and
 normally issues 12 requests per repetition; use it only when that experiment
 is explicitly intended.
 
-Vision, mentor, persistent CLI sessions, Goal Mode, MCP, and provider-specific
-GLM image routing are intentionally separate test blocks. Add one scenario at a
-time with an explicit request budget and a deterministic verifier; do not make
-real calls a default release or CI gate.
+Persistent CLI sessions and provider-specific GLM image routing remain covered
+by separate paths inside this runner. Add one scenario at a time with an
+explicit request budget and a deterministic verifier; do not make real calls a
+default release or CI gate.

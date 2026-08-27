@@ -10,6 +10,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Opt-in, budgeted real-provider scenario checks for text, tools, conversation
   history, persistence, vision, and context compaction, with JSONL evidence and
   no default CI or release-network calls.
+- Opt-in, budgeted real-provider scenario checks for mentor-derived insights,
+  Goal verification/milestone advancement, and production MCP stdio tool calls.
 - Explicit provider output-token caps for controlled integration checks across
   Responses and Chat Completions adapters.
 

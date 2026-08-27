@@ -7,7 +7,7 @@ Status: implemented
 Real-provider checks live in the manual example
 crates/mini-agent-cli/examples/real_llm.rs rather than in the default test
 suite. The runner requires an explicit --allow-paid acknowledgement and
-supports six bounded scenarios:
+supports nine bounded scenarios:
 
 - text: one request for authentication, streaming, and final-text parsing;
 - tool: two requests for function schema, local execution, and settlement;
@@ -15,18 +15,22 @@ supports six bounded scenarios:
 - persistence: two requests for a settled checkpoint, reopen, and restored context;
 - vision: up to three requests including DeepSeek Files upload, image projection, and response;
 - compaction: two requests including the auxiliary summarization request.
+- mentor: one request for an independent review and a persisted derived item.
+- goal: one request for verifier parsing, verdict persistence, and milestone advancement.
+- mcp: two requests for a production MCP stdio path plus model tool settlement.
 
 The selected scenarios must fit the invocation-wide request budget. The hard
-maximum is 12 requests. Each provider request also receives an explicit output
+maximum is 20 requests. Each provider request also receives an explicit output
 token ceiling, defaulting to 256 and capped at 1024, and each scenario has a
 bounded wall-clock timeout. Results are emitted as JSONL without the API key.
 
 ## Boundary
 
 This runner tests the real provider adapter plus the portable core harness. It
-does not pretend to prove general model quality, and it does not automatically
-test vision, mentor, MCP, Goal Mode, persistent CLI sessions, or provider
-specific GLM image routing. Those paths need separate fixtures and budgets.
+does not pretend to prove general model quality. Mentor and Goal use production
+state/verdict code; MCP uses the production loader with a local stdio fixture.
+Persistent CLI sessions and provider-specific GLM image routing remain
+scenario-specific and budgeted.
 
 Real calls are never made by cargo test, CI, or the normal release workflow.
 The prompt-weight experiment remains separate because it intentionally uses a

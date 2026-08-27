@@ -1,15 +1,63 @@
 #[allow(dead_code)]
 #[path = "../src/env_file.rs"]
 mod env_file;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/goal.rs"]
+mod goal;
 #[allow(dead_code)]
 #[path = "../src/image.rs"]
 mod image;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/marketplaces.rs"]
+mod marketplaces;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/mcp.rs"]
+mod mcp;
 #[path = "../src/openai/mod.rs"]
 mod openai;
 #[cfg(not(test))]
 #[allow(dead_code, unused_imports)]
+#[path = "../src/persona.rs"]
+mod persona;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/processes.rs"]
+mod processes;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/result_store.rs"]
+mod result_store;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/sandbox.rs"]
+mod sandbox;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/security.rs"]
+mod security;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
 #[path = "../src/session.rs"]
 mod session;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/skills.rs"]
+mod skills;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/subagent.rs"]
+mod subagent;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/web.rs"]
+mod web;
+#[cfg(not(test))]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/workspace.rs"]
+mod workspace;
 
 use env_file::Environment;
 use image::DeepSeekFiles;
@@ -36,6 +84,8 @@ use openai::OpenAiError;
 use openai::OpenAiModel;
 use serde_json::Value;
 use serde_json::json;
+#[cfg(not(test))]
+use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -46,6 +96,8 @@ use std::io;
 use std::io::BufWriter;
 use std::io::Write;
 use std::path::PathBuf;
+#[cfg(not(test))]
+use std::process::Command as StdCommand;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -59,7 +111,7 @@ use tokio::time::timeout;
 
 const DEFAULT_MAX_OUTPUT_TOKENS: usize = 256;
 const MAX_OUTPUT_TOKENS: usize = 1024;
-const MAX_REQUESTS: usize = 12;
+const MAX_REQUESTS: usize = 20;
 const DEFAULT_TIMEOUT_SECONDS: u64 = 120;
 const TEST_PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -68,7 +120,7 @@ const TEST_PNG: &[u8] = &[
     0x01, 0x05, 0x01, 0x01, 0x27, 0x18, 0xE3, 0x66, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,
     0xAE, 0x42, 0x60, 0x82,
 ];
-const HELP: &str = "real-llm integration checks (network and provider billing are opt-in)\n\nUSAGE:\n    cargo run -p mini-agent-cli --example real_llm -- --allow-paid [OPTIONS]\n\nOPTIONS:\n    --allow-paid                 Required acknowledgement before contacting a provider\n    --scenario LIST               text, tool, conversation, persistence, vision, compaction, or all (default: text)\n    --max-requests N              Hard request budget, 1..12 (default: scenario budget)\n    --max-output-tokens N         Provider output cap, 16..1024 (default: 256)\n    --timeout-seconds N           Per-scenario wall-clock cap, 5..120 (default: 120)\n    --output PATH                 Create a JSONL evidence file instead of stdout\n\nThe runner never runs from cargo test or CI. Every scenario uses a short fixed\nprompt and reports model steps, provider requests, usage, and a deterministic\nverifier result.";
+const HELP: &str = "real-llm integration checks (network and provider billing are opt-in)\n\nUSAGE:\n    cargo run -p mini-agent-cli --example real_llm -- --allow-paid [OPTIONS]\n\nOPTIONS:\n    --allow-paid                 Required acknowledgement before contacting a provider\n    --scenario LIST               text, tool, conversation, persistence, vision, compaction, mentor, goal, mcp, or all (default: text)\n    --max-requests N              Hard request budget, 1..20 (default: scenario budget)\n    --max-output-tokens N         Provider output cap, 16..1024 (default: 256)\n    --timeout-seconds N           Per-scenario wall-clock cap, 5..120 (default: 120)\n    --output PATH                 Create a JSONL evidence file instead of stdout\n\nThe runner never runs from cargo test or CI. Every scenario uses a short fixed\nprompt and reports model steps, provider requests, usage, and a deterministic\nverifier result.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scenario {
@@ -78,6 +130,9 @@ enum Scenario {
     Persistence,
     Vision,
     Compaction,
+    Mentor,
+    Goal,
+    Mcp,
 }
 
 impl Scenario {
@@ -89,8 +144,11 @@ impl Scenario {
             "persistence" => Ok(Self::Persistence),
             "vision" => Ok(Self::Vision),
             "compaction" => Ok(Self::Compaction),
+            "mentor" => Ok(Self::Mentor),
+            "goal" => Ok(Self::Goal),
+            "mcp" => Ok(Self::Mcp),
             other => Err(format!(
-                "unknown scenario {other}; choose text, tool, conversation, persistence, vision, compaction, or all"
+                "unknown scenario {other}; choose text, tool, conversation, persistence, vision, compaction, mentor, goal, mcp, or all"
             )),
         }
     }
@@ -103,6 +161,9 @@ impl Scenario {
             Self::Persistence => "persistence",
             Self::Vision => "vision",
             Self::Compaction => "compaction",
+            Self::Mentor => "mentor",
+            Self::Goal => "goal",
+            Self::Mcp => "mcp",
         }
     }
 
@@ -114,6 +175,9 @@ impl Scenario {
             Self::Persistence => 2,
             Self::Vision => 3,
             Self::Compaction => 2,
+            Self::Mentor => 1,
+            Self::Goal => 1,
+            Self::Mcp => 2,
         }
     }
 }
@@ -523,6 +587,69 @@ async fn run_scenario(
             )
             .await
         }
+        Scenario::Mentor => {
+            #[cfg(not(test))]
+            {
+                run_mentor(
+                    api_key,
+                    model_name,
+                    base_url,
+                    max_output_tokens,
+                    used,
+                    max_requests,
+                )
+                .await
+            }
+            #[cfg(test)]
+            {
+                error_record(
+                    "mentor",
+                    "mentor scenario is only available outside cargo test".to_string(),
+                )
+            }
+        }
+        Scenario::Goal => {
+            #[cfg(not(test))]
+            {
+                run_goal(
+                    api_key,
+                    model_name,
+                    base_url,
+                    max_output_tokens,
+                    used,
+                    max_requests,
+                )
+                .await
+            }
+            #[cfg(test)]
+            {
+                error_record(
+                    "goal",
+                    "goal scenario is only available outside cargo test".to_string(),
+                )
+            }
+        }
+        Scenario::Mcp => {
+            #[cfg(not(test))]
+            {
+                run_mcp(
+                    api_key,
+                    model_name,
+                    base_url,
+                    max_output_tokens,
+                    used,
+                    max_requests,
+                )
+                .await
+            }
+            #[cfg(test)]
+            {
+                error_record(
+                    "mcp",
+                    "mcp scenario is only available outside cargo test".to_string(),
+                )
+            }
+        }
     }
 }
 
@@ -873,6 +1000,537 @@ async fn run_persistence(
     record
 }
 
+#[cfg(not(test))]
+fn mentor_provider(
+    primary_api_key: &str,
+    primary_base_url: &str,
+) -> Result<(String, String, String), String> {
+    let environment = Environment::load(".env").map_err(|error| error.to_string())?;
+    let api_key = environment
+        .resolve("MENTOR_OPENAI_API_KEY")
+        .or_else(|| environment.resolve("OPENAI_API_KEY"))
+        .map(|value| value.value)
+        .unwrap_or_else(|| primary_api_key.to_string());
+    let model = environment
+        .resolve("MENTOR_OPENAI_MODEL")
+        .map(|value| value.value)
+        .ok_or("MENTOR_OPENAI_MODEL is required for mentor and goal scenarios")?;
+    let base_url = environment
+        .resolve("MENTOR_OPENAI_BASE_URL")
+        .or_else(|| environment.resolve("OPENAI_BASE_URL"))
+        .map(|value| value.value)
+        .unwrap_or_else(|| primary_base_url.to_string());
+    Ok((api_key, model, base_url))
+}
+
+#[cfg(not(test))]
+fn mentor_system_prompt() -> String {
+    "You are an independent mentor reviewing a settled coding-agent session. Analyze only the supplied session evidence. Identify important patterns, risks, and the highest-value next action. Distinguish observations from inferences. Do not claim to have run tools or inspected anything outside the session. Keep the answer short and end with exactly MENTOR-LLM-OK.".to_string()
+}
+
+#[cfg(not(test))]
+async fn run_mentor(
+    primary_api_key: &str,
+    _primary_model_name: &str,
+    primary_base_url: &str,
+    max_output_tokens: usize,
+    used: Arc<AtomicUsize>,
+    max_requests: usize,
+) -> Value {
+    let (api_key, mentor_model, mentor_base_url) =
+        match mentor_provider(primary_api_key, primary_base_url) {
+            Ok(provider) => provider,
+            Err(error) => return error_record("mentor", error),
+        };
+    let workspace = match env::current_dir() {
+        Ok(workspace) => workspace,
+        Err(error) => return error_record("mentor", error.to_string()),
+    };
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let session_id = format!("real-mentor-{timestamp}-{}", used.load(Ordering::SeqCst));
+    let session_root = match session::session_directory(&workspace) {
+        Ok(path) => path,
+        Err(error) => return error_record("mentor", error),
+    };
+    let session_path = session_root.join(&session_id);
+    let cleanup = || {
+        let _ = fs::remove_dir_all(&session_path);
+    };
+    let mut opened = match session::SessionStore::open(
+        &workspace,
+        session::SessionRequest::Named(session_id.clone()),
+    ) {
+        Ok(opened) => opened,
+        Err(error) => return error_record("mentor", error),
+    };
+    let source_messages = vec![
+        Message::User {
+            text: "Inspect the release checklist and report the result.".to_string(),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: "Deterministic checks passed; the release checklist is complete.".to_string(),
+            tool_calls: Vec::new(),
+        },
+    ];
+    if let Err(error) = opened.store.record_turn(session::TurnCommit {
+        started_at_ms: timestamp as u64,
+        prompt: "Inspect the release checklist and report the result.",
+        status: session::TurnStatus::Completed,
+        steps: 1,
+        error: None,
+        messages: &source_messages,
+        checkpoint: &source_messages,
+    }) {
+        drop(opened);
+        cleanup();
+        return error_record("mentor", error);
+    }
+    drop(opened);
+
+    let mut resumed = match session::SessionStore::open(
+        &workspace,
+        session::SessionRequest::Resume(session_id.clone()),
+    ) {
+        Ok(opened) => opened,
+        Err(error) => {
+            cleanup();
+            return error_record("mentor", error);
+        }
+    };
+    let source_checkpoint_seq = resumed.store.checkpoint_seq();
+    let restored_messages = resumed.messages.len();
+    let model = match model(
+        &api_key,
+        &mentor_model,
+        &mentor_base_url,
+        max_output_tokens,
+        Arc::clone(&used),
+        max_requests,
+    ) {
+        Ok(model) => model,
+        Err(error) => {
+            drop(resumed);
+            cleanup();
+            return error_record("mentor", error);
+        }
+    };
+    let mentor_config = HarnessConfig {
+        system_prompt: mentor_system_prompt(),
+        max_steps: 1,
+        max_tool_calls_per_step: 0,
+        context_limit_behavior: ContextLimitBehavior::Reject,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(model, ToolRegistry::default(), mentor_config);
+    if let Err(error) = harness.restore_history(std::mem::take(&mut resumed.messages)) {
+        drop(resumed);
+        cleanup();
+        return error_record("mentor", error.to_string());
+    }
+    let mut observer = EvalObserver::default();
+    let result = harness
+        .run(
+            "Produce a concise independent review of the settled evidence. State the observation, one risk or caveat, and one next action.",
+            &mut observer,
+        )
+        .await;
+    let outcome = match result {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            let record = harness_error_record("mentor", error, &observer);
+            drop(resumed);
+            cleanup();
+            return record;
+        }
+    };
+    let final_text = outcome.final_text.clone();
+    let completed = outcome.stop_reason == StopReason::Completed;
+    let marker_found = final_text.contains("MENTOR-LLM-OK");
+    let derived_recorded = resumed
+        .store
+        .record_derived(session::DerivedItem {
+            item_kind: "mentor_insight",
+            provider: "openai_responses",
+            model: &mentor_model,
+            source_checkpoint_seq,
+            source_fingerprint: "real-llm-mentor-fixture",
+            criteria: None,
+            output: &final_text,
+        })
+        .is_ok();
+    let session_jsonl_contains_derived = fs::read_to_string(resumed.store.path())
+        .map(|content| content.contains("\"item_kind\":\"mentor_insight\""))
+        .unwrap_or(false);
+    let record = report(
+        "mentor",
+        completed
+            && marker_found
+            && restored_messages >= 2
+            && derived_recorded
+            && session_jsonl_contains_derived,
+        &observer,
+        json!({
+            "provider_model": mentor_model,
+            "source_checkpoint_seq": source_checkpoint_seq,
+            "restored_messages": restored_messages,
+            "derived_recorded": derived_recorded,
+            "session_jsonl_contains_derived": session_jsonl_contains_derived,
+            "final_text": final_text,
+            "steps": outcome.steps,
+        }),
+    );
+    drop(resumed);
+    cleanup();
+    record
+}
+
+#[cfg(not(test))]
+async fn run_goal(
+    primary_api_key: &str,
+    _primary_model_name: &str,
+    primary_base_url: &str,
+    max_output_tokens: usize,
+    used: Arc<AtomicUsize>,
+    max_requests: usize,
+) -> Value {
+    let (api_key, mentor_model, mentor_base_url) =
+        match mentor_provider(primary_api_key, primary_base_url) {
+            Ok(provider) => provider,
+            Err(error) => return error_record("goal", error),
+        };
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let goal_root = env::temp_dir().join(format!(
+        "mini-agent-real-goal-{timestamp}-{}",
+        used.load(Ordering::SeqCst)
+    ));
+    if let Err(error) = fs::create_dir_all(&goal_root) {
+        return error_record("goal", error.to_string());
+    }
+    let cleanup = || {
+        let _ = fs::remove_dir_all(&goal_root);
+    };
+    let initial_state =
+        match goal::init_goal_workspace(&goal_root, "Verify the release checklist.", 2) {
+            Ok(state) => state,
+            Err(error) => {
+                cleanup();
+                return error_record("goal", error.to_string());
+            }
+        };
+    let criteria = match goal::goal_verification_criteria(&goal_root) {
+        Ok(criteria) => criteria,
+        Err(error) => {
+            cleanup();
+            return error_record("goal", error.to_string());
+        }
+    };
+    let model = match model(
+        &api_key,
+        &mentor_model,
+        &mentor_base_url,
+        max_output_tokens,
+        Arc::clone(&used),
+        max_requests,
+    ) {
+        Ok(model) => model,
+        Err(error) => {
+            cleanup();
+            return error_record("goal", error);
+        }
+    };
+    let verifier_config = HarnessConfig {
+        system_prompt: "You are an independent verifier reviewing a settled coding-agent session against explicit criteria. Use only supplied evidence. For each criterion state pass, fail, or insufficient evidence. End with three separate lines exactly: verdict: approved; score: 100; summary: GOAL-LLM-OK.".to_string(),
+        max_steps: 1,
+        max_tool_calls_per_step: 0,
+        context_limit_behavior: ContextLimitBehavior::Reject,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(model, ToolRegistry::default(), verifier_config);
+    if let Err(error) = harness.restore_history(vec![
+        Message::User {
+            text: "The release checklist requires all deterministic checks to pass.".to_string(),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: "Evidence: cargo tests and linting passed; the checklist is complete."
+                .to_string(),
+            tool_calls: Vec::new(),
+        },
+    ]) {
+        cleanup();
+        return error_record("goal", error.to_string());
+    }
+    let mut observer = EvalObserver::default();
+    let result = harness
+        .run(
+            &format!(
+                "Verify the settled goal milestone against this acceptance plan:\n\n{criteria}\n\nThe supplied session evidence says the deterministic checks passed. Return a concise verdict with exactly these separate parseable lines:\nverdict: approved\nscore: 100\nsummary: GOAL-LLM-OK",
+            ),
+            &mut observer,
+        )
+        .await;
+    let outcome = match result {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            let record = harness_error_record("goal", error, &observer);
+            cleanup();
+            return record;
+        }
+    };
+    let verdict = goal::parse_verifier_verdict(&outcome.final_text);
+    let verdict_recorded =
+        goal::record_verifier_verdict(&goal_root, 1, &outcome.final_text).is_ok();
+    let advanced_state = goal::advance_goal_milestone(&goal_root, Some(verdict.clone())).ok();
+    let passed = outcome.stop_reason == StopReason::Completed
+        && verdict.outcome == goal::VerdictOutcome::Approved
+        && verdict.score == Some(100)
+        && verdict.summary.contains("GOAL-LLM-OK")
+        && verdict_recorded
+        && advanced_state
+            .as_ref()
+            .is_some_and(|state| state.current_milestone == initial_state.current_milestone + 1);
+    let record = report(
+        "goal",
+        passed,
+        &observer,
+        json!({
+            "provider_model": mentor_model,
+            "initial_milestone": initial_state.current_milestone,
+            "advanced_milestone": advanced_state.as_ref().map(|state| state.current_milestone),
+            "verdict": format!("{:?}", verdict.outcome),
+            "score": verdict.score,
+            "summary": verdict.summary,
+            "verdict_recorded": verdict_recorded,
+            "final_text": outcome.final_text,
+            "steps": outcome.steps,
+        }),
+    );
+    cleanup();
+    record
+}
+
+#[cfg(not(test))]
+fn python_command() -> Result<String, String> {
+    ["python3", "python"]
+        .into_iter()
+        .find(|command| {
+            StdCommand::new(command)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+        })
+        .map(str::to_string)
+        .ok_or("Python 3 is required for the MCP fixture".to_string())
+}
+
+#[cfg(not(test))]
+fn write_mcp_fixture(root: &std::path::Path) -> Result<PathBuf, String> {
+    let script = root.join("mcp_fixture.py");
+    fs::write(
+        &script,
+        r#"import json
+import sys
+
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "initialize":
+        result = {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "real-llm-fixture", "version": "1.0.0"},
+        }
+    elif method == "tools/list":
+        result = {
+            "resultType": "complete",
+            "tools": [{
+                "name": "lookup_release_marker",
+                "description": "Return the fixed release marker for the integration check.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"key": {"type": "string", "enum": ["release"]}},
+                    "required": ["key"],
+                    "additionalProperties": False,
+                },
+            }],
+        }
+    elif method == "tools/call":
+        key = request.get("params", {}).get("arguments", {}).get("key", "")
+        result = {
+            "resultType": "complete",
+            "content": [{"type": "text", "text": "MCP-RELEASE-42" if key == "release" else "MCP-INVALID-KEY"}],
+            "isError": key != "release",
+        }
+    else:
+        continue
+    response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
+    print(json.dumps(response), flush=True)
+"#,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(script)
+}
+
+#[cfg(not(test))]
+async fn run_mcp(
+    api_key: &str,
+    model_name: &str,
+    base_url: &str,
+    max_output_tokens: usize,
+    used: Arc<AtomicUsize>,
+    max_requests: usize,
+) -> Value {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let root = env::temp_dir().join(format!(
+        "mini-agent-real-mcp-{timestamp}-{}",
+        used.load(Ordering::SeqCst)
+    ));
+    if let Err(error) = fs::create_dir_all(&root) {
+        return error_record("mcp", error.to_string());
+    }
+    if let Err(error) = fs::create_dir(root.join(".agents")) {
+        let _ = fs::remove_dir_all(&root);
+        return error_record("mcp", error.to_string());
+    }
+    let cleanup = || {
+        let _ = fs::remove_dir_all(&root);
+    };
+    let script = match write_mcp_fixture(&root) {
+        Ok(script) => script,
+        Err(error) => {
+            cleanup();
+            return error_record("mcp", error);
+        }
+    };
+    let command = match python_command() {
+        Ok(command) => command,
+        Err(error) => {
+            cleanup();
+            return error_record("mcp", error);
+        }
+    };
+    let canonical_root = match root.canonicalize() {
+        Ok(root) => root,
+        Err(error) => {
+            cleanup();
+            return error_record("mcp", error.to_string());
+        }
+    };
+    let mcp_config = skills::McpServerConfig {
+        plugin_name: "real_llm.fixture".to_string(),
+        server_name: "release".to_string(),
+        workspace_root: canonical_root.clone(),
+        plugin_root: canonical_root.clone(),
+        plugin_data: canonical_root.join(".agents/plugin-data/real_llm.fixture"),
+        connect_timeout: Duration::from_secs(20),
+        transport: skills::McpTransportConfig::Stdio {
+            command,
+            args: vec![script.to_string_lossy().into_owned()],
+            env: BTreeMap::new(),
+            cwd: None,
+        },
+    };
+    let mut loaded = mcp::load(
+        &[mcp_config],
+        workspace::ApprovalController::new(workspace::ApprovalMode::Automatic),
+    );
+    if !loaded.diagnostics.is_empty() || loaded.tools.len() != 1 || loaded.loaded_servers.len() != 1
+    {
+        let diagnostics = loaded.diagnostics.join("; ");
+        cleanup();
+        return error_record(
+            "mcp",
+            format!(
+                "MCP fixture did not load exactly one server/tool: tools={}, servers={}, diagnostics={diagnostics}",
+                loaded.tools.len(),
+                loaded.loaded_servers.len()
+            ),
+        );
+    }
+    let expected_tool_name = loaded.tools[0].spec().name.clone();
+    let preflight = loaded.tools[0].execute(&json!({"key": "release"}));
+    let preflight_result = match preflight {
+        Ok(output) => output,
+        Err(error) => {
+            cleanup();
+            return error_record("mcp", format!("MCP preflight call failed: {error}"));
+        }
+    };
+    let preflight_ok = preflight_result.contains("MCP-RELEASE-42");
+    let model = match model(
+        api_key,
+        model_name,
+        base_url,
+        max_output_tokens,
+        used,
+        max_requests,
+    ) {
+        Ok(model) => model,
+        Err(error) => {
+            cleanup();
+            return error_record("mcp", error);
+        }
+    };
+    let mut harness = Harness::new(
+        model,
+        ToolRegistry::new(std::mem::take(&mut loaded.tools)),
+        config(2),
+    );
+    let mut observer = EvalObserver::default();
+    let result = harness
+        .run(
+            &format!(
+                "Call the MCP tool {expected_tool_name} exactly once with key release. Then reply exactly MCP-LLM-OK and no other words."
+            ),
+            &mut observer,
+        )
+        .await;
+    let call = observer.events.iter().find_map(|event| match event {
+        Event::ToolStarted { call } => Some(call),
+        _ => None,
+    });
+    let record = match result {
+        Ok(outcome) => {
+            let argument_ok = call
+                .map(|call| {
+                    call.name == expected_tool_name
+                        && call.arguments.get("key").and_then(Value::as_str) == Some("release")
+                })
+                .unwrap_or(false);
+            report(
+                "mcp",
+                outcome.stop_reason == StopReason::Completed
+                    && preflight_ok
+                    && argument_ok
+                    && outcome.final_text.trim() == "MCP-LLM-OK",
+                &observer,
+                json!({
+                    "server": "real_llm.fixture/release",
+                    "tool": expected_tool_name,
+                    "preflight_call_passed": preflight_ok,
+                    "tool_call": call.map(tool_call_value),
+                    "final_text": outcome.final_text,
+                    "steps": outcome.steps,
+                }),
+            )
+        }
+        Err(error) => harness_error_record("mcp", error, &observer),
+    };
+    drop(harness);
+    cleanup();
+    record
+}
+
 async fn run_vision(
     api_key: &str,
     model_name: &str,
@@ -1114,6 +1772,9 @@ fn parse_args(raw: Vec<String>) -> Result<Args, String> {
                             Scenario::Persistence,
                             Scenario::Vision,
                             Scenario::Compaction,
+                            Scenario::Mentor,
+                            Scenario::Goal,
+                            Scenario::Mcp,
                         ];
                         break;
                     }
@@ -1210,18 +1871,18 @@ mod tests {
             "--scenario".to_string(),
             "all".to_string(),
             "--max-requests".to_string(),
-            "12".to_string(),
+            "18".to_string(),
             "--max-output-tokens".to_string(),
             "64".to_string(),
         ])
         .unwrap();
-        assert_eq!(args.scenarios.len(), 6);
+        assert_eq!(args.scenarios.len(), 9);
         assert_eq!(
             args.scenarios
                 .iter()
                 .map(|scenario| scenario.request_budget())
                 .sum::<usize>(),
-            12
+            16
         );
     }
 
