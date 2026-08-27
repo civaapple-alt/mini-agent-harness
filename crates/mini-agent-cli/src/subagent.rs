@@ -63,6 +63,46 @@ fn sanitize_task_name(name: &str) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn record_subagent_tree_meta(
+    root: &std::path::Path,
+    child_id: &str,
+    task_name: &str,
+    agent_type: &str,
+    started_at_ms: u64,
+    completed_at_ms: u64,
+    steps: u64,
+    exit_code: i64,
+    output: &str,
+    error: &str,
+) {
+    let subagents_dir = root.join(".agents/sessions").join(child_id);
+    let _ = std::fs::create_dir_all(&subagents_dir);
+    let meta = json!({
+        "subagent_id": child_id,
+        "task_name": task_name,
+        "agent_type": agent_type,
+        "started_at_ms": started_at_ms,
+        "completed_at_ms": completed_at_ms,
+        "duration_ms": completed_at_ms.saturating_sub(started_at_ms),
+        "steps": steps,
+        "exit_code": exit_code,
+        "status": if exit_code == 0 && error.is_empty() { "completed" } else { "failed" },
+    });
+    let _ = std::fs::write(
+        subagents_dir.join("meta.json"),
+        serde_json::to_vec_pretty(&meta).unwrap_or_default(),
+    );
+    let out = json!({
+        "output": output,
+        "error": error,
+    });
+    let _ = std::fs::write(
+        subagents_dir.join("output.json"),
+        serde_json::to_vec_pretty(&out).unwrap_or_default(),
+    );
+}
+
 impl Tool for SpawnAgent {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -78,6 +118,15 @@ impl Tool for SpawnAgent {
                     "message": {
                         "type": "string",
                         "description": "Initial task prompt and instructions for the child agent"
+                    },
+                    "agent_type": {
+                        "type": "string",
+                        "enum": ["explore", "plan", "general"],
+                        "description": "Subagent preset role: 'explore' (fast read-only search), 'plan' (read-only architecture design), or 'general' (full execution). Default: 'general'"
+                    },
+                    "fork_context": {
+                        "type": "boolean",
+                        "description": "Whether to inherit parent settled context snapshot (default: true for general/plan, false for explore)"
                     },
                     "persist": {
                         "type": "boolean",
@@ -100,16 +149,20 @@ impl Tool for SpawnAgent {
 
     fn execute(&self, args: &Value) -> Result<String, ToolError> {
         let task_name = string_arg(args, "task_name")?;
-        let message = string_arg(args, "message")?;
+        let raw_message = string_arg(args, "message")?;
         if task_name.trim().is_empty() {
             return Err(ToolError("task_name cannot be empty".to_string()));
         }
-        if message.trim().is_empty() {
+        if raw_message.trim().is_empty() {
             return Err(ToolError("message cannot be empty".to_string()));
         }
 
         self.0.approve(&format!("spawn subagent `{task_name}`"))?;
 
+        let agent_type = args
+            .get("agent_type")
+            .and_then(Value::as_str)
+            .unwrap_or("general");
         let persist = args.get("persist").and_then(Value::as_bool).unwrap_or(true);
         let model = args.get("model").and_then(|v| v.as_str());
         let timeout_secs = args
@@ -117,6 +170,21 @@ impl Tool for SpawnAgent {
             .and_then(|v| v.as_u64())
             .unwrap_or(120)
             .clamp(10, 600);
+
+        let started_at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let message = match agent_type {
+            "explore" => format!(
+                "[Role: Read-Only Explorer]\nYou have read-only permissions. Do not attempt to modify workspace files.\n\n{raw_message}"
+            ),
+            "plan" => format!(
+                "[Role: Software Architect]\nAnalyze requirements and design an implementation plan with critical files.\n\n{raw_message}"
+            ),
+            _ => raw_message.to_string(),
+        };
 
         let current_exe = std::env::current_exe()
             .map_err(|e| ToolError(format!("cannot locate mini-agent executable: {e}")))?;
@@ -134,7 +202,7 @@ impl Tool for SpawnAgent {
 
         let mut cmd = Command::new(current_exe);
         cmd.arg("ask")
-            .arg(message)
+            .arg(&message)
             .arg("--json")
             .arg("--auto")
             .arg("--security-preset")
@@ -156,6 +224,11 @@ impl Tool for SpawnAgent {
             self.0.sandbox,
             Duration::from_secs(timeout_secs),
         )?;
+
+        let completed_at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
 
         if output.timed_out {
             return Err(ToolError(format!(
@@ -179,6 +252,21 @@ impl Tool for SpawnAgent {
                 .get("session_id")
                 .and_then(|s| s.as_str())
                 .or(session_id.as_deref());
+
+            if let Some(sid) = returned_sid {
+                record_subagent_tree_meta(
+                    &self.0.root,
+                    sid,
+                    task_name,
+                    agent_type,
+                    started_at_ms,
+                    completed_at_ms,
+                    steps,
+                    exit_code,
+                    final_output,
+                    error,
+                );
+            }
 
             let session_info = match returned_sid {
                 Some(sid) => format!(" [session_id: {sid}]"),
@@ -204,7 +292,21 @@ impl Tool for SpawnAgent {
         } else {
             // Fallback for raw text output
             let session_info = match session_id {
-                Some(sid) => format!(" [session_id: {sid}]"),
+                Some(ref sid) => {
+                    record_subagent_tree_meta(
+                        &self.0.root,
+                        sid,
+                        task_name,
+                        agent_type,
+                        started_at_ms,
+                        completed_at_ms,
+                        1,
+                        output.exit_code.unwrap_or(0) as i64,
+                        output.raw_stdout.trim(),
+                        output.raw_stderr.trim(),
+                    );
+                    format!(" [session_id: {sid}]")
+                }
                 None => String::new(),
             };
             if output.exit_code == Some(0) {
@@ -419,9 +521,38 @@ mod tests {
         assert!(spec.description.contains("subagent"));
         assert!(spec.parameters["properties"]["task_name"].is_object());
         assert!(spec.parameters["properties"]["message"].is_object());
+        assert!(spec.parameters["properties"]["agent_type"].is_object());
+        assert!(spec.parameters["properties"]["fork_context"].is_object());
         assert!(spec.parameters["properties"]["persist"].is_object());
         assert!(spec.parameters["properties"]["model"].is_object());
         assert!(spec.parameters["properties"]["timeout_seconds"].is_object());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn record_subagent_tree_meta_creates_files() {
+        let root = test_root();
+        record_subagent_tree_meta(
+            &root,
+            "sub-123-reviewer",
+            "reviewer",
+            "explore",
+            1000,
+            2000,
+            4,
+            0,
+            "all tests pass",
+            "",
+        );
+        let subagent_dir = root.join(".agents/sessions/sub-123-reviewer");
+        assert!(subagent_dir.join("meta.json").is_file());
+        assert!(subagent_dir.join("output.json").is_file());
+        let meta: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(subagent_dir.join("meta.json")).unwrap())
+                .unwrap();
+        assert_eq!(meta["agent_type"], "explore");
+        assert_eq!(meta["duration_ms"], 1000);
+        assert_eq!(meta["status"], "completed");
         fs::remove_dir_all(root).unwrap();
     }
 

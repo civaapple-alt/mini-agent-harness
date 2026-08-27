@@ -79,11 +79,6 @@ If a proposed approach is rejected during review:
 
 ### Proposed Notes Under Review (`proposed/`)
 
-#### Architecture (`proposed/architecture/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-27 | [Session Directory & Metadata Architecture](.agents/notes/proposed/architecture/2026-08-27-session-directory-and-metadata-architecture.md) | Modular session directory: fast summary index, goal/plan state, subagent trees, and compaction segments |
-
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
 |---|---|---|
@@ -106,6 +101,7 @@ If a proposed approach is rejected during review:
 | 2026-08-27 | [Subprocess CLI & ACP Subagent Execution](.agents/notes/implemented/architecture/2026-08-27-subprocess-cli-and-acp-subagent-execution.md) | Headless `mini-agent ask --json` subprocess spawning, `spawn_agent` tool, and Agent Client Protocol execution |
 | 2026-08-27 | [Multi-turn Interactive Subagent Sessions](.agents/notes/implemented/architecture/2026-08-27-multi-turn-interactive-subagent-sessions.md) | Stateless session-backed resumption (`send_subagent_message`) and ACP streaming protocol |
 | 2026-08-27 | [Subagent Trace Replay & Session Lineage](.agents/notes/implemented/architecture/2026-08-27-subagent-trace-replay-and-session-lineage.md) | Hierarchical trace rollup, nested replay drill-down, and session checkpoint graph |
+| 2026-08-27 | [Session Directory & Metadata Architecture](.agents/notes/implemented/architecture/2026-08-27-session-directory-and-metadata-architecture.md) | Modular session directory: fast summary index, goal/plan state, subagent trees, and compaction segments |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |

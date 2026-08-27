@@ -5,8 +5,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
-### Added
-
+- Modular session directory layout generating atomic `summary.json`, `signals.json`, and `prompt_context.json` snapshots alongside durable `session.jsonl` records.
+- Fast $O(1)$ session discovery in `mini-agent sessions` reading lightweight `summary.json` metadata indexes without parsing full conversation streams.
+- Subagent tree execution tracking recording lifecycle metrics (`started_at_ms`, `completed_at_ms`, `duration_ms`, `steps`, `exit_code`, `status`) in `meta.json` and structured deliverables in `output.json` under `.agents/sessions/<id>/`.
+- Subagent preset role configurations (`explore` with read-only guidelines, `plan` for software architecture design, `general` for full execution) and `fork_context` controls in `SpawnAgent`.
 - Subprocess CLI-driven subagent execution tool (`spawn_agent`), allowing parent agents to delegate bounded tasks to isolated child `mini-agent ask "<prompt>" --json` processes with zero prompt pollution, OS-level crash/memory isolation, and structured result aggregation.
 - Multi-turn interactive subagent session tool suite (`send_subagent_message`, `list_subagents`) enabling stateful conversational follow-ups and refinement with child agents via durable session resumption (`--session-id`).
 - Implicit persistence encapsulation for subagents: `spawn_agent` automatically provisions unique session identifiers (`sub-<time>-<task>`) and commits child checkpoints for seamless multi-turn resumption while standard CLI invocations remain clean and ephemeral.

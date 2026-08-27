@@ -26,6 +26,9 @@ const MAX_SESSIONS: usize = 128;
 const MAX_WORKSPACE_KEY: usize = 240;
 const SESSION_FILE_NAME: &str = "session.jsonl";
 const SESSION_LOCK_NAME: &str = "session";
+pub(crate) const SUMMARY_FILE_NAME: &str = "summary.json";
+pub(crate) const SIGNALS_FILE_NAME: &str = "signals.json";
+pub(crate) const PROMPT_CONTEXT_FILE_NAME: &str = "prompt_context.json";
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) enum SessionRequest {
@@ -45,11 +48,14 @@ pub(crate) struct OpenedSession {
 pub(crate) struct SessionStore {
     session_id: String,
     thread_id: String,
+    session_dir: PathBuf,
     path: PathBuf,
     file: File,
     bytes: u64,
     next_seq: u64,
     checkpoint_seq: u64,
+    turn_count: usize,
+    created_at_ms: u64,
     _lock: SessionLock,
 }
 
@@ -106,6 +112,11 @@ impl SessionStore {
         &self.path
     }
 
+    #[cfg(test)]
+    pub(crate) fn session_dir(&self) -> &Path {
+        &self.session_dir
+    }
+
     pub(crate) fn start_thread(&mut self) -> Result<(), String> {
         let thread_id = new_id("t");
         self.append_records(vec![json!({
@@ -156,7 +167,46 @@ impl SessionStore {
         records.push(self.checkpoint_record(turn.checkpoint));
         self.append_records(records)?;
         self.checkpoint_seq = self.next_seq.saturating_sub(1);
+        self.turn_count = self.turn_count.saturating_add(1);
+        self.update_summary_and_signals(turn.prompt, turn.steps, turn.error);
         Ok(())
+    }
+
+    fn update_summary_and_signals(&self, last_prompt: &str, steps: usize, error: Option<&str>) {
+        let now = timestamp_ms();
+        let summary_path = self.session_dir.join(SUMMARY_FILE_NAME);
+        let summary_val = json!({
+            "id": self.session_id,
+            "created_at_ms": self.created_at_ms,
+            "updated_at_ms": now,
+            "turn_count": self.turn_count,
+            "bytes": self.bytes,
+            "last_prompt": last_prompt,
+            "last_status": if error.is_some() { "error" } else { "completed" },
+        });
+        let _ = write_json_atomic(&summary_path, &summary_val);
+
+        let signals_path = self.session_dir.join(SIGNALS_FILE_NAME);
+        let signals = if let Ok(data) = fs::read_to_string(&signals_path) {
+            serde_json::from_str::<Value>(&data).unwrap_or_else(|_| json!({}))
+        } else {
+            json!({})
+        };
+        let prev_steps = signals
+            .get("step_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let prev_tool_calls = signals
+            .get("tool_call_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let new_signals = json!({
+            "turn_count": self.turn_count,
+            "step_count": prev_steps + steps as u64,
+            "tool_call_count": prev_tool_calls + steps.saturating_sub(1) as u64,
+            "updated_at_ms": now,
+        });
+        let _ = write_json_atomic(&signals_path, &new_signals);
     }
 
     fn create(workspace: &Path) -> Result<OpenedSession, String> {
@@ -192,14 +242,18 @@ impl SessionStore {
                 }
             };
             let thread_id = new_id("t");
+            let now = timestamp_ms();
             let mut store = Self {
                 session_id: session_id.clone(),
                 thread_id: thread_id.clone(),
+                session_dir: session_dir.clone(),
                 path,
                 file,
                 bytes: 0,
                 next_seq: 1,
                 checkpoint_seq: 0,
+                turn_count: 0,
+                created_at_ms: now,
                 _lock: lock,
             };
             store.append_records(vec![
@@ -208,14 +262,16 @@ impl SessionStore {
                     "schema_version": SCHEMA_VERSION,
                     "session_id": session_id,
                     "workspace": workspace,
-                    "timestamp_ms": timestamp_ms(),
+                    "timestamp_ms": now,
                 }),
                 json!({
                     "kind": "thread_started",
                     "thread_id": thread_id,
-                    "timestamp_ms": timestamp_ms(),
+                    "timestamp_ms": now,
                 }),
             ])?;
+            write_prompt_context(&session_dir, workspace, &session_id);
+            store.update_summary_and_signals("", 0, None);
             return Ok(OpenedSession {
                 store,
                 messages: Vec::new(),
@@ -257,14 +313,18 @@ impl SessionStore {
             }
         };
         let thread_id = new_id("t");
+        let now = timestamp_ms();
         let mut store = Self {
             session_id: session_id.to_string(),
             thread_id: thread_id.clone(),
+            session_dir: session_dir.clone(),
             path,
             file,
             bytes: 0,
             next_seq: 1,
             checkpoint_seq: 0,
+            turn_count: 0,
+            created_at_ms: now,
             _lock: lock,
         };
         store.append_records(vec![
@@ -273,14 +333,16 @@ impl SessionStore {
                 "schema_version": SCHEMA_VERSION,
                 "session_id": session_id,
                 "workspace": workspace,
-                "timestamp_ms": timestamp_ms(),
+                "timestamp_ms": now,
             }),
             json!({
                 "kind": "thread_started",
                 "thread_id": thread_id,
-                "timestamp_ms": timestamp_ms(),
+                "timestamp_ms": now,
             }),
         ])?;
+        write_prompt_context(&session_dir, workspace, session_id);
+        store.update_summary_and_signals("", 0, None);
         Ok(OpenedSession {
             store,
             messages: Vec::new(),
@@ -310,17 +372,21 @@ impl SessionStore {
         }
         file.seek(SeekFrom::End(0))
             .map_err(|error| format!("cannot seek session append position: {error}"))?;
+        let store = Self {
+            session_id: session_id.to_string(),
+            thread_id: loaded.thread_id,
+            session_dir,
+            path,
+            file,
+            bytes: loaded.valid_bytes as u64,
+            next_seq: loaded.next_seq,
+            checkpoint_seq: loaded.checkpoint_seq,
+            turn_count: loaded.turn_count,
+            created_at_ms: loaded.created_at_ms,
+            _lock: lock,
+        };
         Ok(OpenedSession {
-            store: Self {
-                session_id: session_id.to_string(),
-                thread_id: loaded.thread_id,
-                path,
-                file,
-                bytes: loaded.valid_bytes as u64,
-                next_seq: loaded.next_seq,
-                checkpoint_seq: loaded.checkpoint_seq,
-                _lock: lock,
-            },
+            store,
             messages: loaded.messages,
             resumed: true,
         })
@@ -356,14 +422,18 @@ impl SessionStore {
             };
             let lock = acquire_lock(&session_dir, SESSION_LOCK_NAME)?;
             let thread_id = new_id("t");
+            let now = timestamp_ms();
             let mut store = Self {
                 session_id: session_id.clone(),
                 thread_id: thread_id.clone(),
+                session_dir: session_dir.clone(),
                 path,
                 file,
                 bytes: 0,
                 next_seq: 1,
                 checkpoint_seq: 0,
+                turn_count: 0,
+                created_at_ms: now,
                 _lock: lock,
             };
             store.append_records(vec![
@@ -372,7 +442,7 @@ impl SessionStore {
                     "schema_version": SCHEMA_VERSION,
                     "session_id": session_id,
                     "workspace": workspace,
-                    "timestamp_ms": timestamp_ms(),
+                    "timestamp_ms": now,
                     "forked_from": {
                         "parent_session_id": parent_session_id,
                         "parent_checkpoint_seq": parent_checkpoint_seq,
@@ -381,11 +451,13 @@ impl SessionStore {
                 json!({
                     "kind": "thread_started",
                     "thread_id": thread_id,
-                    "timestamp_ms": timestamp_ms(),
+                    "timestamp_ms": now,
                 }),
                 store.checkpoint_record(&parent_messages),
             ])?;
             store.checkpoint_seq = store.next_seq.saturating_sub(1);
+            write_prompt_context(&session_dir, workspace, &session_id);
+            store.update_summary_and_signals("", 0, None);
             return Ok(OpenedSession {
                 store,
                 messages: parent_messages,
@@ -460,6 +532,42 @@ impl TurnStatus {
     }
 }
 
+fn write_json_atomic(path: &Path, value: &Value) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let parent = path.parent().ok_or_else(|| "no parent dir".to_string())?;
+    let temp_path = parent.join(format!(".tmp_{}", new_id("tmp")));
+    let encoded =
+        serde_json::to_vec_pretty(value).map_err(|e| format!("cannot encode json: {e}"))?;
+    fs::write(&temp_path, &encoded).map_err(|e| format!("cannot write temp file: {e}"))?;
+    fs::rename(&temp_path, path).map_err(|e| {
+        let _ = fs::remove_file(&temp_path);
+        format!("cannot rename atomic file: {e}")
+    })?;
+    Ok(())
+}
+
+fn write_prompt_context(session_dir: &Path, workspace: &Path, session_id: &str) {
+    let agents_md_path = workspace.join("AGENTS.md");
+    let agents_md_content = if agents_md_path.is_file() {
+        fs::read_to_string(&agents_md_path).ok()
+    } else {
+        None
+    };
+    let value = json!({
+        "version": 1,
+        "session_id": session_id,
+        "created_at_ms": timestamp_ms(),
+        "os_name": std::env::consts::OS,
+        "shell_path": if cfg!(windows) { "pwsh" } else { "sh" },
+        "workspace": workspace.to_string_lossy(),
+        "agents_md_present": agents_md_content.is_some(),
+        "agents_md_content": agents_md_content,
+    });
+    let _ = write_json_atomic(&session_dir.join(PROMPT_CONTEXT_FILE_NAME), &value);
+}
+
 pub(crate) fn list(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
     let mut sessions_map = std::collections::HashMap::new();
 
@@ -475,6 +583,14 @@ pub(crate) fn list(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
                     .map(ToString::to_string)
                 && validate_session_id(&id).is_ok()
             {
+                let summary_file = path.join(SUMMARY_FILE_NAME);
+                if let Ok(data) = fs::read_to_string(&summary_file)
+                    && let Ok(meta) = serde_json::from_str::<Value>(&data)
+                {
+                    let bytes = meta.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0);
+                    sessions_map.insert(id.clone(), SessionSummary { id, bytes });
+                    continue;
+                }
                 let file = path.join(SESSION_FILE_NAME);
                 if let Ok(meta) = fs::metadata(&file) {
                     sessions_map.insert(
@@ -500,6 +616,16 @@ pub(crate) fn list(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
                     .map(ToString::to_string)
                 && validate_session_id(&id).is_ok()
             {
+                let summary_file = path.join(SUMMARY_FILE_NAME);
+                if let Ok(data) = fs::read_to_string(&summary_file)
+                    && let Ok(meta) = serde_json::from_str::<Value>(&data)
+                {
+                    let bytes = meta.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0);
+                    sessions_map
+                        .entry(id.clone())
+                        .or_insert_with(|| SessionSummary { id, bytes });
+                    continue;
+                }
                 let file = path.join(SESSION_FILE_NAME);
                 if let Ok(meta) = fs::metadata(&file) {
                     sessions_map
@@ -541,6 +667,8 @@ struct LoadedRecords {
     messages: Vec<Message>,
     next_seq: u64,
     checkpoint_seq: u64,
+    turn_count: usize,
+    created_at_ms: u64,
     valid_bytes: usize,
 }
 
@@ -550,6 +678,8 @@ fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecords, String>
     let mut expected_seq = 1u64;
     let mut header_seen = false;
     let mut latest_checkpoint = None;
+    let mut turn_count = 0usize;
+    let mut created_at_ms = 0u64;
     while offset < bytes.len() {
         let remaining = &bytes[offset..];
         let Some(end) = remaining.iter().position(|byte| *byte == b'\n') else {
@@ -585,7 +715,14 @@ fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecords, String>
                 if record.get("schema_version").and_then(Value::as_u64) != Some(SCHEMA_VERSION) {
                     return Err("unsupported session schema version".to_string());
                 }
+                created_at_ms = record
+                    .get("timestamp_ms")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
                 header_seen = true;
+            }
+            Some("turn_started") if header_seen => {
+                turn_count = turn_count.saturating_add(1);
             }
             Some("checkpoint") if header_seen => {
                 let thread_id = record
@@ -616,6 +753,8 @@ fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecords, String>
         messages,
         next_seq: expected_seq,
         checkpoint_seq,
+        turn_count,
+        created_at_ms,
         valid_bytes,
     })
 }

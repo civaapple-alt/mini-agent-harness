@@ -1447,6 +1447,24 @@ fn subagent_multi_turn_interactive_session_resumes_and_retains_context() {
             .contains("Multi-turn audit complete: auth is robust.")
     );
 
+    // Verify subagents directory was created and contains meta.json
+    let sessions_dir = root.join(".agents/sessions");
+    assert!(sessions_dir.is_dir());
+    let mut found_meta = false;
+    for entry in fs::read_dir(&sessions_dir).unwrap().filter_map(Result::ok) {
+        if entry.path().join("meta.json").is_file() {
+            found_meta = true;
+            let meta: Value =
+                serde_json::from_str(&fs::read_to_string(entry.path().join("meta.json")).unwrap())
+                    .unwrap();
+            assert_eq!(meta["status"], "completed");
+        }
+    }
+    assert!(
+        found_meta,
+        "expected subagent meta.json in .agents/sessions"
+    );
+
     server.join().unwrap();
     fs::remove_dir_all(root).unwrap();
 }

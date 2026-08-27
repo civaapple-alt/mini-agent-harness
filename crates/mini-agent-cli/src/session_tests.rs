@@ -196,6 +196,83 @@ fn forks_an_existing_session_into_a_new_session() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn creates_summary_signals_and_prompt_context_files() {
+    let (root, _home) = test_root();
+    fs::write(root.join("AGENTS.md"), "# Project Guidelines").unwrap();
+    let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+    let session_dir = opened.store.session_dir().to_path_buf();
+
+    // Verify prompt_context.json was created with AGENTS.md content
+    let prompt_ctx_file = session_dir.join(PROMPT_CONTEXT_FILE_NAME);
+    assert!(prompt_ctx_file.is_file());
+    let prompt_ctx: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&prompt_ctx_file).unwrap()).unwrap();
+    assert_eq!(prompt_ctx["agents_md_present"], true);
+
+    // Verify summary.json was created
+    let summary_file = session_dir.join(SUMMARY_FILE_NAME);
+    assert!(summary_file.is_file());
+
+    // Record a turn and verify summary & signals update
+    opened
+        .store
+        .record_turn(TurnCommit {
+            started_at_ms: 1000,
+            prompt: "build feature",
+            status: TurnStatus::Completed,
+            steps: 3,
+            error: None,
+            messages: &[],
+            checkpoint: &[],
+        })
+        .unwrap();
+
+    let summary: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&summary_file).unwrap()).unwrap();
+    assert_eq!(summary["turn_count"], 1);
+    assert_eq!(summary["last_prompt"], "build feature");
+    assert_eq!(summary["last_status"], "completed");
+
+    let signals_file = session_dir.join(SIGNALS_FILE_NAME);
+    assert!(signals_file.is_file());
+    let signals: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&signals_file).unwrap()).unwrap();
+    assert_eq!(signals["turn_count"], 1);
+    assert_eq!(signals["step_count"], 3);
+
+    drop(opened);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn fast_reads_summary_json_in_session_list() {
+    let (root, _home) = test_root();
+    let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+    let session_id = opened.store.session_id().to_string();
+
+    opened
+        .store
+        .record_turn(TurnCommit {
+            started_at_ms: 1000,
+            prompt: "test fast listing",
+            status: TurnStatus::Completed,
+            steps: 2,
+            error: None,
+            messages: &[],
+            checkpoint: &[],
+        })
+        .unwrap();
+    drop(opened);
+
+    let list = list(&root).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, session_id);
+    assert!(list[0].bytes > 0);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn test_root() -> (PathBuf, HomeGuard) {
     let lock = HOME_LOCK
         .lock()
