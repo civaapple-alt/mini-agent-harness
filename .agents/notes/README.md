@@ -80,7 +80,9 @@ If a proposed approach is rejected during review:
 ### Proposed Notes Under Review (`proposed/`)
 
 #### Architecture (`proposed/architecture/`)
-*No proposed architecture notes currently under review.*
+| Date | Title | Focus |
+|---|---|---|
+| 2026-08-27 | [Session Directory & Metadata Architecture](.agents/notes/proposed/architecture/2026-08-27-session-directory-and-metadata-architecture.md) | Modular session directory: fast summary index, goal/plan state, subagent trees, and compaction segments |
 
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
