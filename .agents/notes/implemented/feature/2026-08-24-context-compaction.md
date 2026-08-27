@@ -11,7 +11,7 @@ Long-running autonomous tasks (copilot/auto loops) inevitably exceed raw context
 In `auto` mode (or when `ContextLimitBehavior::Compact` is enabled):
 
 1. When settled history reaches half of the context limit (512 KiB / 1 MiB):
-   - The latest typed [`Message::Context`](crates/mini-agent-core/src/model.rs) (e.g. World State) is preserved verbatim.
+   - The latest typed [`Message::Context`](../../../../crates/mini-agent-core/src/model.rs) (e.g. World State) is preserved verbatim.
    - The last two model-step groups (capped at 128 KiB serialized) are preserved verbatim as the active tail.
    - Only the older prefix is sent to the model for structured summarization using a deterministic compaction prompt and an **empty tool catalog** (compact cannot call tools or attach `read_image` payloads).
 2. If the compaction request itself is oversized, older prefix messages are mechanically dropped until it fits.

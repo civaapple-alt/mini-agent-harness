@@ -141,7 +141,7 @@ sequenceDiagram
 3. **State Measurement & Convergence Feedback**:
    - Upon child exit, `SpawnAgent` automatically reads `review_file`;
    - Calls `parse_review_stats` to extract live `[open: N, fixed: M, wontfix: K]`;
-   - Persists telemetry into `.agents/sessions/<session_id>/subagents/<child_id>/meta.json`;
+   - Persists telemetry into the durable parent session's `subagents/<child_id>/meta.json`;
    - The parent LLM evaluates the numerical issue counts to determine whether the workflow has converged.
 
 ---

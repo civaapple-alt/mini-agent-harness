@@ -40,6 +40,12 @@ cross-platform certification. Local verification ran
 also passed. Full workspace tests, remote CI results, and live provider behavior
 were not verified in this review. No paid provider calls were made.
 
+The boundary fixes from this review were shipped in `8243e56`. This note
+remains proposed because the evidence-gate process and real-provider value
+evaluation were not completed by that change; the findings below are retained
+as the acceptance checklist and historical rationale, not as a claim that the
+current source still has each defect.
+
 The original development environment was Windows; the current validation
 environment is macOS. Treat those as separate acceptance lanes: Windows-only
 PowerShell, Job Object, and Mark-of-the-Web behavior requires Windows CI or a
@@ -87,8 +93,9 @@ network isolation.
 ### Stage 2: Verify Complete Host Workflows
 
 Goal Mode was the clearest gap between implementation and documentation. The
-stabilization implementation now runs a bounded milestone, settles it in a
-durable checkpoint, invokes a tool-free independent verifier, records the
+stabilization implementation shipped in `8243e56` now runs a bounded
+milestone, settles it in a durable checkpoint, invokes a tool-free independent
+verifier, records the
 verdict with its source checkpoint sequence, and advances only on approval.
 Rejection keeps the milestone in place; step, time, and model failures mark the
 goal failed. Stored milestone budgets are now applied to the active harness

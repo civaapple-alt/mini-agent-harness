@@ -16,8 +16,9 @@ guarantee another workspace's ignore rules. Never commit provider credentials. E
 model output, tool arguments, file content, commands, and errors. Review and
 redact traces before sharing them.
 
-Conversation history is process-local unless the user starts an interactive
-session with `--persist` or resumes an existing session. Durable JSONL files
+Interactive and one-shot `ask` conversation history is process-local unless
+`--persist` is supplied or an existing session is resumed. `auto` sessions
+persist by default; `--ephemeral` disables that. Durable JSONL files
 under `~/.mini-agent/sessions/<workspace>/<session-id>/` contain prompts,
 world-state context, reasoning, assistant messages, tool calls and results,
 errors, and complete settled checkpoints. They can contain source code or

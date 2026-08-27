@@ -12,7 +12,7 @@ records:
 
 - operating system, architecture, workspace, and the actual host shell;
 - `default` (8 steps) or `auto` (unlimited steps unless `MINI_AGENT_MAX_STEPS`, compact) loop mode, per-action
-  or automatic approval, and the lack of a command sandbox;
+  or automatic approval, and the selected native or Docker process sandbox;
 - root project markers for Rust, Maven/Gradle Java, Go, Python, Node, and .NET;
 - availability of a fixed catalog of common navigation, VCS, build, runtime,
   and package-manager commands;
@@ -41,8 +41,9 @@ diff rendering like Codex rather than mutable system-prompt rewriting.
 
 ## Durable item boundary
 
-World state makes the need for durable ordered items visible. The opt-in JSONL
-store now lives in the CLI host rather than `mini-agent-core` and preserves
+World state makes the need for durable ordered items visible. The JSONL store
+lives in the CLI host rather than `mini-agent-core`; it is used by persisted
+sessions and preserves
 these identities and relationships:
 
 ```text

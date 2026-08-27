@@ -108,9 +108,10 @@ mini-agent mentor verify SESSION_ID -- "tests pass and the diff is clean"
 Use `--` before a prompt that begins with `-`. Run `mini-agent help` or
 `mini-agent help <command>` for the complete command reference.
 
-Interactive sessions persist under `~/.mini-agent/sessions/` by default. Use
-`--ephemeral` (or `--no-persist`) for a memory-only session. A durable session
-stores settled conversation checkpoints; running processes, queued input, and
+Interactive sessions are memory-only by default. Use `--persist` to save
+settled checkpoints under `~/.mini-agent/sessions/`; `--ephemeral` (or
+`--no-persist`) explicitly keeps a session in memory. `auto` sessions persist
+by default and accept `--ephemeral`. Running processes, queued input, and
 other live effects are not resumed.
 
 ## Safety and boundaries

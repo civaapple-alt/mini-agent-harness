@@ -131,8 +131,9 @@ deadline to the complete streaming request. It enforces the harness response
 byte limit while accumulating text and tool calls, before returning them to
 core, and retains at most 4 KiB from an HTTP error body.
 
-Durable sessions are append-only by default for interactive and auto sessions.
-Use `--ephemeral` for a memory-only session. They are stored per workspace
+Durable sessions are append-only. Interactive and one-shot `ask` sessions
+require `--persist` (or resume/fork); `auto` sessions use persistence by
+default, and `--ephemeral` disables it. They are stored per workspace
 under `~/.mini-agent/sessions/`, not in the project tree. Resume validates strictly
 increasing sequence numbers and restores only the newest complete checkpoint.
 An incomplete final JSONL line is treated as a torn write and truncated before

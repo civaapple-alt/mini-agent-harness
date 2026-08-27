@@ -17,7 +17,9 @@ Implemented autonomous goal convergence and repetition detection:
 2. **Unattended Copilot Execution (`mini-agent auto`)**:
    - Runs with automatic approval (`ApprovalMode::Automatic`), uncapped step capacity (`max_steps: 0`), and dynamic prefix compaction preserving recent tool tail context verbatim.
 3. **Deterministic Persistence & Recovery**:
-   - Checkpoints settled turn history to `~/.mini-agent/sessions/` when `--persist` is enabled.
+   - Checkpoints settled turn history to `~/.mini-agent/sessions/`; `auto` uses
+     this persistence by default, while an interactive or one-shot session
+     must opt in with `--persist`.
 
 ## Consequences
 

@@ -8,7 +8,10 @@ Interactive coding agent sessions require crash resilience and resumption withou
 
 ## Decision
 
-The CLI provides opt-in session persistence via `--persist`, `sessions`, and `resume SESSION_ID`:
+The CLI provides host-level session persistence via `--persist`, `sessions`,
+and `resume SESSION_ID`. Interactive and one-shot `ask` sessions are
+process-local unless `--persist` is supplied; `auto` sessions persist by
+default and accept `--ephemeral`.
 
 1. **Storage Layout & Concurrency**:
    - Sessions are stored under `~/.mini-agent/sessions/<workspace>/<session-id>/session.jsonl`.

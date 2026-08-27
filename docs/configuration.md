@@ -78,9 +78,11 @@ environment values or command output.
 
 ## Durable sessions
 
-Interactive sessions persist by default. Use `--ephemeral` (or
-`--no-persist`) for an in-memory session. List known IDs with
-`mini-agent sessions`, and restore one with `mini-agent resume SESSION_ID`.
+Interactive and one-shot `ask` sessions are in-memory by default. Use
+`--persist` to save a session; use `--ephemeral` (or `--no-persist`) to make
+the choice explicit. `auto` sessions persist by default and accept
+`--ephemeral`. List known IDs with `mini-agent sessions`, and restore one with
+`mini-agent resume SESSION_ID`.
 Settled records live under `~/.mini-agent/sessions/<workspace>/<session-id>/`,
 where `<workspace>` is the percent-encoded absolute project path. No provider
 setting enables persistence implicitly.
@@ -228,4 +230,4 @@ Stdio configurations accept `command`, `args`, `env`, and `cwd`. Portable
 placeholders are supported without invoking a shell.
 
 Copyable skill, plugin, marketplace, HTTP MCP, and stdio MCP examples live in
-[`examples/extensions`](examples/extensions/README.md).
+[`examples/extensions`](../examples/extensions/README.md).

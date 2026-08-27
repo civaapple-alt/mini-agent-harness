@@ -12,5 +12,5 @@ Add persistent database traits, transaction logs, and execution checkpointing in
 
 ## Rationale for Rejection
 
-1. **Inability to Settle Non-Idempotent Effects**: Crash-boundary simulations ([Effect Recovery Boundary](.agents/notes/archived/experiments/2026-08-24-effect-recovery.md)) demonstrated that while intent logs detect uncertainty, they cannot settle or safely rollback non-idempotent real-world side effects (such as deleted files or external HTTP requests).
-2. **Microkernel Violation**: Adding persistence violates core separation of concerns. Persistence is a host-level integration requirement that belongs at the CLI/edge layer ([`crates/mini-agent-cli/src/session.rs`](crates/mini-agent-cli/src/session.rs)).
+1. **Inability to Settle Non-Idempotent Effects**: Crash-boundary simulations ([Effect Recovery Boundary](../../archived/experiments/2026-08-24-effect-recovery.md)) demonstrated that while intent logs detect uncertainty, they cannot settle or safely rollback non-idempotent real-world side effects (such as deleted files or external HTTP requests).
+2. **Microkernel Violation**: Adding persistence violates core separation of concerns. Persistence is a host-level integration requirement that belongs at the CLI/edge layer ([`crates/mini-agent-cli/src/session.rs`](../../../../crates/mini-agent-cli/src/session.rs)).

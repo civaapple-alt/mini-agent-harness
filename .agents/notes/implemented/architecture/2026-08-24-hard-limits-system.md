@@ -8,7 +8,7 @@ Unbounded context growth, unchecked tool loops, and massive tool outputs frequen
 
 ## Decision
 
-All model-visible inputs, outputs, tool invocations, and conversation context sizes are bounded by hard limits specified in [`HarnessConfig`](crates/mini-agent-core/src/harness.rs):
+All model-visible inputs, outputs, tool invocations, and conversation context sizes are bounded by hard limits specified in [`HarnessConfig`](../../../../crates/mini-agent-core/src/harness.rs):
 
 | Boundary | Default Limit | Limit Behavior |
 | :--- | :--- | :--- |

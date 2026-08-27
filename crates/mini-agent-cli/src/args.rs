@@ -24,7 +24,7 @@ USAGE:
     mini-agent --version
 
 COMMANDS:
-    (default)       Start interactive REPL session (persisted under ~/.mini-agent/sessions)
+    (default)       Start interactive REPL session (in-memory; use --persist for checkpoints)
     auto            Autonomous copilot loop (unlimited steps unless capped, compacts context)
     ask             Run a single script-facing turn (8 steps, no compaction; alias: run)
     resume          Resume an existing session from its latest settled checkpoint
@@ -87,7 +87,7 @@ USAGE:
     mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH]
 
 Starts the interactive REPL. Tools run without per-step approval; shell is protected by the sandbox.
-Settled checkpoints are saved under ~/.mini-agent/sessions by default; use `--ephemeral` for temporary in-memory sessions.
+Interactive and one-shot ask sessions are in-memory by default; use `--persist` to save settled checkpoints under ~/.mini-agent/sessions. Auto sessions persist by default; use `--ephemeral` for temporary in-memory sessions.
 Use `/auto` to enter copilot mode; `/auto off` restores per-action prompts.
 Use `/plan` or `/plan <prompt>` to enter Plan Mode (locks codebase mutations, drafts the session living plan); `/plan off` exits.
 Use `/goal <objective>` to start Autonomous Goal Mode and immediately execute the first milestone.

@@ -23,12 +23,12 @@ No changes yet.
 - Dual-mode file collaboration contracts (`review_file`, `summary_file`) with automated prompt rendering, issue lifecycle state tracking (`open`, `fixed`, `wontfix`, `addressed`), and live review statistics in `SpawnAgent`.
 - Modular session directory layout generating atomic `summary.json`, `signals.json`, and `prompt_context.json` snapshots alongside durable `session.jsonl` records.
 - Fast $O(1)$ session discovery in `mini-agent sessions` reading lightweight `summary.json` metadata indexes without parsing full conversation streams.
-- Subagent tree execution tracking recording lifecycle metrics (`started_at_ms`, `completed_at_ms`, `duration_ms`, `steps`, `exit_code`, `status`) in `meta.json` and structured deliverables in `output.json` under `.agents/sessions/<id>/`.
-- Subagent preset role configurations (`explore` with read-only guidelines, `plan` for software architecture design, `general` for full execution) and `fork_context` controls in `SpawnAgent`.
+- Subagent tree execution tracking recording lifecycle metrics (`started_at_ms`, `completed_at_ms`, `duration_ms`, `steps`, `exit_code`, `status`) in `meta.json` and structured deliverables in `output.json` under the durable parent session's `subagents/<id>/` directory.
+- Subagent preset role configurations (`explore`, `plan`, and `general`) and `fork_context` prompt controls in `SpawnAgent`.
 - Subprocess CLI-driven subagent execution tool (`spawn_agent`), allowing parent agents to delegate bounded tasks to isolated child `mini-agent ask "<prompt>" --json` processes with zero prompt pollution, OS-level crash/memory isolation, and structured result aggregation.
 - Multi-turn interactive subagent session tool suite (`send_subagent_message`, `list_subagents`) enabling stateful conversational follow-ups and refinement with child agents via durable session resumption (`--session-id`).
 - Implicit persistence encapsulation for subagents: `spawn_agent` automatically provisions unique session identifiers (`sub-<time>-<task>`) and commits child checkpoints for seamless multi-turn resumption while standard CLI invocations remain clean and ephemeral.
-- Hierarchical trace rollup and subagent observation tracking in `trace summary` and `trace replay`.
+- Offline trace summary and replay for the selected JSONL trace or session file.
 - Multi-item validation on durable session restore (`restore_history`) validating `Context`, `User`, `Assistant`, and `Tool` message bounds individually.
 - Turn-atomic trimming (`remove_first_message_group`) ensuring function calls and settlement outputs are dropped as cohesive groups during compaction.
 - Settlement-aware loop detection tracking `(name, arguments, content)` to avoid false positive stall warnings during polling.
@@ -58,7 +58,7 @@ No changes yet.
 
 ### Changed
 
-- Interactive sessions persist under `~/.mini-agent/sessions/` by default; `--ephemeral` (`--no-persist`) keeps an in-memory session.
+- Interactive sessions are in-memory by default; `--persist` saves settled checkpoints under `~/.mini-agent/sessions/`, while `--ephemeral` (`--no-persist`) makes the in-memory choice explicit. `auto` sessions persist by default.
 - Strict `max_steps = 0` step limit evaluation halts immediately; unconstrained runs pass `usize::MAX`.
 - Adaptive `web_search` default enables web search for official OpenAI/DeepSeek endpoints while disabling it for custom local LLM endpoints unless explicitly configured.
 - Lowered default `max_model_response_bytes` to 64 KiB (~16K tokens) and bounded compaction summaries to 32 KiB (`max_user_input_bytes`).
