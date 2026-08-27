@@ -79,6 +79,11 @@ If a proposed approach is rejected during review:
 
 ### Proposed Notes Under Review (`proposed/`)
 
+#### Architecture (`proposed/architecture/`)
+| Date | Title | Focus |
+|---|---|---|
+| 2026-08-27 | [web_fetch / read_image session impact](.agents/notes/proposed/architecture/2026-08-27-web-fetch-and-read-image-session-impact.md) | Envelope-only history vs resume/fork attachments, compact tool catalog, and prefix-cache misses |
+
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
 |---|---|---|
