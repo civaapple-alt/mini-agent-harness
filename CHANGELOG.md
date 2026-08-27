@@ -3,7 +3,7 @@
 All notable changes to Mini Agent Harness are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-- First-class Plan Mode (`/plan`, `/plan off`) with workspace modification locking and living plan (`plan.md`) synchronization.
+- First-class Plan Mode (`/plan`, `/plan <prompt>`, `/plan off`) with workspace modification locking and a session-directory living plan (`plan.md`).
 - Autonomous Goal Mode (`/goal <objective>`) state machine (`goal/state.json`, `goal/plan.md`) with milestone tracking and independent verifier gate support.
 - Builtin foundational agent prompts (`explore`, `plan`, `general`) and 7 specialized personas (`reviewer`, `implementer`, `security-auditor`, `test-writer`, `researcher`, `design-doc-writer`, `design-doc-reviewer`) in `persona.rs`.
 - Dual-mode file collaboration contracts (`review_file`, `summary_file`) with automated prompt rendering, issue lifecycle state tracking (`open`, `fixed`, `wontfix`, `addressed`), and live review statistics in `SpawnAgent`.
@@ -27,6 +27,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Fixed
 
+- `/plan <prompt>` now enters Plan Mode and starts drafting with that prompt instead of being rejected as an unknown command.
+- Plan Mode writes go to the session living plan (`plan.md` under the session directory); relative `plan.md` is aliased there and other workspace mutations stay locked.
 - Security deny rules now properly match human-formatted tool action strings, preventing destructive commands from bypassing deny filters.
 - Windows background managed process trees are guaranteed to terminate via `taskkill /PID <pid> /T /F` and sandbox attachment.
 - CLI argument errors and root help on usage failure now print to `stderr`, keeping `stdout` pure for machine-readable JSON consumers.

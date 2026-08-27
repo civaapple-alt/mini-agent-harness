@@ -97,8 +97,9 @@ checkpoint. The result is appended to the same JSONL file as a derived item
 linked to the source checkpoint sequence and fingerprint. It is never replayed
 into the primary conversation.
 
-Plan Mode (`/plan`) locks codebase mutations to read-only while maintaining an
-interactive living plan (`plan.md`). Autonomous Goal Mode (`/goal <objective>`)
+Plan Mode (`/plan` or `/plan <prompt>`) locks codebase mutations to read-only while
+maintaining an interactive living plan at `~/.mini-agent/sessions/<workspace>/<id>/plan.md`.
+Relative `plan.md` edits map to that session file. Autonomous Goal Mode (`/goal <objective>`)
 materializes a dedicated `goal/` workspace with a multi-milestone state machine
 (`goal/state.json`) and connects independent mentor verifiers (`goal/verifier_verdict.md`)
 before advancing milestones. Built-in agent foundations (`explore`, `plan`, `general`)

@@ -70,7 +70,7 @@ and the append-only `session.jsonl` log.
 
 Mini-Agent decouples task execution workflows from approval policies:
 
-- **Plan Mode (`/plan`)**: Locks codebase mutations to read-only while permitting edits exclusively to the living plan `plan.md`. Tracks planning state in `plan_mode.json`.
+- **Plan Mode (`/plan` or `/plan <prompt>`)**: Locks codebase mutations to read-only while permitting edits exclusively to the session living plan (`~/.mini-agent/sessions/<workspace>/<id>/plan.md`). Relative path `plan.md` maps to that file. Tracks planning state in `plan_mode.json`.
 - **Autonomous Goal Mode (`/goal <objective>`)**: Materializes a dedicated `goal/` workspace containing `state.json` (milestone progress, loop counts, verifier scores) and `plan.md` (acceptance criteria). Integrates with independent mentor verifiers (`goal/verifier_verdict.md`) to provide blind validation gates before advancing milestones.
 - **Built-in Foundations & Personas**: Supports 3 core agent roles (`explore`, `plan`, `general`) and 7 specialized personas (`reviewer`, `implementer`, `security-auditor`, `test-writer`, `researcher`, `design-doc-writer`, `design-doc-reviewer`) with dual-mode file contracts (`review_file`, `summary_file`).
 

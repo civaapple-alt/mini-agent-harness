@@ -27,6 +27,7 @@ use std::process::Command;
 use std::process::ExitStatus;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::thread;
@@ -54,6 +55,7 @@ pub struct ApprovalController {
     policy: Arc<SecurityPolicy>,
     store: ApprovalStore,
     callback: Arc<ApprovalCallback>,
+    living_plan: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl ApprovalController {
@@ -92,6 +94,7 @@ impl ApprovalController {
             policy: Arc::new(policy),
             store: ApprovalStore::new(),
             callback: Arc::new(callback),
+            living_plan: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -110,6 +113,14 @@ impl ApprovalController {
     pub fn set_mode(&self, mode: ApprovalMode) {
         self.automatic
             .store(matches!(mode, ApprovalMode::Automatic), Ordering::Relaxed);
+    }
+
+    pub fn set_living_plan(&self, path: Option<PathBuf>) {
+        *self.living_plan.lock().unwrap() = path.map(|path| crate::goal::normalize_path(&path));
+    }
+
+    pub fn living_plan(&self) -> Option<PathBuf> {
+        self.living_plan.lock().unwrap().clone()
     }
 
     #[allow(dead_code)]
@@ -227,6 +238,9 @@ impl Workspace {
         let resolved = candidate
             .canonicalize()
             .map_err(|error| ToolError(format!("cannot resolve path: {error}")))?;
+        if self.is_living_plan(&resolved) {
+            return Ok(resolved);
+        }
         self.ensure_readable(resolved)
     }
 
@@ -235,6 +249,10 @@ impl Workspace {
         let resolved = candidate
             .canonicalize()
             .map_err(|error| ToolError(format!("cannot resolve path: {error}")))?;
+        if self.is_living_plan(&resolved) {
+            return Ok(resolved);
+        }
+        self.ensure_plan_mode_unlocked()?;
         self.ensure_inside(resolved)
     }
 
@@ -250,12 +268,16 @@ impl Workspace {
                 "file already exists; use edit_file for existing files".to_string(),
             ));
         }
+        let living_plan = self.is_living_plan(&candidate);
+        if !living_plan {
+            self.ensure_plan_mode_unlocked()?;
+        }
         let parent = candidate
             .parent()
             .ok_or_else(|| ToolError("path has no parent".to_string()))?
             .canonicalize()
             .map_err(|error| ToolError(format!("parent directory must exist: {error}")))?;
-        if !self.allows_outside_paths() && !parent.starts_with(&self.root) {
+        if !living_plan && !self.allows_outside_paths() && !parent.starts_with(&self.root) {
             return Err(ToolError("path escapes the workspace".to_string()));
         }
         let file_name = candidate
@@ -273,6 +295,11 @@ impl Workspace {
                     .to_string(),
             ));
         }
+        if let Some(living) = self.approval.living_plan()
+            && crate::goal::is_plan_md_alias(path)
+        {
+            return Ok(living);
+        }
         if path.is_absolute() {
             return Ok(path.to_path_buf());
         }
@@ -287,6 +314,22 @@ impl Workspace {
             ));
         }
         Ok(self.root.join(path))
+    }
+
+    fn is_living_plan(&self, path: &Path) -> bool {
+        self.approval
+            .living_plan()
+            .is_some_and(|living| crate::goal::same_path(path, &living))
+    }
+
+    fn ensure_plan_mode_unlocked(&self) -> Result<(), ToolError> {
+        match self.approval.living_plan() {
+            Some(living) => Err(ToolError(format!(
+                "workspace mutations locked in Plan Mode; living plan is {}",
+                living.display()
+            ))),
+            None => Ok(()),
+        }
     }
 
     fn ensure_inside(&self, path: PathBuf) -> Result<PathBuf, ToolError> {
@@ -895,6 +938,57 @@ mod tests {
         );
 
         fs::remove_dir_all(extra).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
+        let root = test_root();
+        let session = test_root();
+        fs::write(root.join("note.txt"), "workspace note").unwrap();
+        let plan = crate::goal::init_plan_mode_with_prompt(&session, None).unwrap();
+        let approval = ApprovalController::new(ApprovalMode::Automatic);
+        approval.set_living_plan(Some(plan.clone()));
+        let workspace = Arc::new(
+            Workspace::with_read_roots(root.clone(), approval, Vec::new(), SandboxKind::Native)
+                .unwrap(),
+        );
+        let read = ReadFile(Arc::clone(&workspace));
+        let edit = EditFile(Arc::clone(&workspace));
+        let write = WriteFile(Arc::clone(&workspace));
+
+        let locked = write
+            .execute(&json!({"path": "src.rs", "content": "fn main() {}"}))
+            .unwrap_err();
+        assert!(
+            locked.0.contains("workspace mutations locked in Plan Mode"),
+            "{locked:?}"
+        );
+        let locked_edit = edit
+            .execute(&json!({
+                "path": "note.txt",
+                "old_text": "workspace",
+                "new_text": "changed"
+            }))
+            .unwrap_err();
+        assert!(
+            locked_edit
+                .0
+                .contains("workspace mutations locked in Plan Mode")
+        );
+
+        edit.execute(&json!({
+            "path": "plan.md",
+            "old_text": "- Goals:",
+            "new_text": "- Goals:\n  - implement auth"
+        }))
+        .unwrap();
+        let living = fs::read_to_string(&plan).unwrap();
+        assert!(living.contains("- implement auth"));
+        assert!(!root.join("plan.md").exists());
+        assert_eq!(read.execute(&json!({"path": "plan.md"})).unwrap(), living);
+
+        fs::remove_dir_all(session).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 

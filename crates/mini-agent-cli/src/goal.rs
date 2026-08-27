@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const GOAL_SCHEMA_VERSION: u32 = 1;
@@ -61,29 +61,105 @@ fn current_time_ms() -> u64 {
         .as_millis() as u64
 }
 
-pub fn init_plan_mode(session_dir: &Path) -> io::Result<PathBuf> {
-    let plan_path = session_dir.join("plan.md");
-    if !plan_path.exists() {
-        let initial_plan = r#"# Implementation Plan
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlanSlash {
+    Enable { prompt: Option<String> },
+    Disable,
+}
 
-## 1. Problem & Scope
-- Goals:
-- Non-Goals:
+pub fn parse_plan_slash(input: &str) -> Option<PlanSlash> {
+    let rest = input.strip_prefix("/plan")?;
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = unquote(rest.trim());
+    if rest.is_empty() || rest == "on" {
+        Some(PlanSlash::Enable { prompt: None })
+    } else if rest == "off" {
+        Some(PlanSlash::Disable)
+    } else {
+        Some(PlanSlash::Enable {
+            prompt: Some(one_line(rest)),
+        })
+    }
+}
 
-## 2. Critical Files
-- `path/to/file` [MODIFY/NEW]
+pub fn living_plan_path(session_dir: &Path) -> PathBuf {
+    session_dir.join("plan.md")
+}
 
-## 3. Phased Milestones
-- [ ] Phase 1: Exploration & Setup
-- [ ] Phase 2: Core Implementation
-- [ ] Phase 3: Verification & Tests
+pub fn normalize_path(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+    if let Some(parent) = path.parent()
+        && let Ok(parent) = parent.canonicalize()
+        && let Some(name) = path.file_name()
+    {
+        return parent.join(name);
+    }
+    path.to_path_buf()
+}
 
-## 4. Verification Plan
-- Automated test checks
-"#;
-        fs::write(&plan_path, initial_plan)?;
+pub fn same_path(left: &Path, right: &Path) -> bool {
+    left == right || normalize_path(left) == normalize_path(right)
+}
+
+pub fn is_plan_md_alias(path: &Path) -> bool {
+    let mut name = None;
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) if name.is_none() => name = Some(part),
+            _ => return false,
+        }
+    }
+    name.is_some_and(|name| name.eq_ignore_ascii_case("plan.md"))
+}
+
+fn unquote(text: &str) -> &str {
+    let bytes = text.as_bytes();
+    let last = bytes.last().copied();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'"' && last == Some(b'"')) || (bytes[0] == b'\'' && last == Some(b'\'')))
+    {
+        text[1..text.len() - 1].trim()
+    } else {
+        text
+    }
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn initial_plan_markdown(prompt: Option<&str>) -> String {
+    let goals = match prompt.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(prompt) => format!("- Goals:\n  - {prompt}"),
+        None => "- Goals:".to_string(),
+    };
+    format!(
+        "# Implementation Plan\n\n## 1. Problem & Scope\n{goals}\n- Non-Goals:\n\n## 2. Critical Files\n- `path/to/file` [MODIFY/NEW]\n\n## 3. Phased Milestones\n- [ ] Phase 1: Exploration & Setup\n- [ ] Phase 2: Core Implementation\n- [ ] Phase 3: Verification & Tests\n\n## 4. Verification Plan\n- Automated test checks\n"
+    )
+}
+
+pub fn init_plan_mode_with_prompt(session_dir: &Path, prompt: Option<&str>) -> io::Result<PathBuf> {
+    let plan_path = living_plan_path(session_dir);
+    let prompt = prompt.map(one_line).filter(|text| !text.is_empty());
+    if plan_path.exists() {
+        if let Some(prompt) = prompt.as_deref() {
+            let mut content = fs::read_to_string(&plan_path)?;
+            let marker = format!("- {prompt}");
+            if !content.contains(&marker) {
+                content.push_str(&format!("\n## User Request\n{marker}\n"));
+                fs::write(&plan_path, content)?;
+            }
+        }
+    } else {
+        fs::write(&plan_path, initial_plan_markdown(prompt.as_deref()))?;
     }
 
+    let plan_path = normalize_path(&plan_path);
     let plan_state = PlanModeState {
         schema_version: GOAL_SCHEMA_VERSION,
         active: true,
@@ -104,7 +180,7 @@ pub fn disable_plan_mode(session_dir: &Path) -> io::Result<()> {
         let plan_state = PlanModeState {
             schema_version: GOAL_SCHEMA_VERSION,
             active: false,
-            plan_file: session_dir.join("plan.md"),
+            plan_file: living_plan_path(session_dir),
             updated_at_ms: current_time_ms(),
         };
         let state_json = serde_json::to_vec_pretty(&plan_state)
@@ -127,8 +203,7 @@ pub fn is_plan_mode_active(session_dir: &Path) -> bool {
 
 #[allow(dead_code)]
 pub fn is_living_plan_whitelisted(target: &Path, session_dir: &Path) -> bool {
-    let plan_md = session_dir.join("plan.md");
-    target == plan_md
+    same_path(target, &living_plan_path(session_dir))
 }
 
 pub fn init_goal_workspace(
@@ -159,7 +234,7 @@ pub fn init_goal_workspace(
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     fs::write(goal_dir.join("state.json"), state_json)?;
 
-    let root_plan = session_dir.join("plan.md");
+    let root_plan = living_plan_path(session_dir);
     if root_plan.is_file() {
         let _ = fs::copy(&root_plan, goal_dir.join("plan.baseline.md"));
         let _ = fs::copy(&root_plan, goal_dir.join("plan.md"));
@@ -307,17 +382,63 @@ mod tests {
     }
 
     #[test]
+    fn parse_plan_slash_accepts_prompt_and_ignores_lookalikes() {
+        assert_eq!(
+            parse_plan_slash("/plan"),
+            Some(PlanSlash::Enable { prompt: None })
+        );
+        assert_eq!(
+            parse_plan_slash("/plan on"),
+            Some(PlanSlash::Enable { prompt: None })
+        );
+        assert_eq!(parse_plan_slash("/plan off"), Some(PlanSlash::Disable));
+        assert_eq!(
+            parse_plan_slash("/plan implement auth"),
+            Some(PlanSlash::Enable {
+                prompt: Some("implement auth".to_string())
+            })
+        );
+        assert_eq!(
+            parse_plan_slash("/plan \"ship the login flow\""),
+            Some(PlanSlash::Enable {
+                prompt: Some("ship the login flow".to_string())
+            })
+        );
+        assert_eq!(parse_plan_slash("/planner"), None);
+        assert_eq!(parse_plan_slash("/status"), None);
+    }
+
+    #[test]
     fn plan_mode_lifecycle_creates_and_toggles_state() {
         let dir = test_dir();
         assert!(!is_plan_mode_active(&dir));
 
-        let plan_file = init_plan_mode(&dir).unwrap();
+        let plan_file = init_plan_mode_with_prompt(&dir, None).unwrap();
         assert!(plan_file.is_file());
         assert!(is_plan_mode_active(&dir));
         assert!(is_living_plan_whitelisted(&plan_file, &dir));
+        assert!(is_plan_md_alias(Path::new("plan.md")));
+        assert!(is_plan_md_alias(Path::new("./plan.md")));
+        assert!(!is_plan_md_alias(Path::new("docs/plan.md")));
 
         disable_plan_mode(&dir).unwrap();
         assert!(!is_plan_mode_active(&dir));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn plan_mode_prompt_seeds_living_plan_without_clobbering() {
+        let dir = test_dir();
+        let plan_file = init_plan_mode_with_prompt(&dir, Some("implement auth")).unwrap();
+        let first = fs::read_to_string(&plan_file).unwrap();
+        assert!(first.contains("- implement auth"));
+
+        let again = init_plan_mode_with_prompt(&dir, Some("add session restore")).unwrap();
+        let second = fs::read_to_string(again).unwrap();
+        assert!(second.contains("- implement auth"));
+        assert!(second.contains("## User Request"));
+        assert!(second.contains("- add session restore"));
 
         fs::remove_dir_all(dir).unwrap();
     }

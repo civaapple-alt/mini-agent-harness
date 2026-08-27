@@ -60,7 +60,10 @@ enum WorkerCommand {
         approval: ApprovalMode,
         copilot: bool,
     },
-    SetPlanMode(bool),
+    SetPlanMode {
+        active: bool,
+        prompt: Option<String>,
+    },
     StartGoal(String),
     Shutdown,
 }
@@ -207,16 +210,26 @@ pub async fn run(
                         },
                         &mut pending_work,
                     ),
-                    "/plan" | "/plan on" => queue_work(
-                        &worker_tx,
-                        WorkerCommand::SetPlanMode(true),
-                        &mut pending_work,
-                    ),
-                    "/plan off" => queue_work(
-                        &worker_tx,
-                        WorkerCommand::SetPlanMode(false),
-                        &mut pending_work,
-                    ),
+                    command if let Some(action) = crate::goal::parse_plan_slash(command) => {
+                        match action {
+                            crate::goal::PlanSlash::Disable => queue_work(
+                                &worker_tx,
+                                WorkerCommand::SetPlanMode {
+                                    active: false,
+                                    prompt: None,
+                                },
+                                &mut pending_work,
+                            ),
+                            crate::goal::PlanSlash::Enable { prompt } => queue_work(
+                                &worker_tx,
+                                WorkerCommand::SetPlanMode {
+                                    active: true,
+                                    prompt,
+                                },
+                                &mut pending_work,
+                            ),
+                        }
+                    }
                     command if command.starts_with("/goal ") => {
                         let objective = command[6..].trim().to_string();
                         queue_work(
@@ -422,334 +435,352 @@ fn spawn_worker(
         if events.send(ReplEvent::Ready).is_err() {
             return;
         }
-        while let Ok(command) = commands.recv() {
-            match command {
-                WorkerCommand::Prompt(prompt) => {
-                    let started_at_ms = session::timestamp_ms();
-                    let previous_messages = harness.messages().to_vec();
-                    let mut observer = ChannelObserver(events.clone());
-                    let result = runtime.block_on(harness.run(prompt.clone(), &mut observer));
-                    let (status, steps, error) = match &result {
-                        Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
-                            (TurnStatus::StepLimit, outcome.steps, None)
-                        }
-                        Ok(outcome) => (TurnStatus::Completed, outcome.steps, None),
-                        Err(error) => (TurnStatus::Failed, 0, Some(error.to_string())),
-                    };
-                    let turn_messages = harness
-                        .messages()
-                        .strip_prefix(previous_messages.as_slice())
-                        .unwrap_or_else(|| harness.messages());
-                    if let Some(opened) = &mut durable
-                        && let Err(error) = opened.store.record_turn(TurnCommit {
-                            started_at_ms,
-                            prompt: &prompt,
-                            status,
-                            steps,
-                            error: error.as_deref(),
-                            messages: turn_messages,
-                            checkpoint: harness.messages(),
-                        })
-                    {
-                        let _ = events.send(ReplEvent::Warning(format!(
-                            "warning: session persistence stopped: {error}"
-                        )));
-                        durable = None;
-                    }
-                    match result {
-                        Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
-                            let _ = events.send(ReplEvent::Warning(format!(
-                                "warning: stopped after {} model steps",
-                                outcome.steps
-                            )));
-                        }
-                        Ok(_) => {}
-                        Err(error) => report_run_error(&events, &error),
-                    }
-                }
-                WorkerCommand::ClearHistory => {
-                    if let Some(opened) = &mut durable
-                        && let Err(error) = opened.store.start_thread()
-                    {
-                        let _ = events.send(ReplEvent::Warning(format!(
-                            "warning: session persistence stopped: {error}"
-                        )));
-                        durable = None;
-                    }
-                    harness.clear_history();
-                    match world.model_context() {
-                        Ok(context) => match harness.append_context(context) {
-                            Ok(()) => {
-                                persist_latest_context(&mut durable, &harness, &events);
-                                let _ =
-                                    events.send(ReplEvent::Notice("new conversation".to_string()));
+        'work: while let Ok(mut command) = commands.recv() {
+            loop {
+                match command {
+                    WorkerCommand::Prompt(prompt) => {
+                        let started_at_ms = session::timestamp_ms();
+                        let previous_messages = harness.messages().to_vec();
+                        let mut observer = ChannelObserver(events.clone());
+                        let result = runtime.block_on(harness.run(prompt.clone(), &mut observer));
+                        let (status, steps, error) = match &result {
+                            Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
+                                (TurnStatus::StepLimit, outcome.steps, None)
                             }
+                            Ok(outcome) => (TurnStatus::Completed, outcome.steps, None),
+                            Err(error) => (TurnStatus::Failed, 0, Some(error.to_string())),
+                        };
+                        let turn_messages = harness
+                            .messages()
+                            .strip_prefix(previous_messages.as_slice())
+                            .unwrap_or_else(|| harness.messages());
+                        if let Some(opened) = &mut durable
+                            && let Err(error) = opened.store.record_turn(TurnCommit {
+                                started_at_ms,
+                                prompt: &prompt,
+                                status,
+                                steps,
+                                error: error.as_deref(),
+                                messages: turn_messages,
+                                checkpoint: harness.messages(),
+                            })
+                        {
+                            let _ = events.send(ReplEvent::Warning(format!(
+                                "warning: session persistence stopped: {error}"
+                            )));
+                            durable = None;
+                        }
+                        match result {
+                            Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "warning: stopped after {} model steps",
+                                    outcome.steps
+                                )));
+                            }
+                            Ok(_) => {}
+                            Err(error) => report_run_error(&events, &error),
+                        }
+                    }
+                    WorkerCommand::ClearHistory => {
+                        if let Some(opened) = &mut durable
+                            && let Err(error) = opened.store.start_thread()
+                        {
+                            let _ = events.send(ReplEvent::Warning(format!(
+                                "warning: session persistence stopped: {error}"
+                            )));
+                            durable = None;
+                        }
+                        harness.clear_history();
+                        match world.model_context() {
+                            Ok(context) => match harness.append_context(context) {
+                                Ok(()) => {
+                                    persist_latest_context(&mut durable, &harness, &events);
+                                    let _ = events
+                                        .send(ReplEvent::Notice("new conversation".to_string()));
+                                }
+                                Err(error) => {
+                                    let _ = events.send(ReplEvent::Warning(format!(
+                                        "error: cannot restore world state: {error}"
+                                    )));
+                                }
+                            },
                             Err(error) => {
                                 let _ = events.send(ReplEvent::Warning(format!(
                                     "error: cannot restore world state: {error}"
                                 )));
                             }
-                        },
-                        Err(error) => {
-                            let _ = events.send(ReplEvent::Warning(format!(
-                                "error: cannot restore world state: {error}"
-                            )));
                         }
                     }
-                }
-                WorkerCommand::ShowStatus => {
-                    let mode_str = match approval.mode() {
-                        ApprovalMode::Automatic => "automatic (auto-approve)",
-                        ApprovalMode::Interactive => "interactive (prompt on shell/sensitive)",
-                    };
-                    let copilot_str = if copilot {
-                        if auto_max_steps == 0 {
-                            "on (unlimited steps)".to_string()
-                        } else {
-                            format!("on (max {auto_max_steps} steps)")
-                        }
-                    } else {
-                        "off".to_string()
-                    };
-                    let session_str = if let Some(opened) = &durable {
-                        format!(
-                            "{} (thread {}) [durable: {}]",
-                            opened.store.session_id(),
-                            opened.store.thread_id(),
-                            opened.store.path().display()
-                        )
-                    } else {
-                        "ephemeral (in-memory)".to_string()
-                    };
-                    let workspace_str = world.workspace().display().to_string();
-
-                    let _ = events.send(ReplEvent::Notice(format!(
-                        "status> workspace:        {workspace_str}"
-                    )));
-                    let _ = events.send(ReplEvent::Notice(format!(
-                        "status> security-preset:  {preset}"
-                    )));
-                    let _ = events.send(ReplEvent::Notice(format!(
-                        "status> sandbox:          {sandbox_kind}"
-                    )));
-                    let _ = events.send(ReplEvent::Notice(format!(
-                        "status> approval:         {mode_str}"
-                    )));
-                    let web_search_str = if web_search_enabled {
-                        "enabled (built-in responses web_search)"
-                    } else {
-                        "disabled"
-                    };
-                    let _ = events.send(ReplEvent::Notice(format!(
-                        "status> web search:       {web_search_str}"
-                    )));
-                    let _ = events.send(ReplEvent::Notice(format!(
-                        "status> copilot mode:     {copilot_str}"
-                    )));
-                    let _ = events.send(ReplEvent::Notice(format!(
-                        "status> session:          {session_str}"
-                    )));
-                }
-                WorkerCommand::ShowWorld => {
-                    for line in world.status_lines() {
-                        let _ = events.send(ReplEvent::Notice(format!("world> {line}")));
-                    }
-                }
-                WorkerCommand::RefreshWorld => {
-                    let refreshed = WorldState::detect(
-                        world.workspace(),
-                        world.approval(),
-                        world.copilot(),
-                        world.sandbox(),
-                    );
-                    if refreshed != world {
-                        match refreshed.model_context() {
-                            Ok(context) => match harness.append_context(context) {
-                                Ok(()) => {
-                                    world = refreshed;
-                                    persist_latest_context(&mut durable, &harness, &events);
-                                    let _ = events.send(ReplEvent::Notice(
-                                        "world> refreshed and appended to context".to_string(),
-                                    ));
-                                }
-                                Err(error) => {
-                                    let _ = events.send(ReplEvent::Warning(format!(
-                                        "error: cannot append world state: {error}"
-                                    )));
-                                }
-                            },
-                            Err(error) => {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "error: cannot refresh world state: {error}"
-                                )));
-                            }
-                        }
-                    } else {
-                        let _ = events.send(ReplEvent::Notice(
-                            "world> unchanged; no context item appended".to_string(),
-                        ));
-                    }
-                }
-                WorkerCommand::EnableMcp => {
-                    if retry_mcp_servers.is_empty() {
-                        let _ = events.send(ReplEvent::Notice(
-                            "no MCP servers are waiting to be enabled".to_string(),
-                        ));
-                    } else {
-                        let mcp::LoadResult {
-                            tools,
-                            loaded_servers,
-                            diagnostics,
-                        } = mcp::load(&retry_mcp_servers, approval.clone());
-                        for diagnostic in diagnostics {
-                            let _ =
-                                events.send(ReplEvent::Warning(format!("warning: {diagnostic}")));
-                        }
-                        retry_mcp_servers.retain(|server| {
-                            !loaded_servers
-                                .contains(&format!("{}/{}", server.plugin_name, server.server_name))
-                        });
-                        let enabled = loaded_servers.iter().cloned().collect::<Vec<_>>();
-                        let tool_count = tools.len();
-                        harness.extend_tools(tools);
-                        let message = if enabled.is_empty() {
-                            "mcp> inactive — no servers enabled; use /mcp to retry".to_string()
-                        } else {
-                            format!(
-                                "mcp> enabled — {} ({tool_count} tool(s))",
-                                bounded_names(&enabled)
-                            )
+                    WorkerCommand::ShowStatus => {
+                        let mode_str = match approval.mode() {
+                            ApprovalMode::Automatic => "automatic (auto-approve)",
+                            ApprovalMode::Interactive => "interactive (prompt on shell/sensitive)",
                         };
-                        let _ = events.send(ReplEvent::Notice(message));
-                        if !retry_mcp_servers.is_empty() {
-                            let inactive = retry_mcp_servers
-                                .iter()
-                                .map(|server| {
-                                    format!("{}/{}", server.plugin_name, server.server_name)
-                                })
-                                .collect::<Vec<_>>();
-                            let _ = events.send(ReplEvent::Notice(format!(
-                                "mcp> inactive — {}; use /mcp to retry",
-                                bounded_names(&inactive)
-                            )));
-                        }
-                    }
-                }
-                WorkerCommand::ShowSession => match &durable {
-                    Some(opened) => {
+                        let copilot_str = if copilot {
+                            if auto_max_steps == 0 {
+                                "on (unlimited steps)".to_string()
+                            } else {
+                                format!("on (max {auto_max_steps} steps)")
+                            }
+                        } else {
+                            "off".to_string()
+                        };
+                        let session_str = if let Some(opened) = &durable {
+                            format!(
+                                "{} (thread {}) [durable: {}]",
+                                opened.store.session_id(),
+                                opened.store.thread_id(),
+                                opened.store.path().display()
+                            )
+                        } else {
+                            "ephemeral (in-memory)".to_string()
+                        };
+                        let workspace_str = world.workspace().display().to_string();
+
                         let _ = events.send(ReplEvent::Notice(format!(
-                            "session> durable {} | thread {} | {}",
-                            opened.store.session_id(),
-                            opened.store.thread_id(),
-                            opened.store.path().display()
+                            "status> workspace:        {workspace_str}"
+                        )));
+                        let _ = events.send(ReplEvent::Notice(format!(
+                            "status> security-preset:  {preset}"
+                        )));
+                        let _ = events.send(ReplEvent::Notice(format!(
+                            "status> sandbox:          {sandbox_kind}"
+                        )));
+                        let _ = events.send(ReplEvent::Notice(format!(
+                            "status> approval:         {mode_str}"
+                        )));
+                        let web_search_str = if web_search_enabled {
+                            "enabled (built-in responses web_search)"
+                        } else {
+                            "disabled"
+                        };
+                        let _ = events.send(ReplEvent::Notice(format!(
+                            "status> web search:       {web_search_str}"
+                        )));
+                        let _ = events.send(ReplEvent::Notice(format!(
+                            "status> copilot mode:     {copilot_str}"
+                        )));
+                        let _ = events.send(ReplEvent::Notice(format!(
+                            "status> session:          {session_str}"
                         )));
                     }
-                    None => {
-                        let _ = events.send(ReplEvent::Notice(
-                            "session> in-memory; restart with --persist to make it durable"
-                                .to_string(),
-                        ));
+                    WorkerCommand::ShowWorld => {
+                        for line in world.status_lines() {
+                            let _ = events.send(ReplEvent::Notice(format!("world> {line}")));
+                        }
                     }
-                },
-                WorkerCommand::SetExecution {
-                    approval: mode,
-                    copilot: new_copilot,
-                } => {
-                    copilot = new_copilot;
-                    approval.set_mode(mode);
-                    let mut config = harness_config_auto(copilot, auto_max_steps);
-                    config.system_prompt.clone_from(&stable_system_prompt);
-                    harness.replace_config(config);
-                    let updated_world = world.with_execution(mode, copilot, sandbox_kind);
-                    if updated_world != world {
-                        match updated_world.model_context() {
-                            Ok(context) => match harness.append_context(context) {
-                                Ok(()) => {
-                                    world = updated_world;
-                                    persist_latest_context(&mut durable, &harness, &events);
-                                }
+                    WorkerCommand::RefreshWorld => {
+                        let refreshed = WorldState::detect(
+                            world.workspace(),
+                            world.approval(),
+                            world.copilot(),
+                            world.sandbox(),
+                        );
+                        if refreshed != world {
+                            match refreshed.model_context() {
+                                Ok(context) => match harness.append_context(context) {
+                                    Ok(()) => {
+                                        world = refreshed;
+                                        persist_latest_context(&mut durable, &harness, &events);
+                                        let _ = events.send(ReplEvent::Notice(
+                                            "world> refreshed and appended to context".to_string(),
+                                        ));
+                                    }
+                                    Err(error) => {
+                                        let _ = events.send(ReplEvent::Warning(format!(
+                                            "error: cannot append world state: {error}"
+                                        )));
+                                    }
+                                },
                                 Err(error) => {
                                     let _ = events.send(ReplEvent::Warning(format!(
-                                        "error: cannot append execution mode state: {error}"
+                                        "error: cannot refresh world state: {error}"
                                     )));
                                 }
-                            },
-                            Err(error) => {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "error: cannot render execution mode state: {error}"
+                            }
+                        } else {
+                            let _ = events.send(ReplEvent::Notice(
+                                "world> unchanged; no context item appended".to_string(),
+                            ));
+                        }
+                    }
+                    WorkerCommand::EnableMcp => {
+                        if retry_mcp_servers.is_empty() {
+                            let _ = events.send(ReplEvent::Notice(
+                                "no MCP servers are waiting to be enabled".to_string(),
+                            ));
+                        } else {
+                            let mcp::LoadResult {
+                                tools,
+                                loaded_servers,
+                                diagnostics,
+                            } = mcp::load(&retry_mcp_servers, approval.clone());
+                            for diagnostic in diagnostics {
+                                let _ = events
+                                    .send(ReplEvent::Warning(format!("warning: {diagnostic}")));
+                            }
+                            retry_mcp_servers.retain(|server| {
+                                !loaded_servers.contains(&format!(
+                                    "{}/{}",
+                                    server.plugin_name, server.server_name
+                                ))
+                            });
+                            let enabled = loaded_servers.iter().cloned().collect::<Vec<_>>();
+                            let tool_count = tools.len();
+                            harness.extend_tools(tools);
+                            let message = if enabled.is_empty() {
+                                "mcp> inactive — no servers enabled; use /mcp to retry".to_string()
+                            } else {
+                                format!(
+                                    "mcp> enabled — {} ({tool_count} tool(s))",
+                                    bounded_names(&enabled)
+                                )
+                            };
+                            let _ = events.send(ReplEvent::Notice(message));
+                            if !retry_mcp_servers.is_empty() {
+                                let inactive = retry_mcp_servers
+                                    .iter()
+                                    .map(|server| {
+                                        format!("{}/{}", server.plugin_name, server.server_name)
+                                    })
+                                    .collect::<Vec<_>>();
+                                let _ = events.send(ReplEvent::Notice(format!(
+                                    "mcp> inactive — {}; use /mcp to retry",
+                                    bounded_names(&inactive)
                                 )));
                             }
                         }
                     }
-                    if copilot {
-                        let _ = events.send(ReplEvent::Warning("warning: auto mode runs workspace writes and unsandboxed shell commands without approval".to_string()));
-                        let _ = events.send(ReplEvent::Notice("auto mode on".to_string()));
-                    } else if mode == ApprovalMode::Interactive {
-                        let _ = events.send(ReplEvent::Notice(
-                            "auto mode off; writes and shell commands require approval".to_string(),
-                        ));
+                    WorkerCommand::ShowSession => match &durable {
+                        Some(opened) => {
+                            let _ = events.send(ReplEvent::Notice(format!(
+                                "session> durable {} | thread {} | {}",
+                                opened.store.session_id(),
+                                opened.store.thread_id(),
+                                opened.store.path().display()
+                            )));
+                        }
+                        None => {
+                            let _ = events.send(ReplEvent::Notice(
+                                "session> in-memory; restart with --persist to make it durable"
+                                    .to_string(),
+                            ));
+                        }
+                    },
+                    WorkerCommand::SetExecution {
+                        approval: mode,
+                        copilot: new_copilot,
+                    } => {
+                        copilot = new_copilot;
+                        approval.set_mode(mode);
+                        let mut config = harness_config_auto(copilot, auto_max_steps);
+                        config.system_prompt.clone_from(&stable_system_prompt);
+                        harness.replace_config(config);
+                        let updated_world = world.with_execution(mode, copilot, sandbox_kind);
+                        if updated_world != world {
+                            match updated_world.model_context() {
+                                Ok(context) => match harness.append_context(context) {
+                                    Ok(()) => {
+                                        world = updated_world;
+                                        persist_latest_context(&mut durable, &harness, &events);
+                                    }
+                                    Err(error) => {
+                                        let _ = events.send(ReplEvent::Warning(format!(
+                                            "error: cannot append execution mode state: {error}"
+                                        )));
+                                    }
+                                },
+                                Err(error) => {
+                                    let _ = events.send(ReplEvent::Warning(format!(
+                                        "error: cannot render execution mode state: {error}"
+                                    )));
+                                }
+                            }
+                        }
+                        if copilot {
+                            let _ = events.send(ReplEvent::Warning("warning: auto mode runs workspace writes and unsandboxed shell commands without approval".to_string()));
+                            let _ = events.send(ReplEvent::Notice("auto mode on".to_string()));
+                        } else if mode == ApprovalMode::Interactive {
+                            let _ = events.send(ReplEvent::Notice(
+                                "auto mode off; writes and shell commands require approval"
+                                    .to_string(),
+                            ));
+                        }
                     }
-                }
-                WorkerCommand::SetPlanMode(active) => {
-                    let session_dir = durable
-                        .as_ref()
-                        .and_then(|opened| opened.store.path().parent())
-                        .unwrap_or(world.workspace());
-                    if active {
-                        match crate::goal::init_plan_mode(session_dir) {
-                            Ok(plan_file) => {
-                                let _ = harness.append_context(
-                                    "[Plan Mode active: focus on architecture exploration and living plan drafting in plan.md. Workspace modifications are locked to read-only.]",
-                                );
-                                persist_latest_context(&mut durable, &harness, &events);
-                                let _ = events.send(ReplEvent::Notice(format!(
+                    WorkerCommand::SetPlanMode { active, prompt } => {
+                        let session_dir = durable
+                            .as_ref()
+                            .and_then(|opened| opened.store.path().parent())
+                            .unwrap_or(world.workspace());
+                        if active {
+                            match crate::goal::init_plan_mode_with_prompt(
+                                session_dir,
+                                prompt.as_deref(),
+                            ) {
+                                Ok(plan_file) => {
+                                    approval.set_living_plan(Some(plan_file.clone()));
+                                    let _ = harness.append_context(format!(
+                                    "[Plan Mode active: draft and update the living plan at {}. Relative path plan.md maps to that file. Workspace modifications are locked to read-only.]",
+                                    plan_file.display()
+                                ));
+                                    persist_latest_context(&mut durable, &harness, &events);
+                                    let _ = events.send(ReplEvent::Notice(format!(
                                     "plan mode on: workspace modifications locked. Living plan at {}",
                                     plan_file.display()
                                 )));
+                                    if let Some(prompt) = prompt {
+                                        command = WorkerCommand::Prompt(prompt);
+                                        continue;
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = events.send(ReplEvent::Warning(format!(
+                                        "error: cannot init plan mode: {e}"
+                                    )));
+                                }
                             }
-                            Err(e) => {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "error: cannot init plan mode: {e}"
-                                )));
-                            }
+                        } else {
+                            approval.set_living_plan(None);
+                            let _ = crate::goal::disable_plan_mode(session_dir);
+                            let _ = events.send(ReplEvent::Notice(
+                                "plan mode off: resumed standard execution mode".to_string(),
+                            ));
                         }
-                    } else {
-                        let _ = crate::goal::disable_plan_mode(session_dir);
-                        let _ = events.send(ReplEvent::Notice(
-                            "plan mode off: resumed standard execution mode".to_string(),
-                        ));
                     }
-                }
-                WorkerCommand::StartGoal(objective) => {
-                    let session_dir = durable
-                        .as_ref()
-                        .and_then(|opened| opened.store.path().parent())
-                        .unwrap_or(world.workspace());
-                    match crate::goal::init_goal_workspace(session_dir, &objective, 20) {
-                        Ok(state) => {
-                            copilot = true;
-                            approval.set_mode(ApprovalMode::Automatic);
-                            let mut config = harness_config_auto(true, auto_max_steps);
-                            config.system_prompt.clone_from(&stable_system_prompt);
-                            harness.replace_config(config);
-                            let _ = harness.append_context(format!(
+                    WorkerCommand::StartGoal(objective) => {
+                        let session_dir = durable
+                            .as_ref()
+                            .and_then(|opened| opened.store.path().parent())
+                            .unwrap_or(world.workspace());
+                        match crate::goal::init_goal_workspace(session_dir, &objective, 20) {
+                            Ok(state) => {
+                                approval.set_living_plan(None);
+                                let _ = crate::goal::disable_plan_mode(session_dir);
+                                copilot = true;
+                                approval.set_mode(ApprovalMode::Automatic);
+                                let mut config = harness_config_auto(true, auto_max_steps);
+                                config.system_prompt.clone_from(&stable_system_prompt);
+                                harness.replace_config(config);
+                                let _ = harness.append_context(format!(
                                 "[Autonomous Goal Mode active: goal_id={}. Work continuously toward acceptance criteria in goal/plan.md. Execute current milestone {}/{}.]",
                                 state.goal_id, state.current_milestone, state.total_milestones
                             ));
-                            persist_latest_context(&mut durable, &harness, &events);
-                            let _ = events.send(ReplEvent::Notice(format!(
+                                persist_latest_context(&mut durable, &harness, &events);
+                                let _ = events.send(ReplEvent::Notice(format!(
                                 "goal mode on [goal_id: {}]: autonomous milestone tracking in goal/state.json",
                                 state.goal_id
                             )));
-                        }
-                        Err(e) => {
-                            let _ = events.send(ReplEvent::Warning(format!(
-                                "error: cannot start goal mode: {e}"
-                            )));
+                            }
+                            Err(e) => {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "error: cannot start goal mode: {e}"
+                                )));
+                            }
                         }
                     }
+                    WorkerCommand::Shutdown => break 'work,
                 }
-                WorkerCommand::Shutdown => break,
+                break;
             }
             let _ = events.send(ReplEvent::WorkFinished);
         }
@@ -898,7 +929,7 @@ fn print_help() {
         "/auto off      Switch to manual mode (require per-step approval for writes/shell/MCP)"
     );
     println!(
-        "/plan          Enable Plan Mode (lock workspace modifications, draft living plan.md)"
+        "/plan [prompt] Enable Plan Mode and optionally start drafting the session living plan"
     );
     println!("/plan off      Exit Plan Mode and resume standard execution");
     println!(

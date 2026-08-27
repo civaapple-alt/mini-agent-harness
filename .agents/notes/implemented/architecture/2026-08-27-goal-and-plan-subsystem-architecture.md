@@ -56,10 +56,11 @@ graph TD
 
 ### 2.2 Plan Mode: Physical Read-Only Lock with Path Whitelisting
 
-In Plan Mode (`/plan` or `mini-agent plan`):
+In Plan Mode (`/plan`, `/plan <prompt>`, or `mini-agent plan`):
 1. **Workspace Mutation Block**: `write_file` and `edit_file` targeting workspace source files fail closed with `ToolError("workspace mutations locked in Plan Mode")`.
-2. **Whitelisted Path**: `session_dir/plan.md` is exclusively whitelisted, enabling the agent to autonomously refine the Living Plan without touching codebase files.
-3. **Shell Command Restriction**: High-risk shell commands are blocked; only non-destructive inspection commands (`git status`, `git diff`, `git log`, `grep`, `cargo check`) are permitted.
+2. **Whitelisted Path**: `session_dir/plan.md` is exclusively whitelisted, enabling the agent to autonomously refine the Living Plan without touching codebase files. Relative `plan.md` and `./plan.md` are aliased to that session file so drafts do not land in the workspace root.
+3. **Prompt Seeding**: `/plan <prompt>` writes the request into the living plan and immediately starts a planning turn.
+4. **Shell Command Restriction**: High-risk shell commands are blocked; only non-destructive inspection commands (`git status`, `git diff`, `git log`, `grep`, `cargo check`) are permitted.
 
 ---
 
@@ -180,7 +181,7 @@ When a user initiates `/goal` in a session where `plan.md` already exists:
 - Includes `is_living_plan_whitelisted` for fine-grained path authorization.
 
 ### 3.2 REPL Slash Commands (`crates/mini-agent-cli/src/repl.rs`)
-- `/plan` / `/plan on` / `/plan off` / `/plan "prompt"`.
+- `/plan` / `/plan on` / `/plan off` / `/plan <prompt>`.
 - `/goal <objective>` / `/goal --resume`.
 - Mode status display in REPL banner.
 
