@@ -16,7 +16,8 @@ non-secret source of each value.
 | --- | --- | --- |
 | `OPENAI_API_KEY` | for primary commands | Bearer credential for the Responses endpoint |
 | `OPENAI_MODEL` | for primary commands | Provider model identifier. DeepSeek flash/pro image-bearing requests are sent as `deepseek-v4-flash-vision-exp` |
-| `OPENAI_BASE_URL` | no | API root; defaults to `https://api.openai.com/v1`. Files API is `{base}/files` |
+| `OPENAI_BASE_URL` | no | Responses API root; defaults to `https://api.openai.com/v1`. Files API is `{base}/files` |
+| `OPENAI_CHAT_BASE_URL` | for GLM image turns | Chat Completions API root. The adapter appends `/chat/completions` unless the value already ends with that path. Not inferred from `OPENAI_BASE_URL`. |
 | `MENTOR_OPENAI_MODEL` | for mentor commands | Independent mentor model identifier |
 | `MENTOR_OPENAI_API_KEY` | no | Mentor credential override; otherwise inherits `OPENAI_API_KEY` |
 | `MENTOR_OPENAI_BASE_URL` | no | Mentor API root override; otherwise inherits `OPENAI_BASE_URL` |
@@ -38,15 +39,16 @@ GLM Coding Plan (Responses, not Chat Completions) uses a **coding-plan key** fro
 OPENAI_API_KEY=
 OPENAI_MODEL=glm-5.3
 OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1
+OPENAI_CHAT_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4
 ```
 
 `glm-5.3` is text-only. Image turns (`read_image`) are sent as `glm-5.3-flash` for that request
-over Coding Plan Chat Completions (`https://open.bigmodel.cn/api/coding/paas/v4/chat/completions`)
-with a user `image_url.url` data URL. Text and tool turns stay on `{base}/responses`. DeepSeek image
-turns still use `function_call_output` `input_image.file_id`.
-Set `OPENAI_MODEL=glm-5.3-flash` if you want native vision on every turn (Coding Plan quota is 3× vs 5.3).
-Do not set `OPENAI_BASE_URL` to the Chat Completions coding URL for normal turns; mini-agent maps
-image turns there from `https://open.bigmodel.cn/api/v1`. Built-in Responses `web_search` stays off for BigModel. Known URLs use
+over Chat Completions, with a user `image_url.url` data URL.
+
+Text and tool turns stay on `{OPENAI_BASE_URL}/responses`. DeepSeek image turns still use
+`function_call_output` `input_image.file_id`. Mini-agent does not rewrite the Responses URL into
+a Chat Completions URL. Set `OPENAI_MODEL=glm-5.3-flash` if you want native vision on every turn
+(Coding Plan quota is 3× vs 5.3). Built-in Responses `web_search` stays off for BigModel. Known URLs use
 host `web_fetch`. Optional Coding Plan search is Remote MCP `webSearchPrime`
 (`https://open.bigmodel.cn/api/mcp/web_search_prime/mcp`).
 

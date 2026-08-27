@@ -3,7 +3,7 @@ mod env_file;
 #[allow(dead_code)]
 #[path = "../src/image.rs"]
 mod image;
-#[path = "../src/openai.rs"]
+#[path = "../src/openai/mod.rs"]
 mod openai;
 
 use env_file::Environment;
@@ -170,6 +170,7 @@ async fn run_case(
         api_key.to_string(),
         model_name.to_string(),
         base_url.to_string(),
+        None,
         false,
         image::ImageStore::memory_only(),
     ) {

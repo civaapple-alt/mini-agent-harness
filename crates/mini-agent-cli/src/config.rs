@@ -20,6 +20,7 @@ pub struct RuntimeConfig {
     api_key: Option<ResolvedValue>,
     model: Option<ResolvedValue>,
     base_url: ResolvedSetting,
+    chat_base_url: Option<ResolvedSetting>,
     mentor_api_key: Option<ResolvedValue>,
     mentor_model: Option<ResolvedValue>,
     mentor_base_url: Option<ResolvedSetting>,
@@ -31,6 +32,7 @@ pub struct ProviderSettings {
     pub api_key: String,
     pub model: String,
     pub base_url: String,
+    pub chat_base_url: Option<String>,
     pub web_search: bool,
 }
 
@@ -74,6 +76,8 @@ impl RuntimeConfig {
                 value: DEFAULT_BASE_URL.to_string(),
                 source: SettingSource::BuiltIn,
             });
+        let chat_base_url = resolve_value("OPENAI_CHAT_BASE_URL", &workspace_env, &user_env)
+            .map(ResolvedSetting::from_environment);
         let mentor_api_key = resolve_value("MENTOR_OPENAI_API_KEY", &workspace_env, &user_env);
         let mentor_model = resolve_value("MENTOR_OPENAI_MODEL", &workspace_env, &user_env);
         let mentor_base_url = resolve_value("MENTOR_OPENAI_BASE_URL", &workspace_env, &user_env)
@@ -94,6 +98,7 @@ impl RuntimeConfig {
             api_key,
             model,
             base_url,
+            chat_base_url,
             mentor_api_key,
             mentor_model,
             mentor_base_url,
@@ -120,10 +125,18 @@ impl RuntimeConfig {
             .value
             .clone();
         validate_base_url(&self.base_url.value)?;
+        let chat_base_url = match &self.chat_base_url {
+            Some(url) => {
+                validate_base_url_named("OPENAI_CHAT_BASE_URL", &url.value)?;
+                Some(url.value.clone())
+            }
+            None => None,
+        };
         Ok(ProviderSettings {
             api_key,
             model,
             base_url: self.base_url.value.clone(),
+            chat_base_url,
             web_search: self.web_search,
         })
     }
@@ -176,6 +189,7 @@ impl RuntimeConfig {
             api_key,
             model,
             base_url,
+            chat_base_url: None,
             web_search: false,
         })
     }
@@ -196,6 +210,14 @@ impl RuntimeConfig {
             "model_source": self.model.as_ref().map(|value| source_name(value.source)),
             "base_url": primary_display_base_url,
             "base_url_source": setting_source_name(self.base_url.source),
+            "chat_base_url": self
+                .chat_base_url
+                .as_ref()
+                .map(|url| display_base_url(&url.value)),
+            "chat_base_url_source": self
+                .chat_base_url
+                .as_ref()
+                .map(|url| setting_source_name(url.source)),
             "credential": if self.api_key.is_some() { "configured" } else { "missing" },
             "credential_source": self.api_key.as_ref().map(|value| source_name(value.source)),
             "web_search": self.web_search,
@@ -241,7 +263,7 @@ impl RuntimeConfig {
     }
 
     pub fn status_lines(&self) -> Vec<String> {
-        let display_base_url = display_base_url(&self.base_url.value);
+        let shown_base_url = display_base_url(&self.base_url.value);
         let (extensions, world) = self.status_snapshot();
         let mut lines = vec![
             format!(
@@ -262,8 +284,19 @@ impl RuntimeConfig {
             ),
             format!(
                 "base_url: {} ({})",
-                display_base_url,
+                shown_base_url,
                 setting_source_name(self.base_url.source)
+            ),
+            format!(
+                "chat_base_url: {} ({})",
+                self.chat_base_url
+                    .as_ref()
+                    .map(|url| display_base_url(&url.value))
+                    .unwrap_or_else(|| "unset".to_string()),
+                self.chat_base_url
+                    .as_ref()
+                    .map(|url| setting_source_name(url.source))
+                    .unwrap_or("unset")
             ),
             format!(
                 "credential: {}",
@@ -344,6 +377,17 @@ impl RuntimeConfig {
         checks.push(match validate_base_url(&self.base_url.value) {
             Ok(()) => check("base_url", true, display_base_url(&self.base_url.value)),
             Err(error) => check("base_url", false, error),
+        });
+        checks.push(match &self.chat_base_url {
+            Some(url) => match validate_base_url_named("OPENAI_CHAT_BASE_URL", &url.value) {
+                Ok(()) => check("chat_base_url", true, display_base_url(&url.value)),
+                Err(error) => check("chat_base_url", false, error),
+            },
+            None => check(
+                "chat_base_url",
+                true,
+                "unset (set OPENAI_CHAT_BASE_URL for GLM image turns)".to_string(),
+            ),
         });
         if self.mentor_model.is_some() {
             checks.push(check(
@@ -647,6 +691,24 @@ mod tests {
         let config = RuntimeConfig::load_from(workspace, None).unwrap();
         assert!(!config.web_search());
         assert!(!is_official_search_endpoint(&config.base_url));
+        assert!(config.provider_settings().unwrap().chat_base_url.is_none());
+    }
+
+    #[test]
+    fn chat_base_url_is_explicit_and_not_rewritten() {
+        let workspace = unique_dir("workspace");
+        fs::write(
+            workspace.join(".env"),
+            "OPENAI_API_KEY=k\nOPENAI_MODEL=glm-5.3-flash\nOPENAI_BASE_URL=https://open.bigmodel.cn/api/v1\nOPENAI_CHAT_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4\n",
+        )
+        .unwrap();
+        let config = RuntimeConfig::load_from(workspace, None).unwrap();
+        let provider = config.provider_settings().unwrap();
+        assert_eq!(provider.base_url, "https://open.bigmodel.cn/api/v1");
+        assert_eq!(
+            provider.chat_base_url.as_deref(),
+            Some("https://open.bigmodel.cn/api/coding/paas/v4")
+        );
     }
 
     #[test]

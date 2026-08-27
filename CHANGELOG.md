@@ -3,7 +3,7 @@
 All notable changes to Mini Agent Harness are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-- GLM image turns (`read_image`) POST Coding Plan Chat Completions (`…/api/coding/paas/v4/chat/completions` from `OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1`) with user `image_url.url` data URLs. Text/tool turns stay on Responses. DeepSeek still uses `function_call_output` `input_image` / `file_id`.
+- Split the host provider adapter into Responses (`openai/responses.rs`) and Chat Completions (`openai/chat.rs`). GLM image turns use Chat Completions only when `OPENAI_CHAT_BASE_URL` is set; the Responses root is not rewritten to `…/api/coding/paas/v4`.
 - Windows `open_file` for images writes a Mark-of-the-Web-free temp copy before `start`, so Photos does not prompt that the file came from an untrusted location. HTML still opens in place.
 - GLM Coding Plan over the existing Responses adapter: `OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1`, `OPENAI_MODEL=glm-5.3` (image turns use `glm-5.3-flash`). Files API upload is DeepSeek-only; GLM `read_image` is inline data URL. Built-in Responses `web_search` stays off for BigModel.
 - Host `read_image` reads a workspace PNG/JPEG/GIF/WebP or, with approval, an absolute path outside the workspace (for example Pictures). It uploads once with DeepSeek Files API (`purpose=user_data`, 7-day expiry); later turns send `input_image.file_id`. DeepSeek `deepseek-v4-flash` / `deepseek-v4-pro` requests that include images are sent as `deepseek-v4-flash-vision-exp` for that request only. Do not copy outside images into the project.

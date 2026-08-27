@@ -71,7 +71,8 @@ GLOBAL OPTIONS:
 ENVIRONMENT:
     OPENAI_API_KEY           Bearer API credential for Responses endpoint (or ~/.mini-agent/.env)
     OPENAI_MODEL             Model identifier (e.g. deepseek-v4-flash, gpt-4o)
-    OPENAI_BASE_URL          API root; defaults to https://api.openai.com/v1
+    OPENAI_BASE_URL          Responses API root; defaults to https://api.openai.com/v1
+    OPENAI_CHAT_BASE_URL     Optional Chat Completions API root (required for GLM image turns)
     MINI_AGENT_WEB_SEARCH    Enable/disable built-in Responses web_search (default: true)
     MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default: 0)
     MENTOR_OPENAI_MODEL      Dedicated independent model for mentor commands

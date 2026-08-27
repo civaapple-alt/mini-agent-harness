@@ -15,18 +15,18 @@ Host web/vision tools live beside this seam: `web_fetch`, `open_file`, `read_ima
 
 ## Decision
 
-### One Responses client, GLM vision on Chat Completions
+### Responses and Chat Completions as sibling protocols
 
-Both vendors use the existing adapter. `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL` select the product. There is no Anthropic client. Text and tool turns still post `{base}/responses`.
+The host adapter is two protocols under `crates/mini-agent-cli/src/openai/`: Responses (`responses.rs`) for text/tools, Chat Completions (`chat.rs`) for GLM vision. `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL` select the Responses product. There is no Anthropic client and no implicit URL rewrite.
 
-GLM-5.3-Flash vision is documented only on Chat Completions (`type: image_url`, `image_url.url`). Putting that block on a Responses user message delivers the caption text and drops the image. Image turns therefore POST Coding Plan Chat Completions and keep the Responses loop for text.
+GLM-5.3-Flash vision is documented only on Chat Completions (`type: image_url`, `image_url.url`). Putting that block on a Responses user message delivers the caption text and drops the image. Image turns POST `{OPENAI_CHAT_BASE_URL}/chat/completions` when that variable is set.
 
-| Product | Base URL | Key | Text model | Vision model |
-| --- | --- | --- | --- | --- |
-| DeepSeek | `https://api.deepseek.com` | platform API key | `deepseek-v4-flash` / `deepseek-v4-pro` | `deepseek-v4-flash-vision-exp` |
-| GLM Coding Plan | `https://open.bigmodel.cn/api/v1` | **coding-plan** key (not a general platform key) | `glm-5.3` | `glm-5.3-flash` |
+| Product | Responses `OPENAI_BASE_URL` | Chat `OPENAI_CHAT_BASE_URL` | Key | Text model | Vision model |
+| --- | --- | --- | --- | --- | --- |
+| DeepSeek | `https://api.deepseek.com` | unset | platform API key | `deepseek-v4-flash` / `deepseek-v4-pro` | `deepseek-v4-flash-vision-exp` |
+| GLM Coding Plan | `https://open.bigmodel.cn/api/v1` | `https://open.bigmodel.cn/api/coding/paas/v4` | **coding-plan** key | `glm-5.3` | `glm-5.3-flash` |
 
-GLM Anthropic `https://open.bigmodel.cn/api/anthropic` is still unused. Image turns map `https://open.bigmodel.cn/api/v1` → `https://open.bigmodel.cn/api/coding/paas/v4/chat/completions` (same coding-plan key). A base that already ends in `/paas/v4` (including `https://api.z.ai/api/paas/v4`) posts `{base}/chat/completions`.
+GLM Anthropic `https://open.bigmodel.cn/api/anthropic` is still unused. `OPENAI_CHAT_BASE_URL` is required for GLM `read_image`; it is never derived from `OPENAI_BASE_URL`.
 
 ### Built-in `web_search` vs host `web_fetch`
 
@@ -40,7 +40,7 @@ Core `Message::Tool` stays a short text envelope. Compaction and mentor requests
 
 DeepSeek projects images onto `function_call_output.output` as Responses `input_image` (`file_id`, or a string data URL fallback).
 
-GLM-5.3-Flash documents Chat Completions `messages[].content[]` `{ "type": "image_url", "image_url": { "url": "<URL or data URL>" } }` ([OpenAI 兼容](https://docs.bigmodel.cn/cn/guide/develop/openai/introduction), [GLM-5.3-Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)). Responses `/responses` does not consume that block (caption arrives, pixels do not). For `glm-*` image turns the host posts Chat Completions: `role: tool` keeps the envelope text, then a user message with `type: text` + `type: image_url`.
+GLM-5.3-Flash documents Chat Completions `messages[].content[]` `{ "type": "image_url", "image_url": { "url": "<URL or data URL>" } }` ([OpenAI 兼容](https://docs.bigmodel.cn/cn/guide/develop/openai/introduction), [GLM-5.3-Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)). Responses `/responses` does not consume that block (caption arrives, pixels do not). For `glm-*` image turns, when `OPENAI_CHAT_BASE_URL` is set, the host posts Chat Completions: `role: tool` keeps the envelope text, then a user message with `type: text` + `type: image_url`.
 
 | | DeepSeek | GLM Coding Plan |
 | --- | --- | --- |

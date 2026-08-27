@@ -136,10 +136,11 @@ turns reuse the returned `file_id`. Inline base64 is only a fallback if that upl
 DeepSeek text models ignore `input_image` (they replace it with a placeholder). When the current
 `OPENAI_MODEL` is `deepseek-v4-flash` or `deepseek-v4-pro` and the request actually contains images,
 that one request is sent as `deepseek-v4-flash-vision-exp`. GLM Coding Plan `glm-5.3` (text-only)
-image turns are sent as `glm-5.3-flash` over Chat Completions (`…/api/coding/paas/v4/chat/completions`)
-with `type: image_url` / `image_url.url` on a user message — the Python OpenAI SDK shape.
-Responses `/responses` keeps the caption and drops the image. The configured coding model is
-unchanged for text-only turns.
+image turns are sent as `glm-5.3-flash` over Chat Completions when `OPENAI_CHAT_BASE_URL` is set
+(Coding Plan: `https://open.bigmodel.cn/api/coding/paas/v4`) with `type: image_url` /
+`image_url.url` on a user message. Responses `/responses` keeps the caption and drops the image.
+If GLM `read_image` errors that `OPENAI_CHAT_BASE_URL` is required, add that variable; it is
+never derived from `OPENAI_BASE_URL`. The configured coding model is unchanged for text-only turns.
 
 If Windows Photos asks whether an `open_file` image came from an untrusted location, that is
 Mark of the Web on a browser-downloaded file. `open_file` now launches a temp copy of images

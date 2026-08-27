@@ -169,9 +169,12 @@ GLM Coding Plan (OpenAI Responses, coding-plan key):
 OPENAI_API_KEY=
 OPENAI_MODEL=glm-5.3
 OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1
+OPENAI_CHAT_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4
 ```
 
-`read_image` on `glm-5.3` is sent as `glm-5.3-flash` for that request over Coding Plan Chat Completions (`image_url.url` data URL). Text turns stay on `https://open.bigmodel.cn/api/v1/responses`.
+`read_image` on `glm-5.3` is sent as `glm-5.3-flash` for that request over Chat Completions
+(`image_url.url` data URL) at `{OPENAI_CHAT_BASE_URL}/chat/completions`. Text turns stay on
+`{OPENAI_BASE_URL}/responses`. The Chat Completions root is not inferred.
 
 A workspace `.env` overrides the user file; process environment values override
 both. This repository ignores `.env`; verify the same before using a workspace

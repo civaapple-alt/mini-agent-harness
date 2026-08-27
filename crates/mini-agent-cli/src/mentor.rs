@@ -62,6 +62,7 @@ pub(crate) async fn run(arguments: String, trace: Option<PathBuf>, json_output: 
         provider.api_key,
         provider.model.clone(),
         provider.base_url,
+        provider.chat_base_url,
         provider.web_search,
         crate::image::ImageStore::memory_only(),
     ) {
