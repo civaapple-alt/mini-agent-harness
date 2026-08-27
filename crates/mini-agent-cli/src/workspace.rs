@@ -571,19 +571,33 @@ fn shell_description(approval: ApprovalMode) -> String {
     }
 }
 
+fn apply_utf8_child_env(cmd: &mut Command) {
+    cmd.env("PYTHONIOENCODING", "utf-8");
+    cmd.env("PYTHONUTF8", "1");
+    cmd.env("PYTHONLEGACYWINDOWSSTDIO", "0");
+}
+
+#[cfg(windows)]
+fn windows_utf8_shell_script(command: &str) -> String {
+    format!(
+        "$OutputEncoding = [System.Text.UTF8Encoding]::new(); [Console]::OutputEncoding = $OutputEncoding; [Console]::InputEncoding = $OutputEncoding; $env:PYTHONIOENCODING = 'utf-8'; $env:PYTHONUTF8 = '1'; {command}"
+    )
+}
+
 pub(crate) fn shell_command(command: &str) -> Command {
-    if cfg!(windows) {
+    #[cfg(windows)]
+    {
+        let wrapped = windows_utf8_shell_script(command);
         let mut process = Command::new("pwsh");
-        process.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            command,
-        ]);
+        apply_utf8_child_env(&mut process);
+        process.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]);
+        process.arg(wrapped);
         process
-    } else {
+    }
+    #[cfg(not(windows))]
+    {
         let mut process = Command::new("sh");
+        apply_utf8_child_env(&mut process);
         process.args(["-lc", command]);
         #[cfg(unix)]
         {
@@ -636,6 +650,7 @@ pub(crate) fn run_sandboxed_command(
     timeout: Duration,
 ) -> Result<CommandOutput, ToolError> {
     let sandbox = ProcessSandbox::new(sandbox_kind);
+    apply_utf8_child_env(&mut cmd);
     let mut child = cmd
         .current_dir(root)
         .stdout(Stdio::piped())
@@ -1168,6 +1183,47 @@ mod tests {
             assert!(spec.description.contains("POSIX sh"));
         }
         assert!(spec.description.contains("without per-command approval"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn shell_preserves_utf8_from_workspace_files() {
+        let root = test_root();
+        fs::write(
+            root.join("note.html"),
+            "<p class=\"tagline\">小巧强悍，性能出众</p>\n",
+        )
+        .unwrap();
+        let command = if cfg!(windows) {
+            "Get-Content -Encoding utf8 -Raw note.html"
+        } else {
+            "cat note.html"
+        };
+        let output = run_shell(command, &root, SandboxKind::Native, COMMAND_TIMEOUT).unwrap();
+        assert!(
+            output.raw_stdout.contains("小巧强悍，性能出众"),
+            "stdout was {:?}",
+            output.raw_stdout
+        );
+        let python = if cfg!(windows) { "python" } else { "python3" };
+        let py = run_shell(
+            &format!(
+                "{python} -c \"from pathlib import Path; print(Path('note.html').read_text(encoding='utf-8'))\""
+            ),
+            &root,
+            SandboxKind::Native,
+            COMMAND_TIMEOUT,
+        );
+        if let Ok(py) = py
+            && py.exit_code == Some(0)
+        {
+            assert!(
+                py.raw_stdout.contains("小巧强悍，性能出众"),
+                "python stdout was {:?}",
+                py.raw_stdout
+            );
+        }
 
         fs::remove_dir_all(root).unwrap();
     }

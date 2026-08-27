@@ -33,6 +33,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Plan Mode `write_file plan.md` replaces the initialized session living plan instead of failing with "file already exists".
 - `/goal <objective>` now starts executing the first milestone immediately instead of only writing `goal/state.json` and returning to the prompt.
 - Goal Mode can read and update session `goal/plan.md` (relative `goal/plan.md` maps there) instead of failing with "path escapes the workspace".
+- Windows shell capture forces UTF-8 (`PYTHONUTF8` / PowerShell `$OutputEncoding`) so UTF-8 HTML and Python previews are not shown as mojibake.
 - Security deny rules now properly match human-formatted tool action strings, preventing destructive commands from bypassing deny filters.
 - Windows background managed process trees are guaranteed to terminate via `taskkill /PID <pid> /T /F` and sandbox attachment.
 - CLI argument errors and root help on usage failure now print to `stderr`, keeping `stdout` pure for machine-readable JSON consumers.
