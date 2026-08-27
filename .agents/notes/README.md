@@ -116,6 +116,7 @@ If a proposed approach is rejected during review:
 | 2026-08-26 | [Fail-Closed Approval](.agents/notes/implemented/feature/2026-08-26-fail-closed-approval-and-tool-orchestration.md) | Permission matrix, interactive TTY approval, and path containment |
 | 2026-08-26 | [Autonomous Goal Mode](.agents/notes/implemented/feature/2026-08-26-autonomous-goal-mode.md) | Long-running goal execution with convergence gates and loop detection |
 | 2026-08-26 | [MCP Circuit Breaker](.agents/notes/implemented/feature/2026-08-26-mcp-circuit-breaker.md) | Circuit breaking and graceful degradation for failing remote HTTP MCP servers |
+| 2026-08-27 | [DeepSeek and GLM Provider Seams](.agents/notes/implemented/feature/2026-08-27-deepseek-and-glm-provider-seams.md) | Responses adapter: built-in web_search, Files `file_id` vs GLM inline vision, Coding Plan endpoints |
 
 #### Simplification (`implemented/simplification/`)
 | Date | Title | Focus |
