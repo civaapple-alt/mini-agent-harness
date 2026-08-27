@@ -131,7 +131,7 @@ impl Tool for SpawnAgent {
                     "agent_type": {
                         "type": "string",
                         "enum": ["explore", "plan", "general"],
-                        "description": "Subagent preset role: 'explore' (fast read-only search), 'plan' (plan-only, no deliverable), or 'general' (full execution). Default: 'general'"
+                        "description": "Subagent preset role: 'explore' (fast read-only search), 'plan' (read-only software architect), or 'general' (full execution). Default: 'general'"
                     },
                     "persona": {
                         "type": "string",

@@ -133,6 +133,29 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+const LIVING_PLAN_RIDER: &str = "\
+=== LIVING PLAN MODE ===
+This session is Plan Mode. Keep the software-architect planning discipline.
+Write the living plan to plan.md (relative path plan.md maps to the session file).
+Do not produce the final deliverable in reasoning or the assistant message: no complete HTML/CSS/JS pages, full source files, or finished documents.
+Research only to inform the plan. Cite sources; do not copy full page content.
+Reply with a short summary, risks, and open questions.";
+
+pub fn with_plan_mode_overlay(base: &str) -> String {
+    let architect = crate::persona::AgentPromptKind::Plan.prompt_template();
+    if base.contains("=== LIVING PLAN MODE ===") {
+        base.to_string()
+    } else {
+        format!("{base}\n\n{architect}\n\n{LIVING_PLAN_RIDER}")
+    }
+}
+
+pub fn planning_turn_prompt(request: &str) -> String {
+    format!(
+        "Draft or update the living plan for this request. Do not produce the final deliverable.\n\nRequest:\n{request}"
+    )
+}
+
 fn initial_plan_markdown(prompt: Option<&str>) -> String {
     let goals = match prompt.map(str::trim).filter(|text| !text.is_empty()) {
         Some(prompt) => format!("- Goals:\n  - {prompt}"),
@@ -406,6 +429,18 @@ mod tests {
         );
         assert_eq!(parse_plan_slash("/planner"), None);
         assert_eq!(parse_plan_slash("/status"), None);
+    }
+
+    #[test]
+    fn plan_mode_overlay_keeps_architect_foundation() {
+        let overlay = with_plan_mode_overlay("You are a coding agent.");
+        assert!(overlay.contains("read-only software architect"));
+        assert!(overlay.contains("=== LIVING PLAN MODE ==="));
+        assert!(overlay.contains("Do not produce the final deliverable"));
+        assert_eq!(with_plan_mode_overlay(&overlay), overlay);
+        let prompt = planning_turn_prompt("提供最新 Mac Studio 介绍的 html");
+        assert!(prompt.contains("Do not produce the final deliverable"));
+        assert!(prompt.contains("提供最新 Mac Studio 介绍的 html"));
     }
 
     #[test]

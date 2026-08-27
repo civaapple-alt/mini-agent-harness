@@ -59,8 +59,8 @@ graph TD
 In Plan Mode (`/plan`, `/plan <prompt>`, or `mini-agent plan`):
 1. **Workspace Mutation Block**: `write_file` and `edit_file` targeting workspace source files fail closed with `ToolError("workspace mutations locked in Plan Mode")`.
 2. **Whitelisted Path**: `session_dir/plan.md` is exclusively whitelisted, enabling the agent to autonomously refine the Living Plan without touching codebase files. Relative `plan.md` and `./plan.md` are aliased to that session file so drafts do not land in the workspace root.
-3. **Plan Foundation Prompt**: REPL Plan Mode overlays the builtin `plan` agent prompt (`=== PLAN ONLY ===`). The model may research to inform the plan but must not produce the final deliverable in reasoning or the assistant message.
-4. **Prompt Seeding**: `/plan <prompt>` writes the request into the living plan and immediately starts a planning turn framed as plan-only.
+3. **Architect Overlay**: REPL Plan Mode overlays the builtin `plan` Software Architect foundation, then a living-plan rider: write `plan.md`, research only to inform the plan, and do not emit the final deliverable.
+4. **Prompt Seeding**: `/plan <prompt>` writes the request into the living plan and immediately starts a planning turn.
 5. **Shell Command Restriction**: High-risk shell commands are blocked; only non-destructive inspection commands (`git status`, `git diff`, `git log`, `grep`, `cargo check`) are permitted.
 
 ---

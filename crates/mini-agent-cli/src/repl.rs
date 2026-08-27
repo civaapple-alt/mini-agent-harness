@@ -440,7 +440,7 @@ fn spawn_worker(
                 match command {
                     WorkerCommand::Prompt(prompt) => {
                         let prompt = if approval.living_plan().is_some() {
-                            crate::persona::planning_turn_prompt(&prompt)
+                            crate::goal::planning_turn_prompt(&prompt)
                         } else {
                             prompt
                         };
@@ -726,7 +726,7 @@ fn spawn_worker(
                                     approval.set_living_plan(Some(plan_file.clone()));
                                     let mut config = harness_config_auto(copilot, auto_max_steps);
                                     config.system_prompt =
-                                        crate::persona::with_plan_foundation(&stable_system_prompt);
+                                        crate::goal::with_plan_mode_overlay(&stable_system_prompt);
                                     harness.replace_config(config);
                                     let _ = harness.append_context(format!(
                                     "[Plan Mode active: living plan at {}. Plan only — research and update plan.md. Do not produce the final deliverable. Relative path plan.md maps to that file. Workspace modifications are locked.]",
