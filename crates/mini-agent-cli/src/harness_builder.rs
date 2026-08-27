@@ -4,6 +4,8 @@ use mini_agent_core::HarnessConfig;
 use mini_agent_core::ToolRegistry;
 
 use crate::config::RuntimeConfig;
+use crate::image::DeepSeekFiles;
+use crate::image::ImageStore;
 use crate::mcp;
 use crate::openai::OpenAiModel;
 use crate::project_context;
@@ -17,6 +19,7 @@ pub(crate) const AUTO_MAX_STEPS: usize = 0;
 
 pub(crate) struct HarnessBuild {
     pub(crate) harness: Harness<OpenAiModel>,
+    pub(crate) images: ImageStore,
     pub(crate) stable_system_prompt: String,
     pub(crate) world: WorldState,
     pub(crate) enabled_mcp_servers: Vec<String>,
@@ -32,11 +35,16 @@ pub(crate) fn prepare_openai_harness(
 ) -> Result<HarnessBuild, String> {
     let provider = runtime_config.provider_settings()?;
     let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
+    let images = ImageStore::with_uploader(std::sync::Arc::new(DeepSeekFiles::new(
+        provider.api_key.clone(),
+        &provider.base_url,
+    )));
     let model = match OpenAiModel::new(
         provider.api_key,
         provider.model,
         provider.base_url,
         provider.web_search,
+        images.clone(),
     ) {
         Ok(model) => model,
         Err(error) => return Err(error.to_string()),
@@ -57,6 +65,7 @@ pub(crate) fn prepare_openai_harness(
         approval.clone(),
         skill_discovery.extra_read_roots().to_vec(),
         sandbox,
+        images.clone(),
     ) {
         Ok(tools) => tools,
         Err(error) => return Err(error.to_string()),
@@ -89,6 +98,7 @@ pub(crate) fn prepare_openai_harness(
         .map_err(|error| error.to_string())?;
     Ok(HarnessBuild {
         harness,
+        images,
         stable_system_prompt,
         world,
         enabled_mcp_servers,

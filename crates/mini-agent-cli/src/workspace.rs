@@ -197,6 +197,7 @@ pub fn workspace_tools_with_read_roots(
     approval: ApprovalController,
     extra_read_roots: Vec<PathBuf>,
     sandbox: SandboxKind,
+    images: crate::image::ImageStore,
 ) -> Result<Vec<Box<dyn Tool>>, ToolError> {
     let workspace = Arc::new(Workspace::with_read_roots(
         root,
@@ -219,6 +220,10 @@ pub fn workspace_tools_with_read_roots(
         Box::new(ReadToolResult(results)),
     ];
     tools.extend(crate::web::web_tools(Arc::clone(&workspace)));
+    tools.push(Box::new(ReadImage {
+        workspace: Arc::clone(&workspace),
+        store: images,
+    }));
     tools.extend(crate::subagent::subagent_tools(Arc::clone(&workspace)));
     tools.extend(process_tools(processes));
     Ok(tools)
@@ -408,6 +413,73 @@ impl Workspace {
     }
 }
 
+struct ReadImage {
+    workspace: Arc<Workspace>,
+    store: crate::image::ImageStore,
+}
+
+impl Tool for ReadImage {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "read_image".to_string(),
+            description: "Read a PNG/JPEG/GIF/WebP workspace file and return it for vision models. The host uploads the image once via the Files API and later turns reuse that file_id. This is not a screenshot tool.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "path": {"type": "string"} },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let path = self.workspace.read_path(arguments)?;
+        let declared = crate::image::declared_media_type(&path).ok_or_else(|| {
+            ToolError(format!(
+                "cannot read \"{}\": read_image only accepts PNG/JPEG/WebP/GIF paths",
+                path.display()
+            ))
+        })?;
+        if !path.is_file() {
+            return Err(ToolError(format!(
+                "cannot read \"{}\": not a regular file",
+                path.display()
+            )));
+        }
+        let mut bytes = Vec::new();
+        File::open(&path)
+            .map_err(io_error)?
+            .take(crate::image::MAX_IMAGE_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(io_error)?;
+        if bytes.len() > crate::image::MAX_IMAGE_BYTES {
+            return Err(ToolError(format!(
+                "image exceeds {} byte read_image limit",
+                crate::image::MAX_IMAGE_BYTES
+            )));
+        }
+        let actual = crate::image::detect_image(&bytes).ok_or_else(|| {
+            ToolError(format!(
+                "cannot read \"{}\": the bytes are not a PNG/JPEG/WebP/GIF image",
+                path.display()
+            ))
+        })?;
+        if actual != declared {
+            return Err(ToolError(format!(
+                "cannot read \"{}\": the extension declares {declared}, but the bytes use {actual}; rename the file to match its actual format if it is PNG/JPEG/WebP/GIF",
+                path.display()
+            )));
+        }
+        let display = path
+            .strip_prefix(&self.workspace.root)
+            .unwrap_or(path.as_path());
+        let stored = self
+            .store
+            .save(&display.display().to_string(), actual, bytes)?;
+        Ok(crate::image::format_envelope(&stored))
+    }
+}
+
 struct ReadFile(Arc<Workspace>);
 
 impl Tool for ReadFile {
@@ -431,6 +503,11 @@ impl Tool for ReadFile {
             return Err(ToolError(format!(
                 "file exceeds {MAX_READ_BYTES} byte read limit"
             )));
+        }
+        if crate::image::detect_image(&bytes).is_some() {
+            return Err(ToolError(
+                "file is not UTF-8; use read_image for PNG/JPEG/GIF/WebP".to_string(),
+            ));
         }
         String::from_utf8(bytes).map_err(|_| ToolError("file is not UTF-8".to_string()))
     }
@@ -924,6 +1001,42 @@ mod tests {
             "hello agent"
         );
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn read_image_uploads_and_rejects_type_mismatch() {
+        struct StubFiles;
+        impl crate::image::FileUploader for StubFiles {
+            fn upload(&self, _: &str, _: &str, _: &[u8]) -> Result<String, ToolError> {
+                Ok("file-api-test".to_string())
+            }
+        }
+
+        let root = test_root();
+        fs::write(root.join("shot.png"), crate::image::TINY_PNG).unwrap();
+        fs::write(root.join("shot.jpg"), crate::image::TINY_PNG).unwrap();
+        let workspace = Arc::new(
+            Workspace::with_read_roots(
+                root.clone(),
+                ApprovalController::new(ApprovalMode::Automatic),
+                Vec::new(),
+                SandboxKind::Native,
+            )
+            .unwrap(),
+        );
+        let ok = ReadImage {
+            workspace: Arc::clone(&workspace),
+            store: crate::image::ImageStore::with_uploader(Arc::new(StubFiles)),
+        };
+        let out = ok.execute(&json!({"path": "shot.png"})).unwrap();
+        assert!(out.contains("file_id=\"file-api-test\""));
+        let mismatch = ReadImage {
+            workspace,
+            store: crate::image::ImageStore::memory_only(),
+        };
+        let error = mismatch.execute(&json!({"path": "shot.jpg"})).unwrap_err();
+        assert!(error.0.contains("extension declares"));
         fs::remove_dir_all(root).unwrap();
     }
 

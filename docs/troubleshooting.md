@@ -100,7 +100,7 @@ same interactive session to retry. Existing conversation history is preserved.
 
 ## File tools and workspace paths
 
-`read_file`, `edit_file`, and `write_file` accept paths located inside the active
+`read_file`, `read_image`, `edit_file`, and `write_file` accept paths located inside the active
 workspace, whether given as relative paths (e.g. `src/main.rs`) or absolute paths
 (e.g. `D:\workspace\src\main.rs`). Paths that escape the workspace (such as
 `../secret` or external directories) or point to `.git` are strictly rejected.
@@ -120,4 +120,18 @@ does not run JavaScript. A public page cannot redirect onto loopback. Client-onl
 come back as a thin shell with a warning; SSR HTML is returned as markdown. `read_file` is for
 source, `open_file` opens the OS default browser for the user. There is no screenshot, vision,
 or headless-browser tool.
+
+## Image understanding
+
+`read_image` is for existing workspace PNG/JPEG/GIF/WebP files (screenshots, diagrams, UI captures).
+It uploads the file once through DeepSeek Files API (`POST /files`, `purpose=user_data`) and later
+turns reuse the returned `file_id`. Inline base64 is only a fallback if that upload fails.
+
+DeepSeek text models ignore `input_image` (they replace it with a placeholder). When the current
+`OPENAI_MODEL` is `deepseek-v4-flash` or `deepseek-v4-pro` and the request actually contains images,
+that one request is sent as `deepseek-v4-flash-vision-exp`. The configured coding model is unchanged
+for text-only turns.
+
+`read_file` still refuses binary images; use `read_image`. There is no screenshot or browser-capture
+tool.
 

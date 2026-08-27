@@ -4,6 +4,7 @@ mod config;
 mod env_file;
 mod goal;
 mod harness_builder;
+mod image;
 mod marketplaces;
 mod mcp;
 mod mentor;
@@ -310,24 +311,27 @@ async fn run_auto(
     if let Some(enabled) = web_search_override {
         runtime = runtime.with_web_search(enabled);
     }
-    let mut harness = match prepare_openai_harness(
+    let prepared = match prepare_openai_harness(
         &runtime,
         approval.clone(),
         harness_config_auto(true, runtime.copilot_max_steps()),
         sandbox,
     ) {
-        Ok(build) => build.harness,
+        Ok(build) => build,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::from(2);
         }
     };
+    let mut harness = prepared.harness;
+    let images = prepared.images;
 
     let mut opened_session = match session_request {
         SessionRequest::Disabled => None,
         other => match session::SessionStore::open(&runtime.workspace(), other) {
             Ok(opened) => {
                 approval.bind_session_file(opened.store.path());
+                images.bind_session_file(opened.store.path());
                 if opened.resumed {
                     let _ = harness.restore_history(opened.messages.clone());
                 }

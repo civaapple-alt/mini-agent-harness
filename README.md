@@ -203,11 +203,11 @@ approval. When stdin is not a TTY, sensitive tool calls fail closed; `ask --auto
 (or `-y`) permits them and should be used only in a trusted or disposable execution
 environment. `run` is an alias of `ask`.
 
-The real modes expose `read_file`, `edit_file`, `write_file`, `open_file`, `web_fetch`, `shell`,
+The real modes expose `read_file`, `read_image`, `edit_file`, `write_file`, `open_file`, `web_fetch`, `shell`,
 `read_tool_result`, and managed-process tools. Reads and direct file writes are
 confined to the current workspace (supporting both relative paths and in-workspace absolute paths);
 `.git` is protected. `edit_file` makes one exact unique replacement; `write_file` creates
-new files and refuses to replace existing ones. Reads never prompt. `web_fetch` GETs a known
+new files and refuses to replace existing ones. Reads never prompt. `read_image` uploads a workspace PNG/JPEG/GIF/WebP via the Files API and later turns reuse that `file_id`; DeepSeek flash/pro requests that include images are sent as `deepseek-v4-flash-vision-exp`. `web_fetch` GETs a known
 public HTTP(S) URL or a loopback dev server (`localhost`, `127.0.0.1`) and returns bounded markdown
 (no JavaScript; LAN/cloud-metadata IPs stay blocked). `open_file`
 opens a workspace file in the OS default app so a human can view local HTML in a browser.

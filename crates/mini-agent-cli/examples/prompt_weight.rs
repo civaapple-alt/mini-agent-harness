@@ -1,5 +1,8 @@
 #[path = "../src/env_file.rs"]
 mod env_file;
+#[allow(dead_code)]
+#[path = "../src/image.rs"]
+mod image;
 #[path = "../src/openai.rs"]
 mod openai;
 
@@ -168,6 +171,7 @@ async fn run_case(
         model_name.to_string(),
         base_url.to_string(),
         false,
+        image::ImageStore::memory_only(),
     ) {
         Ok(model) => model,
         Err(error) => return error_record(repetition, task, treatment, error.to_string()),

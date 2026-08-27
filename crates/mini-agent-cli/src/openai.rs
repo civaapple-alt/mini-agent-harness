@@ -1,3 +1,8 @@
+use crate::image::ImageStore;
+use crate::image::ProjectedImage;
+use crate::image::project_images;
+use crate::image::vision_model_for;
+use crate::image::wire_image_block;
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use mini_agent_core::Message;
@@ -25,6 +30,7 @@ pub struct OpenAiModel {
     model: String,
     endpoint: String,
     web_search: bool,
+    images: ImageStore,
 }
 
 impl OpenAiModel {
@@ -33,6 +39,7 @@ impl OpenAiModel {
         model: String,
         base_url: String,
         web_search: bool,
+        images: ImageStore,
     ) -> Result<Self, OpenAiError> {
         let base_url = base_url.trim().trim_end_matches('/');
         if base_url.is_empty() {
@@ -51,6 +58,7 @@ impl OpenAiModel {
             model,
             endpoint: format!("{base_url}/responses"),
             web_search,
+            images,
         })
     }
 }
@@ -63,7 +71,7 @@ impl Model for OpenAiModel {
         request: ModelRequest<'a>,
         events: &'a mut (dyn ModelEventSink + Send),
     ) -> Result<ModelResponse, Self::Error> {
-        let body = request_body(&self.model, &request, self.web_search);
+        let body = request_body(&self.model, &request, self.web_search, &self.images);
         let response = self
             .client
             .post(&self.endpoint)
@@ -137,11 +145,47 @@ async fn bounded_error_body(response: reqwest::Response) -> String {
     }
 }
 
-fn request_body(model: &str, request: &ModelRequest<'_>, web_search: bool) -> Value {
+fn request_body(
+    model: &str,
+    request: &ModelRequest<'_>,
+    web_search: bool,
+    images: &ImageStore,
+) -> Value {
+    let attach_images = !request.tools.is_empty();
+    let tool_contents = request
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Tool { content, .. } => Some(content.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let projected = if attach_images {
+        project_images(&tool_contents, images)
+    } else {
+        vec![None; tool_contents.len()]
+    };
+    let has_live_image = projected.iter().any(|image| {
+        matches!(
+            image,
+            Some(ProjectedImage::FileId(_) | ProjectedImage::Inline { .. })
+        )
+    });
+    let model = vision_model_for(model, has_live_image);
+    let mut tool_index = 0;
     let input = request
         .messages
         .iter()
-        .flat_map(message_items)
+        .flat_map(|message| {
+            let image = if matches!(message, Message::Tool { .. }) {
+                let image = projected.get(tool_index).and_then(|image| image.as_ref());
+                tool_index += 1;
+                image
+            } else {
+                None
+            };
+            message_items(message, image)
+        })
         .collect::<Vec<_>>();
     let mut tools = request
         .tools
@@ -175,7 +219,7 @@ fn request_body(model: &str, request: &ModelRequest<'_>, web_search: bool) -> Va
     })
 }
 
-fn message_items(message: &Message) -> Vec<Value> {
+fn message_items(message: &Message, image: Option<&ProjectedImage>) -> Vec<Value> {
     match message {
         Message::Context { text } => vec![json!({
             "type": "message",
@@ -221,7 +265,13 @@ fn message_items(message: &Message) -> Vec<Value> {
         } => vec![json!({
             "type": "function_call_output",
             "call_id": call_id,
-            "output": content
+            "output": match image {
+                Some(image) => json!([
+                    { "type": "input_text", "text": content },
+                    wire_image_block(image)
+                ]),
+                None => json!(content)
+            }
         })],
     }
 }
@@ -461,6 +511,7 @@ mod tests {
             parameters: json!({"type": "object"}),
         }];
         let config = HarnessConfig::default();
+        let images = crate::image::ImageStore::memory_only();
         let body = request_body(
             "test-model",
             &ModelRequest {
@@ -470,6 +521,7 @@ mod tests {
                 max_response_bytes: config.max_model_response_bytes,
             },
             true,
+            &images,
         );
 
         assert_eq!(body["model"], "test-model");
@@ -491,6 +543,7 @@ mod tests {
                 max_response_bytes: config.max_model_response_bytes,
             },
             false,
+            &images,
         );
         assert_eq!(body_no_search["tools"].as_array().unwrap().len(), 1);
 
@@ -504,8 +557,72 @@ mod tests {
                 max_response_bytes: config.max_model_response_bytes,
             },
             true,
+            &images,
         );
         assert_eq!(body_empty_tools["tools"], json!([]));
+    }
+
+    #[test]
+    fn projects_file_id_and_switches_deepseek_vision_model() {
+        let images = crate::image::ImageStore::memory_only();
+        let envelope = "<path>shot.png</path>\n<type>image</type>\n<mini_agent_image id=\"att-1\" file_id=\"file-api-test\" media_type=\"image/png\" bytes=\"8\"/>";
+        let messages = vec![
+            Message::User {
+                text: "what is in the screenshot?".to_string(),
+            },
+            Message::Assistant {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call-1".to_string(),
+                    name: "read_image".to_string(),
+                    arguments: json!({"path": "shot.png"}),
+                }],
+            },
+            Message::Tool {
+                call_id: "call-1".to_string(),
+                name: "read_image".to_string(),
+                content: envelope.to_string(),
+                is_error: false,
+            },
+        ];
+        let tools = vec![ToolSpec {
+            name: "read_image".to_string(),
+            description: "Read an image".to_string(),
+            parameters: json!({"type": "object"}),
+        }];
+        let config = HarnessConfig::default();
+        let body = request_body(
+            "deepseek-v4-flash",
+            &ModelRequest {
+                system_prompt: &config.system_prompt,
+                messages: &messages,
+                tools: &tools,
+                max_response_bytes: config.max_model_response_bytes,
+            },
+            false,
+            &images,
+        );
+        assert_eq!(body["model"], "deepseek-v4-flash-vision-exp");
+        let output = &body["input"][2]["output"];
+        assert_eq!(output[1]["type"], "input_image");
+        assert_eq!(output[1]["file_id"], "file-api-test");
+        assert!(output[1].get("image_url").is_none());
+        assert!(!body.to_string().contains("data:image"));
+
+        let compacted = request_body(
+            "deepseek-v4-flash",
+            &ModelRequest {
+                system_prompt: &config.system_prompt,
+                messages: &messages,
+                tools: &[],
+                max_response_bytes: config.max_model_response_bytes,
+            },
+            true,
+            &images,
+        );
+        assert_eq!(compacted["model"], "deepseek-v4-flash");
+        assert_eq!(compacted["input"][2]["output"], envelope);
     }
 
     #[test]

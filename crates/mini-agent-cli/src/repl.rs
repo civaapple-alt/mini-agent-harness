@@ -354,6 +354,7 @@ fn spawn_worker(
             };
         let crate::HarnessBuild {
             mut harness,
+            images,
             stable_system_prompt,
             mut world,
             enabled_mcp_servers,
@@ -374,6 +375,7 @@ fn spawn_worker(
         };
         if let Some(opened) = &mut durable {
             approval.bind_session_file(opened.store.path());
+            images.bind_session_file(opened.store.path());
             if opened.resumed {
                 if let Err(error) = harness.restore_history(std::mem::take(&mut opened.messages)) {
                     let _ = events.send(ReplEvent::InitializationFailed(format!(

@@ -59,17 +59,20 @@ pub async fn run(
         Some(steps) => crate::harness_config_auto(true, steps),
         None => harness_config(false),
     };
-    let mut harness =
-        match prepare_openai_harness(&runtime_config, approval.clone(), config, sandbox) {
-            Ok(build) => build.harness,
-            Err(error) => return preflight_error(json_output, &error),
-        };
+    let prepared = match prepare_openai_harness(&runtime_config, approval.clone(), config, sandbox)
+    {
+        Ok(build) => build,
+        Err(error) => return preflight_error(json_output, &error),
+    };
+    let mut harness = prepared.harness;
+    let images = prepared.images;
 
     let mut opened_session = match session_request {
         SessionRequest::Disabled => None,
         other => match SessionStore::open(&runtime_config.workspace(), other) {
             Ok(opened) => {
                 approval.bind_session_file(opened.store.path());
+                images.bind_session_file(opened.store.path());
                 if opened.resumed {
                     let _ = harness.restore_history(opened.messages.clone());
                 }

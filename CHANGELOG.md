@@ -3,6 +3,7 @@
 All notable changes to Mini Agent Harness are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+- Host `read_image` reads a workspace PNG/JPEG/GIF/WebP, uploads it once with DeepSeek Files API (`purpose=user_data`, 7-day expiry), and later turns send `input_image.file_id`. DeepSeek `deepseek-v4-flash` / `deepseek-v4-pro` requests that include images are sent as `deepseek-v4-flash-vision-exp` for that request only.
 - Host `web_fetch` GETs a known public HTTP(S) URL or a loopback dev server (`localhost`, `127.0.0.1`) and returns bounded markdown via `htmd` (JavaScript not executed; LAN/cloud-metadata and credentialed URLs rejected; public→loopback redirects refused). Host `open_file` opens a workspace file in the OS default app so local HTML can be viewed in a browser without a screenshot or browser-agent tool.
 - First-class Plan Mode (`/plan`, `/plan <prompt>`, `/plan off`) with workspace modification locking and a session-directory living plan (`plan.md`).
 - Autonomous Goal Mode (`/goal <objective>`) state machine (`goal/state.json`, `goal/plan.md`) with milestone tracking and independent verifier gate support.

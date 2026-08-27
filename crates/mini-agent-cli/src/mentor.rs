@@ -63,6 +63,7 @@ pub(crate) async fn run(arguments: String, trace: Option<PathBuf>, json_output: 
         provider.model.clone(),
         provider.base_url,
         provider.web_search,
+        crate::image::ImageStore::memory_only(),
     ) {
         Ok(model) => model,
         Err(error) => return preflight_error(json_output, &error.to_string()),
