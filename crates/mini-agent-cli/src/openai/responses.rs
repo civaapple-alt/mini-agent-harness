@@ -24,7 +24,13 @@ pub async fn complete(
     request: &ModelRequest<'_>,
     events: &mut (dyn ModelEventSink + Send),
 ) -> Result<ModelResponse, OpenAiError> {
-    let body = request_body(&model.model, request, model.web_search, &model.images);
+    let body = request_body_with_limit(
+        &model.model,
+        request,
+        model.web_search,
+        &model.images,
+        model.max_output_tokens,
+    );
     let response = post_json(&model.client, &model.endpoint, &model.api_key, &body).await?;
     let mut state = Accumulator::new(request.max_response_bytes);
     drain_sse(
@@ -42,11 +48,22 @@ pub async fn complete(
     Ok(state.into_response())
 }
 
+#[cfg(test)]
 fn request_body(
     model: &str,
     request: &ModelRequest<'_>,
     web_search: bool,
     images: &ImageStore,
+) -> Value {
+    request_body_with_limit(model, request, web_search, images, None)
+}
+
+fn request_body_with_limit(
+    model: &str,
+    request: &ModelRequest<'_>,
+    web_search: bool,
+    images: &ImageStore,
+    max_output_tokens: Option<usize>,
 ) -> Value {
     let (projected, has_live_image) = project_for_request(request, images);
     let model = vision_model_for(model, has_live_image);
@@ -97,6 +114,9 @@ fn request_body(
     });
     if glm_reasoning_effort(&model) {
         body["reasoning"] = json!({ "effort": "max" });
+    }
+    if let Some(max_output_tokens) = max_output_tokens {
+        body["max_output_tokens"] = json!(max_output_tokens);
     }
     body
 }
@@ -391,6 +411,25 @@ mod tests {
             &images,
         );
         assert_eq!(body_empty_tools["tools"], json!([]));
+    }
+
+    #[test]
+    fn serializes_provider_output_token_budget() {
+        let config = HarnessConfig::default();
+        let images = crate::image::ImageStore::memory_only();
+        let body = request_body_with_limit(
+            "test-model",
+            &ModelRequest {
+                system_prompt: &config.system_prompt,
+                messages: &[],
+                tools: &[],
+                max_response_bytes: config.max_model_response_bytes,
+            },
+            false,
+            &images,
+            Some(64),
+        );
+        assert_eq!(body["max_output_tokens"], 64);
     }
 
     #[test]

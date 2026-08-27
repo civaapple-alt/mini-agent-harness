@@ -21,6 +21,10 @@ clean commit
 The workflow does not use provider credentials and does not make paid model
 requests.
 
+Optional real-provider scenarios are documented in
+[Real LLM scenario checks](real-llm-testing.md). They are manual, budgeted
+checks and are not part of the release gate by default.
+
 ## Before changing the version
 
 Confirm the release scope and review the complete diff. For a patch or minor

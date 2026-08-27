@@ -156,6 +156,7 @@ nested-agent behavior are not emulated. See the
 - [Troubleshooting](docs/troubleshooting.md) — common setup and runtime issues.
 - [Security policy](SECURITY.md) — reporting security problems.
 - [Privacy](docs/privacy.md) — local data and provider requests.
+- [Real LLM checks](docs/real-llm-testing.md) — opt-in, budgeted provider scenarios.
 - [Release process](docs/releasing.md) — how to prepare and publish a release.
 - [Changelog](CHANGELOG.md) — version history.
 - [Agent Notes](.agents/notes/README.md) — architecture decisions and

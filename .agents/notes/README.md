@@ -129,6 +129,11 @@ If a proposed approach is rejected during review:
 |---|---|---|
 | 2026-08-24 | [Source Code Line Budget](implemented/simplification/2026-08-24-source-code-line-budget.md) | Strict line budgets (20k core / 30k workspace) to prevent abstraction bloat |
 
+#### Testing (`implemented/testing/`)
+| Date | Title | Focus |
+|---|---|---|
+| 2026-08-27 | [Real LLM Scenario Runner](implemented/testing/2026-08-27-real-llm-scenario-runner.md) | Explicit real-provider scenarios with request, output, and wall-time budgets |
+
 ---
 
 ### Rejected Proposals (Guardrails) (`rejected/`)
