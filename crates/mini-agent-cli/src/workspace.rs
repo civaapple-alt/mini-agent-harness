@@ -263,12 +263,12 @@ impl Workspace {
 
     fn create_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
         let candidate = self.candidate(value)?;
-        if candidate.exists() {
+        let living_plan = self.is_living_plan(&candidate);
+        if candidate.exists() && !living_plan {
             return Err(ToolError(
                 "file already exists; use edit_file for existing files".to_string(),
             ));
         }
-        let living_plan = self.is_living_plan(&candidate);
         if !living_plan {
             self.ensure_plan_mode_unlocked()?;
         }
@@ -472,12 +472,16 @@ impl Tool for WriteFile {
             path.display(),
             content.len()
         ))?;
-        let mut file = File::options()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(io_error)?;
-        file.write_all(content.as_bytes()).map_err(io_error)?;
+        if self.0.is_living_plan(&path) {
+            fs::write(&path, content.as_bytes()).map_err(io_error)?;
+        } else {
+            let mut file = File::options()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .map_err(io_error)?;
+            file.write_all(content.as_bytes()).map_err(io_error)?;
+        }
         Ok(format!(
             "wrote {} bytes to {}",
             content.len(),
@@ -977,16 +981,24 @@ mod tests {
                 .contains("workspace mutations locked in Plan Mode")
         );
 
-        edit.execute(&json!({
-            "path": "plan.md",
-            "old_text": "- Goals:",
-            "new_text": "- Goals:\n  - implement auth"
-        }))
-        .unwrap();
+        write
+            .execute(&json!({
+                "path": "plan.md",
+                "content": "# Implementation Plan\n\n- Goals:\n  - implement auth\n"
+            }))
+            .unwrap();
         let living = fs::read_to_string(&plan).unwrap();
         assert!(living.contains("- implement auth"));
         assert!(!root.join("plan.md").exists());
         assert_eq!(read.execute(&json!({"path": "plan.md"})).unwrap(), living);
+
+        edit.execute(&json!({
+            "path": "plan.md",
+            "old_text": "- implement auth",
+            "new_text": "- implement auth\n  - add restore"
+        }))
+        .unwrap();
+        assert!(fs::read_to_string(&plan).unwrap().contains("- add restore"));
 
         fs::remove_dir_all(session).unwrap();
         fs::remove_dir_all(root).unwrap();
