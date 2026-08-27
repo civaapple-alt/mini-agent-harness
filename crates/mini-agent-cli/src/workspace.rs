@@ -218,6 +218,7 @@ pub fn workspace_tools_with_read_roots(
         Box::new(Shell(Arc::clone(&workspace), results.clone())),
         Box::new(ReadToolResult(results)),
     ];
+    tools.extend(crate::web::web_tools(Arc::clone(&workspace)));
     tools.extend(crate::subagent::subagent_tools(Arc::clone(&workspace)));
     tools.extend(process_tools(processes));
     Ok(tools)
@@ -253,7 +254,7 @@ impl Workspace {
         })
     }
 
-    fn read_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
+    pub(crate) fn read_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
         let candidate = self.candidate(value)?;
         let resolved = candidate
             .canonicalize()

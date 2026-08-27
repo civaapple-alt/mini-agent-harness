@@ -3,6 +3,7 @@
 All notable changes to Mini Agent Harness are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+- Host `web_fetch` GETs a known public HTTP(S) URL and returns bounded readable text (HTML stripped, JavaScript not executed, localhost/private/credentialed URLs rejected). Host `open_file` opens a workspace file in the OS default app so local HTML can be viewed in a browser without a screenshot or browser-agent tool.
 - First-class Plan Mode (`/plan`, `/plan <prompt>`, `/plan off`) with workspace modification locking and a session-directory living plan (`plan.md`).
 - Autonomous Goal Mode (`/goal <objective>`) state machine (`goal/state.json`, `goal/plan.md`) with milestone tracking and independent verifier gate support.
 - Builtin foundational agent prompts (`explore`, `plan`, `general`) and 7 specialized personas (`reviewer`, `implementer`, `security-auditor`, `test-writer`, `researcher`, `design-doc-writer`, `design-doc-reviewer`) in `persona.rs`.

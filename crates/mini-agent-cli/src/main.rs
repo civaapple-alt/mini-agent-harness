@@ -20,6 +20,7 @@ mod session;
 mod skills;
 mod subagent;
 mod trace;
+mod web;
 mod workspace;
 mod world;
 

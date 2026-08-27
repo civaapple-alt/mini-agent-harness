@@ -83,6 +83,32 @@ fn shell_tool_start_includes_a_bounded_single_line_command() {
 }
 
 #[test]
+fn web_fetch_start_displays_the_url() {
+    let call = ToolCall {
+        id: "call-1".to_string(),
+        name: "web_fetch".to_string(),
+        arguments: json!({"url": "https://example.com/docs"}),
+    };
+    assert_eq!(
+        format_tool_started(&call, false),
+        "tool> web_fetch — https://example.com/docs"
+    );
+}
+
+#[test]
+fn open_file_start_displays_the_path() {
+    let call = ToolCall {
+        id: "call-1".to_string(),
+        name: "open_file".to_string(),
+        arguments: json!({"path": "index.html"}),
+    };
+    assert_eq!(
+        format_tool_started(&call, false),
+        "tool> open_file — index.html"
+    );
+}
+
+#[test]
 fn file_tool_start_only_displays_the_path() {
     let call = ToolCall {
         id: "call-1".to_string(),

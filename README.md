@@ -203,11 +203,14 @@ approval. When stdin is not a TTY, sensitive tool calls fail closed; `ask --auto
 (or `-y`) permits them and should be used only in a trusted or disposable execution
 environment. `run` is an alias of `ask`.
 
-The real modes expose `read_file`, `edit_file`, `write_file`, `shell`,
+The real modes expose `read_file`, `edit_file`, `write_file`, `open_file`, `web_fetch`, `shell`,
 `read_tool_result`, and managed-process tools. Reads and direct file writes are
 confined to the current workspace (supporting both relative paths and in-workspace absolute paths);
 `.git` is protected. `edit_file` makes one exact unique replacement; `write_file` creates
-new files and refuses to replace existing ones. Reads never prompt. Built-in Responses API `web_search`
+new files and refuses to replace existing ones. Reads never prompt. `web_fetch` GETs a known
+public HTTP(S) URL and returns bounded readable text (no JavaScript, no localhost). `open_file`
+opens a workspace file in the OS default app so a human can view local HTML in a browser.
+Built-in Responses API `web_search`
 is enabled by default (toggle via `--web-search|--no-web-search` or `MINI_AGENT_WEB_SEARCH=true|false`).
 The interactive REPL and TTY `ask` run writes, shell commands, process starts, and MCP without per-step
 approval; process execution is protected by the sandbox (`--sandbox native|docker`).
