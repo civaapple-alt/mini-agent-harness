@@ -64,6 +64,17 @@ fn sanitize_task_name(name: &str) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(crate) fn subagent_artifact_dir(
+    workspace: &std::path::Path,
+    child_id: &str,
+) -> std::path::PathBuf {
+    match crate::session::session_directory(workspace) {
+        Ok(base) => base.join(child_id),
+        Err(_) => workspace.join(".agents/sessions").join(child_id),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn record_subagent_tree_meta(
     root: &std::path::Path,
     child_id: &str,
@@ -78,7 +89,7 @@ fn record_subagent_tree_meta(
     error: &str,
     review_stats: Option<crate::persona::ReviewStats>,
 ) {
-    let subagents_dir = root.join(".agents/sessions").join(child_id);
+    let subagents_dir = subagent_artifact_dir(root, child_id);
     let _ = std::fs::create_dir_all(&subagents_dir);
     let meta = json!({
         "subagent_id": child_id,
@@ -116,7 +127,7 @@ impl Tool for SpawnAgent {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "spawn_agent".to_string(),
-            description: "Spawn an isolated subagent child process to perform a dedicated subtask in the workspace. Returns the subagent's structured result, execution status, and session_id for multi-turn follow-ups.".to_string(),
+            description: "Spawn an isolated subagent child process to perform a dedicated subtask in the workspace. Returns the subagent's structured result, execution status, and session_id. After a step-limit or transport failure, continue with send_subagent_message using that session_id.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -387,7 +398,7 @@ impl Tool for SendSubagentMessage {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "send_subagent_message".to_string(),
-            description: "Send a follow-up message or instruction to an existing subagent session. Resumes the subagent's conversation history and returns the updated result.".to_string(),
+            description: "Send a follow-up message to an existing subagent session_id. Resumes the settled checkpoint, including after step-limit or API transport errors, and returns the updated result.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -613,7 +624,7 @@ mod tests {
             "",
             Some(stats),
         );
-        let subagent_dir = root.join(".agents/sessions/sub-123-reviewer");
+        let subagent_dir = subagent_artifact_dir(&root, "sub-123-reviewer");
         assert!(subagent_dir.join("meta.json").is_file());
         assert!(subagent_dir.join("output.json").is_file());
         let meta: serde_json::Value =
@@ -624,6 +635,7 @@ mod tests {
         assert_eq!(meta["duration_ms"], 1000);
         assert_eq!(meta["status"], "completed");
         assert_eq!(meta["review_stats"]["fixed"], 2);
+        let _ = fs::remove_dir_all(&subagent_dir);
         fs::remove_dir_all(root).unwrap();
     }
 
