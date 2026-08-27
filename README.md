@@ -97,6 +97,15 @@ checkpoint. The result is appended to the same JSONL file as a derived item
 linked to the source checkpoint sequence and fingerprint. It is never replayed
 into the primary conversation.
 
+Plan Mode (`/plan`) locks codebase mutations to read-only while maintaining an
+interactive living plan (`plan.md`). Autonomous Goal Mode (`/goal <objective>`)
+materializes a dedicated `goal/` workspace with a multi-milestone state machine
+(`goal/state.json`) and connects independent mentor verifiers (`goal/verifier_verdict.md`)
+before advancing milestones. Built-in agent foundations (`explore`, `plan`, `general`)
+and 7 specialized personas (`reviewer`, `implementer`, `security-auditor`, `test-writer`,
+`researcher`, `design-doc-writer`, `design-doc-reviewer`) collaborate via dual-mode
+file contracts (`review_file`, `summary_file`) with automated issue state tracking.
+
 Tool execution is governed by a 5-stage `ToolOrchestrator` supporting security
 presets (`default`, `full-machine`, `turbomode`, `custom`), session-level
 decision caching (`ApprovalStore`), and native process sandboxing. On Windows,

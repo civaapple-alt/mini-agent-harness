@@ -62,6 +62,18 @@ Settled records live under `~/.mini-agent/sessions/<workspace>/<session-id>/`,
 where `<workspace>` is the percent-encoded absolute project path. No provider
 setting enables persistence implicitly.
 
+Each modular session directory contains fast O(1) metadata index `summary.json`,
+runtime telemetry `signals.json`, frozen environment snapshot `prompt_context.json`,
+and the append-only `session.jsonl` log.
+
+## Plan Mode and Autonomous Goal Workspaces
+
+Mini-Agent decouples task execution workflows from approval policies:
+
+- **Plan Mode (`/plan`)**: Locks codebase mutations to read-only while permitting edits exclusively to the living plan `plan.md`. Tracks planning state in `plan_mode.json`.
+- **Autonomous Goal Mode (`/goal <objective>`)**: Materializes a dedicated `goal/` workspace containing `state.json` (milestone progress, loop counts, verifier scores) and `plan.md` (acceptance criteria). Integrates with independent mentor verifiers (`goal/verifier_verdict.md`) to provide blind validation gates before advancing milestones.
+- **Built-in Foundations & Personas**: Supports 3 core agent roles (`explore`, `plan`, `general`) and 7 specialized personas (`reviewer`, `implementer`, `security-auditor`, `test-writer`, `researcher`, `design-doc-writer`, `design-doc-reviewer`) with dual-mode file contracts (`review_file`, `summary_file`).
+
 ## Mentor insight and verification
 
 Set `MENTOR_OPENAI_MODEL`, then analyze the latest settled checkpoint of a
