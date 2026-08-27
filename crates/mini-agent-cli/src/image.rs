@@ -156,8 +156,42 @@ impl ImageStore {
             .map(|parent| parent.join("attachments"));
         if let Some(dir) = &dir {
             let _ = fs::create_dir_all(dir);
+            self.reload_from_dir(dir);
         }
         self.inner.lock().unwrap().dir = dir;
+    }
+
+    fn reload_from_dir(&self, dir: &Path) {
+        let mut candidates = match fs::read_dir(dir) {
+            Ok(entries) => entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file() && declared_media_type(path).is_some())
+                .collect::<Vec<_>>(),
+            Err(_) => return,
+        };
+        candidates.sort_by_key(|path| std::cmp::Reverse(attachment_recency(path)));
+        let mut loaded = Vec::new();
+        for path in candidates {
+            if loaded.len() >= MAX_STORED_IMAGES {
+                break;
+            }
+            if let Some(stored) = load_attachment(dir, &path) {
+                loaded.push(stored);
+            }
+        }
+        loaded.reverse();
+        let mut inner = self.inner.lock().unwrap();
+        for stored in loaded {
+            if inner.order.len() >= MAX_STORED_IMAGES {
+                break;
+            }
+            if inner.records.contains_key(&stored.id) {
+                continue;
+            }
+            inner.order.push_back(stored.id.clone());
+            inner.records.insert(stored.id.clone(), stored);
+        }
     }
 
     pub fn get(&self, id: &str) -> Option<StoredImage> {
@@ -171,19 +205,17 @@ impl ImageStore {
             let ext = extension_for(stored.media_type);
             let path = dir.join(format!("{}{ext}", stored.id));
             let _ = fs::write(&path, &stored.bytes);
-            if let Some(file_id) = &stored.file_id {
-                let _ = fs::write(
-                    dir.join(format!("{}.json", stored.id)),
-                    json!({
-                        "id": stored.id,
-                        "file_id": file_id,
-                        "media_type": stored.media_type,
-                        "bytes": stored.bytes.len(),
-                        "display_path": stored.display_path,
-                    })
-                    .to_string(),
-                );
-            }
+            let _ = fs::write(
+                dir.join(format!("{}.json", stored.id)),
+                json!({
+                    "id": stored.id,
+                    "file_id": stored.file_id,
+                    "media_type": stored.media_type,
+                    "bytes": stored.bytes.len(),
+                    "display_path": stored.display_path,
+                })
+                .to_string(),
+            );
         }
         while inner.order.len() >= MAX_STORED_IMAGES {
             if let Some(old) = inner.order.pop_front() {
@@ -215,6 +247,59 @@ impl ImageStore {
             display_path: display_path.to_string(),
         }))
     }
+}
+
+fn load_attachment(dir: &Path, path: &Path) -> Option<StoredImage> {
+    let id = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| stem.starts_with("att-"))?
+        .to_string();
+    let bytes = fs::read(path).ok()?;
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
+        return None;
+    }
+    let media_type = detect_image(&bytes)?;
+    let meta = read_attachment_meta(&dir.join(format!("{id}.json")));
+    let file_id = meta
+        .as_ref()
+        .and_then(|value| value.get("file_id"))
+        .and_then(Value::as_str)
+        .filter(|id| id.starts_with("file-"))
+        .map(str::to_string);
+    let display_path = meta
+        .as_ref()
+        .and_then(|value| value.get("display_path"))
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&id)
+                .to_string()
+        });
+    Some(StoredImage {
+        id,
+        media_type,
+        bytes,
+        file_id,
+        display_path,
+    })
+}
+
+fn read_attachment_meta(path: &Path) -> Option<Value> {
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+fn attachment_recency(path: &Path) -> (u128, u64) {
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default();
+    let rest = stem.strip_prefix("att-").unwrap_or(stem);
+    let (nanos, seq) = rest.rsplit_once('-').unwrap_or((rest, "0"));
+    (nanos.parse().unwrap_or(0), seq.parse().unwrap_or(0))
 }
 
 fn next_attachment_id() -> String {
@@ -555,6 +640,74 @@ mod tests {
         let deepseek = wire_image_block(&image);
         assert_eq!(deepseek["type"], "input_image");
         assert_eq!(deepseek["image_url"], "data:image/png;base64,abcd");
+    }
+
+    #[test]
+    fn bind_session_reloads_bytes_without_reupload() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-agent-img-reload-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let session = root.join("session.jsonl");
+        fs::write(&session, "").unwrap();
+        let store = ImageStore::with_uploader(Arc::new(StubFiles));
+        store.bind_session_file(&session);
+        let stored = store
+            .save("shot.png", "image/png", TINY_PNG.to_vec())
+            .unwrap();
+        let id = stored.id.clone();
+        assert_eq!(stored.file_id.as_deref(), Some("file-api-test"));
+        drop(store);
+
+        let restored = ImageStore::memory_only();
+        restored.bind_session_file(&session);
+        let got = restored.get(&id).expect("attachment should reload");
+        assert_eq!(got.bytes, TINY_PNG);
+        assert_eq!(got.file_id.as_deref(), Some("file-api-test"));
+        assert_eq!(got.display_path, "shot.png");
+        let envelope = format_envelope(&got);
+        let projected = project_images(&[envelope], &restored);
+        assert!(matches!(
+            projected[0],
+            Some(ProjectedImage::FileId(ref file_id)) if file_id == "file-api-test"
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bind_session_reloads_inline_images_without_file_id() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-agent-img-inline-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let session = root.join("session.jsonl");
+        fs::write(&session, "").unwrap();
+        let store = ImageStore::memory_only();
+        store.bind_session_file(&session);
+        let stored = store
+            .save("pic.png", "image/png", TINY_PNG.to_vec())
+            .unwrap();
+        let id = stored.id.clone();
+        assert!(stored.file_id.is_none());
+        drop(store);
+
+        let restored = ImageStore::memory_only();
+        restored.bind_session_file(&session);
+        let got = restored.get(&id).expect("inline attachment should reload");
+        assert_eq!(got.bytes, TINY_PNG);
+        assert!(got.file_id.is_none());
+        let envelope = format_envelope(&got);
+        let projected = project_images(&[envelope], &restored);
+        assert!(matches!(projected[0], Some(ProjectedImage::Inline { .. })));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

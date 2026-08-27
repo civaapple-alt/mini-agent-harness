@@ -47,9 +47,11 @@ is compacted. The newest context item and a bounded recent tail stay verbatim:
 the last two model-step groups (each an assistant message plus its following
 tool results, or a final tool-less assistant), capped at 128 KiB serialized.
 Only the older prefix is sent to the same model with the unchanged system
-prompt and tool catalog, followed by one appended compaction user message. If
-that compaction request would exceed 1 MiB, the oldest prefix messages are
-dropped until it fits. The returned summary must be non-empty, contain no tool
+prompt and an empty tool catalog (so compact cannot call tools or attach
+images), followed by one appended compaction user message. If that compaction
+request would exceed 1 MiB, the oldest prefix messages are dropped until it
+fits. The 1 MiB JSON ceiling does not count host-projected image bytes; GLM
+data URLs are a host wire payload, not core history. The returned summary must be non-empty, contain no tool
 calls, reduce context size, and fit the existing response and request ceilings.
 If it does not, the harness drops oldest prefix messages until the request is
 under the compact threshold, instead of aborting the run. Compaction has its
@@ -58,9 +60,9 @@ can still exceed the hard context ceiling and fail rather than sending an
 oversized request.
 
 Skill catalog text, root `AGENTS.md`, MCP tool schemas, and the latest
-world-state context item sit in the stable request prefix. They are re-supplied
-on every turn, including compaction, so compact cannot reclaim that budget.
-Opening more MCP tools therefore makes long auto runs worse, not better.
+world-state context item sit in the stable request prefix on normal turns.
+Compaction omits the tool catalog from its auxiliary request. Opening more MCP
+tools therefore makes long auto runs worse, not better.
 
 The host currently uses context items for full world-state snapshots. The
 latest snapshot is retained across compaction and restored after `/new`.
@@ -72,7 +74,7 @@ Host tools add their own effect-side bounds before results reach core:
 | Host boundary | Default |
 | --- | ---: |
 | file read | 128 KiB |
-| `read_image` file | 4 MiB; JPEG/PNG/GIF/WebP by magic; 4 images / request; Files API 60s, 7-day expiry |
+| `read_image` file | 4 MiB; JPEG/PNG/GIF/WebP by magic; 4 images / request; Files API 60s, 7-day expiry; session `attachments/` reloaded on resume and copied on fork |
 | `web_fetch` body / extracted text | 128 KiB / 50k characters; 15s; 5 same-class redirects |
 | `open_file` | workspace file, or approved absolute local file; OS default app; Windows images use a MOTW-free temp copy |
 | new file or edited file | 1 MiB |

@@ -464,7 +464,7 @@ impl<M: Model> Harness<M> {
             &mut prefix,
             COMPACTION_PROMPT,
             &self.config.system_prompt,
-            tool_specs,
+            &[],
             self.config.max_context_bytes,
         );
         if prefix.is_empty() {
@@ -482,7 +482,7 @@ impl<M: Model> Harness<M> {
                 ModelRequest {
                     system_prompt: &self.config.system_prompt,
                     messages: &compaction_messages,
-                    tools: tool_specs,
+                    tools: &[],
                     max_response_bytes: self.config.max_model_response_bytes,
                 },
                 &mut SilentModelEvents,

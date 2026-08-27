@@ -23,6 +23,9 @@ non-secret source of each value.
 | `MENTOR_OPENAI_BASE_URL` | no | Mentor API root override; otherwise inherits `OPENAI_BASE_URL` |
 | `MINI_AGENT_MAX_STEPS` | no | Copilot/auto model-step cap; `0` means unlimited (the default) |
 
+`read_image` bytes stay in the session `attachments/` directory (not `session.jsonl`). Resume reloads
+them; fork copies them. Compaction does not attach images.
+
 The adapter appends `/responses` to `OPENAI_BASE_URL`. DeepSeek's Responses API
 therefore uses:
 

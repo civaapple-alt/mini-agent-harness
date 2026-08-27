@@ -553,7 +553,7 @@ async fn compacts_context_and_continues_the_tool_loop() {
     let compaction = &requests[1];
     let continuation = &requests[2];
     assert_eq!(compaction.system_prompt, first.system_prompt);
-    assert_eq!(compaction.tools, first.tools);
+    assert!(compaction.tools.is_empty());
     assert_eq!(continuation.system_prompt, first.system_prompt);
     assert_eq!(continuation.tools, first.tools);
     assert!(matches!(

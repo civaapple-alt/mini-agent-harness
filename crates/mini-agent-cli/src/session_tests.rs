@@ -185,6 +185,9 @@ fn forks_an_existing_session_into_a_new_session() {
     };
     let initial = vec![context.clone()];
     parent.store.record_context(&context, &initial).unwrap();
+    let parent_attachments = parent.store.session_dir().join("attachments");
+    fs::create_dir_all(&parent_attachments).unwrap();
+    fs::write(parent_attachments.join("att-1.png"), b"png-bytes").unwrap();
     drop(parent);
 
     // Fork the parent session
@@ -192,6 +195,21 @@ fn forks_an_existing_session_into_a_new_session() {
     assert_ne!(forked.store.session_id(), parent_id);
     assert!(forked.resumed);
     assert_eq!(forked.messages, vec![context]);
+    assert_eq!(
+        fs::read(
+            forked
+                .store
+                .session_dir()
+                .join("attachments")
+                .join("att-1.png")
+        )
+        .unwrap(),
+        b"png-bytes"
+    );
+    assert_eq!(
+        fs::read(parent_attachments.join("att-1.png")).unwrap(),
+        b"png-bytes"
+    );
     drop(forked);
     fs::remove_dir_all(root).unwrap();
 }

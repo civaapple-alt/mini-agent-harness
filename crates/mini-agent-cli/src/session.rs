@@ -394,7 +394,7 @@ impl SessionStore {
 
     fn fork(workspace: &Path, parent_session_id: &str) -> Result<OpenedSession, String> {
         validate_session_id(parent_session_id)?;
-        let (_parent_dir, parent_path) = resolve_session_file(workspace, parent_session_id)?;
+        let (parent_dir, parent_path) = resolve_session_file(workspace, parent_session_id)?;
         let metadata = fs::metadata(&parent_path)
             .map_err(|error| format!("cannot open parent session {parent_session_id}: {error}"))?;
         if metadata.len() > MAX_SESSION_BYTES {
@@ -456,6 +456,10 @@ impl SessionStore {
                 store.checkpoint_record(&parent_messages),
             ])?;
             store.checkpoint_seq = store.next_seq.saturating_sub(1);
+            copy_attachments(
+                &parent_dir.join("attachments"),
+                &session_dir.join("attachments"),
+            );
             write_prompt_context(&session_dir, workspace, &session_id);
             store.update_summary_and_signals("", 0, None);
             return Ok(OpenedSession {
@@ -783,6 +787,26 @@ fn acquire_lock(directory: &Path, session_id: &str) -> Result<SessionLock, Strin
     .and_then(|()| file.sync_data())
     .map_err(|error| format!("cannot write session lock: {error}"))?;
     Ok(SessionLock(path))
+}
+
+fn copy_attachments(src: &Path, dst: &Path) {
+    if !src.is_dir() {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(src) else {
+        return;
+    };
+    let _ = fs::create_dir_all(dst);
+    for entry in entries.flatten() {
+        let from = entry.path();
+        if !from.is_file() {
+            continue;
+        }
+        let Some(name) = from.file_name() else {
+            continue;
+        };
+        let _ = fs::copy(&from, dst.join(name));
+    }
 }
 
 pub(crate) fn session_directory(workspace: &Path) -> Result<PathBuf, String> {

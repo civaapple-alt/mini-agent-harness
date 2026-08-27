@@ -141,6 +141,8 @@ image turns are sent as `glm-5.3-flash` over Chat Completions when `OPENAI_CHAT_
 `image_url.url` on a user message. Responses `/responses` keeps the caption and drops the image.
 If GLM `read_image` errors that `OPENAI_CHAT_BASE_URL` is required, add that variable; it is
 never derived from `OPENAI_BASE_URL`. The configured coding model is unchanged for text-only turns.
+Resume and fork reload session `attachments/` so a later GLM image turn can still send the data URL;
+DeepSeek keeps using `file_id` from the envelope when present.
 
 If Windows Photos asks whether an `open_file` image came from an untrusted location, that is
 Mark of the Web on a browser-downloaded file. `open_file` now launches a temp copy of images

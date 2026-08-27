@@ -55,6 +55,8 @@ Files upload runs only when `OPENAI_BASE_URL` host is `api.deepseek.com`. Other 
 
 Windows `open_file` for images writes raw bytes to `%TEMP%\mini-agent-open\` and launches that copy. `std::fs::copy` would keep NTFS `Zone.Identifier` (Mark of the Web) from a browser download and Photos would prompt “此文件是否来自可靠来源?”. HTML and other files still open in place so relative assets keep working.
 
+Session `attachments/` is reloaded on `bind_session_file` and copied on `fork`, so GLM inline data URLs survive resume. Compaction sends an empty tool catalog and does not project images.
+
 ### Reasoning
 
 GLM-5.3 thinking cannot be disabled; default effort is `max`. Responses bodies for `glm-5.3*` include `"reasoning": { "effort": "max" }`. DeepSeek and OpenAI do not get that field (their defaults stay vendor-side).

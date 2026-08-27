@@ -79,11 +79,6 @@ If a proposed approach is rejected during review:
 
 ### Proposed Notes Under Review (`proposed/`)
 
-#### Architecture (`proposed/architecture/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-27 | [web_fetch / read_image session impact](.agents/notes/proposed/architecture/2026-08-27-web-fetch-and-read-image-session-impact.md) | Envelope-only history vs resume/fork attachments, compact tool catalog, and prefix-cache misses |
-
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
 |---|---|---|
@@ -109,6 +104,7 @@ If a proposed approach is rejected during review:
 | 2026-08-27 | [Session Directory & Metadata Architecture](.agents/notes/implemented/architecture/2026-08-27-session-directory-and-metadata-architecture.md) | Modular session directory: fast summary index, goal/plan state, subagent trees, and compaction segments |
 | 2026-08-27 | [Builtin Agent & Persona Prompt System](.agents/notes/implemented/architecture/2026-08-27-builtin-agent-personas-and-file-contracts.md) | Builtin agent/persona prompts, dual-mode file contracts (review/summary), and issue state tracking |
 | 2026-08-27 | [Goal and Plan Subsystem Architecture](.agents/notes/implemented/architecture/2026-08-27-goal-and-plan-subsystem-architecture.md) | Explicit triggers, Living Plan protocol (plan.md), and autonomous verification state machine (goal/) |
+| 2026-08-27 | [web_fetch / read_image session impact](.agents/notes/implemented/architecture/2026-08-27-web-fetch-and-read-image-session-impact.md) | Envelope-only history; resume/fork attachments; compact empty tools; prefix-cache misses |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |

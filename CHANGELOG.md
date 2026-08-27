@@ -3,6 +3,7 @@
 All notable changes to Mini Agent Harness are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+- Session `attachments/` for `read_image` reload on resume and copy on fork, so GLM inline vision survives process restart. Compaction auxiliary requests send an empty tool catalog (no image projection, no `web_fetch` during summarize).
 - Split the host provider adapter into Responses (`openai/responses.rs`) and Chat Completions (`openai/chat.rs`). GLM image turns use Chat Completions only when `OPENAI_CHAT_BASE_URL` is set; the Responses root is not rewritten to `…/api/coding/paas/v4`.
 - Windows `open_file` for images writes a Mark-of-the-Web-free temp copy before `start`, so Photos does not prompt that the file came from an untrusted location. HTML still opens in place.
 - GLM Coding Plan over the existing Responses adapter: `OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1`, `OPENAI_MODEL=glm-5.3` (image turns use `glm-5.3-flash`). Files API upload is DeepSeek-only; GLM `read_image` is inline data URL. Built-in Responses `web_search` stays off for BigModel.
