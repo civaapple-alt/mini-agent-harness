@@ -589,9 +589,18 @@ fn apply_utf8_child_env(cmd: &mut Command) {
 
 #[cfg(windows)]
 fn windows_utf8_shell_script(command: &str) -> String {
-    format!(
-        "$OutputEncoding = [System.Text.UTF8Encoding]::new(); [Console]::OutputEncoding = $OutputEncoding; [Console]::InputEncoding = $OutputEncoding; $env:PYTHONIOENCODING = 'utf-8'; $env:PYTHONUTF8 = '1'; {command}"
-    )
+    let preamble = concat!(
+        "$OutputEncoding = [System.Text.UTF8Encoding]::new($false); ",
+        "[Console]::OutputEncoding = $OutputEncoding; ",
+        "[Console]::InputEncoding = $OutputEncoding; ",
+        "$PSDefaultParameterValues['Get-Content:Encoding'] = 'utf8'; ",
+        "$PSDefaultParameterValues['Set-Content:Encoding'] = 'utf8'; ",
+        "$PSDefaultParameterValues['Add-Content:Encoding'] = 'utf8'; ",
+        "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; ",
+        "$env:PYTHONIOENCODING = 'utf-8'; ",
+        "$env:PYTHONUTF8 = '1'; ",
+    );
+    format!("{preamble}{command}")
 }
 
 pub(crate) fn shell_command(command: &str) -> Command {
@@ -1202,17 +1211,22 @@ mod tests {
         let root = test_root();
         fs::write(
             root.join("note.html"),
-            "<p class=\"tagline\">小巧强悍，性能出众</p>\n",
+            "/* 数据统计卡片 */\n<p class=\"tagline\">小巧强悍，性能出众</p>\n",
         )
         .unwrap();
         let command = if cfg!(windows) {
-            "Get-Content -Encoding utf8 -Raw note.html"
+            "$lines = Get-Content note.html; $lines[0..20]"
         } else {
             "cat note.html"
         };
         let output = run_shell(command, &root, SandboxKind::Native, COMMAND_TIMEOUT).unwrap();
         assert!(
             output.raw_stdout.contains("小巧强悍，性能出众"),
+            "stdout was {:?}",
+            output.raw_stdout
+        );
+        assert!(
+            output.raw_stdout.contains("数据统计卡片"),
             "stdout was {:?}",
             output.raw_stdout
         );

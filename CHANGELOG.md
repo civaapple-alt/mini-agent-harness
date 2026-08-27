@@ -33,7 +33,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Plan Mode `write_file plan.md` replaces the initialized session living plan instead of failing with "file already exists".
 - `/goal <objective>` now starts executing the first milestone immediately instead of only writing `goal/state.json` and returning to the prompt.
 - Goal Mode can read and update session `goal/plan.md` (relative `goal/plan.md` maps there) instead of failing with "path escapes the workspace".
-- Windows shell capture forces UTF-8 (`PYTHONUTF8` / PowerShell `$OutputEncoding`) so UTF-8 HTML and Python previews are not shown as mojibake.
+- Windows shell capture forces UTF-8 (`PYTHONUTF8`, PowerShell `$OutputEncoding`, and `Get-Content`/`Set-Content` default Encoding) so UTF-8 HTML previews are not shown as mojibake.
 - Subagent tree records (`meta.json`, `output.json`, `parent_session_id`) live under the parent session at `~/.mini-agent/sessions/<workspace>/<parent-id>/subagents/<child-id>/`, not in the project `.agents/sessions/` directory.
 - `spawn_agent` and `send_subagent_message` run child `ask` with `--max-steps 50` (and a 300s default timeout) so reviews are less likely to stop after 8 steps.
 - REPL `tool>` lines for `spawn_agent` and `send_subagent_message` show task/persona/session_id and a bounded message preview.
