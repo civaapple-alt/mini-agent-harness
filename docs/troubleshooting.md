@@ -123,7 +123,11 @@ or headless-browser tool.
 
 ## Image understanding
 
-`read_image` is for existing workspace PNG/JPEG/GIF/WebP files (screenshots, diagrams, UI captures).
+`read_image` is for existing PNG/JPEG/GIF/WebP files (screenshots, diagrams, UI captures). Pass a
+workspace-relative path, or an absolute path on this machine such as a file under Pictures. Outside
+the workspace, `auto` and other automatic-approval sessions proceed after the same approval gate as
+shell; interactive ask/N sessions prompt. Do not copy those files into the project.
+
 It uploads the file once through DeepSeek Files API (`POST /files`, `purpose=user_data`) and later
 turns reuse the returned `file_id`. Inline base64 is only a fallback if that upload fails.
 

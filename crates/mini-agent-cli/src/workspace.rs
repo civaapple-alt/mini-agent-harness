@@ -270,6 +270,30 @@ impl Workspace {
         self.ensure_readable(resolved)
     }
 
+    pub(crate) fn read_image_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
+        let candidate = self.candidate(value)?;
+        let resolved = candidate
+            .canonicalize()
+            .map_err(|error| ToolError(format!("cannot resolve path: {error}")))?;
+        if self.is_session_artifact(&resolved) {
+            return Ok(resolved);
+        }
+        if self.ensure_readable(resolved.clone()).is_ok() {
+            return Ok(resolved);
+        }
+        if has_git_component(&resolved) {
+            return Err(ToolError("path escapes the workspace".to_string()));
+        }
+        if !resolved.is_file() {
+            return Err(ToolError(format!(
+                "cannot read \"{}\": not a regular file",
+                resolved.display()
+            )));
+        }
+        self.approve(&format!("read_image {}", resolved.display()))?;
+        Ok(resolved)
+    }
+
     fn mutate_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
         let candidate = self.candidate(value)?;
         let resolved = candidate
@@ -422,7 +446,7 @@ impl Tool for ReadImage {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "read_image".to_string(),
-            description: "Read a PNG/JPEG/GIF/WebP workspace file and return it for vision models. The host uploads the image once via the Files API and later turns reuse that file_id. This is not a screenshot tool.".to_string(),
+            description: "Read a local PNG/JPEG/GIF/WebP file and return it for vision models. Path may be workspace-relative or an absolute path on this machine (for example a file under Pictures). Do not copy outside images into the workspace. Absolute paths outside the workspace require approval. The host uploads once via the Files API and later turns reuse that file_id. This is not a screenshot tool.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": { "path": {"type": "string"} },
@@ -433,7 +457,7 @@ impl Tool for ReadImage {
     }
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let path = self.workspace.read_path(arguments)?;
+        let path = self.workspace.read_image_path(arguments)?;
         let declared = crate::image::declared_media_type(&path).ok_or_else(|| {
             ToolError(format!(
                 "cannot read \"{}\": read_image only accepts PNG/JPEG/WebP/GIF paths",
@@ -1038,6 +1062,72 @@ mod tests {
         let error = mismatch.execute(&json!({"path": "shot.jpg"})).unwrap_err();
         assert!(error.0.contains("extension declares"));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn read_image_accepts_absolute_path_outside_workspace_after_approval() {
+        struct StubFiles;
+        impl crate::image::FileUploader for StubFiles {
+            fn upload(&self, _: &str, _: &str, _: &[u8]) -> Result<String, ToolError> {
+                Ok("file-api-outside".to_string())
+            }
+        }
+
+        let root = test_root();
+        let pictures = test_root();
+        fs::write(pictures.join("outside.png"), crate::image::TINY_PNG).unwrap();
+        let abs = pictures.join("outside.png").canonicalize().unwrap();
+        let workspace = Arc::new(
+            Workspace::with_read_roots(
+                root.clone(),
+                ApprovalController::new(ApprovalMode::Automatic),
+                Vec::new(),
+                SandboxKind::Native,
+            )
+            .unwrap(),
+        );
+        let tool = ReadImage {
+            workspace: Arc::clone(&workspace),
+            store: crate::image::ImageStore::with_uploader(Arc::new(StubFiles)),
+        };
+        let out = tool
+            .execute(&json!({"path": abs.to_string_lossy().to_string()}))
+            .unwrap();
+        assert!(out.contains("file_id=\"file-api-outside\""), "{out}");
+        assert!(
+            ReadFile(workspace)
+                .execute(&json!({"path": abs.to_string_lossy().to_string()}))
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(pictures).unwrap();
+    }
+
+    #[test]
+    fn read_image_outside_workspace_can_be_denied() {
+        let root = test_root();
+        let pictures = test_root();
+        fs::write(pictures.join("secret.png"), crate::image::TINY_PNG).unwrap();
+        let abs = pictures.join("secret.png").canonicalize().unwrap();
+        let workspace = Arc::new(
+            Workspace::with_read_roots(
+                root.clone(),
+                ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
+                Vec::new(),
+                SandboxKind::Native,
+            )
+            .unwrap(),
+        );
+        let tool = ReadImage {
+            workspace,
+            store: crate::image::ImageStore::memory_only(),
+        };
+        let error = tool
+            .execute(&json!({"path": abs.to_string_lossy().to_string()}))
+            .unwrap_err();
+        assert!(error.0.contains("denied"), "{error:?}");
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(pictures).unwrap();
     }
 
     #[test]
