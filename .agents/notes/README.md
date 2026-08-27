@@ -83,6 +83,7 @@ If a proposed approach is rejected during review:
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-27 | [Subagent Task Scheduling & Delegation](.agents/notes/proposed/architecture/2026-08-27-subagent-task-scheduling-and-delegation.md) | Multi-tool subagent delegation, context forking, and asynchronous event waiting |
+| 2026-08-27 | [Subprocess CLI & ACP Subagent Execution](.agents/notes/proposed/architecture/2026-08-27-subprocess-cli-and-acp-subagent-execution.md) | Headless `mini-agent ask --json` subprocess spawning and Agent Client Protocol execution |
 
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
