@@ -83,6 +83,7 @@ If a proposed approach is rejected during review:
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-27 | [Subagent Task Scheduling & Delegation](.agents/notes/proposed/architecture/2026-08-27-subagent-task-scheduling-and-delegation.md) | Multi-tool subagent delegation, context forking, and asynchronous event waiting |
+| 2026-08-27 | [Multi-turn Interactive Subagent Sessions](.agents/notes/proposed/architecture/2026-08-27-multi-turn-interactive-subagent-sessions.md) | Stateless session-backed resumption (`send_subagent_message`) and ACP streaming protocol |
 
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |

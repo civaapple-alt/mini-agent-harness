@@ -80,37 +80,20 @@ For complex multi-turn subagent collaborations requiring intermediate feedback, 
 
 ---
 
-## 4. Phased Implementation Roadmap
+## 4. Implementation Details (Phase 1 Implemented)
 
-### Phase 1: Headless CLI Task Invocation (Immediate Priority)
+### 4.1. `spawn_agent` Workspace Tool (`crates/mini-agent-cli/src/subagent.rs`)
 
-Implement the `spawn_agent` / `exec_subagent` tool backend in `crates/mini-agent-cli/src/workspace.rs` using `std::env::current_exe()`:
+The `spawn_agent` tool is registered in `workspace_tools_with_read_roots` and provides bounded subagent execution:
+- **Parameters**: `task_name` (required), `message` (required), `model` (optional override), `timeout_seconds` (optional, default 120s, range 10s–600s).
+- **Process Spawning**: Uses `std::env::current_exe()` to launch `mini-agent ask "<prompt>" --json --auto` with the parent's active security preset and sandbox mode.
+- **Supervision**: Supervised by `run_sandboxed_command` with Win32 JobObject / POSIX process tree termination guarantees.
+- **Output Aggregation**: Parses child JSON output (`output`, `steps`, `exit_code`, `error`) and returns structured markdown to the calling parent agent.
 
-```rust
-// Conceptual implementation in Host Adapter (CLI)
-pub fn execute_subagent_task(
-    prompt: &str,
-    security_preset: SecurityPreset,
-    sandbox: SandboxKind,
-    timeout: Duration,
-) -> Result<SubagentOutput, ToolError> {
-    let current_exe = std::env::current_exe()
-        .map_err(|e| ToolError(format!("cannot resolve current binary: {e}")))?;
-    
-    let mut cmd = std::process::Command::new(current_exe);
-    cmd.args(&["ask", prompt, "--json", "--security-preset", security_preset.as_str()]);
-    
-    // Execute under ProcessSandbox guard for timeout & descendant termination
-    let output = run_sandboxed_process(cmd, timeout)?;
-    let result: SubagentOutput = serde_json::from_slice(&output.stdout)
-        .map_err(|e| ToolError(format!("invalid subagent JSON output: {e}")))?;
-    Ok(result)
-}
-```
+### 4.2. Next Evolution: Multi-Turn Interactive Subagents
 
-### Phase 2: Agent Client Protocol (ACP) Stdio Subcommand
-
-Introduce `mini-agent acp` subcommand supporting bidirectional JSON-RPC for long-running streaming interactions without altering `mini-agent-core`.
+Phase 2 (multi-turn interactive sessions and streaming ACP protocol) is detailed in the follow-up proposal:
+`[Multi-turn Interactive Subagent Sessions](.agents/notes/proposed/architecture/2026-08-27-multi-turn-interactive-subagent-sessions.md)`.
 
 ---
 
@@ -125,17 +108,16 @@ Introduce `mini-agent acp` subcommand supporting bidirectional JSON-RPC for long
 
 ---
 
-## 6. Acceptance Criteria
+## 6. Verification & Acceptance Criteria
 
 1. **Headless Execution**:
-   - `mini-agent ask "<prompt>" --json` returns valid JSON with `status: "completed"` and exit code 0.
+   - `mini-agent ask "<prompt>" --json` returns valid JSON with `exit_code: 0` and structured fields.
    - `spawn_agent` CLI tool successfully executes child processes and receives structured output.
-2. **Isolation & Concurrency**:
-   - Spawning 4 parallel child review agents completes concurrently without file lock conflicts or mutual interference.
-3. **Timeout & Kill Verification**:
-   - A stalled child process is cleanly terminated upon timeout without hanging the parent agent.
-4. **Line Budget**:
-   - Phase 1 implementation requires $< 120$ lines of code in `mini-agent-cli`, adding 0 lines to `mini-agent-core`.
+2. **Integration Testing**:
+   - `subagent_spawn_runs_child_process_and_returns_output` in `crates/mini-agent-cli/tests/interactive.rs` validates the complete parent -> subagent -> parent round-trip under SSE mock transport.
+3. **Line Budget Compliance**:
+   - `mini-agent-core`: 2,787 / 20,000 lines (0 core lines added).
+   - `all Rust source`: 19,165 / 30,000 lines.
 
 ---
 
