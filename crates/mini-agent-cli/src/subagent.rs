@@ -69,12 +69,14 @@ fn record_subagent_tree_meta(
     child_id: &str,
     task_name: &str,
     agent_type: &str,
+    persona: Option<&str>,
     started_at_ms: u64,
     completed_at_ms: u64,
     steps: u64,
     exit_code: i64,
     output: &str,
     error: &str,
+    review_stats: Option<crate::persona::ReviewStats>,
 ) {
     let subagents_dir = root.join(".agents/sessions").join(child_id);
     let _ = std::fs::create_dir_all(&subagents_dir);
@@ -82,12 +84,19 @@ fn record_subagent_tree_meta(
         "subagent_id": child_id,
         "task_name": task_name,
         "agent_type": agent_type,
+        "persona": persona,
         "started_at_ms": started_at_ms,
         "completed_at_ms": completed_at_ms,
         "duration_ms": completed_at_ms.saturating_sub(started_at_ms),
         "steps": steps,
         "exit_code": exit_code,
         "status": if exit_code == 0 && error.is_empty() { "completed" } else { "failed" },
+        "review_stats": review_stats.map(|s| json!({
+            "open": s.open,
+            "fixed": s.fixed,
+            "wontfix": s.wontfix,
+            "addressed": s.addressed,
+        })),
     });
     let _ = std::fs::write(
         subagents_dir.join("meta.json"),
@@ -123,6 +132,27 @@ impl Tool for SpawnAgent {
                         "type": "string",
                         "enum": ["explore", "plan", "general"],
                         "description": "Subagent preset role: 'explore' (fast read-only search), 'plan' (read-only architecture design), or 'general' (full execution). Default: 'general'"
+                    },
+                    "persona": {
+                        "type": "string",
+                        "enum": [
+                            "reviewer",
+                            "implementer",
+                            "security-auditor",
+                            "test-writer",
+                            "researcher",
+                            "design-doc-writer",
+                            "design-doc-reviewer"
+                        ],
+                        "description": "Specialized persona behavior and contract preset (e.g. 'reviewer', 'implementer', 'security-auditor', 'test-writer')"
+                    },
+                    "review_file": {
+                        "type": "string",
+                        "description": "Optional file path for structured review notes or issues (e.g. '.agents/scratch/review-123.md')"
+                    },
+                    "summary_file": {
+                        "type": "string",
+                        "description": "Optional file path for implementation deliverables and summaries"
                     },
                     "fork_context": {
                         "type": "boolean",
@@ -163,6 +193,9 @@ impl Tool for SpawnAgent {
             .get("agent_type")
             .and_then(Value::as_str)
             .unwrap_or("general");
+        let persona = args.get("persona").and_then(Value::as_str);
+        let review_file = args.get("review_file").and_then(Value::as_str);
+        let summary_file = args.get("summary_file").and_then(Value::as_str);
         let persist = args.get("persist").and_then(Value::as_bool).unwrap_or(true);
         let model = args.get("model").and_then(|v| v.as_str());
         let timeout_secs = args
@@ -176,15 +209,13 @@ impl Tool for SpawnAgent {
             .unwrap_or_default()
             .as_millis() as u64;
 
-        let message = match agent_type {
-            "explore" => format!(
-                "[Role: Read-Only Explorer]\nYou have read-only permissions. Do not attempt to modify workspace files.\n\n{raw_message}"
-            ),
-            "plan" => format!(
-                "[Role: Software Architect]\nAnalyze requirements and design an implementation plan with critical files.\n\n{raw_message}"
-            ),
-            _ => raw_message.to_string(),
-        };
+        let message = crate::persona::render_subagent_prompt(
+            Some(agent_type),
+            persona,
+            raw_message,
+            review_file,
+            summary_file,
+        );
 
         let current_exe = std::env::current_exe()
             .map_err(|e| ToolError(format!("cannot locate mini-agent executable: {e}")))?;
@@ -253,18 +284,31 @@ impl Tool for SpawnAgent {
                 .and_then(|s| s.as_str())
                 .or(session_id.as_deref());
 
+            let review_stats = if let Some(rf) = review_file {
+                let candidate = self.0.root.join(rf);
+                if let Ok(content) = std::fs::read_to_string(&candidate) {
+                    Some(crate::persona::parse_review_stats(&content))
+                } else {
+                    Some(crate::persona::parse_review_stats(final_output))
+                }
+            } else {
+                None
+            };
+
             if let Some(sid) = returned_sid {
                 record_subagent_tree_meta(
                     &self.0.root,
                     sid,
                     task_name,
                     agent_type,
+                    persona,
                     started_at_ms,
                     completed_at_ms,
                     steps,
                     exit_code,
                     final_output,
                     error,
+                    review_stats,
                 );
             }
 
@@ -273,9 +317,21 @@ impl Tool for SpawnAgent {
                 None => String::new(),
             };
 
+            let review_info = match review_stats {
+                Some(stats)
+                    if stats.open > 0
+                        || stats.fixed > 0
+                        || stats.wontfix > 0
+                        || stats.addressed > 0 =>
+                {
+                    format!(" [{stats}]")
+                }
+                _ => String::new(),
+            };
+
             if exit_code == 0 && error.is_empty() {
                 Ok(format!(
-                    "Subagent '{task_name}'{session_info} completed (in {steps} steps):\n\n{final_output}"
+                    "Subagent '{task_name}'{session_info}{review_info} completed (in {steps} steps):\n\n{final_output}"
                 ))
             } else {
                 let err_msg = if !error.is_empty() {
@@ -286,7 +342,7 @@ impl Tool for SpawnAgent {
                     "subagent failed without error details"
                 };
                 Ok(format!(
-                    "Subagent '{task_name}'{session_info} failed (exit code {exit_code}):\n{err_msg}\n\nPartial output:\n{final_output}"
+                    "Subagent '{task_name}'{session_info}{review_info} failed (exit code {exit_code}):\n{err_msg}\n\nPartial output:\n{final_output}"
                 ))
             }
         } else {
@@ -298,12 +354,14 @@ impl Tool for SpawnAgent {
                         sid,
                         task_name,
                         agent_type,
+                        persona,
                         started_at_ms,
                         completed_at_ms,
                         1,
                         output.exit_code.unwrap_or(0) as i64,
                         output.raw_stdout.trim(),
                         output.raw_stderr.trim(),
+                        None,
                     );
                     format!(" [session_id: {sid}]")
                 }
@@ -522,6 +580,9 @@ mod tests {
         assert!(spec.parameters["properties"]["task_name"].is_object());
         assert!(spec.parameters["properties"]["message"].is_object());
         assert!(spec.parameters["properties"]["agent_type"].is_object());
+        assert!(spec.parameters["properties"]["persona"].is_object());
+        assert!(spec.parameters["properties"]["review_file"].is_object());
+        assert!(spec.parameters["properties"]["summary_file"].is_object());
         assert!(spec.parameters["properties"]["fork_context"].is_object());
         assert!(spec.parameters["properties"]["persist"].is_object());
         assert!(spec.parameters["properties"]["model"].is_object());
@@ -532,17 +593,25 @@ mod tests {
     #[test]
     fn record_subagent_tree_meta_creates_files() {
         let root = test_root();
+        let stats = crate::persona::ReviewStats {
+            open: 0,
+            fixed: 2,
+            wontfix: 0,
+            addressed: 0,
+        };
         record_subagent_tree_meta(
             &root,
             "sub-123-reviewer",
             "reviewer",
-            "explore",
+            "general",
+            Some("reviewer"),
             1000,
             2000,
             4,
             0,
             "all tests pass",
             "",
+            Some(stats),
         );
         let subagent_dir = root.join(".agents/sessions/sub-123-reviewer");
         assert!(subagent_dir.join("meta.json").is_file());
@@ -550,9 +619,11 @@ mod tests {
         let meta: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(subagent_dir.join("meta.json")).unwrap())
                 .unwrap();
-        assert_eq!(meta["agent_type"], "explore");
+        assert_eq!(meta["agent_type"], "general");
+        assert_eq!(meta["persona"], "reviewer");
         assert_eq!(meta["duration_ms"], 1000);
         assert_eq!(meta["status"], "completed");
+        assert_eq!(meta["review_stats"]["fixed"], 2);
         fs::remove_dir_all(root).unwrap();
     }
 

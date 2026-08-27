@@ -102,6 +102,7 @@ If a proposed approach is rejected during review:
 | 2026-08-27 | [Multi-turn Interactive Subagent Sessions](.agents/notes/implemented/architecture/2026-08-27-multi-turn-interactive-subagent-sessions.md) | Stateless session-backed resumption (`send_subagent_message`) and ACP streaming protocol |
 | 2026-08-27 | [Subagent Trace Replay & Session Lineage](.agents/notes/implemented/architecture/2026-08-27-subagent-trace-replay-and-session-lineage.md) | Hierarchical trace rollup, nested replay drill-down, and session checkpoint graph |
 | 2026-08-27 | [Session Directory & Metadata Architecture](.agents/notes/implemented/architecture/2026-08-27-session-directory-and-metadata-architecture.md) | Modular session directory: fast summary index, goal/plan state, subagent trees, and compaction segments |
+| 2026-08-27 | [Builtin Agent & Persona Prompt System](.agents/notes/implemented/architecture/2026-08-27-builtin-agent-personas-and-file-contracts.md) | Builtin agent/persona prompts, dual-mode file contracts (review/summary), and issue state tracking |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |

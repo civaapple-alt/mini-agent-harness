@@ -3,8 +3,8 @@
 All notable changes to Mini Agent Harness are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
+- Builtin foundational agent prompts (`explore`, `plan`, `general`) and 7 specialized personas (`reviewer`, `implementer`, `security-auditor`, `test-writer`, `researcher`, `design-doc-writer`, `design-doc-reviewer`) in `persona.rs`.
+- Dual-mode file collaboration contracts (`review_file`, `summary_file`) with automated prompt rendering, issue lifecycle state tracking (`open`, `fixed`, `wontfix`, `addressed`), and live review statistics in `SpawnAgent`.
 - Modular session directory layout generating atomic `summary.json`, `signals.json`, and `prompt_context.json` snapshots alongside durable `session.jsonl` records.
 - Fast $O(1)$ session discovery in `mini-agent sessions` reading lightweight `summary.json` metadata indexes without parsing full conversation streams.
 - Subagent tree execution tracking recording lifecycle metrics (`started_at_ms`, `completed_at_ms`, `duration_ms`, `steps`, `exit_code`, `status`) in `meta.json` and structured deliverables in `output.json` under `.agents/sessions/<id>/`.

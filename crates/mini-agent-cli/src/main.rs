@@ -8,6 +8,7 @@ mod mcp;
 mod mentor;
 mod observer;
 mod openai;
+mod persona;
 mod processes;
 mod project_context;
 mod repl;
