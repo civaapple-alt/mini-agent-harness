@@ -16,6 +16,7 @@ mod sandbox;
 mod security;
 mod session;
 mod skills;
+mod subagent;
 mod trace;
 mod workspace;
 mod world;

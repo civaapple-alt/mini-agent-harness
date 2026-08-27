@@ -7,6 +7,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Added
 
+- Subprocess CLI-driven subagent execution tool (`spawn_agent`), allowing parent agents to delegate bounded tasks to isolated child `mini-agent ask "<prompt>" --json` processes with zero prompt pollution, OS-level crash/memory isolation, and structured result aggregation.
 - Multi-item validation on durable session restore (`restore_history`) validating `Context`, `User`, `Assistant`, and `Tool` message bounds individually.
 - Turn-atomic trimming (`remove_first_message_group`) ensuring function calls and settlement outputs are dropped as cohesive groups during compaction.
 - Settlement-aware loop detection tracking `(name, arguments, content)` to avoid false positive stall warnings during polling.

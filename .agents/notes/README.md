@@ -83,7 +83,6 @@ If a proposed approach is rejected during review:
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-27 | [Subagent Task Scheduling & Delegation](.agents/notes/proposed/architecture/2026-08-27-subagent-task-scheduling-and-delegation.md) | Multi-tool subagent delegation, context forking, and asynchronous event waiting |
-| 2026-08-27 | [Subprocess CLI & ACP Subagent Execution](.agents/notes/proposed/architecture/2026-08-27-subprocess-cli-and-acp-subagent-execution.md) | Headless `mini-agent ask --json` subprocess spawning and Agent Client Protocol execution |
 
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
@@ -104,6 +103,7 @@ If a proposed approach is rejected during review:
 | 2026-08-26 | [Session Branching Lanes](.agents/notes/implemented/architecture/2026-08-26-session-branching-lanes.md) | Multi-branch tree conversations and speculative exploration lanes |
 | 2026-08-26 | [Local Sandbox Adapter](.agents/notes/implemented/architecture/2026-08-26-local-sandbox-adapter.md) | Codex-inspired 5-stage tool orchestrator, security presets, and Windows JobObject sandboxing |
 | 2026-08-27 | [Model Context Boundaries & CLI Decoupling](.agents/notes/implemented/architecture/2026-08-27-model-context-boundaries-and-cli-decoupling.md) | Model item ceilings, atomic turn trimming, CLI decoupling, and session continuity |
+| 2026-08-27 | [Subprocess CLI & ACP Subagent Execution](.agents/notes/implemented/architecture/2026-08-27-subprocess-cli-and-acp-subagent-execution.md) | Headless `mini-agent ask --json` subprocess spawning, `spawn_agent` tool, and Agent Client Protocol execution |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |

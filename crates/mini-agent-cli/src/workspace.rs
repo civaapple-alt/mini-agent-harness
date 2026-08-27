@@ -186,20 +186,21 @@ pub fn workspace_tools_with_read_roots(
         Box::new(WriteFile(Arc::clone(&workspace))),
         Box::new(Shell(Arc::clone(&workspace), results.clone())),
         Box::new(ReadToolResult(results)),
+        Box::new(crate::subagent::SpawnAgent::new(Arc::clone(&workspace))),
     ];
     tools.extend(process_tools(processes));
     Ok(tools)
 }
 
-struct Workspace {
-    root: PathBuf,
-    extra_read_roots: Vec<PathBuf>,
-    approval: ApprovalController,
-    sandbox: SandboxKind,
+pub(crate) struct Workspace {
+    pub(crate) root: PathBuf,
+    pub(crate) extra_read_roots: Vec<PathBuf>,
+    pub(crate) approval: ApprovalController,
+    pub(crate) sandbox: SandboxKind,
 }
 
 impl Workspace {
-    fn with_read_roots(
+    pub(crate) fn with_read_roots(
         root: PathBuf,
         approval: ApprovalController,
         extra_read_roots: Vec<PathBuf>,
@@ -546,51 +547,23 @@ pub(crate) fn terminate_process_tree(child: &mut std::process::Child) -> io::Res
     child.wait()
 }
 
-struct CommandOutput {
-    text: String,
-    source_bytes: usize,
-    source_truncated: bool,
+pub(crate) struct CommandOutput {
+    pub(crate) text: String,
+    pub(crate) raw_stdout: String,
+    pub(crate) raw_stderr: String,
+    pub(crate) timed_out: bool,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) source_bytes: usize,
+    pub(crate) source_truncated: bool,
 }
 
-fn run_shell(
-    command: &str,
+pub(crate) fn run_sandboxed_command(
+    mut cmd: Command,
     root: &Path,
     sandbox_kind: SandboxKind,
     timeout: Duration,
 ) -> Result<CommandOutput, ToolError> {
-    if sandbox_kind == SandboxKind::Docker {
-        let docker_check = Command::new("docker")
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        if docker_check.is_err() || !docker_check.unwrap().success() {
-            return Err(ToolError(
-                "docker sandbox is unavailable on this host; ensure docker daemon is running, or use '--sandbox native'"
-                    .to_string(),
-            ));
-        }
-    }
     let sandbox = ProcessSandbox::new(sandbox_kind);
-    let mut cmd = if sandbox_kind == SandboxKind::Docker {
-        let mut docker_cmd = Command::new("docker");
-        docker_cmd.args([
-            "run",
-            "--rm",
-            "-i",
-            "-v",
-            &format!("{}:/workspace", root.display()),
-            "-w",
-            "/workspace",
-            "alpine",
-            "sh",
-            "-c",
-            command,
-        ]);
-        docker_cmd
-    } else {
-        shell_command(command)
-    };
     let mut child = cmd
         .current_dir(root)
         .stdout(Stdio::piped())
@@ -627,7 +600,7 @@ fn run_shell(
         .join()
         .map_err(|_| ToolError("stderr reader panicked".to_string()))?
         .map_err(io_error)?;
-    let status = if timed_out {
+    let status_str = if timed_out {
         format!("timed out after {} seconds", timeout.as_secs_f64())
     } else {
         status.code().map_or_else(
@@ -637,15 +610,58 @@ fn run_shell(
     };
     let source_bytes = stdout.total_bytes.saturating_add(stderr.total_bytes);
     let source_truncated = stdout.truncated || stderr.truncated;
+    let raw_stdout = stdout.render();
+    let raw_stderr = stderr.render();
     Ok(CommandOutput {
-        text: format!(
-            "exit: {status}\nstdout:\n{}\nstderr:\n{}",
-            stdout.render(),
-            stderr.render()
-        ),
+        text: format!("exit: {status_str}\nstdout:\n{raw_stdout}\nstderr:\n{raw_stderr}"),
+        raw_stdout,
+        raw_stderr,
+        timed_out,
+        exit_code: if timed_out { None } else { status.code() },
         source_bytes,
         source_truncated,
     })
+}
+
+fn run_shell(
+    command: &str,
+    root: &Path,
+    sandbox_kind: SandboxKind,
+    timeout: Duration,
+) -> Result<CommandOutput, ToolError> {
+    if sandbox_kind == SandboxKind::Docker {
+        let docker_check = Command::new("docker")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        if docker_check.is_err() || !docker_check.unwrap().success() {
+            return Err(ToolError(
+                "docker sandbox is unavailable on this host; ensure docker daemon is running, or use '--sandbox native'"
+                    .to_string(),
+            ));
+        }
+    }
+    let cmd = if sandbox_kind == SandboxKind::Docker {
+        let mut docker_cmd = Command::new("docker");
+        docker_cmd.args([
+            "run",
+            "--rm",
+            "-i",
+            "-v",
+            &format!("{}:/workspace", root.display()),
+            "-w",
+            "/workspace",
+            "alpine",
+            "sh",
+            "-c",
+            command,
+        ]);
+        docker_cmd
+    } else {
+        shell_command(command)
+    };
+    run_sandboxed_command(cmd, root, sandbox_kind, timeout)
 }
 
 struct CapturedOutput {
@@ -733,7 +749,7 @@ fn file_tool_spec(name: &str, description: &str, content: bool) -> ToolSpec {
     }
 }
 
-fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, ToolError> {
+pub(crate) fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, ToolError> {
     arguments
         .get(name)
         .and_then(Value::as_str)

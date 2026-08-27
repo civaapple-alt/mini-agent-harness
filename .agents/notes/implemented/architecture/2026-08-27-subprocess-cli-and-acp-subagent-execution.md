@@ -1,6 +1,6 @@
 # Subprocess CLI and ACP-Style Headless Subagent Execution Architecture
 
-Status: proposed
+Status: implemented
 
 ## 1. Context & Motivation
 

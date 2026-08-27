@@ -1191,6 +1191,100 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn subagent_spawn_runs_child_process_and_returns_output() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        // Request 1: Parent agent calls spawn_agent
+        let (mut stream1, _) = listener.accept().unwrap();
+        stream1
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let _ = read_request_body(&mut stream1);
+        let body1 = format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "spawn-call-1",
+                    "name": "spawn_agent",
+                    "arguments": serde_json::to_string(&json!({
+                        "task_name": "child_reviewer",
+                        "message": "review changes"
+                    })).unwrap()
+                }
+            }),
+            json!({
+                "type": "response.completed",
+                "response": {
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 2
+                    }
+                }
+            })
+        );
+        write!(
+            stream1,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body1}",
+            body1.len()
+        )
+        .unwrap();
+        stream1.flush().unwrap();
+
+        // Request 2: Child agent runs turn and returns answer
+        let (mut stream2, _) = listener.accept().unwrap();
+        stream2
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let _ = read_request_body(&mut stream2);
+        write_sse_response(&mut stream2, "Child review complete: no issues found.");
+
+        // Request 3: Parent agent receives tool output and finishes
+        let (mut stream3, _) = listener.accept().unwrap();
+        stream3
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let _ = read_request_body(&mut stream3);
+        write_sse_response(&mut stream3, "All reviews completed successfully.");
+    });
+
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+
+    let output = mini_agent(&root)
+        .args(["ask", "start review", "--json", "--auto-approve"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "ask command failed: {}",
+        stderr(&output)
+    );
+    let stdout_str = stdout(&output);
+    let parsed: Value = serde_json::from_str(&stdout_str).unwrap();
+    assert_eq!(parsed["exit_code"], 0);
+    assert!(
+        parsed["output"]
+            .as_str()
+            .unwrap()
+            .contains("All reviews completed successfully.")
+    );
+
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn read_request_body(stream: &mut TcpStream) -> Vec<u8> {
     let mut received = Vec::new();
     let mut buffer = [0u8; 4096];

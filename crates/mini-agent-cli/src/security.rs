@@ -31,6 +31,10 @@ impl SecurityPreset {
             Self::Custom => "custom",
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        self.name()
+    }
 }
 
 impl std::fmt::Display for SecurityPreset {
