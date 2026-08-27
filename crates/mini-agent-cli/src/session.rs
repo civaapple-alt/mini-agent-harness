@@ -158,19 +158,37 @@ impl SessionStore {
     }
 
     fn create(workspace: &Path) -> Result<OpenedSession, String> {
-        let project_dir = session_directory(workspace)?;
+        let base_dir = session_directory(workspace)?;
+        fs::create_dir_all(&base_dir)
+            .map_err(|error| format!("cannot create session directory: {error}"))?;
         for _ in 0..16 {
             let session_id = new_id("s");
-            let session_dir = project_dir.join(&session_id);
-            fs::create_dir_all(&session_dir)
+            let session_dir = base_dir.join(&session_id);
+            if session_dir.exists() {
+                continue;
+            }
+            fs::create_dir(&session_dir)
                 .map_err(|error| format!("cannot create session directory: {error}"))?;
-            let path = session_dir.join(SESSION_FILE_NAME);
-            let file = match OpenOptions::new().append(true).create_new(true).open(&path) {
-                Ok(file) => file,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(format!("cannot create session: {error}")),
+            let lock = match acquire_lock(&session_dir, SESSION_LOCK_NAME) {
+                Ok(lock) => lock,
+                Err(error) => {
+                    let _ = fs::remove_dir(&session_dir);
+                    return Err(error);
+                }
             };
-            let lock = acquire_lock(&session_dir, SESSION_LOCK_NAME)?;
+            let path = session_dir.join(SESSION_FILE_NAME);
+            let file = match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => file,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&session_dir);
+                    return Err(format!("cannot create session file: {error}"));
+                }
+            };
             let thread_id = new_id("t");
             let mut store = Self {
                 session_id: session_id.clone(),
@@ -207,8 +225,7 @@ impl SessionStore {
 
     fn resume(workspace: &Path, session_id: &str) -> Result<OpenedSession, String> {
         validate_session_id(session_id)?;
-        let session_dir = session_directory(workspace)?.join(session_id);
-        let path = session_dir.join(SESSION_FILE_NAME);
+        let (session_dir, path) = resolve_session_file(workspace, session_id)?;
         let metadata = fs::metadata(&path)
             .map_err(|error| format!("cannot open session {session_id}: {error}"))?;
         if metadata.len() > MAX_SESSION_BYTES {
@@ -246,8 +263,7 @@ impl SessionStore {
 
     fn fork(workspace: &Path, parent_session_id: &str) -> Result<OpenedSession, String> {
         validate_session_id(parent_session_id)?;
-        let parent_dir = session_directory(workspace)?.join(parent_session_id);
-        let parent_path = parent_dir.join(SESSION_FILE_NAME);
+        let (_parent_dir, parent_path) = resolve_session_file(workspace, parent_session_id)?;
         let metadata = fs::metadata(&parent_path)
             .map_err(|error| format!("cannot open parent session {parent_session_id}: {error}"))?;
         if metadata.len() > MAX_SESSION_BYTES {
@@ -531,6 +547,31 @@ pub(crate) fn session_directory(workspace: &Path) -> Result<PathBuf, String> {
         return Err("workspace path is too long to name a session directory".to_string());
     }
     Ok(home.join("sessions").join(key))
+}
+
+pub(crate) fn resolve_session_file(
+    workspace: &Path,
+    session_id: &str,
+) -> Result<(PathBuf, PathBuf), String> {
+    let session_dir = session_directory(workspace)?.join(session_id);
+    let path = session_dir.join(SESSION_FILE_NAME);
+    if path.exists() {
+        return Ok((session_dir, path));
+    }
+    let legacy1 = workspace
+        .join(".agents/sessions")
+        .join(session_id)
+        .join(SESSION_FILE_NAME);
+    if legacy1.exists() {
+        return Ok((workspace.join(".agents/sessions").join(session_id), legacy1));
+    }
+    let legacy2 = workspace
+        .join(".agents/sessions")
+        .join(format!("{session_id}.jsonl"));
+    if legacy2.exists() {
+        return Ok((workspace.join(".agents/sessions"), legacy2));
+    }
+    Ok((session_dir, path))
 }
 
 fn mini_agent_home() -> Option<PathBuf> {

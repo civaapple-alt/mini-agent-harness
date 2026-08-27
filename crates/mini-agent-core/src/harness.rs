@@ -47,7 +47,7 @@ impl Default for HarnessConfig {
             max_steps: 8,
             max_context_item_bytes: 8 * 1024,
             max_user_input_bytes: 32 * 1024,
-            max_model_response_bytes: 384 * 1024,
+            max_model_response_bytes: 64 * 1024,
             max_tool_calls_per_step: 8,
             max_tool_output_bytes: 16 * 1024,
             max_context_bytes: 1024 * 1024,
@@ -63,6 +63,7 @@ pub enum LimitKind {
     UserInputBytes,
     ModelResponseBytes,
     ToolCallsPerStep,
+    ToolOutputBytes,
     ContextBytes,
 }
 
@@ -73,6 +74,7 @@ impl fmt::Display for LimitKind {
             Self::UserInputBytes => "user input bytes",
             Self::ModelResponseBytes => "model response bytes",
             Self::ToolCallsPerStep => "tool calls per step",
+            Self::ToolOutputBytes => "tool output bytes",
             Self::ContextBytes => "context bytes",
         })
     }
@@ -146,8 +148,16 @@ impl<M: Model> Harness<M> {
         }
     }
 
+    pub fn system_prompt(&self) -> &str {
+        &self.config.system_prompt
+    }
+
     pub fn messages(&self) -> &[Message] {
         &self.messages
+    }
+
+    pub fn tool_specs(&self) -> Vec<crate::ToolSpec> {
+        self.tools.specs()
     }
 
     pub fn clear_history(&mut self) {
@@ -168,20 +178,56 @@ impl<M: Model> Harness<M> {
     }
 
     pub fn restore_history(&mut self, messages: Vec<Message>) -> Result<(), LimitExceeded> {
-        if let Some(actual) = messages.iter().find_map(|message| match message {
-            Message::Context { text } if text.len() > self.config.max_context_item_bytes => {
-                Some(text.len())
+        for message in &messages {
+            match message {
+                Message::Context { text } if text.len() > self.config.max_context_item_bytes => {
+                    return Err(LimitExceeded {
+                        kind: LimitKind::ContextItemBytes,
+                        limit: self.config.max_context_item_bytes,
+                        actual: text.len(),
+                    });
+                }
+                Message::User { text } if text.len() > self.config.max_user_input_bytes => {
+                    return Err(LimitExceeded {
+                        kind: LimitKind::UserInputBytes,
+                        limit: self.config.max_user_input_bytes,
+                        actual: text.len(),
+                    });
+                }
+                Message::Assistant {
+                    reasoning,
+                    text,
+                    tool_calls,
+                } => {
+                    let actual = reasoning.len()
+                        + text.len()
+                        + serde_json::to_vec(tool_calls).map(|v| v.len()).unwrap_or(0);
+                    if actual > self.config.max_model_response_bytes {
+                        return Err(LimitExceeded {
+                            kind: LimitKind::ModelResponseBytes,
+                            limit: self.config.max_model_response_bytes,
+                            actual,
+                        });
+                    }
+                    if tool_calls.len() > self.config.max_tool_calls_per_step {
+                        return Err(LimitExceeded {
+                            kind: LimitKind::ToolCallsPerStep,
+                            limit: self.config.max_tool_calls_per_step,
+                            actual: tool_calls.len(),
+                        });
+                    }
+                }
+                Message::Tool { content, .. }
+                    if content.len() > self.config.max_tool_output_bytes =>
+                {
+                    return Err(LimitExceeded {
+                        kind: LimitKind::ToolOutputBytes,
+                        limit: self.config.max_tool_output_bytes,
+                        actual: content.len(),
+                    });
+                }
+                _ => {}
             }
-            Message::Context { .. }
-            | Message::User { .. }
-            | Message::Assistant { .. }
-            | Message::Tool { .. } => None,
-        }) {
-            return Err(LimitExceeded {
-                kind: LimitKind::ContextItemBytes,
-                limit: self.config.max_context_item_bytes,
-                actual,
-            });
         }
         let tool_specs = self.tools.specs();
         let actual = context_bytes_for(&self.config.system_prompt, &messages, &tool_specs);
@@ -236,7 +282,7 @@ impl<M: Model> Harness<M> {
         let mut final_text = String::new();
         let mut step = 0usize;
         let mut consecutive_duplicate_tool_batches = 0usize;
-        let mut last_tool_batch: Option<Vec<(String, serde_json::Value)>> = None;
+        let mut last_tool_batch: Option<Vec<(String, serde_json::Value, String)>> = None;
 
         loop {
             step = step.saturating_add(1);
@@ -323,19 +369,7 @@ impl<M: Model> Harness<M> {
                 ));
             }
 
-            let current_batch: Vec<(String, serde_json::Value)> = response
-                .tool_calls
-                .iter()
-                .map(|call| (call.name.clone(), call.arguments.clone()))
-                .collect();
-            if last_tool_batch.as_ref() == Some(&current_batch) {
-                consecutive_duplicate_tool_batches =
-                    consecutive_duplicate_tool_batches.saturating_add(1);
-            } else {
-                consecutive_duplicate_tool_batches = 0;
-                last_tool_batch = Some(current_batch);
-            }
-
+            let mut current_executed_batch = Vec::new();
             for call in response.tool_calls {
                 observer.observe(&Event::ToolStarted { call: call.clone() });
                 let result = self.tools.execute(&call.name, &call.arguments);
@@ -355,16 +389,23 @@ impl<M: Model> Harness<M> {
                 });
                 self.messages.push(Message::Tool {
                     call_id: call.id,
-                    name: call.name,
-                    content,
+                    name: call.name.clone(),
+                    content: content.clone(),
                     is_error,
                 });
+                current_executed_batch.push((call.name, call.arguments, content));
+            }
+
+            if last_tool_batch.as_ref() == Some(&current_executed_batch) {
+                consecutive_duplicate_tool_batches =
+                    consecutive_duplicate_tool_batches.saturating_add(1);
+            } else {
+                consecutive_duplicate_tool_batches = 0;
+                last_tool_batch = Some(current_executed_batch);
             }
 
             if consecutive_duplicate_tool_batches >= 2 {
-                let _ = self.append_context(
-                    "[Loop warning: identical tool calls were repeated without progress. Please adjust arguments or try an alternate strategy.]",
-                );
+                let _ = self.append_context(LOOP_WARNING_TEXT);
             }
 
             if let Err(limit) = self.ensure_context_limit(&tool_specs) {
@@ -427,7 +468,8 @@ impl<M: Model> Harness<M> {
             self.config.max_context_bytes,
         );
         if prefix.is_empty() {
-            let compacted = assemble_compacted(None, context, tail);
+            let compacted =
+                assemble_compacted(None, context, tail, self.config.max_user_input_bytes);
             return self.finish_compacted(compacted, before_bytes, None, tool_specs, observer);
         }
         let mut compaction_messages = prefix.clone();
@@ -469,7 +511,12 @@ impl<M: Model> Harness<M> {
         let summary = response.text.trim();
         let mut compacted = None;
         if response.tool_calls.is_empty() && !summary.is_empty() {
-            let candidate = assemble_compacted(Some(summary), context.clone(), tail.clone());
+            let candidate = assemble_compacted(
+                Some(summary),
+                context.clone(),
+                tail.clone(),
+                self.config.max_user_input_bytes,
+            );
             let after_bytes = context_bytes_for(&self.config.system_prompt, &candidate, tool_specs);
             if after_bytes < before_bytes && after_bytes <= self.config.max_context_bytes {
                 compacted = Some(candidate);
@@ -483,6 +530,7 @@ impl<M: Model> Harness<M> {
                 compact_at,
                 &self.config.system_prompt,
                 tool_specs,
+                self.config.max_user_input_bytes,
             )
         });
         self.finish_compacted(
@@ -529,6 +577,9 @@ impl<M: Model> Harness<M> {
     }
 }
 
+const LOOP_WARNING_PREFIX: &str = "[Loop warning:";
+const LOOP_WARNING_TEXT: &str = "[Loop warning: identical tool calls and outputs were repeated without progress. Please adjust arguments or try an alternate strategy.]";
+
 fn split_compaction_parts(messages: &[Message]) -> (Vec<Message>, Option<Message>, Vec<Message>) {
     let (without_context, context) = take_latest_context(messages);
     let (prefix, tail) = split_prefix_tail(&without_context);
@@ -536,10 +587,10 @@ fn split_compaction_parts(messages: &[Message]) -> (Vec<Message>, Option<Message
 }
 
 fn take_latest_context(messages: &[Message]) -> (Vec<Message>, Option<Message>) {
-    let Some(index) = messages
-        .iter()
-        .rposition(|message| matches!(message, Message::Context { .. }))
-    else {
+    let Some(index) = messages.iter().rposition(|message| match message {
+        Message::Context { text } => !text.starts_with(LOOP_WARNING_PREFIX),
+        _ => false,
+    }) else {
         return (messages.to_vec(), None);
     };
     let context = messages[index].clone();
@@ -581,6 +632,23 @@ fn serialized_len(messages: &[Message]) -> usize {
         .len()
 }
 
+fn remove_first_message_group(messages: &mut Vec<Message>) {
+    if messages.is_empty() {
+        return;
+    }
+    match messages.remove(0) {
+        Message::Assistant { tool_calls, .. } if !tool_calls.is_empty() => {
+            while matches!(messages.first(), Some(Message::Tool { .. })) {
+                messages.remove(0);
+            }
+        }
+        _ => {}
+    }
+    while matches!(messages.first(), Some(Message::Tool { .. })) {
+        messages.remove(0);
+    }
+}
+
 fn trim_prefix_to_fit(
     prefix: &mut Vec<Message>,
     prompt: &str,
@@ -596,7 +664,7 @@ fn trim_prefix_to_fit(
         if context_bytes_for(system_prompt, &request, tool_specs) <= max_bytes {
             return;
         }
-        prefix.remove(0);
+        remove_first_message_group(prefix);
     }
 }
 
@@ -604,11 +672,13 @@ fn assemble_compacted(
     summary: Option<&str>,
     context: Option<Message>,
     tail: Vec<Message>,
+    max_user_input_bytes: usize,
 ) -> Vec<Message> {
     let mut compacted = Vec::new();
     if let Some(summary) = summary {
+        let bounded_summary = truncate_utf8(summary.to_string(), max_user_input_bytes);
         compacted.push(Message::User {
-            text: format!("{COMPACTION_PREFIX}\n{summary}"),
+            text: format!("{COMPACTION_PREFIX}\n{bounded_summary}"),
         });
     }
     if let Some(context) = context {
@@ -625,9 +695,11 @@ fn mechanical_compact(
     compact_at: usize,
     system_prompt: &str,
     tool_specs: &[crate::ToolSpec],
+    max_user_input_bytes: usize,
 ) -> Vec<Message> {
     loop {
-        let compacted = assemble_compacted(None, context.clone(), tail.clone());
+        let compacted =
+            assemble_compacted(None, context.clone(), tail.clone(), max_user_input_bytes);
         let mut candidate = prefix.clone();
         candidate.extend(compacted.iter().cloned());
         if prefix.is_empty()
@@ -635,7 +707,7 @@ fn mechanical_compact(
         {
             return candidate;
         }
-        prefix.remove(0);
+        remove_first_message_group(&mut prefix);
     }
 }
 

@@ -423,6 +423,32 @@ fn restores_only_history_that_fits_the_current_harness() {
         .unwrap_err();
     assert_eq!(error.kind, LimitKind::ContextItemBytes);
     assert_eq!(harness.messages(), messages);
+
+    let user_err = harness
+        .restore_history(vec![Message::User {
+            text: "x".repeat(HarnessConfig::default().max_user_input_bytes + 1),
+        }])
+        .unwrap_err();
+    assert_eq!(user_err.kind, LimitKind::UserInputBytes);
+
+    let tool_err = harness
+        .restore_history(vec![Message::Tool {
+            call_id: "call-1".to_string(),
+            name: "uppercase".to_string(),
+            content: "x".repeat(HarnessConfig::default().max_tool_output_bytes + 1),
+            is_error: false,
+        }])
+        .unwrap_err();
+    assert_eq!(tool_err.kind, LimitKind::ToolOutputBytes);
+
+    let assistant_err = harness
+        .restore_history(vec![Message::Assistant {
+            reasoning: String::new(),
+            text: "x".repeat(HarnessConfig::default().max_model_response_bytes + 1),
+            tool_calls: vec![],
+        }])
+        .unwrap_err();
+    assert_eq!(assistant_err.kind, LimitKind::ModelResponseBytes);
 }
 
 #[tokio::test]
@@ -1008,7 +1034,7 @@ async fn rejects_oversized_model_response_before_retaining_it() {
 fn default_ceilings_remain_bounded_under_deepseek_v4_windows() {
     let config = HarnessConfig::default();
     assert_eq!(config.max_context_bytes, 1024 * 1024);
-    assert_eq!(config.max_model_response_bytes, 384 * 1024);
+    assert_eq!(config.max_model_response_bytes, 64 * 1024);
 }
 
 #[tokio::test]

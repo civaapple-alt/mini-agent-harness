@@ -157,7 +157,7 @@ fn request_body(model: &str, request: &ModelRequest<'_>, web_search: bool) -> Va
         })
         .collect::<Vec<_>>();
 
-    if web_search {
+    if web_search && !request.tools.is_empty() {
         tools.push(json!({
             "type": "web_search"
         }));
@@ -493,6 +493,19 @@ mod tests {
             false,
         );
         assert_eq!(body_no_search["tools"].as_array().unwrap().len(), 1);
+
+        let empty_tools = [];
+        let body_empty_tools = request_body(
+            "test-model",
+            &ModelRequest {
+                system_prompt: &config.system_prompt,
+                messages: &messages,
+                tools: &empty_tools,
+                max_response_bytes: config.max_model_response_bytes,
+            },
+            true,
+        );
+        assert_eq!(body_empty_tools["tools"], json!([]));
     }
 
     #[test]

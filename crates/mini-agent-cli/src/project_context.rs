@@ -2,7 +2,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-pub const MAX_PROJECT_INSTRUCTIONS_BYTES: usize = 64 * 1024;
+pub const MAX_PROJECT_INSTRUCTIONS_BYTES: usize = 16 * 1024;
 const TRUNCATION_MARKER: &str = "\n[truncated]\n";
 
 #[derive(Debug, PartialEq, Eq)]

@@ -340,6 +340,9 @@ fn spawn_worker(
                     let _ = events.send(ReplEvent::Exited);
                     return;
                 }
+                let _ = harness.append_context(
+                    "[Session resumed. Note: previously running background processes and result preview handles from prior sessions have expired.]",
+                );
                 match world.model_context() {
                     Ok(context) => {
                         if let Err(error) = harness.append_context(context) {
