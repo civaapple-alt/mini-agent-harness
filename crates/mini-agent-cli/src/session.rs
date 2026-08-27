@@ -396,29 +396,74 @@ impl TurnStatus {
 }
 
 pub(crate) fn list(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
-    let directory = session_directory(workspace)?;
-    let entries = match fs::read_dir(&directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(format!("cannot list sessions: {error}")),
-    };
-    let mut sessions = entries
-        .take(MAX_SESSIONS + 1)
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
+    let mut sessions_map = std::collections::HashMap::new();
+
+    if let Ok(directory) = session_directory(workspace)
+        && let Ok(entries) = fs::read_dir(&directory)
+    {
+        for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
-            if !path.is_dir() {
-                return None;
+            if path.is_dir()
+                && let Some(id) = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(ToString::to_string)
+                && validate_session_id(&id).is_ok()
+            {
+                let file = path.join(SESSION_FILE_NAME);
+                if let Ok(meta) = fs::metadata(&file) {
+                    sessions_map.insert(
+                        id.clone(),
+                        SessionSummary {
+                            id,
+                            bytes: meta.len(),
+                        },
+                    );
+                }
             }
-            let id = path.file_name()?.to_str()?.to_string();
-            validate_session_id(&id).ok()?;
-            let file = path.join(SESSION_FILE_NAME);
-            Some(SessionSummary {
-                id,
-                bytes: fs::metadata(file).ok()?.len(),
-            })
-        })
-        .collect::<Vec<_>>();
+        }
+    }
+
+    let legacy_dir = workspace.join(".agents/sessions");
+    if let Ok(entries) = fs::read_dir(&legacy_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir()
+                && let Some(id) = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(ToString::to_string)
+                && validate_session_id(&id).is_ok()
+            {
+                let file = path.join(SESSION_FILE_NAME);
+                if let Ok(meta) = fs::metadata(&file) {
+                    sessions_map
+                        .entry(id.clone())
+                        .or_insert_with(|| SessionSummary {
+                            id,
+                            bytes: meta.len(),
+                        });
+                }
+            } else if path.is_file()
+                && path.extension().is_some_and(|ext| ext == "jsonl")
+                && let Some(stem) = path
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .map(ToString::to_string)
+                && validate_session_id(&stem).is_ok()
+                && let Ok(meta) = fs::metadata(&path)
+            {
+                sessions_map
+                    .entry(stem.clone())
+                    .or_insert_with(|| SessionSummary {
+                        id: stem,
+                        bytes: meta.len(),
+                    });
+            }
+        }
+    }
+
+    let mut sessions: Vec<_> = sessions_map.into_values().collect();
     if sessions.len() > MAX_SESSIONS {
         return Err(format!("session count exceeds {MAX_SESSIONS} limit"));
     }

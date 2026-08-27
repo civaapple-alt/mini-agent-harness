@@ -52,6 +52,8 @@ pub(crate) use harness_builder::harness_config_auto;
 pub(crate) use harness_builder::prepare_openai_harness;
 pub(crate) use harness_builder::print_auto_warning;
 use observer::RunObserver;
+use sandbox::SandboxKind;
+use security::SecurityPreset;
 use session::SessionRequest;
 use workspace::ApprovalController;
 use workspace::ApprovalMode;
@@ -70,16 +72,16 @@ async fn main() -> ExitCode {
         Ok(invocation) => invocation,
         Err(error) => {
             eprintln!("error: {error}\n");
-            println!("{}", help_text(HelpTopic::Root));
+            eprintln!("{}", help_text(HelpTopic::Root));
             return ExitCode::from(2);
         }
     };
     match invocation.command {
         Command::Interactive => {
-            let request = if invocation.ephemeral {
-                SessionRequest::Disabled
-            } else {
+            let request = if invocation.persist && !invocation.ephemeral {
                 SessionRequest::New
+            } else {
+                SessionRequest::Disabled
             };
             repl::run(
                 invocation.trace,
@@ -100,15 +102,16 @@ async fn main() -> ExitCode {
                 invocation.json,
                 invocation.automatic,
                 invocation.security_preset,
+                invocation.sandbox_kind,
                 invocation.web_search,
             )
             .await
         }
         Command::Auto if invocation.prompt.is_empty() => {
-            let request = if invocation.ephemeral {
-                SessionRequest::Disabled
-            } else {
+            let request = if invocation.persist && !invocation.ephemeral {
                 SessionRequest::New
+            } else {
+                SessionRequest::Disabled
             };
             repl::run(
                 invocation.trace,
@@ -121,7 +124,16 @@ async fn main() -> ExitCode {
             )
             .await
         }
-        Command::Auto => run_auto(invocation.prompt, invocation.trace, invocation.web_search).await,
+        Command::Auto => {
+            run_auto(
+                invocation.prompt,
+                invocation.trace,
+                invocation.security_preset,
+                invocation.sandbox_kind,
+                invocation.web_search,
+            )
+            .await
+        }
         Command::Help => {
             println!("{}", help_text(invocation.help_topic));
             ExitCode::SUCCESS
@@ -260,10 +272,12 @@ async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
 async fn run_auto(
     prompt: String,
     trace: Option<PathBuf>,
+    preset: SecurityPreset,
+    sandbox: SandboxKind,
     web_search_override: Option<bool>,
 ) -> ExitCode {
     print_auto_warning();
-    let approval = ApprovalController::new(ApprovalMode::Automatic);
+    let approval = ApprovalController::with_preset(ApprovalMode::Automatic, preset);
     let mut runtime = match RuntimeConfig::load() {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -278,6 +292,7 @@ async fn run_auto(
         &runtime,
         approval,
         harness_config_auto(true, runtime.copilot_max_steps()),
+        sandbox,
     ) {
         Ok(build) => build.harness,
         Err(error) => {

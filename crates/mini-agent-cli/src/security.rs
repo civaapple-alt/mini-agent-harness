@@ -168,31 +168,98 @@ impl SecurityPolicy {
     }
 }
 
+fn normalize_action(action: &str) -> (Option<&str>, String) {
+    let trimmed = action.trim();
+    if let Some(cmd) = trimmed
+        .strip_prefix("shell command `")
+        .and_then(|s| s.strip_suffix('`'))
+    {
+        return (Some("shell"), cmd.to_string());
+    }
+    if let Some(cmd) = trimmed
+        .strip_prefix("start process `")
+        .and_then(|s| s.strip_suffix('`'))
+    {
+        return (Some("shell"), cmd.to_string());
+    }
+    if let Some(cmd) = trimmed.strip_prefix("shell:") {
+        return (Some("shell"), cmd.to_string());
+    }
+    if let Some(path) = trimmed.strip_prefix("edit ") {
+        return (Some("file"), path.replace('\\', "/"));
+    }
+    if let Some(path) = trimmed.strip_prefix("write ") {
+        return (Some("file"), path.replace('\\', "/"));
+    }
+    if let Some(path) = trimmed.strip_prefix("read ") {
+        return (Some("file"), path.replace('\\', "/"));
+    }
+    if let Some(path) = trimmed.strip_prefix("file:write:") {
+        return (Some("file"), path.replace('\\', "/"));
+    }
+    if let Some(path) = trimmed.strip_prefix("file:edit:") {
+        return (Some("file"), path.replace('\\', "/"));
+    }
+    if let Some(path) = trimmed.strip_prefix("file:read:") {
+        return (Some("file"), path.replace('\\', "/"));
+    }
+    if let Some(path) = trimmed.strip_prefix("file:") {
+        return (Some("file"), path.replace('\\', "/"));
+    }
+    if let Some(mcp) = trimmed.strip_prefix("mcp tool ") {
+        return (Some("mcp"), mcp.to_string());
+    }
+    if let Some(mcp) = trimmed.strip_prefix("mcp:") {
+        return (Some("mcp"), mcp.to_string());
+    }
+    (None, trimmed.replace('\\', "/"))
+}
+
 fn matches_pattern(pattern: &str, text: &str) -> bool {
-    if pattern == "*" {
+    if pattern == "*" || pattern == "**" {
         return true;
     }
-    if match_single(pattern, text) {
+    let (kind, normalized) = normalize_action(text);
+    let normalized_text = text.replace('\\', "/");
+
+    if match_single(pattern, &normalized_text) || match_single(pattern, &normalized) {
         return true;
     }
-    if let Some(stripped) = text.strip_prefix("shell:")
-        && match_single(pattern, stripped)
-    {
-        return true;
+
+    if let Some(kind) = kind {
+        let prefixed = format!("{kind}:{normalized}");
+        if match_single(pattern, &prefixed) {
+            return true;
+        }
+        if kind == "file" {
+            let write_prefixed = format!("file:write:{normalized}");
+            let edit_prefixed = format!("file:edit:{normalized}");
+            let read_prefixed = format!("file:read:{normalized}");
+            if match_single(pattern, &write_prefixed)
+                || match_single(pattern, &edit_prefixed)
+                || match_single(pattern, &read_prefixed)
+            {
+                return true;
+            }
+        }
     }
-    if let Some(stripped) = text
-        .strip_prefix("file:read:")
-        .or_else(|| text.strip_prefix("file:write:"))
-        && match_single(pattern, stripped)
-    {
-        return true;
-    }
+
     false
 }
 
 fn match_single(pattern: &str, text: &str) -> bool {
-    if pattern == "*" {
+    if pattern == "*" || pattern == "**" {
         return true;
+    }
+    if let Some(glob_suffix) = pattern.strip_prefix("**/") {
+        if match_single(glob_suffix, text) {
+            return true;
+        }
+        if let Some(idx) = text.rfind('/')
+            && match_single(glob_suffix, &text[idx + 1..])
+        {
+            return true;
+        }
     }
     if let Some(prefix) = pattern.strip_suffix('*') {
         text.starts_with(prefix)
@@ -263,5 +330,30 @@ mod tests {
 
         store.clear();
         assert!(!store.is_approved(key));
+    }
+
+    #[test]
+    fn matches_human_formatted_actions() {
+        let policy = SecurityPolicy::for_preset(SecurityPreset::Default);
+        assert_eq!(
+            policy.evaluate("shell command `rm -rf /*`"),
+            SecurityDecision::Deny
+        );
+        assert_eq!(
+            policy.evaluate("shell command `gh auth login`"),
+            SecurityDecision::Deny
+        );
+        assert_eq!(
+            policy.evaluate("write D:\\project\\.env"),
+            SecurityDecision::Deny
+        );
+        assert_eq!(
+            policy.evaluate("edit /home/user/cert.pem"),
+            SecurityDecision::Deny
+        );
+        assert_eq!(
+            policy.evaluate("shell command `cargo test`"),
+            SecurityDecision::Ask
+        );
     }
 }

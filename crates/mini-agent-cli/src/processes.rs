@@ -1,4 +1,6 @@
 use crate::result_store::ResultStore;
+use crate::sandbox::ProcessSandbox;
+use crate::sandbox::SandboxKind;
 use crate::workspace::ApprovalController;
 use crate::workspace::shell_command;
 use crate::workspace::terminate_process_tree;
@@ -28,6 +30,7 @@ struct ProcessManagerInner {
     root: PathBuf,
     approval: ApprovalController,
     results: ResultStore,
+    sandbox_kind: SandboxKind,
     state: Mutex<ProcessState>,
 }
 
@@ -78,22 +81,25 @@ impl BoundedLog {
     }
 
     fn snapshot(&self) -> (String, usize, bool) {
-        let mut bytes = self.head.clone();
-        bytes.extend(self.tail.iter());
-        (
-            String::from_utf8_lossy(&bytes).into_owned(),
-            self.total_bytes,
-            self.total_bytes > bytes.len(),
-        )
+        let text = String::from_utf8_lossy(&self.head).to_string()
+            + &String::from_utf8_lossy(&self.tail.iter().copied().collect::<Vec<_>>());
+        let truncated = self.total_bytes > MAX_LOG_BYTES_PER_STREAM;
+        (text, self.total_bytes, truncated)
     }
 }
 
 impl ProcessManager {
-    pub fn new(root: PathBuf, approval: ApprovalController, results: ResultStore) -> Self {
+    pub fn new(
+        root: PathBuf,
+        approval: ApprovalController,
+        results: ResultStore,
+        sandbox_kind: SandboxKind,
+    ) -> Self {
         Self(Arc::new(ProcessManagerInner {
             root,
             approval,
             results,
+            sandbox_kind,
             state: Mutex::new(ProcessState::default()),
         }))
     }
@@ -125,6 +131,8 @@ impl ProcessManager {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(io_error)?;
+        let sandbox = ProcessSandbox::new(self.0.sandbox_kind);
+        sandbox.attach_child(&child);
         let stdout = child
             .stdout
             .take()
@@ -408,6 +416,7 @@ mod tests {
             root.clone(),
             ApprovalController::new(ApprovalMode::Automatic),
             ResultStore::default(),
+            SandboxKind::Native,
         );
         let command = if cfg!(windows) {
             "Write-Output managed-ready"

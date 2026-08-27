@@ -154,6 +154,7 @@ async fn run_treatment(surface: EditSurface) -> ExperimentResult {
             root.clone(),
             ApprovalController::new(ApprovalMode::Automatic),
             Vec::new(),
+            crate::sandbox::SandboxKind::Native,
         )
         .unwrap(),
     );

@@ -301,6 +301,7 @@ fn spawn_worker(
                     &runtime,
                     approval.clone(),
                     harness_config_auto(copilot, auto_max_steps),
+                    sandbox_kind,
                 )
                 .map(|build| (build, auto_max_steps, web_search_enabled))
             }) {

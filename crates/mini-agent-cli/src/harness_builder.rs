@@ -7,6 +7,7 @@ use crate::config::RuntimeConfig;
 use crate::mcp;
 use crate::openai::OpenAiModel;
 use crate::project_context;
+use crate::sandbox::SandboxKind;
 use crate::skills;
 use crate::workspace::ApprovalController;
 use crate::workspace::workspace_tools_with_read_roots;
@@ -27,6 +28,7 @@ pub(crate) fn prepare_openai_harness(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
     mut config: HarnessConfig,
+    sandbox: SandboxKind,
 ) -> Result<HarnessBuild, String> {
     let provider = runtime_config.provider_settings()?;
     let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
@@ -54,6 +56,7 @@ pub(crate) fn prepare_openai_harness(
         workspace.clone(),
         approval.clone(),
         skill_discovery.extra_read_roots().to_vec(),
+        sandbox,
     ) {
         Ok(tools) => tools,
         Err(error) => return Err(error.to_string()),
@@ -102,7 +105,11 @@ pub(crate) fn harness_config(copilot: bool) -> HarnessConfig {
 pub(crate) fn harness_config_auto(copilot: bool, auto_max_steps: usize) -> HarnessConfig {
     if copilot {
         HarnessConfig {
-            max_steps: auto_max_steps,
+            max_steps: if auto_max_steps == 0 {
+                usize::MAX
+            } else {
+                auto_max_steps
+            },
             context_limit_behavior: ContextLimitBehavior::Compact,
             ..HarnessConfig::default()
         }

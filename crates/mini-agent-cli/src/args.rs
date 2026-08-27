@@ -399,17 +399,15 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             }
             json = true;
         } else if options
-            && (argument == "--auto-approve" || argument == "-y" || argument == "--yes")
+            && (argument == "--auto-approve"
+                || argument == "-y"
+                || argument == "--yes"
+                || argument == "--auto")
         {
             if automatic {
                 return Err(format!("{argument} may be provided only once"));
             }
             automatic = true;
-        } else if options && argument == "--auto" {
-            return Err(
-                "unknown option: --auto (use '--auto-approve' or '-y' in ask mode, or use 'mini-agent auto')"
-                    .to_string(),
-            );
         } else if options && argument == "--persist" {
             if persist {
                 return Err("--persist may be provided only once".to_string());
@@ -964,14 +962,13 @@ mod tests {
             .unwrap_err(),
             "--json is supported only by ask, mentor, status, doctor, and trace"
         );
-        assert_eq!(
-            parse_args(vec![
-                "ask".to_string(),
-                "--auto".to_string(),
-                "prompt".to_string()
-            ])
-            .unwrap_err(),
-            "unknown option: --auto (use '--auto-approve' or '-y' in ask mode, or use 'mini-agent auto')"
-        );
+        let auto_inv = parse_args(vec![
+            "ask".to_string(),
+            "--auto".to_string(),
+            "prompt".to_string(),
+        ])
+        .unwrap();
+        assert!(auto_inv.automatic);
+        assert_eq!(auto_inv.prompt, "prompt");
     }
 }

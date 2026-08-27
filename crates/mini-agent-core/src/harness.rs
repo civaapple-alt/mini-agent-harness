@@ -286,11 +286,11 @@ impl<M: Model> Harness<M> {
 
         loop {
             step = step.saturating_add(1);
-            if self.config.max_steps > 0 && step > self.config.max_steps {
+            if step > self.config.max_steps {
                 return Ok(finish(
                     final_text,
                     self.messages.clone(),
-                    self.config.max_steps,
+                    step.saturating_sub(1),
                     StopReason::StepLimit,
                     observer,
                 ));

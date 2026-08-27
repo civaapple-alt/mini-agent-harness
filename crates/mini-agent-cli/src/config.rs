@@ -87,7 +87,7 @@ impl RuntimeConfig {
             .or_else(|| resolve_value("OPENAI_WEB_SEARCH", &workspace_env, &user_env))
         {
             Some(value) => parse_bool_setting("MINI_AGENT_WEB_SEARCH", &value.value)?,
-            None => true,
+            None => is_official_search_endpoint(&base_url),
         };
         Ok(Self {
             workspace,
@@ -492,6 +492,11 @@ struct Check {
 
 fn check(name: &'static str, ok: bool, detail: String) -> Check {
     Check { name, ok, detail }
+}
+
+fn is_official_search_endpoint(base_url: &ResolvedSetting) -> bool {
+    let val = base_url.value.to_ascii_lowercase();
+    val.contains("api.openai.com") || val.contains("api.deepseek.com")
 }
 
 fn validate_base_url(base_url: &str) -> Result<(), String> {

@@ -57,6 +57,7 @@ pub struct ApprovalController {
 }
 
 impl ApprovalController {
+    #[allow(dead_code)]
     pub fn new(mode: ApprovalMode) -> Self {
         Self::with_policy_and_callback(
             mode,
@@ -160,17 +161,20 @@ pub fn workspace_tools_with_read_roots(
     root: PathBuf,
     approval: ApprovalController,
     extra_read_roots: Vec<PathBuf>,
+    sandbox: SandboxKind,
 ) -> Result<Vec<Box<dyn Tool>>, ToolError> {
     let workspace = Arc::new(Workspace::with_read_roots(
         root,
         approval,
         extra_read_roots,
+        sandbox,
     )?);
     let results = ResultStore::default();
     let processes = ProcessManager::new(
         workspace.root.clone(),
         workspace.approval.clone(),
         results.clone(),
+        sandbox,
     );
     let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(ReadFile(Arc::clone(&workspace))),
@@ -187,6 +191,7 @@ struct Workspace {
     root: PathBuf,
     extra_read_roots: Vec<PathBuf>,
     approval: ApprovalController,
+    sandbox: SandboxKind,
 }
 
 impl Workspace {
@@ -194,6 +199,7 @@ impl Workspace {
         root: PathBuf,
         approval: ApprovalController,
         extra_read_roots: Vec<PathBuf>,
+        sandbox: SandboxKind,
     ) -> Result<Self, ToolError> {
         let root = root
             .canonicalize()
@@ -207,6 +213,7 @@ impl Workspace {
             root,
             extra_read_roots,
             approval,
+            sandbox,
         })
     }
 
@@ -441,7 +448,7 @@ impl Tool for Shell {
             )));
         }
         self.0.approve(&format!("shell command `{command}`"))?;
-        let output = run_shell(command, &self.0.root, COMMAND_TIMEOUT)?;
+        let output = run_shell(command, &self.0.root, self.0.sandbox, COMMAND_TIMEOUT)?;
         if output.text.len() <= INLINE_COMMAND_OUTPUT_BYTES {
             return Ok(output.text);
         }
@@ -497,8 +504,28 @@ pub(crate) fn shell_command(command: &str) -> Command {
 }
 
 pub(crate) fn terminate_process_tree(child: &mut std::process::Child) -> io::Result<ExitStatus> {
-    let sandbox = ProcessSandbox::new(SandboxKind::Native);
-    sandbox.terminate(child)
+    #[cfg(windows)]
+    {
+        let process_id = child.id().to_string();
+        let _ = Command::new("taskkill")
+            .args(["/PID", &process_id, "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(windows))]
+    {
+        let process_id = child.id().to_string();
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{process_id}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    if child.try_wait()?.is_none() {
+        let _ = child.kill();
+    }
+    child.wait()
 }
 
 struct CommandOutput {
@@ -507,9 +534,46 @@ struct CommandOutput {
     source_truncated: bool,
 }
 
-fn run_shell(command: &str, root: &Path, timeout: Duration) -> Result<CommandOutput, ToolError> {
-    let sandbox = ProcessSandbox::new(SandboxKind::Native);
-    let mut child = shell_command(command)
+fn run_shell(
+    command: &str,
+    root: &Path,
+    sandbox_kind: SandboxKind,
+    timeout: Duration,
+) -> Result<CommandOutput, ToolError> {
+    if sandbox_kind == SandboxKind::Docker {
+        let docker_check = Command::new("docker")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        if docker_check.is_err() || !docker_check.unwrap().success() {
+            return Err(ToolError(
+                "docker sandbox is unavailable on this host; ensure docker daemon is running, or use '--sandbox native'"
+                    .to_string(),
+            ));
+        }
+    }
+    let sandbox = ProcessSandbox::new(sandbox_kind);
+    let mut cmd = if sandbox_kind == SandboxKind::Docker {
+        let mut docker_cmd = Command::new("docker");
+        docker_cmd.args([
+            "run",
+            "--rm",
+            "-i",
+            "-v",
+            &format!("{}:/workspace", root.display()),
+            "-w",
+            "/workspace",
+            "alpine",
+            "sh",
+            "-c",
+            command,
+        ]);
+        docker_cmd
+    } else {
+        shell_command(command)
+    };
+    let mut child = cmd
         .current_dir(root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -692,6 +756,7 @@ mod tests {
                 root.clone(),
                 ApprovalController::new(ApprovalMode::Automatic),
                 Vec::new(),
+                SandboxKind::Native,
             )
             .unwrap(),
         );
@@ -733,6 +798,7 @@ mod tests {
                 root.clone(),
                 ApprovalController::new(ApprovalMode::Automatic),
                 Vec::new(),
+                SandboxKind::Native,
             )
             .unwrap(),
         );
@@ -769,6 +835,7 @@ mod tests {
                 root.clone(),
                 ApprovalController::new(ApprovalMode::Automatic),
                 vec![extra_root],
+                SandboxKind::Native,
             )
             .unwrap(),
         );
@@ -806,6 +873,7 @@ mod tests {
                 root.clone(),
                 ApprovalController::new(ApprovalMode::Automatic),
                 Vec::new(),
+                SandboxKind::Native,
             )
             .unwrap(),
         );
@@ -849,7 +917,13 @@ mod tests {
             "sleep 5"
         };
 
-        let output = run_shell(command, &root, Duration::from_millis(50)).unwrap();
+        let output = run_shell(
+            command,
+            &root,
+            SandboxKind::Native,
+            Duration::from_millis(50),
+        )
+        .unwrap();
 
         assert!(output.text.contains("timed out"));
         fs::remove_dir_all(root).unwrap();
@@ -863,6 +937,7 @@ mod tests {
                 root.clone(),
                 ApprovalController::new(ApprovalMode::Automatic),
                 Vec::new(),
+                SandboxKind::Native,
             )
             .unwrap(),
         );
@@ -890,6 +965,7 @@ mod tests {
                 root.clone(),
                 ApprovalController::new(ApprovalMode::Automatic),
                 Vec::new(),
+                SandboxKind::Native,
             )
             .unwrap(),
         );
@@ -909,6 +985,21 @@ mod tests {
         assert!(read.contains("stored_bytes="));
         assert!(read.len() >= 128);
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn docker_sandbox_checks_availability_or_reports_clear_error() {
+        let root = test_root();
+        let result = run_shell(
+            "echo hello",
+            &root,
+            SandboxKind::Docker,
+            Duration::from_secs(5),
+        );
+        if let Err(err) = result {
+            assert!(err.0.contains("docker sandbox is unavailable"));
+        }
         fs::remove_dir_all(root).unwrap();
     }
 }

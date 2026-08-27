@@ -5,6 +5,7 @@ use crate::observer::ScriptFormat;
 use crate::observer::print_final_answer;
 use crate::prepare_openai_harness;
 use crate::print_auto_warning;
+use crate::sandbox::SandboxKind;
 use crate::security::SecurityPreset;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
@@ -24,6 +25,7 @@ pub async fn run(
     json_output: bool,
     automatic: bool,
     preset: SecurityPreset,
+    sandbox: SandboxKind,
     web_search_override: Option<bool>,
 ) -> ExitCode {
     let prompt = match resolve_prompt(prompt) {
@@ -46,11 +48,11 @@ pub async fn run(
         ApprovalMode::Interactive
     };
     let approval = ApprovalController::with_preset(mode, preset);
-    let mut harness = match prepare_openai_harness(&runtime_config, approval, harness_config(false))
-    {
-        Ok(build) => build.harness,
-        Err(error) => return preflight_error(json_output, &error),
-    };
+    let mut harness =
+        match prepare_openai_harness(&runtime_config, approval, harness_config(false), sandbox) {
+            Ok(build) => build.harness,
+            Err(error) => return preflight_error(json_output, &error),
+        };
     let format = if json_output {
         ScriptFormat::Json
     } else {

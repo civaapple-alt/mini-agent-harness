@@ -11,11 +11,24 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Turn-atomic trimming (`remove_first_message_group`) ensuring function calls and settlement outputs are dropped as cohesive groups during compaction.
 - Settlement-aware loop detection tracking `(name, arguments, content)` to avoid false positive stall warnings during polling.
 - Session resume and fork invalidation notice informing the model that prior process IDs and result preview handles have expired.
-- Backward-compatible session lookup for legacy `.agents/sessions/<id>.jsonl` and `.agents/sessions/<id>/session.jsonl`.
+- Backward-compatible session lookup for legacy `.agents/sessions/<id>.jsonl` and `.agents/sessions/<id>/session.jsonl` across `resume`, `fork`, and `sessions` listing.
+- Canonical security action normalization and glob wildcard matching (`**/.env*`, `rm -rf /*`, `gh auth *`) in `SecurityPolicy`.
+- Docker sandbox execution validation ensuring container isolation or failing closed with clear diagnostics.
+- Backward-compatible `--auto` alias for `--auto-approve` in `mini-agent ask`.
 - Decoupled CLI architecture with dedicated `args.rs` and `harness_builder.rs` modules, reducing `main.rs` to a lightweight dispatcher.
+
+### Fixed
+
+- Security deny rules now properly match human-formatted tool action strings, preventing destructive commands from bypassing deny filters.
+- Windows background managed process trees are guaranteed to terminate via `taskkill /PID <pid> /T /F` and sandbox attachment.
+- CLI argument errors and root help on usage failure now print to `stderr`, keeping `stdout` pure for machine-readable JSON consumers.
+- Prompted `mini-agent auto` now correctly applies `--security-preset` and `--sandbox` configurations.
 
 ### Changed
 
+- Interactive sessions default to process-local memory; `--persist` opts in to creating durable sessions (aligning with `docs/privacy.md`).
+- Strict `max_steps = 0` step limit evaluation halts immediately; unconstrained runs pass `usize::MAX`.
+- Adaptive `web_search` default enables web search for official OpenAI/DeepSeek endpoints while disabling it for custom local LLM endpoints unless explicitly configured.
 - Lowered default `max_model_response_bytes` to 64 KiB (~16K tokens) and bounded compaction summaries to 32 KiB (`max_user_input_bytes`).
 - Reduced `MAX_PROJECT_INSTRUCTIONS_BYTES` to 16 KiB (~4K tokens) with head/tail truncation.
 - Raised durable session `MAX_RECORD_BYTES` to 2 MiB to reliably serialize full 1 MiB checkpoints.

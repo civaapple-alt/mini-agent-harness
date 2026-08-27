@@ -77,10 +77,8 @@ snapshot when it changes. If an MCP server is denied or fails during startup,
 bounded set of discovered skill and plugin names and shows configured MCP
 servers as inactive until connection approval succeeds.
 
-Interactive history is durable by default. Each interactive session automatically
-provisions a durable session record under `~/.mini-agent/sessions/<workspace>/<session-id>/`.
-`--ephemeral` (or `--no-persist`) opts out into a temporary in-memory session.
-`sessions` lists bounded session files for the current workspace,
+Conversation history is process-local by default; `--persist` opts in to creating durable session records under `~/.mini-agent/sessions/<workspace>/<session-id>/`.
+`sessions` lists bounded session files for the current workspace (including legacy `.agents/sessions/`),
 `resume SESSION_ID` restores the latest completely settled checkpoint (with multi-item validation and expired process/result boundary notices), and
 `fork SESSION_ID` branches an existing checkpoint into an independent session
 for speculative exploration. `/new` starts a new thread inside a durable
