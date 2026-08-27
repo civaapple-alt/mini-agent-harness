@@ -112,10 +112,12 @@ so the model can query the internet without writing raw local shell/PowerShell s
 To disable web search, pass `--no-web-search` (or `--no-search`) or set `MINI_AGENT_WEB_SEARCH=false`
 in `.env`.
 
-`web_search` is for discovery. To read a known public URL, use `web_fetch` instead of `curl` or
-PowerShell download cmdlets. `web_fetch` only admits public `http`/`https` URLs: no credentials,
-localhost, private IPs, or `file:` paths, and it does not run JavaScript. Thin JS-shell pages
-come back with a warning rather than a fake read. Local HTML belongs to `read_file` (source) and
-`open_file` (default browser for the user). There is no screenshot, vision, or headless-browser
-tool.
+`web_search` is for discovery. To read a known public URL, or a local Vite/Next/Vue/React
+dev server, use `web_fetch` instead of `curl` or PowerShell download cmdlets. `web_fetch` admits
+public `http`/`https` URLs and loopback (`localhost`, `127.0.0.1`, `[::1]`). It still rejects
+credentials, LAN/private IPs, cloud metadata (`169.254.169.254`), and `file:` paths, and it
+does not run JavaScript. A public page cannot redirect onto loopback. Client-only SPAs may
+come back as a thin shell with a warning; SSR HTML is returned as markdown. `read_file` is for
+source, `open_file` opens the OS default browser for the user. There is no screenshot, vision,
+or headless-browser tool.
 

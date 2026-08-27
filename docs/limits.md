@@ -72,7 +72,7 @@ Host tools add their own effect-side bounds before results reach core:
 | Host boundary | Default |
 | --- | ---: |
 | file read | 128 KiB |
-| `web_fetch` body / extracted text | 128 KiB / 50k characters; 15s; 5 redirects |
+| `web_fetch` body / extracted text | 128 KiB / 50k characters; 15s; 5 same-class redirects |
 | `open_file` | workspace-readable file; OS default app |
 | new file or edited file | 1 MiB |
 | shell command text | 16 KiB |

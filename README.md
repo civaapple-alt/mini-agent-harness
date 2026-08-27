@@ -208,7 +208,8 @@ The real modes expose `read_file`, `edit_file`, `write_file`, `open_file`, `web_
 confined to the current workspace (supporting both relative paths and in-workspace absolute paths);
 `.git` is protected. `edit_file` makes one exact unique replacement; `write_file` creates
 new files and refuses to replace existing ones. Reads never prompt. `web_fetch` GETs a known
-public HTTP(S) URL and returns bounded readable text (no JavaScript, no localhost). `open_file`
+public HTTP(S) URL or a loopback dev server (`localhost`, `127.0.0.1`) and returns bounded markdown
+(no JavaScript; LAN/cloud-metadata IPs stay blocked). `open_file`
 opens a workspace file in the OS default app so a human can view local HTML in a browser.
 Built-in Responses API `web_search`
 is enabled by default (toggle via `--web-search|--no-web-search` or `MINI_AGENT_WEB_SEARCH=true|false`).
