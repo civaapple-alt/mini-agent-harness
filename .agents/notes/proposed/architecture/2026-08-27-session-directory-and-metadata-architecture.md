@@ -86,6 +86,54 @@ Personas decouple inter-agent communication from memory context by defining stan
 - **`[[outputs]]`**: Defines outgoing deliverables (e.g. `review_file`).
 - **Runtime Binding**: `mini-agent` injects scratch file paths (`.agents/scratch/grok-review-${ID}.md`) and enforces that child agents produce structured markdown rather than unstructured chat turns.
 
+### 3.3. Key Architectural Insights & Design Fusion for `mini-agent`
+
+```
++-----------------------------------------------------------------------------------+
+|                        Mini-Agent Bundled Design Matrix                           |
++---------------+---------------------+--------------------+------------------------+
+| Dimension     | Grok Bundled System | Mini-Agent Fusion  | Concrete Advantage     |
++---------------+---------------------+--------------------+------------------------+
+| 1. Separation | Role / Persona /    | SecurityPreset /   | Zero framework bloat;  |
+|    of Concern | Agent / Skill       | Prompt Template /  | 4 orthogonal concerns  |
+|               | (Orthogonal TOML)   | Progressive Skill  | cleanly separated      |
++---------------+---------------------+--------------------+------------------------+
+| 2. Inter-Agent| File-Based Handoff  | Scratch Files      | Zero memory bloat;     |
+|    Channel    | ([[inputs/outputs]])| (.agents/scratch/) | Context stays <= 32KB  |
++---------------+---------------------+--------------------+------------------------+
+| 3. Security & | capability_mode:    | ProcessSandbox /   | Guarantees read-only   |
+|    Privilege  | "read-only" | "all" | ReadOnly Filter    | safety for explorers   |
++---------------+---------------------+--------------------+------------------------+
+| 4. Packaging  | ~/.grok/bundled/    | rust-embed /       | Single 10MB standalone |
+|    & Override | + manifest.json     | include_str! +     | binary + local git     |
+|               |                     | .agents/ overrides | overrides (.agents/)   |
++---------------+---------------------+--------------------+------------------------+
+```
+
+1. **Orthogonal Separation of Concerns (Role vs Persona vs Agent vs Skill)**:
+   - **Role** = Runtime sandbox & compute tier (`capability_mode = "read-only"`, `reasoning_effort = "high"`).
+   - **Persona** = Behavior rules & file contracts (No code-fixing for reviewers, structured markdown outputs).
+   - **Agent** = Out-of-the-box user-facing or subagent archetype (`explore`, `plan`, `general-purpose`).
+   - **Skill** = Orchestration script (`/implement`, `/code-review`).
+   - *Fusion*: `mini-agent` avoids bloated OOP class hierarchies; roles map directly to `SecurityPreset` and model flags, personas map to system prompt prefixes, and skills reuse the progressive discovery engine.
+
+2. **File-Based Communication Channel (Preventing Context Bloat)**:
+   - *Problem*: Traditional multi-agent frameworks pass full conversation transcripts between agents, leading to rapid token explosion ($O(K \times N)$).
+   - *Fusion*: Child agents communicate strictly through scratch Markdown files. The parent agent's context only receives a single bounded summary line (`[session_id: sub-123] Completed, review saved to .agents/scratch/review.md`), ensuring the parent context window stays pristine.
+
+3. **Least Privilege & Tiered Reasoning**:
+   - `explore`: `read-only` sandbox + `medium` reasoning (cheap, fast, safe scanning).
+   - `plan`: `read-only` sandbox + `high` reasoning (deep thinking, zero file mutation).
+   - `implementer`: `all` read-write sandbox + `high` reasoning (focused execution).
+   - *Fusion*: `spawn_agent(agent_type="explore")` automatically applies the read-only sandbox filter, preventing accidental file deletions or hallucinated modifications.
+
+4. **Zero-Dependency Single-Binary Distribution**:
+   - Bundled templates are compiled directly into the `mini-agent` binary via `include_str!` or `rust-embed`.
+   - Progressive local override hierarchy:
+     1. Project workspace: `.agents/skills/`, `.agents/personas/`, `.agents/roles/` (highest precedence).
+     2. User global config: `~/.mini-agent/`
+     3. Builtin embedded assets (fallback default).
+
 ---
 
 ## 4. Runtime Session Directory Specification
