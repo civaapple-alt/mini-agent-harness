@@ -56,9 +56,63 @@ sequenceDiagram
 3. **Minimal Code Surface**:
    Reuses existing `session::save_checkpoint` and `session::load_latest_checkpoint` infrastructure. Requires adding only a lightweight `send_subagent_message` tool (~60 lines) in `crates/mini-agent-cli/src/subagent.rs`.
 
+### 2.2. Implicit Persistence Encapsulation
+
+A key design nuance is the distinction between human CLI defaults and agent-to-agent subagent delegation:
+
+| Execution Context | Default Persistence | Rationale & Mechanical Behavior |
+| :--- | :--- | :--- |
+| **Standard User CLI (`mini-agent ask "..."`)** | **Ephemeral (No disk writes)** | Keeps developer environment clean and avoids polluting `.agents/sessions/` with transient one-off shell queries. |
+| **Interactive Subagent (`spawn_agent` with `persist=true`)** | **Implicitly Persistent** | The `spawn_agent` tool automatically generates a deterministic `session_id` (`sub-<timestamp>-<task_name>`) and passes `--persist --session-id <id>` under the hood. The parent model only tracks the returned `session_id`. |
+| **One-Off Subagent (`spawn_agent` with `persist=false`)** | **Ephemeral** | For fire-and-forget lookups or isolated grep passes, disk serialization is skipped entirely. |
+
 ---
 
-## 3. Architecture: Streaming ACP Daemon Mode (Phase 2B)
+## 3. Case Study: Orchestrator Skill Validation (`code-review` Multi-Turn Workflows)
+
+Orchestrator skills like `.codex/skills/code-review/SKILL.md` coordinate multiple specialized subagents (`breaking-changes`, `change-size`, `context`, `testing`). In complex code reviews, the orchestrator often needs **multi-turn interactive clarification** with specific reviewers.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User / Developer
+    participant Root as Root Orchestrator (/root)
+    participant Engine as Subagent Subprocess Runner
+    participant B as Subagent: breaking-changes (sub-rev-break)
+    participant T as Subagent: testing (sub-rev-test)
+
+    User->>Root: Run code-review skill
+    Note over Root: Reads code-review/SKILL.md
+
+    Root->>Engine: spawn_agent("breaking-changes", message="Audit PR integration surfaces", persist=true)
+    Engine->>B: Spawns child CLI with --persist (writes turn 1 checkpoint)
+    B-->>Root: Returns initial finding + session_id "sub-rev-break" (Flags CLI argument change)
+
+    Root->>Engine: spawn_agent("testing", message="Audit test coverage", persist=true)
+    Engine->>T: Spawns child CLI with --persist (writes turn 1 checkpoint)
+    T-->>Root: Returns initial finding + session_id "sub-rev-test" (Flags missing unit test)
+
+    Note over Root: Root inspects findings; decides to follow up ONLY with breaking-changes reviewer
+    Root->>Engine: send_subagent_message(session_id="sub-rev-break", message="Would adding a backward-compatible alias resolve the CLI break?")
+    Engine->>B: Spawns: mini-agent resume sub-rev-break "..." (loads turn 1, executes turn 2)
+    B-->>Root: Returns turn 2 verdict: "Yes, alias '--auto' for '--auto-approve' maintains full compatibility."
+
+    Note over Root: Root aggregates findings across all subagent sessions
+    Root->>User: Emits consolidated Markdown review report with actionable resolution paths
+```
+
+### 3.1. Capability Mapping for Multi-Turn Orchestrator Skills
+
+| Orchestrator Skill Requirement | Multi-Turn Subagent Mechanism | System & Operational Benefit |
+| :--- | :--- | :--- |
+| **Selective Turn Refinement** | `send_subagent_message(session_id, ...)` | Orchestrator only re-engages the reviewer that flagged an issue (e.g. `breaking-changes`), without re-running unrelated reviewers. |
+| **Preserved Analysis State** | Durable checkpoint resume (`session.jsonl`) | Child reviewer retains its exact code diff reasoning and file inspection cache from turn 1. |
+| **Zero Idle Overhead** | Process exits between turns | While Root is thinking or querying reviewer B, reviewer T consumes 0 MB RAM and 0 CPU cycles. |
+| **High Reasoning Isolation** | Child runs with `--reasoning-effort xhigh` | Deep multi-turn debate happens entirely in child context, keeping Root context clean and concise. |
+
+---
+
+## 4. Architecture: Streaming ACP Daemon Mode (Phase 2B)
 
 For advanced IDE or GUI use cases requiring live token streaming (`AssistantTextDelta`) and real-time interruption:
 
@@ -68,7 +122,7 @@ graph LR
     Daemon <-->|Event Stream| LLM["Responses API / Provider"]
 ```
 
-### 3.1. Stdio ACP Framing Protocol
+### 4.1. Stdio ACP Framing Protocol
 
 The parent communicates with `mini-agent app-server` over standard Content-Length framed JSON-RPC 2.0 messages:
 - `subagent/initialize`: Initializes workspace context and security preset.
@@ -78,7 +132,7 @@ The parent communicates with `mini-agent app-server` over standard Content-Lengt
 
 ---
 
-## 4. Comparative Evaluation
+## 5. Comparative Evaluation
 
 | Dimension | Phase 2A: Session-Backed Resumption | Phase 2B: Stdio ACP Daemon |
 | :--- | :--- | :--- |
@@ -91,7 +145,7 @@ The parent communicates with `mini-agent app-server` over standard Content-Lengt
 
 ---
 
-## 5. Tool Suite Specifications
+## 6. Tool Suite Specifications
 
 ```json
 {
@@ -124,7 +178,7 @@ The parent communicates with `mini-agent app-server` over standard Content-Lengt
 
 ---
 
-## 6. Security, Isolation & Limits
+## 7. Security, Isolation & Limits
 
 1. **Session ID Containment**:
    All subagent session IDs conform to `sub-[a-zA-Z0-9_-]{8,32}` and are strictly scoped within `.agents/sessions/` (preventing path traversal).
@@ -135,7 +189,7 @@ The parent communicates with `mini-agent app-server` over standard Content-Lengt
 
 ---
 
-## 7. Acceptance Criteria
+## 8. Acceptance Criteria
 
 1. **Multi-Turn Continuity**:
    - Spawning a subagent with `persist=true` writes `.agents/sessions/<session_id>/session.jsonl`.
