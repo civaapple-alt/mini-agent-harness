@@ -156,6 +156,12 @@ pub fn planning_turn_prompt(request: &str) -> String {
     )
 }
 
+pub fn goal_turn_prompt(objective: &str, milestone: usize, total: usize) -> String {
+    format!(
+        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Current milestone {milestone}/{total}. Follow goal/plan.md in the session directory. Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
+    )
+}
+
 fn initial_plan_markdown(prompt: Option<&str>) -> String {
     let goals = match prompt.map(str::trim).filter(|text| !text.is_empty()) {
         Some(prompt) => format!("- Goals:\n  - {prompt}"),
@@ -441,6 +447,10 @@ mod tests {
         let prompt = planning_turn_prompt("提供最新 Mac Studio 介绍的 html");
         assert!(prompt.contains("Do not produce the final deliverable"));
         assert!(prompt.contains("提供最新 Mac Studio 介绍的 html"));
+        let goal = goal_turn_prompt("提供最新 Mac Studio 介绍的 html", 1, 3);
+        assert!(goal.contains("Execute the objective now"));
+        assert!(goal.contains("1/3"));
+        assert!(goal.contains("提供最新 Mac Studio 介绍的 html"));
     }
 
     #[test]

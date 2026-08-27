@@ -31,6 +31,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Plan Mode writes go to the session living plan (`plan.md` under the session directory); relative `plan.md` is aliased there and other workspace mutations stay locked.
 - REPL Plan Mode overlays the builtin `plan` Software Architect foundation plus a living-plan rider so the model plans into `plan.md` instead of emitting the deliverable.
 - Plan Mode `write_file plan.md` replaces the initialized session living plan instead of failing with "file already exists".
+- `/goal <objective>` now starts executing the first milestone immediately instead of only writing `goal/state.json` and returning to the prompt.
 - Security deny rules now properly match human-formatted tool action strings, preventing destructive commands from bypassing deny filters.
 - Windows background managed process trees are guaranteed to terminate via `taskkill /PID <pid> /T /F` and sandbox attachment.
 - CLI argument errors and root help on usage failure now print to `stderr`, keeping `stdout` pure for machine-readable JSON consumers.

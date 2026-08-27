@@ -89,7 +89,7 @@ Starts the interactive REPL. Tools run without per-step approval; shell is prote
 Settled checkpoints are saved under ~/.mini-agent/sessions by default; use `--ephemeral` for temporary in-memory sessions.
 Use `/auto` to enter copilot mode; `/auto off` restores per-action prompts.
 Use `/plan` or `/plan <prompt>` to enter Plan Mode (locks codebase mutations, drafts the session living plan); `/plan off` exits.
-Use `/goal <objective>` to start Autonomous Goal Mode with milestone state tracking and independent verification.
+Use `/goal <objective>` to start Autonomous Goal Mode and immediately execute the first milestone.
 
 OPTIONS:
     --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]

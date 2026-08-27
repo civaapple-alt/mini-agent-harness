@@ -232,11 +232,18 @@ pub async fn run(
                     }
                     command if command.starts_with("/goal ") => {
                         let objective = command[6..].trim().to_string();
-                        queue_work(
-                            &worker_tx,
-                            WorkerCommand::StartGoal(objective),
-                            &mut pending_work,
-                        );
+                        if objective.is_empty() {
+                            eprintln!("usage: /goal <objective>");
+                            if ready && pending_work == 0 {
+                                print_prompt();
+                            }
+                        } else {
+                            queue_work(
+                                &worker_tx,
+                                WorkerCommand::StartGoal(objective),
+                                &mut pending_work,
+                            );
+                        }
                     }
                     command if command.starts_with('/') => {
                         eprintln!("unknown local command: {command}");
@@ -773,15 +780,22 @@ fn spawn_worker(
                                 let mut config = harness_config_auto(true, auto_max_steps);
                                 config.system_prompt.clone_from(&stable_system_prompt);
                                 harness.replace_config(config);
+                                let goal_plan = session_dir.join("goal").join("plan.md");
                                 let _ = harness.append_context(format!(
-                                "[Autonomous Goal Mode active: goal_id={}. Work continuously toward acceptance criteria in goal/plan.md. Execute current milestone {}/{}.]",
-                                state.goal_id, state.current_milestone, state.total_milestones
+                                "[Autonomous Goal Mode active: goal_id={}. Execute now. Current milestone {}/{}. Goal plan at {}. Workspace mutations are allowed.]",
+                                state.goal_id, state.current_milestone, state.total_milestones, goal_plan.display()
                             ));
                                 persist_latest_context(&mut durable, &harness, &events);
                                 let _ = events.send(ReplEvent::Notice(format!(
-                                "goal mode on [goal_id: {}]: autonomous milestone tracking in goal/state.json",
-                                state.goal_id
+                                "goal mode on [goal_id: {}]: executing milestone {}/{} (auto-approve, copilot on)",
+                                state.goal_id, state.current_milestone, state.total_milestones
                             )));
+                                command = WorkerCommand::Prompt(crate::goal::goal_turn_prompt(
+                                    &objective,
+                                    state.current_milestone,
+                                    state.total_milestones,
+                                ));
+                                continue;
                             }
                             Err(e) => {
                                 let _ = events.send(ReplEvent::Warning(format!(
@@ -945,7 +959,7 @@ fn print_help() {
     );
     println!("/plan off      Exit Plan Mode and resume standard execution");
     println!(
-        "/goal <goal>   Start Autonomous Goal Mode (multi-milestone loop with independent verifier)"
+        "/goal <goal>   Start Goal Mode and immediately execute the objective (auto-approve, copilot on)"
     );
     println!(
         "/status        Display runtime status (security preset, sandbox, web search, session, approval)"
