@@ -14,7 +14,7 @@ All model-visible inputs, outputs, tool invocations, and conversation context si
 | :--- | :--- | :--- |
 | Single typed context item | 8 KiB | Rejected before appending |
 | User input | 32 KiB | Rejected before execution |
-| Model response (reasoning + text) | 384 KiB | Rejected before executing tool calls |
+| Model response (reasoning + text) | 64 KiB | Rejected before executing tool calls |
 | Tool calls in one step | 8 | Entire step proposal rejected |
 | Single tool output | 16 KiB | Retains UTF-8 safe head and tail with `[truncated]` marker |
 | Total request context | 1 MiB | Rejected before sampling (or triggers compaction if configured) |

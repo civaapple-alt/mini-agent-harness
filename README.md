@@ -81,7 +81,7 @@ Interactive history is durable by default. Each interactive session automaticall
 provisions a durable session record under `~/.mini-agent/sessions/<workspace>/<session-id>/`.
 `--ephemeral` (or `--no-persist`) opts out into a temporary in-memory session.
 `sessions` lists bounded session files for the current workspace,
-`resume SESSION_ID` restores the latest completely settled checkpoint, and
+`resume SESSION_ID` restores the latest completely settled checkpoint (with multi-item validation and expired process/result boundary notices), and
 `fork SESSION_ID` branches an existing checkpoint into an independent session
 for speculative exploration. `/new` starts a new thread inside a durable
 session; `/session` shows its identity. The append-only JSONL record
@@ -105,7 +105,9 @@ decision caching (`ApprovalStore`), and native process sandboxing. On Windows,
 spawned shells are contained within Win32 `JobObject` guards to guarantee atomic
 subprocess tree destruction (Zero-Zombie guarantee). Remote HTTP MCP servers
 include circuit breaking to fail fast during outages. Autonomous copilot runs
-include loop detection warnings to prevent repetitive invocation stalls.
+include settlement-aware loop detection warnings to prevent repetitive invocation stalls.
+Request context is protected by turn-atomic trimming, bounded model responses (64 KiB),
+bounded AGENTS.md (16 KiB), and request-scoped tool suppression during compaction.
 
 ## Install
 

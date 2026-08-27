@@ -97,6 +97,7 @@ If a proposed approach is rejected during review:
 | 2026-08-26 | [Event Stream Rollout Replay](.agents/notes/implemented/architecture/2026-08-26-event-stream-rollout-replay.md) | Deterministic offline replay, playback, and inspection of JSONL traces |
 | 2026-08-26 | [Session Branching Lanes](.agents/notes/implemented/architecture/2026-08-26-session-branching-lanes.md) | Multi-branch tree conversations and speculative exploration lanes |
 | 2026-08-26 | [Local Sandbox Adapter](.agents/notes/implemented/architecture/2026-08-26-local-sandbox-adapter.md) | Codex-inspired 5-stage tool orchestrator, security presets, and Windows JobObject sandboxing |
+| 2026-08-27 | [Model Context Boundaries & CLI Decoupling](.agents/notes/implemented/architecture/2026-08-27-model-context-boundaries-and-cli-decoupling.md) | Model item ceilings, atomic turn trimming, CLI decoupling, and session continuity |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |

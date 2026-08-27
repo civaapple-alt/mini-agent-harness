@@ -5,6 +5,23 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+### Added
+
+- Multi-item validation on durable session restore (`restore_history`) validating `Context`, `User`, `Assistant`, and `Tool` message bounds individually.
+- Turn-atomic trimming (`remove_first_message_group`) ensuring function calls and settlement outputs are dropped as cohesive groups during compaction.
+- Settlement-aware loop detection tracking `(name, arguments, content)` to avoid false positive stall warnings during polling.
+- Session resume and fork invalidation notice informing the model that prior process IDs and result preview handles have expired.
+- Backward-compatible session lookup for legacy `.agents/sessions/<id>.jsonl` and `.agents/sessions/<id>/session.jsonl`.
+- Decoupled CLI architecture with dedicated `args.rs` and `harness_builder.rs` modules, reducing `main.rs` to a lightweight dispatcher.
+
+### Changed
+
+- Lowered default `max_model_response_bytes` to 64 KiB (~16K tokens) and bounded compaction summaries to 32 KiB (`max_user_input_bytes`).
+- Reduced `MAX_PROJECT_INSTRUCTIONS_BYTES` to 16 KiB (~4K tokens) with head/tail truncation.
+- Raised durable session `MAX_RECORD_BYTES` to 2 MiB to reliably serialize full 1 MiB checkpoints.
+- Compaction prioritizes authoritative `WorldState` context over transient loop advisories.
+- OpenAI request serialization suppresses `web_search` and function schemas when `request.tools` is empty (e.g. during auxiliary compaction and mentor requests).
+
 ## [0.2.0] - 2026-08-26
 
 ### Added
