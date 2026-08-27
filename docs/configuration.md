@@ -63,7 +63,7 @@ turn. `doctor` exits non-zero while `OPENAI_API_KEY` or `OPENAI_MODEL` is
 missing. Both commands accept `--json`. `mini-agent demo` needs no credentials.
 
 If the startup workspace contains `AGENTS.md`, mini-agent appends its UTF-8
-contents once to the stable system prompt. The file has a 64 KiB hard limit.
+contents once to the stable system prompt. The file has a 16 KiB hard limit.
 Oversized files are not dropped: the host keeps a UTF-8-safe head and tail,
 inserts an explicit `[truncated]` marker, and prints a warning. Invalid UTF-8
 still fails startup. Nested instruction discovery is not part of the v0.1
@@ -78,8 +78,8 @@ environment values or command output.
 
 ## Durable sessions
 
-Interactive sessions remain in-memory by default. Start one with
-`mini-agent --persist`, copy the displayed session ID, list known IDs with
+Interactive sessions persist by default. Use `--ephemeral` (or
+`--no-persist`) for an in-memory session. List known IDs with
 `mini-agent sessions`, and restore one with `mini-agent resume SESSION_ID`.
 Settled records live under `~/.mini-agent/sessions/<workspace>/<session-id>/`,
 where `<workspace>` is the percent-encoded absolute project path. No provider

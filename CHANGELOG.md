@@ -5,6 +5,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.3.0] - 2026-08-27
+
 ### Added
 
 - Session `attachments/` for `read_image` reload on resume and copy on fork, so GLM inline vision survives process restart. Compaction auxiliary requests send an empty tool catalog (no image projection, no `web_fetch` during summarize).

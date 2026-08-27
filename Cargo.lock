@@ -786,7 +786,7 @@ dependencies = [
 
 [[package]]
 name = "mini-agent-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "eventsource-stream",
  "futures-util",
@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "mini-agent-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
