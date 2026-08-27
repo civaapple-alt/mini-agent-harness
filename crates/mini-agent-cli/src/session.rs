@@ -608,6 +608,222 @@ pub(crate) fn timestamp_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+pub(crate) fn try_load_session_events(lines: &[String]) -> Option<Vec<mini_agent_core::Event>> {
+    use mini_agent_core::Event;
+    use mini_agent_core::RunFailure;
+    use mini_agent_core::StopReason;
+    use mini_agent_core::ToolCall;
+
+    if lines.is_empty() {
+        return None;
+    }
+    let first_val: Value = serde_json::from_str(&lines[0]).ok()?;
+    if first_val.get("session_id").is_none() && first_val.get("kind").is_none() {
+        return None;
+    }
+
+    let mut events = Vec::new();
+    let mut step = 1usize;
+
+    for line in lines {
+        let record: Value = match serde_json::from_str(line) {
+            Ok(val) => val,
+            Err(_) => continue,
+        };
+        let kind = record.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+        match kind {
+            "session_created" => {
+                let session_id = record
+                    .get("session_id")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("");
+                if events.is_empty() {
+                    events.push(Event::RunStarted {
+                        prompt: format!("session created: {session_id}"),
+                    });
+                }
+            }
+            "turn_started" => {
+                if let Some(prompt) = record.get("prompt").and_then(|p| p.as_str()) {
+                    if events.len() == 1
+                        && matches!(&events[0], Event::RunStarted { prompt: p } if p.starts_with("session created:"))
+                    {
+                        events[0] = Event::RunStarted {
+                            prompt: prompt.to_string(),
+                        };
+                    } else {
+                        events.push(Event::RunStarted {
+                            prompt: prompt.to_string(),
+                        });
+                    }
+                }
+            }
+            "item" => {
+                if let Some(msg_val) = record.get("message")
+                    && let Ok(msg) = serde_json::from_value::<Message>(msg_val.clone())
+                {
+                    match msg {
+                        Message::Assistant {
+                            reasoning,
+                            text,
+                            tool_calls,
+                        } => {
+                            events.push(Event::ModelStarted { step });
+                            if !reasoning.is_empty() {
+                                events.push(Event::AssistantReasoningDelta {
+                                    delta: reasoning.clone(),
+                                });
+                            }
+                            if !text.is_empty() {
+                                events.push(Event::AssistantTextDelta {
+                                    delta: text.clone(),
+                                });
+                            }
+                            events.push(Event::ModelResponded {
+                                reasoning,
+                                text,
+                                tool_calls,
+                                usage: None,
+                            });
+                            step = step.saturating_add(1);
+                        }
+                        Message::Tool {
+                            call_id,
+                            name,
+                            content,
+                            is_error,
+                        } => {
+                            events.push(Event::ToolStarted {
+                                call: ToolCall {
+                                    id: call_id.clone(),
+                                    name: name.clone(),
+                                    arguments: serde_json::json!({}),
+                                },
+                            });
+                            events.push(Event::ToolFinished {
+                                call_id,
+                                name,
+                                content,
+                                is_error,
+                                truncated: false,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "turn_settled" => {
+                let status = record
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("completed");
+                let steps = record.get("steps").and_then(|s| s.as_u64()).unwrap_or(1) as usize;
+                match status {
+                    "failed" => {
+                        events.push(Event::RunFailed {
+                            reason: RunFailure::Model,
+                        });
+                    }
+                    "step_limit" => {
+                        events.push(Event::RunFinished {
+                            stop_reason: StopReason::StepLimit,
+                            steps,
+                        });
+                    }
+                    _ => {
+                        events.push(Event::RunFinished {
+                            stop_reason: StopReason::Completed,
+                            steps,
+                        });
+                    }
+                }
+            }
+            "turn_completed" => {
+                let steps = record.get("steps").and_then(|s| s.as_u64()).unwrap_or(1) as usize;
+                if let Some(messages) = record.get("messages").and_then(|m| m.as_array()) {
+                    for msg in messages {
+                        if let Ok(msg) = serde_json::from_value::<Message>(msg.clone()) {
+                            match msg {
+                                Message::Assistant {
+                                    reasoning,
+                                    text,
+                                    tool_calls,
+                                } => {
+                                    events.push(Event::ModelStarted { step });
+                                    if !reasoning.is_empty() {
+                                        events.push(Event::AssistantReasoningDelta {
+                                            delta: reasoning.clone(),
+                                        });
+                                    }
+                                    if !text.is_empty() {
+                                        events.push(Event::AssistantTextDelta {
+                                            delta: text.clone(),
+                                        });
+                                    }
+                                    events.push(Event::ModelResponded {
+                                        reasoning,
+                                        text,
+                                        tool_calls,
+                                        usage: None,
+                                    });
+                                    step = step.saturating_add(1);
+                                }
+                                Message::Tool {
+                                    call_id,
+                                    name,
+                                    content,
+                                    is_error,
+                                } => {
+                                    events.push(Event::ToolFinished {
+                                        call_id,
+                                        name,
+                                        content,
+                                        is_error,
+                                        truncated: false,
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                events.push(Event::RunFinished {
+                    stop_reason: StopReason::Completed,
+                    steps,
+                });
+            }
+            "derived" => {
+                let summary = record.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+                events.push(Event::RunStarted {
+                    prompt: "mentor verification".to_string(),
+                });
+                events.push(Event::ModelStarted { step });
+                events.push(Event::AssistantTextDelta {
+                    delta: summary.to_string(),
+                });
+                events.push(Event::ModelResponded {
+                    reasoning: String::new(),
+                    text: summary.to_string(),
+                    tool_calls: vec![],
+                    usage: None,
+                });
+                events.push(Event::RunFinished {
+                    stop_reason: StopReason::Completed,
+                    steps: 1,
+                });
+                step = step.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+
+    if events.is_empty() {
+        None
+    } else {
+        Some(events)
+    }
+}
+
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;
