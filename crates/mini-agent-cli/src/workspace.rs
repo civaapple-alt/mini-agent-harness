@@ -270,7 +270,11 @@ impl Workspace {
         self.ensure_readable(resolved)
     }
 
-    pub(crate) fn read_image_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
+    pub(crate) fn local_file_path(
+        &self,
+        value: &Value,
+        outside_action: &str,
+    ) -> Result<PathBuf, ToolError> {
         let candidate = self.candidate(value)?;
         let resolved = candidate
             .canonicalize()
@@ -290,7 +294,7 @@ impl Workspace {
                 resolved.display()
             )));
         }
-        self.approve(&format!("read_image {}", resolved.display()))?;
+        self.approve(&format!("{outside_action} {}", resolved.display()))?;
         Ok(resolved)
     }
 
@@ -457,7 +461,7 @@ impl Tool for ReadImage {
     }
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let path = self.workspace.read_image_path(arguments)?;
+        let path = self.workspace.local_file_path(arguments, "read_image")?;
         let declared = crate::image::declared_media_type(&path).ok_or_else(|| {
             ToolError(format!(
                 "cannot read \"{}\": read_image only accepts PNG/JPEG/WebP/GIF paths",

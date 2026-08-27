@@ -76,7 +76,7 @@ impl Tool for OpenFile {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "open_file".to_string(),
-            description: "Open a workspace file in the operating system default app for the user to view, including HTML in the default browser. When to use: the user should see a local file. When NOT to use: inspect contents yourself (read_file), fetch a public URL (web_fetch), or browse the web.".to_string(),
+            description: "Open a local file in the operating system default app for the user to view, including HTML in the default browser and images in the default viewer. Path may be workspace-relative or an absolute path on this machine (for example a file under Pictures). Absolute paths outside the workspace require approval. When to use: the user should see a local file. When NOT to use: inspect contents yourself (read_file or read_image), fetch a public URL (web_fetch), or browse the web.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": { "path": {"type": "string"} },
@@ -87,7 +87,7 @@ impl Tool for OpenFile {
     }
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let path = self.workspace.read_path(arguments)?;
+        let path = self.workspace.local_file_path(arguments, "open")?;
         if !path.is_file() {
             return Err(ToolError("path is not a file".to_string()));
         }
@@ -758,11 +758,11 @@ mod tests {
     }
 
     #[test]
-    fn open_file_opens_workspace_file_and_rejects_escape() {
+    fn open_file_opens_workspace_file_and_approved_outside_path() {
         let root = test_root();
         fs::write(root.join("index.html"), "<p>hi</p>").unwrap();
         let other = test_root();
-        fs::write(other.join("secret.html"), "no").unwrap();
+        fs::write(other.join("photo.jpg"), "no").unwrap();
         let tool = OpenFile {
             workspace: workspace(root.clone()),
             open: noop_open,
@@ -771,9 +771,38 @@ mod tests {
             tool.execute(&json!({"path": "index.html"})).unwrap(),
             "opened index.html in the default app"
         );
-        let escaped = other.join("secret.html").to_string_lossy().to_string();
-        let error = tool.execute(&json!({"path": escaped})).unwrap_err();
-        assert!(error.0.contains("escapes the workspace"));
+        let outside = other.join("photo.jpg").canonicalize().unwrap();
+        let out = tool
+            .execute(&json!({"path": outside.to_string_lossy().to_string()}))
+            .unwrap();
+        assert!(out.contains("opened"), "{out}");
+        assert!(out.contains("photo.jpg"), "{out}");
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(other).unwrap();
+    }
+
+    #[test]
+    fn open_file_outside_workspace_can_be_denied() {
+        let root = test_root();
+        let other = test_root();
+        fs::write(other.join("secret.jpg"), "no").unwrap();
+        let abs = other.join("secret.jpg").canonicalize().unwrap();
+        let tool = OpenFile {
+            workspace: Arc::new(
+                Workspace::with_read_roots(
+                    root.clone(),
+                    ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
+                    Vec::new(),
+                    SandboxKind::Native,
+                )
+                .unwrap(),
+            ),
+            open: noop_open,
+        };
+        let error = tool
+            .execute(&json!({"path": abs.to_string_lossy().to_string()}))
+            .unwrap_err();
+        assert!(error.0.contains("denied"), "{error:?}");
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(other).unwrap();
     }

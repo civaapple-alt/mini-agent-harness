@@ -120,7 +120,7 @@ public `http`/`https` URLs and loopback (`localhost`, `127.0.0.1`, `[::1]`). It 
 credentials, LAN/private IPs, cloud metadata (`169.254.169.254`), and `file:` paths, and it
 does not run JavaScript. A public page cannot redirect onto loopback. Client-only SPAs may
 come back as a thin shell with a warning; SSR HTML is returned as markdown. `read_file` is for
-source, `open_file` opens the OS default browser for the user. There is no screenshot, vision,
+source, `open_file` opens the OS default app (browser for HTML, viewer for images; absolute Pictures paths need the same approval as `read_image`). There is no screenshot, vision,
 or headless-browser tool.
 
 ## Image understanding

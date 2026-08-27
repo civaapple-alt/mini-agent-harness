@@ -45,7 +45,7 @@ Core `Message::Tool` stays a short text envelope. The host projects images onto 
 
 Files upload runs only when `OPENAI_BASE_URL` host is `api.deepseek.com`. Other hosts use `NoUpload` so `read_image` does not wait 60s on a missing `/files` API. `file_id` and data URLs are never mixed in one request.
 
-`read_image` accepts workspace-relative paths or, with approval, an absolute local file (for example under Pictures). `read_file` stays workspace-bound. Do not copy outside images into the project.
+`read_image` and `open_file` accept workspace-relative paths or, with approval, an absolute local file (for example under Pictures). `read_file` stays workspace-bound. Do not copy outside images into the project.
 
 ### Reasoning
 

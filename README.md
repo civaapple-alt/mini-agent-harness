@@ -220,7 +220,8 @@ confined to the current workspace (supporting both relative paths and in-workspa
 new files and refuses to replace existing ones. Reads never prompt. `read_image` reads a workspace PNG/JPEG/GIF/WebP or, after approval, an absolute path on this machine (for example under Pictures); it uploads once via the Files API and later turns reuse that `file_id`. Do not copy outside images into the project. DeepSeek flash/pro requests that include images are sent as `deepseek-v4-flash-vision-exp`. `web_fetch` GETs a known
 public HTTP(S) URL or a loopback dev server (`localhost`, `127.0.0.1`) and returns bounded markdown
 (no JavaScript; LAN/cloud-metadata IPs stay blocked). `open_file`
-opens a workspace file in the OS default app so a human can view local HTML in a browser.
+opens a workspace file or, after approval, an absolute local path (for example under Pictures)
+in the OS default app.
 Built-in Responses API `web_search`
 is enabled by default (toggle via `--web-search|--no-web-search` or `MINI_AGENT_WEB_SEARCH=true|false`).
 The interactive REPL and TTY `ask` run writes, shell commands, process starts, and MCP without per-step
