@@ -334,20 +334,55 @@ fn shows_full_tool_output(name: &str) -> bool {
     matches!(name, "shell" | "process_read" | "read_tool_result")
 }
 
+fn arg_str<'a>(arguments: &'a Value, name: &str) -> Option<&'a str> {
+    arguments.get(name).and_then(Value::as_str)
+}
+
 fn tool_detail(call: &ToolCall) -> Option<String> {
-    let field = match call.name.as_str() {
-        "shell" | "process_start" => "command",
-        "read_file" | "edit_file" | "write_file" => "path",
-        "process_read" | "process_stop" => "process_id",
-        "read_tool_result" => "handle",
-        _ => return None,
-    };
-    let value = call.arguments.get(field)?;
-    let value = value
-        .as_str()
-        .map(str::to_owned)
-        .unwrap_or_else(|| value.to_string());
-    Some(bounded_single_line(&value, MAX_TOOL_DETAIL_BYTES))
+    match call.name.as_str() {
+        "shell" | "process_start" => Some(bounded_single_line(
+            arg_str(&call.arguments, "command")?,
+            MAX_TOOL_DETAIL_BYTES,
+        )),
+        "read_file" | "edit_file" | "write_file" => Some(bounded_single_line(
+            arg_str(&call.arguments, "path")?,
+            MAX_TOOL_DETAIL_BYTES,
+        )),
+        "process_read" | "process_stop" => Some(bounded_single_line(
+            arg_str(&call.arguments, "process_id")?,
+            MAX_TOOL_DETAIL_BYTES,
+        )),
+        "read_tool_result" => Some(bounded_single_line(
+            arg_str(&call.arguments, "handle")?,
+            MAX_TOOL_DETAIL_BYTES,
+        )),
+        "spawn_agent" => {
+            let task = arg_str(&call.arguments, "task_name").unwrap_or("task");
+            let role = arg_str(&call.arguments, "persona")
+                .or_else(|| arg_str(&call.arguments, "agent_type"));
+            let mut detail = match role {
+                Some(role) => format!("{task} [{role}]"),
+                None => task.to_string(),
+            };
+            if let Some(message) = arg_str(&call.arguments, "message").filter(|m| !m.is_empty()) {
+                let budget = MAX_TOOL_DETAIL_BYTES.saturating_sub(detail.len() + 3);
+                detail.push_str(" — ");
+                detail.push_str(&bounded_single_line(message, budget));
+            }
+            Some(bounded_single_line(&detail, MAX_TOOL_DETAIL_BYTES))
+        }
+        "send_subagent_message" => {
+            let session = arg_str(&call.arguments, "session_id").unwrap_or("session");
+            let mut detail = session.to_string();
+            if let Some(message) = arg_str(&call.arguments, "message").filter(|m| !m.is_empty()) {
+                let budget = MAX_TOOL_DETAIL_BYTES.saturating_sub(detail.len() + 3);
+                detail.push_str(" — ");
+                detail.push_str(&bounded_single_line(message, budget));
+            }
+            Some(bounded_single_line(&detail, MAX_TOOL_DETAIL_BYTES))
+        }
+        _ => None,
+    }
 }
 
 fn bounded_single_line(value: &str, max_bytes: usize) -> String {

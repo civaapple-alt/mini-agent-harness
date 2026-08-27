@@ -13,6 +13,8 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+const SUBAGENT_MAX_STEPS: usize = 50;
+
 pub struct SpawnAgent(pub Arc<Workspace>);
 
 impl SpawnAgent {
@@ -178,7 +180,7 @@ impl Tool for SpawnAgent {
                     },
                     "timeout_seconds": {
                         "type": "integer",
-                        "description": "Maximum execution time in seconds (default: 120, min: 10, max: 600)"
+                        "description": "Maximum execution time in seconds (default: 300, min: 10, max: 600)"
                     }
                 },
                 "required": ["task_name", "message"],
@@ -211,7 +213,7 @@ impl Tool for SpawnAgent {
         let timeout_secs = args
             .get("timeout_seconds")
             .and_then(|v| v.as_u64())
-            .unwrap_or(120)
+            .unwrap_or(300)
             .clamp(10, 600);
 
         let started_at_ms = SystemTime::now()
@@ -246,6 +248,8 @@ impl Tool for SpawnAgent {
             .arg(&message)
             .arg("--json")
             .arg("--auto")
+            .arg("--max-steps")
+            .arg(SUBAGENT_MAX_STEPS.to_string())
             .arg("--security-preset")
             .arg(self.0.approval.preset().as_str())
             .arg("--sandbox")
@@ -413,7 +417,7 @@ impl Tool for SendSubagentMessage {
                     },
                     "timeout_seconds": {
                         "type": "integer",
-                        "description": "Maximum execution time in seconds (default: 120, min: 10, max: 600)"
+                        "description": "Maximum execution time in seconds (default: 300, min: 10, max: 600)"
                     }
                 },
                 "required": ["session_id", "message"],
@@ -438,7 +442,7 @@ impl Tool for SendSubagentMessage {
         let timeout_secs = args
             .get("timeout_seconds")
             .and_then(|v| v.as_u64())
-            .unwrap_or(120)
+            .unwrap_or(300)
             .clamp(10, 600);
 
         let current_exe = std::env::current_exe()
@@ -451,6 +455,8 @@ impl Tool for SendSubagentMessage {
             .arg(session_id)
             .arg("--json")
             .arg("--auto")
+            .arg("--max-steps")
+            .arg(SUBAGENT_MAX_STEPS.to_string())
             .arg("--security-preset")
             .arg(self.0.approval.preset().as_str())
             .arg("--sandbox")

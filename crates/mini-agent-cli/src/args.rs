@@ -136,14 +136,15 @@ CONFIGURATION:
 pub const ASK_HELP: &str = "mini-agent ask
 
 USAGE:
-    mini-agent ask [--auto-approve|-y] [--json] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]
+    mini-agent ask [--auto-approve|-y] [--max-steps N] [--json] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]
 
-Runs one script-facing turn (8 steps, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.
+Runs one script-facing turn (8 steps by default, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.
 On a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).
 Progress is written to stderr and the final result to stdout.
 
 OPTIONS:
     --auto-approve, -y           Permit sensitive tools non-interactively (auto-approve)
+    --max-steps N                Cap model steps for this turn (default: 8; 0 means unlimited)
     --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
@@ -243,6 +244,7 @@ pub struct Invocation {
     pub security_preset: SecurityPreset,
     pub sandbox_kind: SandboxKind,
     pub web_search: Option<bool>,
+    pub max_steps: Option<usize>,
     pub help_topic: HelpTopic,
 }
 
@@ -371,6 +373,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             security_preset: SecurityPreset::Default,
             sandbox_kind: SandboxKind::Native,
             web_search: None,
+            max_steps: None,
             help_topic: HelpTopic::Root,
         });
     }
@@ -386,6 +389,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut security_preset = SecurityPreset::Default;
     let mut sandbox_kind = SandboxKind::Native;
     let mut web_search = None;
+    let mut max_steps = None;
     let mut options = true;
     while let Some(argument) = args.next() {
         if options && argument == "--" {
@@ -451,6 +455,18 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 return Err(format!("{argument} may be provided only once"));
             }
             web_search = Some(false);
+        } else if options && argument == "--max-steps" {
+            if max_steps.is_some() {
+                return Err("--max-steps may be provided only once".to_string());
+            }
+            let value = args
+                .next()
+                .ok_or_else(|| "--max-steps requires a number".to_string())?;
+            max_steps = Some(
+                value
+                    .parse::<usize>()
+                    .map_err(|_| "--max-steps requires a non-negative integer".to_string())?,
+            );
         } else if options && argument.starts_with('-') {
             return Err(format!("unknown option: {argument}"));
         } else {
@@ -556,6 +572,9 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     {
         return Err("--session-id is supported only by ask, auto, and interactive".to_string());
     }
+    if max_steps.is_some() && !matches!(command, Command::Ask | Command::Run) {
+        return Err("--max-steps is supported only by ask".to_string());
+    }
     Ok(Invocation {
         command,
         prompt: prompt.join(" "),
@@ -568,6 +587,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         security_preset,
         sandbox_kind,
         web_search,
+        max_steps,
         help_topic: HelpTopic::Root,
     })
 }
@@ -585,6 +605,7 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         security_preset: SecurityPreset::Default,
         sandbox_kind: SandboxKind::Native,
         web_search: None,
+        max_steps: None,
         help_topic,
     }
 }
@@ -821,6 +842,16 @@ mod tests {
         assert_eq!(invocation.trace, Some(PathBuf::from("trace.jsonl")));
         assert!(invocation.json);
         assert!(invocation.automatic);
+        assert_eq!(invocation.max_steps, None);
+
+        let stepped = parse_args(vec![
+            "ask".to_string(),
+            "--max-steps".to_string(),
+            "50".to_string(),
+            "go".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(stepped.max_steps, Some(50));
     }
 
     #[test]

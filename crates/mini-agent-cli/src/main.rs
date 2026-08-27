@@ -113,6 +113,7 @@ async fn main() -> ExitCode {
                 invocation.sandbox_kind,
                 invocation.web_search,
                 request,
+                invocation.max_steps,
             )
             .await
         }

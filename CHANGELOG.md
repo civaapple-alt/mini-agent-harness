@@ -35,6 +35,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Goal Mode can read and update session `goal/plan.md` (relative `goal/plan.md` maps there) instead of failing with "path escapes the workspace".
 - Windows shell capture forces UTF-8 (`PYTHONUTF8` / PowerShell `$OutputEncoding`) so UTF-8 HTML and Python previews are not shown as mojibake.
 - Subagent tree records (`meta.json`, `output.json`, `parent_session_id`) live under the parent session at `~/.mini-agent/sessions/<workspace>/<parent-id>/subagents/<child-id>/`, not in the project `.agents/sessions/` directory.
+- `spawn_agent` and `send_subagent_message` run child `ask` with `--max-steps 50` (and a 300s default timeout) so reviews are less likely to stop after 8 steps.
+- REPL `tool>` lines for `spawn_agent` and `send_subagent_message` show task/persona/session_id and a bounded message preview.
 - Security deny rules now properly match human-formatted tool action strings, preventing destructive commands from bypassing deny filters.
 - Windows background managed process trees are guaranteed to terminate via `taskkill /PID <pid> /T /F` and sandbox attachment.
 - CLI argument errors and root help on usage failure now print to `stderr`, keeping `stdout` pure for machine-readable JSON consumers.

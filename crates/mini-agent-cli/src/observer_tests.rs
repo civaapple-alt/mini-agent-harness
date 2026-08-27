@@ -98,6 +98,39 @@ fn file_tool_start_only_displays_the_path() {
 }
 
 #[test]
+fn spawn_agent_start_displays_task_persona_and_message() {
+    let call = ToolCall {
+        id: "call-1".to_string(),
+        name: "spawn_agent".to_string(),
+        arguments: json!({
+            "task_name": "mac_studio_page_review",
+            "persona": "reviewer",
+            "message": "Review mac-studio-m5.html against mac-mini-m6.html"
+        }),
+    };
+    let shown = format_tool_started(&call, false);
+    assert!(shown.starts_with("tool> spawn_agent — "));
+    assert!(shown.contains("mac_studio_page_review"));
+    assert!(shown.contains("reviewer"));
+    assert!(shown.contains("Review mac-studio-m5.html"));
+}
+
+#[test]
+fn send_subagent_message_start_displays_session_and_message() {
+    let call = ToolCall {
+        id: "call-2".to_string(),
+        name: "send_subagent_message".to_string(),
+        arguments: json!({
+            "session_id": "sub-1787813257-mac_studio_page_review",
+            "message": "Continue the review from the last checkpoint"
+        }),
+    };
+    let shown = format_tool_started(&call, false);
+    assert!(shown.contains("sub-1787813257-mac_studio_page_review"));
+    assert!(shown.contains("Continue the review"));
+}
+
+#[test]
 fn tool_finished_stays_on_one_bounded_line() {
     assert_eq!(
         format_tool_finished("read_file", "MAKE THIS LOUD", false, false),

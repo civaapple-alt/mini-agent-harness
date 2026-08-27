@@ -33,6 +33,7 @@ pub async fn run(
     sandbox: SandboxKind,
     web_search_override: Option<bool>,
     session_request: SessionRequest,
+    max_steps: Option<usize>,
 ) -> ExitCode {
     let prompt = match resolve_prompt(prompt) {
         Ok(prompt) => prompt,
@@ -54,15 +55,15 @@ pub async fn run(
         ApprovalMode::Interactive
     };
     let approval = ApprovalController::with_preset(mode, preset);
-    let mut harness = match prepare_openai_harness(
-        &runtime_config,
-        approval.clone(),
-        harness_config(false),
-        sandbox,
-    ) {
-        Ok(build) => build.harness,
-        Err(error) => return preflight_error(json_output, &error),
+    let config = match max_steps {
+        Some(steps) => crate::harness_config_auto(true, steps),
+        None => harness_config(false),
     };
+    let mut harness =
+        match prepare_openai_harness(&runtime_config, approval.clone(), config, sandbox) {
+            Ok(build) => build.harness,
+            Err(error) => return preflight_error(json_output, &error),
+        };
 
     let mut opened_session = match session_request {
         SessionRequest::Disabled => None,
