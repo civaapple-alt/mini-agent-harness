@@ -1285,6 +1285,172 @@ fn subagent_spawn_runs_child_process_and_returns_output() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn subagent_multi_turn_interactive_session_resumes_and_retains_context() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        // Request 1: Parent agent calls spawn_agent with persist=true
+        let (mut stream1, _) = listener.accept().unwrap();
+        stream1
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let _ = read_request_body(&mut stream1);
+        let body1 = format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "spawn-call-1",
+                    "name": "spawn_agent",
+                    "arguments": serde_json::to_string(&json!({
+                        "task_name": "auth_tester",
+                        "message": "Turn 1: inspect auth module",
+                        "persist": true
+                    })).unwrap()
+                }
+            }),
+            json!({
+                "type": "response.completed",
+                "response": {
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 2
+                    }
+                }
+            })
+        );
+        write!(
+            stream1,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body1}",
+            body1.len()
+        )
+        .unwrap();
+        stream1.flush().unwrap();
+
+        // Request 2: Child agent runs Turn 1 and returns answer
+        let (mut stream2, _) = listener.accept().unwrap();
+        stream2
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let _ = read_request_body(&mut stream2);
+        write_sse_response(&mut stream2, "Turn 1 Analysis: JWT validation is present.");
+
+        // Request 3: Parent agent receives tool output with session_id and calls send_subagent_message
+        let (mut stream3, _) = listener.accept().unwrap();
+        stream3
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let parent_req2_body = read_request_body(&mut stream3);
+        let parent_req2_str = String::from_utf8_lossy(&parent_req2_body);
+        assert!(
+            parent_req2_str.contains("JWT validation is present"),
+            "{parent_req2_str}"
+        );
+
+        // Extract session_id from parent's tool response in prompt
+        let session_marker = "[session_id: ";
+        let start = parent_req2_str
+            .find(session_marker)
+            .expect("session_id marker in parent prompt")
+            + session_marker.len();
+        let end = parent_req2_str[start..]
+            .find(']')
+            .expect("closing bracket for session_id")
+            + start;
+        let session_id = &parent_req2_str[start..end];
+
+        let body3 = format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "send-msg-call-1",
+                    "name": "send_subagent_message",
+                    "arguments": serde_json::to_string(&json!({
+                        "session_id": session_id,
+                        "message": "Turn 2: does it validate expiration?"
+                    })).unwrap()
+                }
+            }),
+            json!({
+                "type": "response.completed",
+                "response": {
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 2
+                    }
+                }
+            })
+        );
+        write!(
+            stream3,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body3}",
+            body3.len()
+        )
+        .unwrap();
+        stream3.flush().unwrap();
+
+        // Request 4: Child subagent resumes session and processes Turn 2
+        let (mut stream4, _) = listener.accept().unwrap();
+        stream4
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let child_req2_body = read_request_body(&mut stream4);
+        let child_req2_str = String::from_utf8_lossy(&child_req2_body);
+        // Verify child retained Turn 1 context from resumed checkpoint
+        assert!(
+            child_req2_str.contains("Turn 1 Analysis: JWT validation is present"),
+            "{child_req2_str}"
+        );
+        write_sse_response(&mut stream4, "Turn 2 Analysis: Expiration is verified.");
+
+        // Request 5: Parent receives follow-up response and concludes
+        let (mut stream5, _) = listener.accept().unwrap();
+        stream5
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let _ = read_request_body(&mut stream5);
+        write_sse_response(&mut stream5, "Multi-turn audit complete: auth is robust.");
+    });
+
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+
+    let output = mini_agent(&root)
+        .args(["ask", "start multi-turn audit", "--json", "--auto-approve"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "ask command failed: {}",
+        stderr(&output)
+    );
+    let stdout_str = stdout(&output);
+    let parsed: Value = serde_json::from_str(&stdout_str).unwrap();
+    assert_eq!(parsed["exit_code"], 0);
+    assert!(
+        parsed["output"]
+            .as_str()
+            .unwrap()
+            .contains("Multi-turn audit complete: auth is robust.")
+    );
+
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn read_request_body(stream: &mut TcpStream) -> Vec<u8> {
     let mut received = Vec::new();
     let mut buffer = [0u8; 4096];

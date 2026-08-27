@@ -80,11 +80,7 @@ If a proposed approach is rejected during review:
 ### Proposed Notes Under Review (`proposed/`)
 
 #### Architecture (`proposed/architecture/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-27 | [Subagent Task Scheduling & Delegation](.agents/notes/proposed/architecture/2026-08-27-subagent-task-scheduling-and-delegation.md) | Multi-tool subagent delegation, context forking, and asynchronous event waiting |
-| 2026-08-27 | [Multi-turn Interactive Subagent Sessions](.agents/notes/proposed/architecture/2026-08-27-multi-turn-interactive-subagent-sessions.md) | Stateless session-backed resumption (`send_subagent_message`) and ACP streaming protocol |
-| 2026-08-27 | [Subagent Trace Replay & Session Lineage](.agents/notes/proposed/architecture/2026-08-27-subagent-trace-replay-and-session-lineage.md) | Hierarchical trace rollup, nested replay drill-down, and session checkpoint graph |
+*No proposed architecture notes currently under review.*
 
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
@@ -106,6 +102,8 @@ If a proposed approach is rejected during review:
 | 2026-08-26 | [Local Sandbox Adapter](.agents/notes/implemented/architecture/2026-08-26-local-sandbox-adapter.md) | Codex-inspired 5-stage tool orchestrator, security presets, and Windows JobObject sandboxing |
 | 2026-08-27 | [Model Context Boundaries & CLI Decoupling](.agents/notes/implemented/architecture/2026-08-27-model-context-boundaries-and-cli-decoupling.md) | Model item ceilings, atomic turn trimming, CLI decoupling, and session continuity |
 | 2026-08-27 | [Subprocess CLI & ACP Subagent Execution](.agents/notes/implemented/architecture/2026-08-27-subprocess-cli-and-acp-subagent-execution.md) | Headless `mini-agent ask --json` subprocess spawning, `spawn_agent` tool, and Agent Client Protocol execution |
+| 2026-08-27 | [Multi-turn Interactive Subagent Sessions](.agents/notes/implemented/architecture/2026-08-27-multi-turn-interactive-subagent-sessions.md) | Stateless session-backed resumption (`send_subagent_message`) and ACP streaming protocol |
+| 2026-08-27 | [Subagent Trace Replay & Session Lineage](.agents/notes/implemented/architecture/2026-08-27-subagent-trace-replay-and-session-lineage.md) | Hierarchical trace rollup, nested replay drill-down, and session checkpoint graph |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |
@@ -132,6 +130,7 @@ If a proposed approach is rejected during review:
 | Date | Title | Rationale |
 |---|---|---|
 | 2026-08-24 | [Generic Persistence in Core](.agents/notes/rejected/architecture/2026-08-24-generic-persistence-in-core.md) | Cannot settle non-idempotent external effects; persistence belongs at edge |
+| 2026-08-27 | [Subagent Task Scheduling & Delegation](.agents/notes/rejected/architecture/2026-08-27-subagent-task-scheduling-and-delegation.md) | In-process multi-tenant scheduler adds unnecessary core complexity; replaced by Subprocess CLI execution and session-backed multi-turn architecture |
 
 #### Features & Extensions (`rejected/feature/`)
 | Date | Title | Rationale |

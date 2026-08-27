@@ -237,6 +237,7 @@ pub struct Invocation {
     #[allow(dead_code)]
     pub persist: bool,
     pub ephemeral: bool,
+    pub session_id: Option<String>,
     pub security_preset: SecurityPreset,
     pub sandbox_kind: SandboxKind,
     pub web_search: Option<bool>,
@@ -364,6 +365,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             automatic: false,
             persist: false,
             ephemeral: false,
+            session_id: None,
             security_preset: SecurityPreset::Default,
             sandbox_kind: SandboxKind::Native,
             web_search: None,
@@ -378,6 +380,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut automatic = false;
     let mut persist = false;
     let mut ephemeral = false;
+    let mut session_id = None;
     let mut security_preset = SecurityPreset::Default;
     let mut sandbox_kind = SandboxKind::Native;
     let mut web_search = None;
@@ -408,6 +411,14 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 return Err(format!("{argument} may be provided only once"));
             }
             automatic = true;
+        } else if options && (argument == "--session" || argument == "--session-id") {
+            if session_id.is_some() {
+                return Err(format!("{argument} may be provided only once"));
+            }
+            session_id = Some(
+                args.next()
+                    .ok_or_else(|| format!("{argument} requires a session ID"))?,
+            );
         } else if options && argument == "--persist" {
             if persist {
                 return Err("--persist may be provided only once".to_string());
@@ -516,14 +527,32 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         return Err("--persist and --ephemeral cannot be combined".to_string());
     }
     if persist
-        && !(command == Command::Interactive || command == Command::Auto && prompt.is_empty())
+        && !(command == Command::Interactive
+            || command == Command::Ask
+            || command == Command::Run
+            || (command == Command::Auto && prompt.is_empty()))
     {
-        return Err("--persist is supported only by interactive sessions".to_string());
+        return Err(
+            "--persist is supported only by interactive, auto, and ask sessions".to_string(),
+        );
     }
     if ephemeral
-        && !(command == Command::Interactive || command == Command::Auto && prompt.is_empty())
+        && !(command == Command::Interactive
+            || command == Command::Ask
+            || command == Command::Run
+            || (command == Command::Auto && prompt.is_empty()))
     {
-        return Err("--ephemeral is supported only by interactive sessions".to_string());
+        return Err(
+            "--ephemeral is supported only by interactive, auto, and ask sessions".to_string(),
+        );
+    }
+    if session_id.is_some()
+        && !matches!(
+            command,
+            Command::Ask | Command::Run | Command::Interactive | Command::Auto
+        )
+    {
+        return Err("--session-id is supported only by ask, auto, and interactive".to_string());
     }
     Ok(Invocation {
         command,
@@ -533,6 +562,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         automatic,
         persist,
         ephemeral,
+        session_id,
         security_preset,
         sandbox_kind,
         web_search,
@@ -549,6 +579,7 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         automatic: false,
         persist: false,
         ephemeral: false,
+        session_id: None,
         security_preset: SecurityPreset::Default,
         sandbox_kind: SandboxKind::Native,
         web_search: None,

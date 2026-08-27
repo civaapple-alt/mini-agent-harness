@@ -7,6 +7,10 @@ use crate::prepare_openai_harness;
 use crate::print_auto_warning;
 use crate::sandbox::SandboxKind;
 use crate::security::SecurityPreset;
+use crate::session::SessionRequest;
+use crate::session::SessionStore;
+use crate::session::TurnCommit;
+use crate::session::TurnStatus;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
 use mini_agent_core::StopReason;
@@ -19,6 +23,7 @@ use std::process::ExitCode;
 
 const MAX_STDIN_PROMPT_BYTES: usize = 32 * 1024;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     prompt: String,
     trace: Option<PathBuf>,
@@ -27,6 +32,7 @@ pub async fn run(
     preset: SecurityPreset,
     sandbox: SandboxKind,
     web_search_override: Option<bool>,
+    session_request: SessionRequest,
 ) -> ExitCode {
     let prompt = match resolve_prompt(prompt) {
         Ok(prompt) => prompt,
@@ -53,6 +59,22 @@ pub async fn run(
             Ok(build) => build.harness,
             Err(error) => return preflight_error(json_output, &error),
         };
+
+    let mut opened_session = match session_request {
+        SessionRequest::Disabled => None,
+        other => match SessionStore::open(&runtime_config.workspace(), other) {
+            Ok(opened) => {
+                if opened.resumed {
+                    let _ = harness.restore_history(opened.messages.clone());
+                }
+                Some(opened)
+            }
+            Err(error) => {
+                return preflight_error(json_output, &format!("cannot open session: {error}"));
+            }
+        },
+    };
+
     let format = if json_output {
         ScriptFormat::Json
     } else {
@@ -65,9 +87,27 @@ pub async fn run(
         }
     };
 
-    match harness.run(prompt, &mut observer).await {
+    let started_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let result = harness.run(prompt.clone(), &mut observer).await;
+
+    match result {
         Ok(outcome) if outcome.stop_reason != StopReason::StepLimit => {
             observer.finish();
+            if let Some(ref mut session) = opened_session {
+                let _ = session.store.record_turn(TurnCommit {
+                    started_at_ms,
+                    prompt: &prompt,
+                    status: TurnStatus::Completed,
+                    steps: outcome.steps,
+                    error: None,
+                    messages: harness.messages(),
+                    checkpoint: harness.messages(),
+                });
+            }
             if json_output {
                 println!(
                     "{}",
@@ -76,6 +116,7 @@ pub async fn run(
                         "exit_code": 0,
                         "model": model_name,
                         "steps": outcome.steps,
+                        "session_id": opened_session.as_ref().map(|s| s.store.session_id()),
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json()
                     })
@@ -91,6 +132,17 @@ pub async fn run(
                 "stopped after {} model steps without completing",
                 outcome.steps
             );
+            if let Some(ref mut session) = opened_session {
+                let _ = session.store.record_turn(TurnCommit {
+                    started_at_ms,
+                    prompt: &prompt,
+                    status: TurnStatus::StepLimit,
+                    steps: outcome.steps,
+                    error: Some(&error),
+                    messages: harness.messages(),
+                    checkpoint: harness.messages(),
+                });
+            }
             eprintln!("error: {error}");
             if json_output {
                 println!(
@@ -100,6 +152,7 @@ pub async fn run(
                         "exit_code": 1,
                         "model": model_name,
                         "steps": outcome.steps,
+                        "session_id": opened_session.as_ref().map(|s| s.store.session_id()),
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json(),
                         "error": error
@@ -110,6 +163,18 @@ pub async fn run(
         }
         Err(error) => {
             observer.finish();
+            if let Some(ref mut session) = opened_session {
+                let err_str = error.to_string();
+                let _ = session.store.record_turn(TurnCommit {
+                    started_at_ms,
+                    prompt: &prompt,
+                    status: TurnStatus::Failed,
+                    steps: 0,
+                    error: Some(&err_str),
+                    messages: harness.messages(),
+                    checkpoint: harness.messages(),
+                });
+            }
             eprintln!("error: {error}");
             if json_output {
                 println!(
@@ -119,6 +184,7 @@ pub async fn run(
                         "exit_code": 1,
                         "model": model_name,
                         "steps": 0,
+                        "session_id": opened_session.as_ref().map(|s| s.store.session_id()),
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json(),
                         "error": error.to_string()

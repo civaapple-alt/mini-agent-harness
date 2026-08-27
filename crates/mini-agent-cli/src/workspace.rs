@@ -186,8 +186,8 @@ pub fn workspace_tools_with_read_roots(
         Box::new(WriteFile(Arc::clone(&workspace))),
         Box::new(Shell(Arc::clone(&workspace), results.clone())),
         Box::new(ReadToolResult(results)),
-        Box::new(crate::subagent::SpawnAgent::new(Arc::clone(&workspace))),
     ];
+    tools.extend(crate::subagent::subagent_tools(Arc::clone(&workspace)));
     tools.extend(process_tools(processes));
     Ok(tools)
 }

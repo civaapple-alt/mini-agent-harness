@@ -1,6 +1,6 @@
 # Subagent Trace Replay, Summary Rollup, and Hierarchical Session Checkpoints
 
-Status: proposed
+Status: implemented
 
 ## 1. Context & Motivation
 

@@ -573,4 +573,54 @@ mod tests {
         let err = crate::session::try_load_session_events(&corrupt_lines).unwrap_err();
         assert!(err.contains("line 3"), "expected line 3 in error: {err}");
     }
+
+    #[test]
+    fn trace_summary_tracks_subagent_tool_calls() {
+        let events = vec![
+            Event::RunStarted {
+                prompt: "run multi-agent review".to_string(),
+            },
+            Event::ModelStarted { step: 1 },
+            Event::ToolStarted {
+                call: ToolCall {
+                    id: "spawn-1".to_string(),
+                    name: "spawn_agent".to_string(),
+                    arguments: json!({"task_name": "reviewer", "message": "review PR"}),
+                },
+            },
+            Event::ToolFinished {
+                call_id: "spawn-1".to_string(),
+                name: "spawn_agent".to_string(),
+                content: "Subagent 'reviewer' [session_id: sub-123] completed:\n\nAll clear."
+                    .to_string(),
+                is_error: false,
+                truncated: false,
+            },
+            Event::ModelStarted { step: 2 },
+            Event::ToolStarted {
+                call: ToolCall {
+                    id: "send-1".to_string(),
+                    name: "send_subagent_message".to_string(),
+                    arguments: json!({"session_id": "sub-123", "message": "verify tests"}),
+                },
+            },
+            Event::ToolFinished {
+                call_id: "send-1".to_string(),
+                name: "send_subagent_message".to_string(),
+                content: "Subagent [sub-123] completed follow-up turn:\n\nTests pass.".to_string(),
+                is_error: false,
+                truncated: false,
+            },
+            Event::RunFinished {
+                stop_reason: StopReason::Completed,
+                steps: 2,
+            },
+        ];
+
+        let summary = compute_summary(Path::new("parent-trace.jsonl"), &events);
+        assert_eq!(summary.steps, 2);
+        assert!(summary.completed);
+        assert_eq!(summary.tool_calls_total, 2);
+        assert_eq!(summary.tool_calls_success, 2);
+    }
 }

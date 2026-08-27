@@ -1,6 +1,6 @@
 # Subagent Task Scheduling and Delegation Architecture
 
-Status: proposed
+Status: rejected — In-process multi-tenant scheduler adds unnecessary core complexity; replaced by Subprocess CLI execution and session-backed multi-turn architecture.
 
 ## 1. Context & Motivation
 

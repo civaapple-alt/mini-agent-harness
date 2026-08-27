@@ -1,6 +1,6 @@
 # Multi-turn Interactive Subagent Sessions via Durable Resumption and ACP Protocol
 
-Status: proposed
+Status: implemented
 
 ## 1. Context & Motivation
 

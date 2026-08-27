@@ -31,6 +31,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 pub(crate) enum SessionRequest {
     Disabled,
     New,
+    Named(String),
     Resume(String),
     Fork(String),
 }
@@ -87,6 +88,7 @@ impl SessionStore {
         match request {
             SessionRequest::Disabled => Err("session persistence is disabled".to_string()),
             SessionRequest::New => Self::create(workspace),
+            SessionRequest::Named(session_id) => Self::create_named(workspace, &session_id),
             SessionRequest::Resume(session_id) => Self::resume(workspace, &session_id),
             SessionRequest::Fork(session_id) => Self::fork(workspace, &session_id),
         }
@@ -221,6 +223,69 @@ impl SessionStore {
             });
         }
         Err("cannot allocate a unique session id".to_string())
+    }
+
+    fn create_named(workspace: &Path, session_id: &str) -> Result<OpenedSession, String> {
+        validate_session_id(session_id)?;
+        let base_dir = session_directory(workspace)?;
+        fs::create_dir_all(&base_dir)
+            .map_err(|error| format!("cannot create session directory: {error}"))?;
+        let session_dir = base_dir.join(session_id);
+        if session_dir.exists() {
+            return Self::resume(workspace, session_id);
+        }
+        fs::create_dir(&session_dir)
+            .map_err(|error| format!("cannot create session directory: {error}"))?;
+        let lock = match acquire_lock(&session_dir, SESSION_LOCK_NAME) {
+            Ok(lock) => lock,
+            Err(error) => {
+                let _ = fs::remove_dir(&session_dir);
+                return Err(error);
+            }
+        };
+        let path = session_dir.join(SESSION_FILE_NAME);
+        let file = match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&session_dir);
+                return Err(format!("cannot create session file: {error}"));
+            }
+        };
+        let thread_id = new_id("t");
+        let mut store = Self {
+            session_id: session_id.to_string(),
+            thread_id: thread_id.clone(),
+            path,
+            file,
+            bytes: 0,
+            next_seq: 1,
+            checkpoint_seq: 0,
+            _lock: lock,
+        };
+        store.append_records(vec![
+            json!({
+                "kind": "session_created",
+                "schema_version": SCHEMA_VERSION,
+                "session_id": session_id,
+                "workspace": workspace,
+                "timestamp_ms": timestamp_ms(),
+            }),
+            json!({
+                "kind": "thread_started",
+                "thread_id": thread_id,
+                "timestamp_ms": timestamp_ms(),
+            }),
+        ])?;
+        Ok(OpenedSession {
+            store,
+            messages: Vec::new(),
+            resumed: false,
+        })
     }
 
     fn resume(workspace: &Path, session_id: &str) -> Result<OpenedSession, String> {

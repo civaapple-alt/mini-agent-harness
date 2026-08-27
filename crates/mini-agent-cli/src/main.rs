@@ -97,6 +97,11 @@ async fn main() -> ExitCode {
         }
         Command::Demo => run_demo(invocation.prompt, invocation.trace).await,
         Command::Run | Command::Ask => {
+            let request = match invocation.session_id {
+                Some(id) => SessionRequest::Named(id),
+                None if invocation.persist && !invocation.ephemeral => SessionRequest::New,
+                None => SessionRequest::Disabled,
+            };
             ask::run(
                 invocation.prompt,
                 invocation.trace,
@@ -105,6 +110,7 @@ async fn main() -> ExitCode {
                 invocation.security_preset,
                 invocation.sandbox_kind,
                 invocation.web_search,
+                request,
             )
             .await
         }
