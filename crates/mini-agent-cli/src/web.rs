@@ -8,13 +8,17 @@ use mini_agent_core::ToolSpec;
 use reqwest::Url;
 use serde_json::Value;
 use serde_json::json;
+use std::fs;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 const MAX_URL_BYTES: usize = 2000;
 const MAX_FETCH_BYTES: usize = 128 * 1024;
@@ -539,7 +543,8 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 }
 
 fn launch_default_app(path: &Path) -> Result<(), ToolError> {
-    let status = open_command(path)
+    let target = launch_target(path)?;
+    let status = open_command(&target)
         .status()
         .map_err(|error| ToolError(format!("failed to open {}: {error}", path.display())))?;
     if status.success() {
@@ -547,6 +552,46 @@ fn launch_default_app(path: &Path) -> Result<(), ToolError> {
     } else {
         Err(ToolError(format!("failed to open {}", path.display())))
     }
+}
+
+fn launch_target(path: &Path) -> Result<PathBuf, ToolError> {
+    #[cfg(windows)]
+    {
+        if is_viewer_image(path) {
+            return stage_clean_open_copy(path);
+        }
+    }
+    Ok(path.to_path_buf())
+}
+
+fn is_viewer_image(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .as_deref(),
+        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tif" | "tiff")
+    )
+}
+
+fn stage_clean_open_copy(path: &Path) -> Result<PathBuf, ToolError> {
+    let bytes = fs::read(path)
+        .map_err(|error| ToolError(format!("failed to read {}: {error}", path.display())))?;
+    let dir = std::env::temp_dir().join("mini-agent-open");
+    fs::create_dir_all(&dir)
+        .map_err(|error| ToolError(format!("failed to create temp open dir: {error}")))?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("image");
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let dest = dir.join(format!("{stamp}-{name}"));
+    fs::write(&dest, bytes)
+        .map_err(|error| ToolError(format!("failed to stage {}: {error}", dest.display())))?;
+    Ok(dest)
 }
 
 fn open_command(path: &Path) -> Command {
@@ -816,5 +861,50 @@ mod tests {
         assert_eq!(command.get_program(), "open");
         #[cfg(all(not(windows), not(target_os = "macos")))]
         assert_eq!(command.get_program(), "xdg-open");
+    }
+
+    #[test]
+    fn launch_target_leaves_html_in_place() {
+        let path = Path::new("index.html");
+        assert!(!is_viewer_image(path));
+        assert!(is_viewer_image(Path::new("photo.jpg")));
+        assert_eq!(launch_target(path).unwrap(), path);
+    }
+
+    #[test]
+    fn stage_clean_open_copy_writes_raw_bytes() {
+        let root = test_root();
+        let src = root.join("photo.jpg");
+        fs::write(&src, crate::image::TINY_PNG).unwrap();
+        let dest = stage_clean_open_copy(&src).unwrap();
+        assert_ne!(dest, src);
+        assert!(
+            dest.starts_with(std::env::temp_dir().join("mini-agent-open")),
+            "{}",
+            dest.display()
+        );
+        assert_eq!(fs::read(&dest).unwrap(), crate::image::TINY_PNG);
+        let _ = fs::remove_file(&dest);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn launch_target_does_not_copy_zone_identifier() {
+        let root = test_root();
+        let src = root.join("photo.jpg");
+        fs::write(&src, crate::image::TINY_PNG).unwrap();
+        let ads = format!("{}:Zone.Identifier", src.display());
+        fs::write(&ads, "[ZoneTransfer]\r\nZoneId=3\r\n").unwrap();
+        let dest = launch_target(&src).unwrap();
+        assert_ne!(dest, src);
+        assert_eq!(fs::read(&dest).unwrap(), crate::image::TINY_PNG);
+        let dest_ads = format!("{}:Zone.Identifier", dest.display());
+        assert!(
+            !Path::new(&dest_ads).exists(),
+            "temp copy should not inherit Mark of the Web"
+        );
+        let _ = fs::remove_file(&dest);
+        fs::remove_dir_all(root).unwrap();
     }
 }

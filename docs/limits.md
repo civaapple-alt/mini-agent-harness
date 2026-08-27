@@ -74,7 +74,7 @@ Host tools add their own effect-side bounds before results reach core:
 | file read | 128 KiB |
 | `read_image` file | 4 MiB; JPEG/PNG/GIF/WebP by magic; 4 images / request; Files API 60s, 7-day expiry |
 | `web_fetch` body / extracted text | 128 KiB / 50k characters; 15s; 5 same-class redirects |
-| `open_file` | workspace file, or approved absolute local file; OS default app |
+| `open_file` | workspace file, or approved absolute local file; OS default app; Windows images use a MOTW-free temp copy |
 | new file or edited file | 1 MiB |
 | shell command text | 16 KiB |
 | shell runtime | 120 seconds |

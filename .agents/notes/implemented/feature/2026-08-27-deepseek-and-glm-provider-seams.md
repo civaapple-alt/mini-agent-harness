@@ -34,18 +34,24 @@ Known-URL reads use host `web_fetch` (public HTTP(S) or loopback; LAN/metadata b
 
 ### `read_image` projection
 
-Core `Message::Tool` stays a short text envelope. The host projects images onto `function_call_output.output` as `input_image` blocks. Compaction and mentor requests (`tools` empty) never attach images.
+Core `Message::Tool` stays a short text envelope. Compaction and mentor requests (`tools` empty) never attach images.
+
+DeepSeek projects images onto `function_call_output.output` as Responses `input_image` (`file_id`, or a string data URL fallback).
+
+GLM-5.3-Flash documents Chat Completions `messages[].content[]` `{ "type": "image_url", "image_url": { "url": "<URL or data URL>" } }` ([OpenAI 兼容](https://docs.bigmodel.cn/cn/guide/develop/openai/introduction), [GLM-5.3-Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)). It does not consume DeepSeek-style `input_image` on tool output. The host still posts `{base}/responses`; for `glm-*` image turns it keeps `function_call_output` as the envelope text and appends a user message with that `image_url` block.
 
 | | DeepSeek | GLM Coding Plan |
 | --- | --- | --- |
 | Text model + image | ignored / placeholder | `glm-5.3` is text-only |
 | Swap for that request | `…-flash` / `…-pro` → `deepseek-v4-flash-vision-exp` | `glm-5.3` → `glm-5.3-flash` |
-| Bytes on the wire | `POST {base}/files` `purpose=user_data`, 7-day expiry, then `input_image.file_id` | no Files API; `input_image.image_url` data URL |
+| Bytes on the wire | `POST {base}/files` `purpose=user_data`, 7-day expiry, then `input_image.file_id` on tool output | no Files API; user-message `image_url.url` data URL |
 | Later turns | reuse `file_id` | re-encode local attachment |
 
 Files upload runs only when `OPENAI_BASE_URL` host is `api.deepseek.com`. Other hosts use `NoUpload` so `read_image` does not wait 60s on a missing `/files` API. `file_id` and data URLs are never mixed in one request.
 
 `read_image` and `open_file` accept workspace-relative paths or, with approval, an absolute local file (for example under Pictures). `read_file` stays workspace-bound. Do not copy outside images into the project.
+
+Windows `open_file` for images writes raw bytes to `%TEMP%\mini-agent-open\` and launches that copy. `std::fs::copy` would keep NTFS `Zone.Identifier` (Mark of the Web) from a browser download and Photos would prompt “此文件是否来自可靠来源?”. HTML and other files still open in place so relative assets keep working.
 
 ### Reasoning
 

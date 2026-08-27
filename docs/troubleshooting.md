@@ -136,7 +136,14 @@ turns reuse the returned `file_id`. Inline base64 is only a fallback if that upl
 DeepSeek text models ignore `input_image` (they replace it with a placeholder). When the current
 `OPENAI_MODEL` is `deepseek-v4-flash` or `deepseek-v4-pro` and the request actually contains images,
 that one request is sent as `deepseek-v4-flash-vision-exp`. GLM Coding Plan `glm-5.3` (text-only)
-image turns are sent as `glm-5.3-flash`. The configured coding model is unchanged for text-only turns.
+image turns are sent as `glm-5.3-flash`, with the bytes on a user message as
+`type: image_url` / `image_url.url` data URL — the shape GLM documents for Chat Completions,
+not `input_image` on `function_call_output` (which GLM does not consume). The configured
+coding model is unchanged for text-only turns.
+
+If Windows Photos asks whether an `open_file` image came from an untrusted location, that is
+Mark of the Web on a browser-downloaded file. `open_file` now launches a temp copy of images
+without that zone stamp; HTML still opens in place.
 
 `read_file` still refuses binary images; use `read_image`. There is no screenshot or browser-capture
 tool.

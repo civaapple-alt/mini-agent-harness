@@ -171,7 +171,7 @@ OPENAI_MODEL=glm-5.3
 OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1
 ```
 
-`read_image` on `glm-5.3` is sent as `glm-5.3-flash` for that request. Use `https://open.bigmodel.cn/api/v1`, not the Chat Completions coding URL.
+`read_image` on `glm-5.3` is sent as `glm-5.3-flash` for that request, with the image on a user `image_url` data URL (not DeepSeek `input_image` on tool output). Use `https://open.bigmodel.cn/api/v1`, not the Chat Completions coding URL.
 
 A workspace `.env` overrides the user file; process environment values override
 both. This repository ignores `.env`; verify the same before using a workspace
@@ -221,7 +221,8 @@ new files and refuses to replace existing ones. Reads never prompt. `read_image`
 public HTTP(S) URL or a loopback dev server (`localhost`, `127.0.0.1`) and returns bounded markdown
 (no JavaScript; LAN/cloud-metadata IPs stay blocked). `open_file`
 opens a workspace file or, after approval, an absolute local path (for example under Pictures)
-in the OS default app.
+in the OS default app. On Windows, images are staged to a temp copy without Mark of the Web
+so Photos does not show an untrusted-source prompt.
 Built-in Responses API `web_search`
 is enabled by default (toggle via `--web-search|--no-web-search` or `MINI_AGENT_WEB_SEARCH=true|false`).
 The interactive REPL and TTY `ask` run writes, shell commands, process starts, and MCP without per-step

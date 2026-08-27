@@ -40,7 +40,9 @@ OPENAI_MODEL=glm-5.3
 OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1
 ```
 
-`glm-5.3` is text-only. Image turns (`read_image`) are sent as `glm-5.3-flash` for that request.
+`glm-5.3` is text-only. Image turns (`read_image`) are sent as `glm-5.3-flash` for that request,
+with a follow-up user `image_url.url` data URL (GLM's documented vision shape). DeepSeek image
+turns still use `function_call_output` `input_image.file_id`.
 Set `OPENAI_MODEL=glm-5.3-flash` if you want native vision on every turn (Coding Plan quota is 3× vs 5.3).
 Do not use `https://open.bigmodel.cn/api/coding/paas/v4` here; that is Chat Completions, and mini-agent
 always posts `{base}/responses`. Built-in Responses `web_search` stays off for BigModel. Known URLs use

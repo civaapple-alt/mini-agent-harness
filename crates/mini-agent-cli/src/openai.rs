@@ -1,7 +1,9 @@
 use crate::image::ImageStore;
 use crate::image::ProjectedImage;
+use crate::image::is_glm_model;
 use crate::image::project_images;
 use crate::image::vision_model_for;
+use crate::image::wire_glm_image_block;
 use crate::image::wire_image_block;
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
@@ -172,6 +174,7 @@ fn request_body(
         )
     });
     let model = vision_model_for(model, has_live_image);
+    let glm_image_on_user = is_glm_model(&model);
     let mut tool_index = 0;
     let input = request
         .messages
@@ -184,7 +187,7 @@ fn request_body(
             } else {
                 None
             };
-            message_items(message, image)
+            message_items(message, image, glm_image_on_user)
         })
         .collect::<Vec<_>>();
     let mut tools = request
@@ -227,7 +230,11 @@ fn glm_reasoning_effort(model: &str) -> bool {
     model.to_ascii_lowercase().starts_with("glm-5.3")
 }
 
-fn message_items(message: &Message, image: Option<&ProjectedImage>) -> Vec<Value> {
+fn message_items(
+    message: &Message,
+    image: Option<&ProjectedImage>,
+    glm_image_on_user: bool,
+) -> Vec<Value> {
     match message {
         Message::Context { text } => vec![json!({
             "type": "message",
@@ -270,18 +277,47 @@ fn message_items(message: &Message, image: Option<&ProjectedImage>) -> Vec<Value
         }
         Message::Tool {
             call_id, content, ..
-        } => vec![json!({
-            "type": "function_call_output",
-            "call_id": call_id,
-            "output": match image {
-                Some(image) => json!([
-                    { "type": "input_text", "text": content },
-                    wire_image_block(image)
-                ]),
-                None => json!(content)
+        } => {
+            if glm_image_on_user {
+                glm_tool_items(call_id, content, image)
+            } else {
+                vec![json!({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": match image {
+                        Some(image) => json!([
+                            { "type": "input_text", "text": content },
+                            wire_image_block(image)
+                        ]),
+                        None => json!(content)
+                    }
+                })]
             }
-        })],
+        }
     }
+}
+
+fn glm_tool_items(call_id: &str, content: &str, image: Option<&ProjectedImage>) -> Vec<Value> {
+    let output = match image {
+        Some(ProjectedImage::Missing(note)) => format!("{content}\n{note}"),
+        _ => content.to_string(),
+    };
+    let mut items = vec![json!({
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": output
+    })];
+    if let Some(image @ (ProjectedImage::Inline { .. } | ProjectedImage::FileId(_))) = image {
+        items.push(json!({
+            "type": "message",
+            "role": "user",
+            "content": [
+                { "type": "input_text", "text": "Image from the previous tool result." },
+                wire_glm_image_block(image)
+            ]
+        }));
+    }
+    items
 }
 
 struct StreamState {
@@ -680,15 +716,24 @@ mod tests {
         );
         assert_eq!(body["model"], "glm-5.3-flash");
         assert_eq!(body["reasoning"]["effort"], "max");
-        let output = &body["input"][2]["output"];
-        assert_eq!(output[1]["type"], "input_image");
+        assert_eq!(body["input"][2]["type"], "function_call_output");
+        assert_eq!(body["input"][2]["output"], envelope);
+        let image_msg = &body["input"][3];
+        assert_eq!(image_msg["type"], "message");
+        assert_eq!(image_msg["role"], "user");
+        let content = &image_msg["content"];
+        assert_eq!(content[1]["type"], "image_url");
         assert!(
-            output[1]["image_url"]
+            content[1]["image_url"]["url"]
                 .as_str()
                 .unwrap()
                 .starts_with("data:image/png;base64,")
         );
-        assert!(output[1].get("file_id").is_none());
+        assert!(content[1].get("file_id").is_none());
+        assert!(
+            !body.to_string().contains("\"type\":\"input_image\""),
+            "GLM vision uses Chat Completions image_url on a user message, not Responses input_image on tool output"
+        );
 
         let text_only = request_body(
             "glm-5.3",

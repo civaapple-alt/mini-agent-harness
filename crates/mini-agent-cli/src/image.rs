@@ -464,6 +464,25 @@ pub fn wire_image_block(image: &ProjectedImage) -> Value {
     }
 }
 
+/// GLM-5.3-Flash documents Chat Completions `type: image_url` with nested
+/// `image_url.url` (URL or Base64 data URL) on user `messages[].content[]`.
+/// The host still posts Responses `/responses`; this block is placed on a
+/// follow-up user message because GLM ignores DeepSeek-style `input_image`
+/// on `function_call_output`.
+pub fn wire_glm_image_block(image: &ProjectedImage) -> Value {
+    match image {
+        ProjectedImage::Inline { data_url, .. } => json!({
+            "type": "image_url",
+            "image_url": { "url": data_url }
+        }),
+        ProjectedImage::FileId(_) | ProjectedImage::Missing(_) => wire_image_block(image),
+    }
+}
+
+pub fn is_glm_model(model: &str) -> bool {
+    model.to_ascii_lowercase().starts_with("glm-")
+}
+
 fn run_blocking<T>(
     fut: impl std::future::Future<Output = Result<T, ToolError>> + Send + 'static,
 ) -> Result<T, ToolError>
@@ -520,8 +539,24 @@ mod tests {
         assert_eq!(vision_model_for("glm-5.3", true), "glm-5.3-flash");
         assert_eq!(vision_model_for("glm-5.3", false), "glm-5.3");
         assert_eq!(vision_model_for("glm-5.3-flash", true), "glm-5.3-flash");
+        assert!(is_glm_model("glm-5.3-flash"));
+        assert!(is_glm_model("GLM-5.3"));
+        assert!(!is_glm_model("deepseek-v4-flash"));
         assert!(!uses_deepseek_files("https://open.bigmodel.cn/api/v1"));
         assert!(uses_deepseek_files("https://api.deepseek.com"));
+    }
+
+    #[test]
+    fn glm_image_block_nests_data_url() {
+        let image = ProjectedImage::Inline {
+            data_url: "data:image/png;base64,abcd".to_string(),
+        };
+        let block = wire_glm_image_block(&image);
+        assert_eq!(block["type"], "image_url");
+        assert_eq!(block["image_url"]["url"], "data:image/png;base64,abcd");
+        let deepseek = wire_image_block(&image);
+        assert_eq!(deepseek["type"], "input_image");
+        assert_eq!(deepseek["image_url"], "data:image/png;base64,abcd");
     }
 
     #[test]
