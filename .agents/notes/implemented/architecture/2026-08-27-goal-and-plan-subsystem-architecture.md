@@ -4,81 +4,68 @@ Status: implemented
 
 ## 1. Context & Problem Statement
 
-In Mini-Agent, we established the session directory layout containing placeholders for `plan.md`, `plan_mode.json`, and `goal/` (`state.json`, `plan.md`, `verifier_verdict.md`). However, an architectural review identified several key gaps:
+In Mini-Agent, we established the session directory layout containing placeholders for `plan.md`, `plan_mode.json`, and `goal/` (`state.json`, `plan.md`, `verifier_verdict.md`). An architectural review identified key ambiguities:
 
-1. **Semantic Conflation between `auto` and `goal`**:
-   `mini-agent auto` and `/auto` serve as **execution permission policies** (automatic approval without `[y/N]` prompts + unlimited steps + compaction). They were colloquially conflated with long-running, multi-milestone **goal state machines**.
+1. **Conflation between `auto` and `goal`**:
+   `mini-agent auto` and `/auto` serve as **execution approval policies** (`ApprovalMode::Automatic` + unlimited steps + compaction), whereas `goal` represents a multi-milestone **autonomous task state machine**.
 2. **Trigger Boundary Ambiguity**:
-   Without explicit triggers, deciding whether a task is a 5-second bug fix or a 2-hour autonomous goal based purely on fuzzy keywords (e.g. "strictly execute") introduces false positives, directory pollution, and wasted model inference.
+   Relying on fuzzy user keywords (e.g., "strictly execute", "production-ready") introduces false positives and overhead on trivial 5-second tasks.
 3. **Missing First-Class Plan Mode & Goal Mode Commands**:
    Users lack explicit `/plan` and `/goal` commands to deterministically enter collaborative living-plan drafting or multi-milestone autonomous verification loops.
+4. **Read-Only Lock & Whitelisting Specifics**:
+   In Plan Mode, workspace modifications must be blocked while preserving write access exclusively for `plan.md`.
+5. **Verifier Independence & Schema**:
+   Verification must run against an independent model and clean context, outputting machine-parseable structured verdicts.
 
 ---
 
 ## 2. Decision & Architectural Upgrades
 
-### 2.1 Four-Tier Execution Mode Hierarchy
+### 2.1 Orthogonal Mode & Approval Matrix
+
+To preserve strict orthogonality, **Execution Mode** (Task Workflow) is decoupled from **Approval Policy** (Human-in-the-Loop Gate):
 
 ```mermaid
 graph TD
-    subgraph ExecutionModes ["Mini-Agent Execution Mode Hierarchy"]
-        INT["1. Interactive Mode (Default)<br/>• Step-by-step turn interaction<br/>• Interactive [y/N] tool approval<br/>• Pure session.jsonl logging"]
-        AUT["2. Auto / Copilot Mode (Permission Switch)<br/>• ApprovalMode::Automatic (Zero prompt)<br/>• Unlimited step cap<br/>• Dynamic context compaction"]
-        PLN["3. Plan Mode (Architectural Living Plan)<br/>• Physical read-only mutation lock<br/>• Lazily instantiates plan.md & plan_mode.json<br/>• Bidirectional checkbox checklist"]
-        GOL["4. Goal Mode (Autonomous Milestone State Machine)<br/>• Explicit /goal or mini-agent goal<br/>• Materializes goal/state.json & goal/plan.md<br/>• Independent mentor verifier blind gate"]
+    subgraph ExecutionModes ["Task Execution Mode (What is Managed)"]
+        INT["Interactive Mode<br/>• Standard turn chat<br/>• session.jsonl only"]
+        PLN["Plan Mode<br/>• Read-only code lock<br/>• plan.md living plan<br/>• plan_mode.json state"]
+        GOL["Goal Mode<br/>• Multi-milestone loop<br/>• goal/state.json<br/>• goal/verifier_verdict.md"]
     end
+
+    subgraph ApprovalPolicies ["Approval Policy (How Tools Run)"]
+        MAN["Interactive Approval<br/>(Prompts [y/N] on mutations)"]
+        AUT["Automatic Approval<br/>(Auto-approves within sandbox)"]
+    end
+
+    INT --- MAN
+    INT --- AUT
+    PLN --- MAN
+    PLN --- AUT
+    GOL --- AUT
+    GOL -.->|Optional Audit| MAN
 ```
 
-| Mode | Trigger | Permission / Sandbox | Session Artifacts Materialized | Primary Purpose |
-| :--- | :--- | :--- | :--- | :--- |
-| **Interactive** | `mini-agent` (default) | `ApprovalMode::Interactive` | `summary.json`, `session.jsonl` | Standard human-agent pairing |
-| **Auto** | `/auto` or `mini-agent auto` | `ApprovalMode::Automatic` | `summary.json`, `session.jsonl` | Fast, frictionless execution of routine tasks |
-| **Plan** | `/plan` or `mini-agent plan` | `read-only` (workspace writes blocked) | `plan.md`, `plan_mode.json` | Collaborative RFC & phased milestone design |
-| **Goal** | `/goal` or `mini-agent goal` | `ApprovalMode::Automatic` + Sandboxed | `goal/state.json`, `goal/plan.md`, `goal/verifier_verdict.md` | Overnight, multi-stage autonomous goal execution |
+| Execution Mode | Supported Approval Policies | Workspace Code Mutation | `plan.md` Mutation | Session Artifacts Materialized |
+| :--- | :--- | :---: | :---: | :--- |
+| **Interactive** | `Interactive` (default), `Automatic` (`/auto`) | ✅ Allowed | ❌ Not managed | `summary.json`, `session.jsonl` |
+| **Plan Mode** | `Interactive`, `Automatic` | ❌ **Locked (Read-Only)** | ✅ **Whitelisted** | `plan.md`, `plan_mode.json` |
+| **Goal Mode** | `Automatic` (default), `Interactive` | ✅ Allowed | Baseline Frozen | `goal/state.json`, `goal/plan.md`, `goal/verifier_verdict.md` |
 
 ---
 
-### 2.2 Explicit Trigger Specification
+### 2.2 Plan Mode: Physical Read-Only Lock with Path Whitelisting
 
-#### 1. Plan Mode Trigger (`/plan` & `mini-agent plan`)
-- **CLI Invocations**:
-  ```sh
-  mini-agent plan "Design modular session directory architecture"
-  ```
-- **REPL Slash Command**:
-  ```text
-  mini-agent> /plan
-  plan mode on: workspace modifications disabled. Drafting plan.md...
-  mini-agent> /plan off
-  plan mode off: resumed standard interactive mode.
-  ```
-- **Behavior**:
-  - Sets `execution_mode: "plan"` in `plan_mode.json`;
-  - Disables workspace mutation tools (`write_file`, `edit_file`);
-  - Automatically initializes and updates `plan.md` in the session directory;
-  - Renders plan status in REPL banner.
-
-#### 2. Goal Mode Trigger (`/goal` & `mini-agent goal`)
-- **CLI Invocations**:
-  ```sh
-  mini-agent goal "Implement PASETO auth, achieve 100% test pass rate" --max-loops 20
-  ```
-- **REPL Slash Command**:
-  ```text
-  mini-agent> /goal "Refactor network crate to async-channel and pass integration tests"
-  goal mode started: goal_id=g_1724751000, tracking in goal/state.json
-  ```
-- **Behavior**:
-  - Lazily materializes `goal/` subdirectory;
-  - Initializes `goal/state.json` with milestone breakdown;
-  - Runs autonomous execution loop with independent `mini-agent mentor verify` gate after each milestone;
-  - If user presses `Ctrl+C`, smoothly transitions `status: "running"` $\to$ `status: "user_paused"`.
+In Plan Mode (`/plan` or `mini-agent plan`):
+1. **Workspace Mutation Block**: `write_file` and `edit_file` targeting workspace source files fail closed with `ToolError("workspace mutations locked in Plan Mode")`.
+2. **Whitelisted Path**: `session_dir/plan.md` is exclusively whitelisted, enabling the agent to autonomously refine the Living Plan without touching codebase files.
+3. **Shell Command Restriction**: High-risk shell commands are blocked; only non-destructive inspection commands (`git status`, `git diff`, `git log`, `grep`, `cargo check`) are permitted.
 
 ---
 
 ### 2.3 Living Plan Protocol (`plan.md`)
 
-When in Plan Mode, `plan.md` is maintained as a **living bidirectional document**:
+`plan.md` serves as a bidirectional living document:
 
 ```markdown
 # Implementation Plan: [Goal Title]
@@ -88,23 +75,23 @@ When in Plan Mode, `plan.md` is maintained as a **living bidirectional document*
 - **Non-Goals**: ...
 
 ## 2. Critical Files
-- `crates/mini-agent-cli/src/args.rs` [MODIFY]
 - `crates/mini-agent-cli/src/goal.rs` [NEW]
+- `crates/mini-agent-cli/src/repl.rs` [MODIFY]
 
 ## 3. Phased Milestones
-- [x] Phase 1: Define GoalState and PlanMode structs
-- [ ] Phase 2: Implement /plan and /goal slash commands in REPL
-- [ ] Phase 3: Connect independent verifier loop
+- [x] Phase 1: State machine and schema versioning
+- [ ] Phase 2: REPL slash command integration
+- [ ] Phase 3: Independent verifier gate connection
 - [ ] Phase 4: Full verification gate
 
 ## 4. Verification Plan
 - Automated test commands
-- Edge case validation
+- Integration verification
 ```
 
 ---
 
-### 2.4 Autonomous Goal Verification Loop
+### 2.4 Autonomous Goal State Machine & Independent Verifier Gate
 
 ```mermaid
 sequenceDiagram
@@ -116,20 +103,21 @@ sequenceDiagram
     participant Verifier as Independent Mentor Verifier
 
     User->>Harness: /goal "Refactor network layer"
-    Harness->>GoalStore: Create goal/state.json (status: running, milestone: 1)
+    Harness->>GoalStore: Initialize goal/state.json (status: running, milestone: 1)
     
-    loop Milestone Execution Loop
+    loop Milestone Execution Loop (milestone_step_budget: 50, timeout: 600s)
         Harness->>Worker: Execute current milestone tasks
         Worker->>Worker: Code edits, local test verification
         Worker-->>Harness: Milestone work completed
         
-        Harness->>Verifier: Independent verification audit (mentor verify)
-        Verifier->>GoalStore: Write verdict to goal/verifier_verdict.md
+        Harness->>Verifier: Independent blind verification audit (mentor verify)
+        Verifier->>GoalStore: Write YAML frontmatter verdict to goal/verifier_verdict.md
         
-        alt Verifier Verdict == APPROVED
+        alt Verifier Outcome == APPROVED
             Harness->>GoalStore: Advance milestone in state.json (1 -> 2)
-        else Verifier Verdict == REJECTED
-            Harness->>Worker: Feed verifier objections for corrective iteration
+        else Verifier Outcome == REJECTED
+            Harness->>GoalStore: Increment loop_count (fail if loop_count >= max_loops)
+            Harness->>Worker: Feed structured objections for corrective iteration
         end
     end
     
@@ -137,28 +125,69 @@ sequenceDiagram
     Harness-->>User: Goal successfully achieved!
 ```
 
+#### 1. `goal/state.json` Schema (`schema_version: 1`):
+```json
+{
+  "schema_version": 1,
+  "goal_id": "g_1724751000",
+  "status": "running",
+  "current_milestone": 2,
+  "total_milestones": 4,
+  "loop_count": 3,
+  "max_loops": 20,
+  "milestone_step_budget": 50,
+  "milestone_timeout_secs": 600,
+  "verifier_model": "deepseek-v4-verifier",
+  "last_verifier_score": 92,
+  "updated_at_ms": 1724751050000
+}
+```
+
+#### 2. Machine-Readable `goal/verifier_verdict.md` Schema:
+```yaml
+---
+verdict: approved
+score: 95
+summary: All 171 workspace tests pass, zero clippy warnings, microkernel boundary intact.
+issues: []
+---
+### Summary
+All 171 workspace tests pass, zero clippy warnings, microkernel boundary intact.
+```
+
+#### 3. Exception & Recovery Handling:
+- **Loop & Step Cap**: If `loop_count >= max_loops` or step budget exceeds `50`, status transitions to `failed` and outputs diagnostic logs.
+- **Verifier Fallback**: If the verifier encounters API timeouts or network errors, it retries up to 3 times before setting `status: "verifier_unreachable"` and notifying the user.
+- **Graceful Pausing**: On `Ctrl+C` or `/goal --pause`, state transitions to `status: "user_paused"`; resuming with `/goal --resume` or `mini-agent resume` re-loads the active milestone without repeating already-settled work.
+
+---
+
+### 2.5 Plan to Goal Lifecycle Transition
+
+When a user initiates `/goal` in a session where `plan.md` already exists:
+1. `plan.md` is frozen into `goal/plan.baseline.md` as the immutable acceptance contract.
+2. `goal/plan.md` is created with initial milestone checkboxes derived from the plan.
+3. `plan_mode.json` transitions `active: false` as Goal Mode takes precedence.
+
 ---
 
 ## 3. Implementation Specification
 
-### 3.1 New Module `crates/mini-agent-cli/src/goal.rs`
-- Defines `GoalState`, `GoalStatus` (`Running`, `Converged`, `Failed`, `UserPaused`).
-- Implements `init_goal(workspace, session_dir, objective, max_loops)`.
-- Implements `advance_goal_milestone(...)` and `pause_goal(...)`.
+### 3.1 Module `crates/mini-agent-cli/src/goal.rs`
+- Defines `GoalState`, `GoalStatus` (`Running`, `Converged`, `Failed`, `UserPaused`), and `PlanModeState`.
+- Implements `init_plan_mode` and `disable_plan_mode`.
+- Implements `init_goal_workspace`, `advance_goal_milestone`, `pause_goal`, and `parse_verifier_verdict`.
+- Includes `is_living_plan_whitelisted` for fine-grained path authorization.
 
-### 3.2 Slash Command Extension in `crates/mini-agent-cli/src/repl.rs`
-- Add `/plan` and `/plan off` command parser.
-- Add `/goal <prompt>` command parser.
-- Update REPL prompt display to indicate active mode (e.g. `mini-agent (plan)>` or `mini-agent (goal: 2/5)>`).
-
-### 3.3 CLI Subcommand Extension in `crates/mini-agent-cli/src/args.rs`
-- Add `mini-agent plan [PROMPT]`.
-- Add `mini-agent goal [OPTIONS] <PROMPT>` with `--max-loops <N>`.
+### 3.2 REPL Slash Commands (`crates/mini-agent-cli/src/repl.rs`)
+- `/plan` / `/plan on` / `/plan off` / `/plan "prompt"`.
+- `/goal <objective>` / `/goal --resume`.
+- Mode status display in REPL banner.
 
 ---
 
 ## 4. Line Budget & Complexity Guardrails
 
-- `goal.rs` is purely lightweight state file I/O: $\sim 200$ lines.
+- `goal.rs` is fully decoupled from `mini-agent-core`: $\sim 280$ lines.
 - `mini-agent-core` remains untouched ($\le 20,000$ lines).
-- Workspace total remains comfortably below the $30,000$ line ceiling.
+- Total workspace size: **21,097 / 30,000 lines**.
