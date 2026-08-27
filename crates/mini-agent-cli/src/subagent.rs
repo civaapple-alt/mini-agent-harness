@@ -6,6 +6,7 @@ use mini_agent_core::ToolError;
 use mini_agent_core::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
+use std::fs;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
@@ -63,20 +64,13 @@ fn sanitize_task_name(name: &str) -> String {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn subagent_artifact_dir(
-    workspace: &std::path::Path,
-    child_id: &str,
-) -> std::path::PathBuf {
-    match crate::session::session_directory(workspace) {
-        Ok(base) => base.join(child_id),
-        Err(_) => workspace.join(".agents/sessions").join(child_id),
-    }
+fn subagent_tree_dir(parent_session_dir: &std::path::Path, child_id: &str) -> std::path::PathBuf {
+    parent_session_dir.join("subagents").join(child_id)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn record_subagent_tree_meta(
-    root: &std::path::Path,
+    parent_session_dir: &std::path::Path,
     child_id: &str,
     task_name: &str,
     agent_type: &str,
@@ -89,9 +83,14 @@ fn record_subagent_tree_meta(
     error: &str,
     review_stats: Option<crate::persona::ReviewStats>,
 ) {
-    let subagents_dir = subagent_artifact_dir(root, child_id);
+    let subagents_dir = subagent_tree_dir(parent_session_dir, child_id);
     let _ = std::fs::create_dir_all(&subagents_dir);
+    let parent_session_id = parent_session_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
     let meta = json!({
+        "parent_session_id": parent_session_id,
         "subagent_id": child_id,
         "task_name": task_name,
         "agent_type": agent_type,
@@ -306,9 +305,9 @@ impl Tool for SpawnAgent {
                 None
             };
 
-            if let Some(sid) = returned_sid {
+            if let (Some(sid), Some(parent_dir)) = (returned_sid, self.0.approval.session_dir()) {
                 record_subagent_tree_meta(
-                    &self.0.root,
+                    &parent_dir,
                     sid,
                     task_name,
                     agent_type,
@@ -360,20 +359,22 @@ impl Tool for SpawnAgent {
             // Fallback for raw text output
             let session_info = match session_id {
                 Some(ref sid) => {
-                    record_subagent_tree_meta(
-                        &self.0.root,
-                        sid,
-                        task_name,
-                        agent_type,
-                        persona,
-                        started_at_ms,
-                        completed_at_ms,
-                        1,
-                        output.exit_code.unwrap_or(0) as i64,
-                        output.raw_stdout.trim(),
-                        output.raw_stderr.trim(),
-                        None,
-                    );
+                    if let Some(parent_dir) = self.0.approval.session_dir() {
+                        record_subagent_tree_meta(
+                            &parent_dir,
+                            sid,
+                            task_name,
+                            agent_type,
+                            persona,
+                            started_at_ms,
+                            completed_at_ms,
+                            1,
+                            output.exit_code.unwrap_or(0) as i64,
+                            output.raw_stdout.trim(),
+                            output.raw_stderr.trim(),
+                            None,
+                        );
+                    }
                     format!(" [session_id: {sid}]")
                 }
                 None => String::new(),
@@ -530,21 +531,40 @@ impl Tool for ListSubagents {
     }
 
     fn execute(&self, _args: &Value) -> Result<String, ToolError> {
-        let sessions = crate::session::list(&self.0.root)
-            .map_err(|e| ToolError(format!("cannot list subagent sessions: {e}")))?;
-        let subagent_sessions: Vec<_> = sessions
-            .into_iter()
-            .filter(|s| s.id.starts_with("sub-"))
-            .collect();
-
-        if subagent_sessions.is_empty() {
-            return Ok("No subagent sessions found in this workspace.".to_string());
+        let Some(parent_dir) = self.0.approval.session_dir() else {
+            return Ok("No durable parent session; spawn_agent tree is not recorded.".to_string());
+        };
+        let tree = parent_dir.join("subagents");
+        let Ok(entries) = fs::read_dir(&tree) else {
+            return Ok("No subagents recorded for this session.".to_string());
+        };
+        let mut rows = Vec::new();
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            let meta_path = path.join("meta.json");
+            if !meta_path.is_file() {
+                continue;
+            }
+            let id = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unknown");
+            let status = fs::read_to_string(&meta_path)
+                .ok()
+                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                .and_then(|meta| {
+                    meta.get("status")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+            rows.push(format!("| `{id}` | {status} |\n"));
         }
-
-        let mut output = String::from("| Session ID | Size (bytes) |\n|---|---|\n");
-        for session in subagent_sessions {
-            output.push_str(&format!("| `{}` | {} |\n", session.id, session.bytes));
+        if rows.is_empty() {
+            return Ok("No subagents recorded for this session.".to_string());
         }
+        let mut output = String::from("| Session ID | Status |\n|---|---|\n");
+        output.extend(rows);
         Ok(output)
     }
 }
@@ -610,8 +630,10 @@ mod tests {
             wontfix: 0,
             addressed: 0,
         };
+        let parent = root.join("s-parent");
+        fs::create_dir_all(&parent).unwrap();
         record_subagent_tree_meta(
-            &root,
+            &parent,
             "sub-123-reviewer",
             "reviewer",
             "general",
@@ -624,18 +646,19 @@ mod tests {
             "",
             Some(stats),
         );
-        let subagent_dir = subagent_artifact_dir(&root, "sub-123-reviewer");
+        let subagent_dir = parent.join("subagents/sub-123-reviewer");
         assert!(subagent_dir.join("meta.json").is_file());
         assert!(subagent_dir.join("output.json").is_file());
         let meta: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(subagent_dir.join("meta.json")).unwrap())
                 .unwrap();
+        assert_eq!(meta["parent_session_id"], "s-parent");
         assert_eq!(meta["agent_type"], "general");
         assert_eq!(meta["persona"], "reviewer");
         assert_eq!(meta["duration_ms"], 1000);
         assert_eq!(meta["status"], "completed");
         assert_eq!(meta["review_stats"]["fixed"], 2);
-        let _ = fs::remove_dir_all(&subagent_dir);
+        assert!(!root.join(".agents").exists());
         fs::remove_dir_all(root).unwrap();
     }
 

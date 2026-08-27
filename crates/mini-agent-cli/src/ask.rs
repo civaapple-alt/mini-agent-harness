@@ -54,16 +54,21 @@ pub async fn run(
         ApprovalMode::Interactive
     };
     let approval = ApprovalController::with_preset(mode, preset);
-    let mut harness =
-        match prepare_openai_harness(&runtime_config, approval, harness_config(false), sandbox) {
-            Ok(build) => build.harness,
-            Err(error) => return preflight_error(json_output, &error),
-        };
+    let mut harness = match prepare_openai_harness(
+        &runtime_config,
+        approval.clone(),
+        harness_config(false),
+        sandbox,
+    ) {
+        Ok(build) => build.harness,
+        Err(error) => return preflight_error(json_output, &error),
+    };
 
     let mut opened_session = match session_request {
         SessionRequest::Disabled => None,
         other => match SessionStore::open(&runtime_config.workspace(), other) {
             Ok(opened) => {
+                approval.bind_session_file(opened.store.path());
                 if opened.resumed {
                     let _ = harness.restore_history(opened.messages.clone());
                 }

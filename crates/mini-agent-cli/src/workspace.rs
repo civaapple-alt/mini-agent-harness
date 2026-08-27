@@ -57,6 +57,7 @@ pub struct ApprovalController {
     callback: Arc<ApprovalCallback>,
     living_plan: Arc<Mutex<Option<PathBuf>>>,
     goal_dir: Arc<Mutex<Option<PathBuf>>>,
+    session_dir: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl ApprovalController {
@@ -97,6 +98,7 @@ impl ApprovalController {
             callback: Arc::new(callback),
             living_plan: Arc::new(Mutex::new(None)),
             goal_dir: Arc::new(Mutex::new(None)),
+            session_dir: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -131,6 +133,14 @@ impl ApprovalController {
 
     pub fn goal_dir(&self) -> Option<PathBuf> {
         self.goal_dir.lock().unwrap().clone()
+    }
+
+    pub fn bind_session_file(&self, session_jsonl: &Path) {
+        *self.session_dir.lock().unwrap() = session_jsonl.parent().map(crate::goal::normalize_path);
+    }
+
+    pub fn session_dir(&self) -> Option<PathBuf> {
+        self.session_dir.lock().unwrap().clone()
     }
 
     #[allow(dead_code)]

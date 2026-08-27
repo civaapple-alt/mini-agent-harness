@@ -373,6 +373,7 @@ fn spawn_worker(
             },
         };
         if let Some(opened) = &mut durable {
+            approval.bind_session_file(opened.store.path());
             if opened.resumed {
                 if let Err(error) = harness.restore_history(std::mem::take(&mut opened.messages)) {
                     let _ = events.send(ReplEvent::InitializationFailed(format!(

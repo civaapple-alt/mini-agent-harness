@@ -310,7 +310,7 @@ async fn run_auto(
     }
     let mut harness = match prepare_openai_harness(
         &runtime,
-        approval,
+        approval.clone(),
         harness_config_auto(true, runtime.copilot_max_steps()),
         sandbox,
     ) {
@@ -325,6 +325,7 @@ async fn run_auto(
         SessionRequest::Disabled => None,
         other => match session::SessionStore::open(&runtime.workspace(), other) {
             Ok(opened) => {
+                approval.bind_session_file(opened.store.path());
                 if opened.resumed {
                     let _ = harness.restore_history(opened.messages.clone());
                 }
