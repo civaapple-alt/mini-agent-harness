@@ -163,6 +163,16 @@ OPENAI_MODEL=deepseek-v4-flash
 OPENAI_BASE_URL=https://api.deepseek.com
 ```
 
+GLM Coding Plan (OpenAI Responses, coding-plan key):
+
+```dotenv
+OPENAI_API_KEY=
+OPENAI_MODEL=glm-5.3
+OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1
+```
+
+`read_image` on `glm-5.3` is sent as `glm-5.3-flash` for that request. Use `https://open.bigmodel.cn/api/v1`, not the Chat Completions coding URL.
+
 A workspace `.env` overrides the user file; process environment values override
 both. This repository ignores `.env`; verify the same before using a workspace
 file elsewhere, and prefer process secrets in CI.

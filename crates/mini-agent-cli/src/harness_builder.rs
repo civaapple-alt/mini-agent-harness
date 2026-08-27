@@ -4,7 +4,6 @@ use mini_agent_core::HarnessConfig;
 use mini_agent_core::ToolRegistry;
 
 use crate::config::RuntimeConfig;
-use crate::image::DeepSeekFiles;
 use crate::image::ImageStore;
 use crate::mcp;
 use crate::openai::OpenAiModel;
@@ -35,10 +34,7 @@ pub(crate) fn prepare_openai_harness(
 ) -> Result<HarnessBuild, String> {
     let provider = runtime_config.provider_settings()?;
     let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
-    let images = ImageStore::with_uploader(std::sync::Arc::new(DeepSeekFiles::new(
-        provider.api_key.clone(),
-        &provider.base_url,
-    )));
+    let images = ImageStore::for_provider(provider.api_key.clone(), &provider.base_url);
     let model = match OpenAiModel::new(
         provider.api_key,
         provider.model,

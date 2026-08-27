@@ -21,6 +21,7 @@ const MAX_STORED_IMAGES: usize = 16;
 const FILE_EXPIRY_SECONDS: u64 = 7 * 24 * 60 * 60;
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 const VISION_MODEL: &str = "deepseek-v4-flash-vision-exp";
+const GLM_VISION_MODEL: &str = "glm-5.3-flash";
 
 #[cfg(test)]
 pub(crate) const TINY_PNG: &[u8] = &[
@@ -128,6 +129,14 @@ pub struct StoredImage {
 impl ImageStore {
     pub fn memory_only() -> Self {
         Self::with_uploader(Arc::new(NoUpload))
+    }
+
+    pub fn for_provider(api_key: String, base_url: &str) -> Self {
+        if uses_deepseek_files(base_url) {
+            Self::with_uploader(Arc::new(DeepSeekFiles::new(api_key, base_url)))
+        } else {
+            Self::memory_only()
+        }
     }
 
     pub fn with_uploader(uploader: Arc<dyn FileUploader>) -> Self {
@@ -297,17 +306,31 @@ fn attr(tag: &str, name: &str) -> Option<String> {
 }
 
 pub fn vision_model_for(configured: &str, has_images: bool) -> String {
-    if has_images && is_deepseek_text_model(configured) {
+    if !has_images {
+        return configured.to_string();
+    }
+    if is_deepseek_text_model(configured) {
         VISION_MODEL.to_string()
+    } else if is_glm_53_text_model(configured) {
+        GLM_VISION_MODEL.to_string()
     } else {
         configured.to_string()
     }
+}
+
+pub fn uses_deepseek_files(base_url: &str) -> bool {
+    base_url.to_ascii_lowercase().contains("api.deepseek.com")
 }
 
 fn is_deepseek_text_model(model: &str) -> bool {
     let model = model.to_ascii_lowercase();
     !model.contains("vision")
         && (model.starts_with("deepseek-v4-flash") || model.starts_with("deepseek-v4-pro"))
+}
+
+fn is_glm_53_text_model(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    model == "glm-5.3" || (model.starts_with("glm-5.3") && !model.contains("flash"))
 }
 
 #[derive(Clone, Debug)]
@@ -494,6 +517,11 @@ mod tests {
             "deepseek-v4-flash-vision-exp"
         );
         assert_eq!(vision_model_for("gpt-4o", true), "gpt-4o");
+        assert_eq!(vision_model_for("glm-5.3", true), "glm-5.3-flash");
+        assert_eq!(vision_model_for("glm-5.3", false), "glm-5.3");
+        assert_eq!(vision_model_for("glm-5.3-flash", true), "glm-5.3-flash");
+        assert!(!uses_deepseek_files("https://open.bigmodel.cn/api/v1"));
+        assert!(uses_deepseek_files("https://api.deepseek.com"));
     }
 
     #[test]

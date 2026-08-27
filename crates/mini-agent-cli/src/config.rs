@@ -637,6 +637,19 @@ mod tests {
     }
 
     #[test]
+    fn glm_coding_plan_does_not_enable_builtin_web_search() {
+        let workspace = unique_dir("workspace");
+        fs::write(
+            workspace.join(".env"),
+            "OPENAI_API_KEY=k\nOPENAI_MODEL=glm-5.3\nOPENAI_BASE_URL=https://open.bigmodel.cn/api/v1\n",
+        )
+        .unwrap();
+        let config = RuntimeConfig::load_from(workspace, None).unwrap();
+        assert!(!config.web_search());
+        assert!(!is_official_search_endpoint(&config.base_url));
+    }
+
+    #[test]
     fn redacts_url_credentials_and_query_values() {
         assert_eq!(
             display_base_url("https://user:secret@example.com/v1?token=private#fragment"),

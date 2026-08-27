@@ -3,6 +3,7 @@
 All notable changes to Mini Agent Harness are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+- GLM Coding Plan over the existing Responses adapter: `OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1`, `OPENAI_MODEL=glm-5.3` (image turns use `glm-5.3-flash`). Files API upload is DeepSeek-only; GLM `read_image` is inline data URL. Built-in Responses `web_search` stays off for BigModel.
 - Host `read_image` reads a workspace PNG/JPEG/GIF/WebP or, with approval, an absolute path outside the workspace (for example Pictures). It uploads once with DeepSeek Files API (`purpose=user_data`, 7-day expiry); later turns send `input_image.file_id`. DeepSeek `deepseek-v4-flash` / `deepseek-v4-pro` requests that include images are sent as `deepseek-v4-flash-vision-exp` for that request only. Do not copy outside images into the project.
 - Host `web_fetch` GETs a known public HTTP(S) URL or a loopback dev server (`localhost`, `127.0.0.1`) and returns bounded markdown via `htmd` (JavaScript not executed; LAN/cloud-metadata and credentialed URLs rejected; public→loopback redirects refused). Host `open_file` opens a workspace file in the OS default app so local HTML can be viewed in a browser without a screenshot or browser-agent tool.
 - First-class Plan Mode (`/plan`, `/plan <prompt>`, `/plan off`) with workspace modification locking and a session-directory living plan (`plan.md`).

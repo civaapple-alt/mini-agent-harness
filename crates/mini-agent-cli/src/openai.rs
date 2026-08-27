@@ -207,7 +207,7 @@ fn request_body(
         }));
     }
 
-    json!({
+    let mut body = json!({
         "model": model,
         "instructions": request.system_prompt,
         "input": input,
@@ -216,7 +216,15 @@ fn request_body(
         "parallel_tool_calls": false,
         "store": false,
         "stream": true
-    })
+    });
+    if glm_reasoning_effort(&model) {
+        body["reasoning"] = json!({ "effort": "max" });
+    }
+    body
+}
+
+fn glm_reasoning_effort(model: &str) -> bool {
+    model.to_ascii_lowercase().starts_with("glm-5.3")
 }
 
 fn message_items(message: &Message, image: Option<&ProjectedImage>) -> Vec<Value> {
@@ -623,6 +631,89 @@ mod tests {
         );
         assert_eq!(compacted["model"], "deepseek-v4-flash");
         assert_eq!(compacted["input"][2]["output"], envelope);
+    }
+
+    #[test]
+    fn glm_image_turns_use_flash_and_inline_data_urls() {
+        let images = crate::image::ImageStore::memory_only();
+        let stored = images
+            .save("shot.png", "image/png", crate::image::TINY_PNG.to_vec())
+            .unwrap();
+        let envelope = crate::image::format_envelope(&stored);
+        assert!(!envelope.contains("file_id="));
+        let messages = vec![
+            Message::User {
+                text: "what is in the screenshot?".to_string(),
+            },
+            Message::Assistant {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call-1".to_string(),
+                    name: "read_image".to_string(),
+                    arguments: json!({"path": "shot.png"}),
+                }],
+            },
+            Message::Tool {
+                call_id: "call-1".to_string(),
+                name: "read_image".to_string(),
+                content: envelope.clone(),
+                is_error: false,
+            },
+        ];
+        let tools = vec![ToolSpec {
+            name: "read_image".to_string(),
+            description: "Read an image".to_string(),
+            parameters: json!({"type": "object"}),
+        }];
+        let config = HarnessConfig::default();
+        let body = request_body(
+            "glm-5.3",
+            &ModelRequest {
+                system_prompt: &config.system_prompt,
+                messages: &messages,
+                tools: &tools,
+                max_response_bytes: config.max_model_response_bytes,
+            },
+            false,
+            &images,
+        );
+        assert_eq!(body["model"], "glm-5.3-flash");
+        assert_eq!(body["reasoning"]["effort"], "max");
+        let output = &body["input"][2]["output"];
+        assert_eq!(output[1]["type"], "input_image");
+        assert!(
+            output[1]["image_url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
+        assert!(output[1].get("file_id").is_none());
+
+        let text_only = request_body(
+            "glm-5.3",
+            &ModelRequest {
+                system_prompt: &config.system_prompt,
+                messages: &[Message::User {
+                    text: "hello".to_string(),
+                }],
+                tools: &tools,
+                max_response_bytes: config.max_model_response_bytes,
+            },
+            false,
+            &images,
+        );
+        assert_eq!(text_only["model"], "glm-5.3");
+        assert_eq!(text_only["reasoning"]["effort"], "max");
+        assert!(
+            text_only
+                .get("tools")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|tool| tool["type"] != "web_search")
+        );
     }
 
     #[test]

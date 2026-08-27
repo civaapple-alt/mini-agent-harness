@@ -31,6 +31,22 @@ OPENAI_MODEL=deepseek-v4-flash
 OPENAI_BASE_URL=https://api.deepseek.com
 ```
 
+GLM Coding Plan (Responses, not Chat Completions) uses a **coding-plan key** from
+[个人编程套餐概览](https://bigmodel.cn/coding-plan/personal/overview), not a general platform key:
+
+```dotenv
+OPENAI_API_KEY=
+OPENAI_MODEL=glm-5.3
+OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1
+```
+
+`glm-5.3` is text-only. Image turns (`read_image`) are sent as `glm-5.3-flash` for that request.
+Set `OPENAI_MODEL=glm-5.3-flash` if you want native vision on every turn (Coding Plan quota is 3× vs 5.3).
+Do not use `https://open.bigmodel.cn/api/coding/paas/v4` here; that is Chat Completions, and mini-agent
+always posts `{base}/responses`. Built-in Responses `web_search` stays off for BigModel. Known URLs use
+host `web_fetch`. Optional Coding Plan search is Remote MCP `webSearchPrime`
+(`https://open.bigmodel.cn/api/mcp/web_search_prime/mcp`).
+
 Run `mini-agent status` to inspect the effective non-secret configuration and
 its source and detected world state. `status` never prints the credential and
 succeeds even when the provider is unconfigured. Run `mini-agent doctor` to

@@ -110,7 +110,9 @@ workspace, whether given as relative paths (e.g. `src/main.rs`) or absolute path
 By default, mini-agent enables built-in Responses API `web_search` (`{"type": "web_search"}`)
 so the model can query the internet without writing raw local shell/PowerShell scrape scripts.
 To disable web search, pass `--no-web-search` (or `--no-search`) or set `MINI_AGENT_WEB_SEARCH=false`
-in `.env`.
+in `.env`. GLM Coding Plan (`OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1`) does not enable that
+built-in tool. Use host `web_fetch` for a known URL, or optional Remote MCP
+`https://open.bigmodel.cn/api/mcp/web_search_prime/mcp` with the same Coding Plan key.
 
 `web_search` is for discovery. To read a known public URL, or a local Vite/Next/Vue/React
 dev server, use `web_fetch` instead of `curl` or PowerShell download cmdlets. `web_fetch` admits
@@ -133,8 +135,8 @@ turns reuse the returned `file_id`. Inline base64 is only a fallback if that upl
 
 DeepSeek text models ignore `input_image` (they replace it with a placeholder). When the current
 `OPENAI_MODEL` is `deepseek-v4-flash` or `deepseek-v4-pro` and the request actually contains images,
-that one request is sent as `deepseek-v4-flash-vision-exp`. The configured coding model is unchanged
-for text-only turns.
+that one request is sent as `deepseek-v4-flash-vision-exp`. GLM Coding Plan `glm-5.3` (text-only)
+image turns are sent as `glm-5.3-flash`. The configured coding model is unchanged for text-only turns.
 
 `read_file` still refuses binary images; use `read_image`. There is no screenshot or browser-capture
 tool.
