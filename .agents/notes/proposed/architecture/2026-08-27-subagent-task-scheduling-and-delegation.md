@@ -115,7 +115,70 @@ Following the `AGENTS.md` hard boundaries:
 
 ---
 
-## 5. Acceptance Criteria
+## 5. Case Study: Orchestrator Skill Validation (`code-review`)
+
+A primary validation benchmark for subagent task scheduling is the **Orchestrator Skill** pattern, exemplified by `.codex/skills/code-review/SKILL.md`.
+
+### 5.1. Pattern Characteristics & Requirements
+
+The orchestrator coordinates 4 specialized reviewer sub-skills in parallel:
+- `code-review-breaking-changes`: External API, CLI parameter, and configuration compatibility.
+- `code-review-change-size`: Change volume, PR decomposition, and atomicity.
+- `code-review-context`: Context window inflation, instruction ceilings, and token efficiency.
+- `code-review-testing`: Test adequacy, edge-case coverage, and mutation safety.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User / Developer
+    participant Root as Root Orchestrator (/root)
+    participant Engine as Subagent Runtime
+    participant B as /root/breaking_changes
+    participant S as /root/change_size
+    participant C as /root/context
+    participant T as /root/testing
+
+    User->>Root: Run code-review skill
+    Note over Root: Reads code-review/SKILL.md instructions
+
+    Root->>Engine: spawn_agent("breaking_changes", fork_turns="none", reasoning_effort="xhigh", message="...")
+    Root->>Engine: spawn_agent("change_size", fork_turns="none", reasoning_effort="xhigh", message="...")
+    Root->>Engine: spawn_agent("context", fork_turns="none", reasoning_effort="xhigh", message="...")
+    Root->>Engine: spawn_agent("testing", fork_turns="none", reasoning_effort="xhigh", message="...")
+
+    par Concurrent Review Execution
+        Engine->>B: Execute review (clean context)
+        Engine->>S: Execute review (clean context)
+        Engine->>C: Execute review (clean context)
+        Engine->>T: Execute review (clean context)
+    end
+
+    Root->>Engine: wait_agent(timeout_ms=120000)
+    Note over Root: Parent suspends in non-busy wait; zero token drain
+
+    B-->>Engine: Returns breaking change issues
+    S-->>Engine: Returns change size & split findings
+    C-->>Engine: Returns context inflation findings
+    T-->>Engine: Returns missing test cases
+
+    Engine-->>Root: All reviewers settled; deliver aggregated findings
+    Root->>User: Compile and output unified Markdown report with file:line links
+```
+
+### 5.2. Capability Mapping Matrix
+
+| Orchestrator Skill Requirement | Proposed Subagent Mechanism | System Benefit |
+| :--- | :--- | :--- |
+| **Concurrent Dispatch** | `spawn_agent` + `max_concurrency_slots = 4` | Total review duration drops from $4 \times T$ to $\approx 1 \times T$. |
+| **Reviewer Independence** | `fork_turns: "none"` (token hygiene) | Each reviewer only loads its specialized `SKILL.md` and `git diff`, preventing cross-reviewer prompt contamination and hallucinations. |
+| **Deep Reasoning Override** | `spawn_agent(..., reasoning_effort="xhigh")` | Parent can remain on standard effort while reviewers utilize high reasoning tokens. |
+| **Non-Busy Aggregation** | `wait_agent(timeout_ms)` | Parent avoids polling loops, saving 30%–70% parent turn tokens. |
+| **Read-Only Safety** | Read-only inspection tools (`git`, `read_file`, `grep`) | Reviewers cannot inadvertently mutate workspace code. |
+| **Recursive Protection** | `max_agent_depth = 3` | Prevents runaway recursive sub-agent spawns. |
+
+---
+
+## 6. Acceptance Criteria
 
 1. **Deterministic Unit Testing**:
    - `spawn_agent` creates isolated child harness instances without mutating parent message history.
@@ -132,7 +195,7 @@ Following the `AGENTS.md` hard boundaries:
 
 ---
 
-## 6. Non-Goals & Guardrails
+## 7. Non-Goals & Guardrails
 
 - **No Distributed / Networked Agent Cluster**: Subagents execute as in-process asynchronous tasks or localized worker threads on the same machine.
 - **No Complex Dynamic Graph Routing**: We adopt a clean tree hierarchy (`/root/subagent`) rather than arbitrary peer-to-peer cyclic graphs.
