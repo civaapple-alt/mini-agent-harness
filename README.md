@@ -171,7 +171,7 @@ OPENAI_MODEL=glm-5.3
 OPENAI_BASE_URL=https://open.bigmodel.cn/api/v1
 ```
 
-`read_image` on `glm-5.3` is sent as `glm-5.3-flash` for that request, with the image on a user `image_url` data URL (not DeepSeek `input_image` on tool output). Use `https://open.bigmodel.cn/api/v1`, not the Chat Completions coding URL.
+`read_image` on `glm-5.3` is sent as `glm-5.3-flash` for that request over Coding Plan Chat Completions (`image_url.url` data URL). Text turns stay on `https://open.bigmodel.cn/api/v1/responses`.
 
 A workspace `.env` overrides the user file; process environment values override
 both. This repository ignores `.env`; verify the same before using a workspace

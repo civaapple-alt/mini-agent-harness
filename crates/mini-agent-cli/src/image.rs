@@ -466,9 +466,7 @@ pub fn wire_image_block(image: &ProjectedImage) -> Value {
 
 /// GLM-5.3-Flash documents Chat Completions `type: image_url` with nested
 /// `image_url.url` (URL or Base64 data URL) on user `messages[].content[]`.
-/// The host still posts Responses `/responses`; this block is placed on a
-/// follow-up user message because GLM ignores DeepSeek-style `input_image`
-/// on `function_call_output`.
+/// Image turns post Coding Plan `{base}/chat/completions`, not Responses.
 pub fn wire_glm_image_block(image: &ProjectedImage) -> Value {
     match image {
         ProjectedImage::Inline { data_url, .. } => json!({
