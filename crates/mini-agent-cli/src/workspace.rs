@@ -143,6 +143,16 @@ impl ApprovalController {
         self.session_dir.lock().unwrap().clone()
     }
 
+    pub(crate) fn ensure_plan_mode_unlocked(&self) -> Result<(), ToolError> {
+        match self.living_plan() {
+            Some(living) => Err(ToolError(format!(
+                "workspace mutations locked in Plan Mode; living plan is {}",
+                living.display()
+            ))),
+            None => Ok(()),
+        }
+    }
+
     #[allow(dead_code)]
     pub fn store(&self) -> &ApprovalStore {
         &self.store
@@ -392,13 +402,7 @@ impl Workspace {
     }
 
     fn ensure_plan_mode_unlocked(&self) -> Result<(), ToolError> {
-        match self.approval.living_plan() {
-            Some(living) => Err(ToolError(format!(
-                "workspace mutations locked in Plan Mode; living plan is {}",
-                living.display()
-            ))),
-            None => Ok(()),
-        }
+        self.approval.ensure_plan_mode_unlocked()
     }
 
     fn ensure_inside(&self, path: PathBuf) -> Result<PathBuf, ToolError> {
@@ -654,6 +658,7 @@ impl Tool for Shell {
                 "command must contain 1..={MAX_COMMAND_BYTES} bytes"
             )));
         }
+        self.0.approval.ensure_plan_mode_unlocked()?;
         self.0.approve(&format!("shell command `{command}`"))?;
         let output = run_shell(command, &self.0.root, self.0.sandbox, COMMAND_TIMEOUT)?;
         if output.text.len() <= INLINE_COMMAND_OUTPUT_BYTES {
@@ -1266,6 +1271,16 @@ mod tests {
         }))
         .unwrap();
         assert!(fs::read_to_string(&plan).unwrap().contains("- add restore"));
+
+        let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+        let locked_shell = shell
+            .execute(&json!({"command": "printf should-not-run"}))
+            .unwrap_err();
+        assert!(
+            locked_shell
+                .0
+                .contains("workspace mutations locked in Plan Mode")
+        );
 
         fs::remove_dir_all(session).unwrap();
         fs::remove_dir_all(root).unwrap();

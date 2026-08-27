@@ -12,6 +12,8 @@ use std::fs;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -233,8 +235,20 @@ fn ipv4_blocked(ip: Ipv4Addr) -> bool {
         || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
 }
 
-fn same_class_redirect(from: TargetClass, location: &str) -> Result<Url, ToolError> {
+fn same_class_redirect(
+    from: TargetClass,
+    origin_host: &str,
+    location: &str,
+) -> Result<Url, ToolError> {
     let (url, class) = classify_url(location)?;
+    if url
+        .host_str()
+        .is_none_or(|host| !host.eq_ignore_ascii_case(origin_host))
+    {
+        return Err(ToolError(
+            "redirect to a different host is not allowed".to_string(),
+        ));
+    }
     if class != from {
         return Err(ToolError(
             "redirect changed address class (public and loopback cannot mix)".to_string(),
@@ -269,14 +283,23 @@ where
 }
 
 async fn fetch_admitted(url: Url, class: TargetClass) -> Result<FetchedPage, ToolError> {
+    let origin_host = url
+        .host_str()
+        .ok_or_else(|| ToolError("url is missing a host".to_string()))?
+        .to_string();
+    let endpoint = resolve_checked_endpoint(&origin_host, url.port_or_known_default(), class)?;
     let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
-            if attempt.previous().len() >= MAX_REDIRECTS {
-                return attempt.error("too many redirects");
-            }
-            match same_class_redirect(class, attempt.url().as_str()) {
-                Ok(_) => attempt.follow(),
-                Err(error) => attempt.error(error.0),
+        .resolve(&origin_host, endpoint)
+        .redirect(reqwest::redirect::Policy::custom({
+            let origin_host = origin_host.clone();
+            move |attempt| {
+                if attempt.previous().len() >= MAX_REDIRECTS {
+                    return attempt.error("too many redirects");
+                }
+                match same_class_redirect(class, &origin_host, attempt.url().as_str()) {
+                    Ok(_) => attempt.follow(),
+                    Err(error) => attempt.error(error.0),
+                }
             }
         }))
         .timeout(FETCH_TIMEOUT)
@@ -294,7 +317,7 @@ async fn fetch_admitted(url: Url, class: TargetClass) -> Result<FetchedPage, Too
         .map_err(|error| ToolError(format!("fetch failed: {error}")))?;
     let status = response.status().as_u16();
     let final_url = response.url().clone();
-    same_class_redirect(class, final_url.as_str())?;
+    same_class_redirect(class, &origin_host, final_url.as_str())?;
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -327,6 +350,43 @@ async fn fetch_admitted(url: Url, class: TargetClass) -> Result<FetchedPage, Too
         content_type,
         body,
     })
+}
+
+fn resolve_checked_endpoint(
+    host: &str,
+    port: Option<u16>,
+    expected_class: TargetClass,
+) -> Result<SocketAddr, ToolError> {
+    let port = port.ok_or_else(|| ToolError("url is missing a port".to_string()))?;
+    let addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(|error| ToolError(format!("cannot resolve host {host}: {error}")))?
+        .collect::<Vec<_>>();
+    validate_resolved_addresses(host, expected_class, &addresses)
+}
+
+fn validate_resolved_addresses(
+    host: &str,
+    expected_class: TargetClass,
+    addresses: &[SocketAddr],
+) -> Result<SocketAddr, ToolError> {
+    let mut selected = None;
+    for address in addresses {
+        let actual_class = classify_ip(address.ip()).map_err(|_| {
+            ToolError(format!(
+                "host {host} resolved to a non-public address ({})",
+                address.ip()
+            ))
+        })?;
+        if actual_class != expected_class {
+            return Err(ToolError(format!(
+                "host {host} resolved to an unexpected address class ({})",
+                address.ip()
+            )));
+        }
+        selected.get_or_insert(*address);
+    }
+    selected.ok_or_else(|| ToolError(format!("host {host} did not resolve to an address")))
 }
 
 fn render_page(page: &FetchedPage) -> String {
@@ -505,19 +565,23 @@ fn decode_entity(entity: &str) -> Option<char> {
         "quot" => Some('"'),
         "apos" | "#39" => Some('\''),
         "nbsp" => Some(' '),
-        other
-            if let Some(digits) = other
-                .strip_prefix("#x")
-                .or_else(|| other.strip_prefix("#X")) =>
-        {
-            u32::from_str_radix(digits, 16)
-                .ok()
-                .and_then(char::from_u32)
-        }
-        other if let Some(digits) = other.strip_prefix('#') => {
-            digits.parse::<u32>().ok().and_then(char::from_u32)
-        }
-        _ => None,
+        _ => decode_numeric_entity(entity),
+    }
+}
+
+fn decode_numeric_entity(entity: &str) -> Option<char> {
+    if let Some(digits) = entity
+        .strip_prefix("#x")
+        .or_else(|| entity.strip_prefix("#X"))
+    {
+        u32::from_str_radix(digits, 16)
+            .ok()
+            .and_then(char::from_u32)
+    } else {
+        entity
+            .strip_prefix('#')
+            .and_then(|digits| digits.parse::<u32>().ok())
+            .and_then(char::from_u32)
     }
 }
 
@@ -564,6 +628,7 @@ fn launch_target(path: &Path) -> Result<PathBuf, ToolError> {
     Ok(path.to_path_buf())
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_viewer_image(path: &Path) -> bool {
     matches!(
         path.extension()
@@ -574,6 +639,7 @@ fn is_viewer_image(path: &Path) -> bool {
     )
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn stage_clean_open_copy(path: &Path) -> Result<PathBuf, ToolError> {
     let bytes = fs::read(path)
         .map_err(|error| ToolError(format!("failed to read {}: {error}", path.display())))?;
@@ -722,11 +788,49 @@ mod tests {
 
     #[test]
     fn redirects_cannot_cross_public_and_loopback() {
-        assert!(same_class_redirect(TargetClass::Public, "https://iana.org/").is_ok());
-        assert!(same_class_redirect(TargetClass::Loopback, "http://127.0.0.1:5173/").is_ok());
-        assert!(same_class_redirect(TargetClass::Public, "http://127.0.0.1/").is_err());
-        assert!(same_class_redirect(TargetClass::Loopback, "https://example.com/").is_err());
-        assert!(same_class_redirect(TargetClass::Loopback, "http://169.254.169.254/").is_err());
+        assert!(same_class_redirect(TargetClass::Public, "iana.org", "https://iana.org/").is_ok());
+        assert!(
+            same_class_redirect(TargetClass::Loopback, "127.0.0.1", "http://127.0.0.1:5173/")
+                .is_ok()
+        );
+        assert!(
+            same_class_redirect(TargetClass::Public, "example.com", "http://127.0.0.1/").is_err()
+        );
+        assert!(
+            same_class_redirect(TargetClass::Loopback, "127.0.0.1", "https://example.com/")
+                .is_err()
+        );
+        assert!(
+            same_class_redirect(
+                TargetClass::Loopback,
+                "127.0.0.1",
+                "http://169.254.169.254/"
+            )
+            .is_err()
+        );
+        assert!(
+            same_class_redirect(TargetClass::Public, "example.com", "https://iana.org/").is_err()
+        );
+    }
+
+    #[test]
+    fn resolved_addresses_must_match_admitted_class() {
+        let public = SocketAddr::from(([93, 184, 216, 34], 443));
+        let private = SocketAddr::from(([192, 168, 1, 5], 443));
+        let loopback = SocketAddr::from(([127, 0, 0, 1], 3000));
+
+        assert_eq!(
+            validate_resolved_addresses("example.com", TargetClass::Public, &[public]).unwrap(),
+            public
+        );
+        assert!(
+            validate_resolved_addresses("example.com", TargetClass::Public, &[private, public])
+                .is_err()
+        );
+        assert!(
+            validate_resolved_addresses("app.example.com", TargetClass::Loopback, &[loopback])
+                .is_ok()
+        );
     }
 
     #[test]

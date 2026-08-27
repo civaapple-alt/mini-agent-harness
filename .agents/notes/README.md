@@ -79,6 +79,12 @@ If a proposed approach is rejected during review:
 
 ### Proposed Notes Under Review (`proposed/`)
 
+#### Development Process (`proposed/process/`)
+
+| Date | Title | Focus |
+|---|---|---|
+| 2026-08-27 | [Stabilization and Evidence Gates](proposed/process/2026-08-27-stabilization-and-evidence-gates.md) | Close runtime boundary defects, verify complete workflows, and align release claims with evidence before expanding scope |
+
 #### Features & Extensions (`proposed/feature/`)
 | Date | Title | Focus |
 |---|---|---|
@@ -152,4 +158,3 @@ If a proposed approach is rejected during review:
 | 2026-08-24 | [Tool-Output Retention](.agents/notes/archived/experiments/2026-08-24-tool-output-retention.md) | Head-plus-tail truncation preserves both orientation and final verdict |
 | 2026-08-24 | [Effect Recovery Boundary](.agents/notes/archived/experiments/2026-08-24-effect-recovery.md) | Replay safety simulation across non-idempotent crash boundaries |
 | 2026-08-24 | [Prompt Weight Protocol](.agents/notes/archived/experiments/2026-08-24-prompt-weight.md) | Benchmark protocol comparing minimal vs expanded operational system prompts |
-

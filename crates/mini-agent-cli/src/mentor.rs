@@ -150,6 +150,49 @@ pub(crate) async fn run(arguments: String, trace: Option<PathBuf>, json_output: 
     ExitCode::SUCCESS
 }
 
+pub(crate) async fn verify_checkpoint(
+    runtime_config: &RuntimeConfig,
+    messages: &[Message],
+    criteria: &str,
+) -> Result<(String, crate::goal::VerifierVerdict), String> {
+    let provider = runtime_config.mentor_provider_settings()?;
+    let model = OpenAiModel::new(
+        provider.api_key,
+        provider.model,
+        provider.base_url,
+        provider.chat_base_url,
+        false,
+        crate::image::ImageStore::memory_only(),
+    )
+    .map_err(|error| error.to_string())?;
+    let config = HarnessConfig {
+        system_prompt: VERIFY_SYSTEM_PROMPT.to_string(),
+        max_steps: 1,
+        max_tool_calls_per_step: 0,
+        context_limit_behavior: ContextLimitBehavior::Reject,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(model, ToolRegistry::new(Vec::new()), config);
+    harness
+        .restore_history(messages.to_vec())
+        .map_err(|error| format!("cannot restore goal verifier source: {error}"))?;
+    let prompt = format!(
+        "Verify the settled goal milestone against the following acceptance plan.\n\n{criteria}"
+    );
+    let outcome = harness
+        .run(prompt, &mut ())
+        .await
+        .map_err(|error| format!("goal verifier failed: {error}"))?;
+    if outcome.stop_reason != StopReason::Completed {
+        return Err(format!(
+            "goal verifier stopped after {} model steps without completing",
+            outcome.steps
+        ));
+    }
+    let verdict = crate::goal::parse_verifier_verdict(&outcome.final_text);
+    Ok((outcome.final_text, verdict))
+}
+
 impl Request {
     fn analysis_prompt(&self) -> String {
         match &self.criteria {

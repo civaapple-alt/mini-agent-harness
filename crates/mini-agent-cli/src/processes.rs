@@ -110,6 +110,7 @@ impl ProcessManager {
                 "command must contain 1..={MAX_COMMAND_BYTES} bytes"
             )));
         }
+        self.0.approval.ensure_plan_mode_unlocked()?;
         self.0
             .approval
             .approve(&format!("start managed process `{command}`"))?;
@@ -203,6 +204,10 @@ impl ProcessManager {
     }
 
     fn stop(&self, id: u64) -> Result<String, ToolError> {
+        self.0.approval.ensure_plan_mode_unlocked()?;
+        self.0
+            .approval
+            .approve(&format!("stop managed process `{id}`"))?;
         let mut state = self.0.state.lock().unwrap();
         refresh_jobs(&mut state.jobs)?;
         let job = state
@@ -481,6 +486,31 @@ mod tests {
         );
 
         drop(manager);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plan_mode_blocks_managed_process_effects() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("mini-agent-process-plan-{nonce}"));
+        fs::create_dir(&root).unwrap();
+        let approval = ApprovalController::new(ApprovalMode::Automatic);
+        approval.set_living_plan(Some(root.join("plan.md")));
+        let manager = ProcessManager::new(
+            root.clone(),
+            approval,
+            ResultStore::default(),
+            SandboxKind::Native,
+        );
+
+        let start_error = manager.start("printf should-not-run").unwrap_err();
+        assert!(start_error.0.contains("Plan Mode"));
+        let stop_error = manager.stop(1).unwrap_err();
+        assert!(stop_error.0.contains("Plan Mode"));
+
         fs::remove_dir_all(root).unwrap();
     }
 }

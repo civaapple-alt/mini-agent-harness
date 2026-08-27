@@ -1,6 +1,7 @@
 use crate::config::RuntimeConfig;
 use crate::harness_config_auto;
 use crate::mcp;
+use crate::mentor;
 use crate::observer::RunObserver;
 use crate::print_auto_warning;
 use crate::session;
@@ -27,6 +28,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 const MAX_QUEUED_INPUTS: usize = 16;
 const MAX_INPUT_BYTES: usize = 32 * 1024;
@@ -210,7 +212,15 @@ pub async fn run(
                         },
                         &mut pending_work,
                     ),
-                    command if let Some(action) = crate::goal::parse_plan_slash(command) => {
+                    command
+                        if command.strip_prefix("/plan").is_some_and(|rest| {
+                            rest.is_empty() || rest.starts_with(char::is_whitespace)
+                        }) =>
+                    {
+                        let action = match crate::goal::parse_plan_slash(command) {
+                            Some(action) => action,
+                            None => unreachable!("plan command matched its parser guard"),
+                        };
                         match action {
                             crate::goal::PlanSlash::Disable => queue_work(
                                 &worker_tx,
@@ -330,7 +340,7 @@ fn spawn_worker(
     events: mpsc::SyncSender<ReplEvent>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let (build, auto_max_steps, web_search_enabled) =
+        let (build, auto_max_steps, web_search_enabled, runtime_config) =
             match RuntimeConfig::load().and_then(|mut runtime| {
                 if let Some(enabled) = web_search_override {
                     runtime = runtime.with_web_search(enabled);
@@ -343,7 +353,7 @@ fn spawn_worker(
                     harness_config_auto(copilot, auto_max_steps),
                     sandbox_kind,
                 )
-                .map(|build| (build, auto_max_steps, web_search_enabled))
+                .map(|build| (build, auto_max_steps, web_search_enabled, runtime))
             }) {
                 Ok(loaded) => loaded,
                 Err(error) => {
@@ -362,6 +372,7 @@ fn spawn_worker(
             mut retry_mcp_servers,
         } = build;
         let mut copilot = copilot;
+        let mut goal_objective: Option<String> = None;
         let mut durable = match session_request {
             SessionRequest::Disabled => None,
             request => match SessionStore::open(world.workspace(), request) {
@@ -413,7 +424,7 @@ fn spawn_worker(
             )));
             persist_latest_context(&mut durable, &harness, &events);
         }
-        let runtime = match tokio::runtime::Builder::new_current_thread()
+        let model_runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
         {
@@ -457,7 +468,38 @@ fn spawn_worker(
                         let started_at_ms = session::timestamp_ms();
                         let previous_messages = harness.messages().to_vec();
                         let mut observer = ChannelObserver(events.clone());
-                        let result = runtime.block_on(harness.run(prompt.clone(), &mut observer));
+                        let goal_timeout = approval.goal_dir().and_then(|goal_dir| {
+                            goal_dir
+                                .parent()
+                                .and_then(|dir| crate::goal::load_goal_state(dir).ok().flatten())
+                                .map(|state| Duration::from_secs(state.milestone_timeout_secs))
+                        });
+                        let result = if let Some(timeout) = goal_timeout {
+                            match model_runtime.block_on(tokio::time::timeout(
+                                timeout,
+                                harness.run(prompt.clone(), &mut observer),
+                            )) {
+                                Ok(result) => result,
+                                Err(_) => {
+                                    let _ = events.send(ReplEvent::Warning(format!(
+                                        "goal> milestone timed out after {} seconds",
+                                        timeout.as_secs()
+                                    )));
+                                    if let Some(goal_dir) = approval.goal_dir() {
+                                        let session_dir = goal_dir
+                                            .parent()
+                                            .map(PathBuf::from)
+                                            .unwrap_or_else(|| world.workspace().to_path_buf());
+                                        let _ = crate::goal::fail_goal(&session_dir);
+                                        approval.set_goal_dir(None);
+                                        goal_objective = None;
+                                    }
+                                    break;
+                                }
+                            }
+                        } else {
+                            model_runtime.block_on(harness.run(prompt.clone(), &mut observer))
+                        };
                         let (status, steps, error) = match &result {
                             Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
                                 (TurnStatus::StepLimit, outcome.steps, None)
@@ -491,9 +533,112 @@ fn spawn_worker(
                                     "warning: stopped after {} model steps",
                                     outcome.steps
                                 )));
+                                if let Some(goal_dir) = approval.goal_dir() {
+                                    let session_dir = goal_dir
+                                        .parent()
+                                        .map(PathBuf::from)
+                                        .unwrap_or_else(|| world.workspace().to_path_buf());
+                                    let _ = crate::goal::fail_goal(&session_dir);
+                                    approval.set_goal_dir(None);
+                                    goal_objective = None;
+                                }
                             }
-                            Ok(_) => {}
-                            Err(error) => report_run_error(&events, &error),
+                            Ok(_outcome) => {
+                                let Some(goal_dir) = approval.goal_dir() else {
+                                    break;
+                                };
+                                let session_dir = goal_dir
+                                    .parent()
+                                    .map(PathBuf::from)
+                                    .unwrap_or_else(|| world.workspace().to_path_buf());
+                                let Some(checkpoint_seq) =
+                                    durable.as_ref().map(|opened| opened.store.checkpoint_seq())
+                                else {
+                                    let _ = events.send(ReplEvent::Warning(
+                                        "goal> cannot verify without a settled durable checkpoint"
+                                            .to_string(),
+                                    ));
+                                    approval.set_goal_dir(None);
+                                    goal_objective = None;
+                                    break;
+                                };
+                                let criteria =
+                                    match crate::goal::goal_verification_criteria(&session_dir) {
+                                        Ok(criteria) => criteria,
+                                        Err(error) => {
+                                            let _ = events.send(ReplEvent::Warning(format!(
+                                                "goal> verifier unavailable: {error}"
+                                            )));
+                                            break;
+                                        }
+                                    };
+                                let (verifier_output, verdict) =
+                                    match model_runtime.block_on(mentor::verify_checkpoint(
+                                        &runtime_config,
+                                        harness.messages(),
+                                        &criteria,
+                                    )) {
+                                        Ok(result) => result,
+                                        Err(error) => {
+                                            let _ = events.send(ReplEvent::Warning(format!(
+                                                "goal> verifier failed: {error}"
+                                            )));
+                                            break;
+                                        }
+                                    };
+                                if let Err(error) = crate::goal::record_verifier_verdict(
+                                    &session_dir,
+                                    checkpoint_seq,
+                                    &verifier_output,
+                                ) {
+                                    let _ = events.send(ReplEvent::Warning(format!(
+                                        "goal> cannot persist verifier verdict: {error}"
+                                    )));
+                                    break;
+                                }
+                                let next = match crate::goal::advance_goal_milestone(
+                                    &session_dir,
+                                    Some(verdict),
+                                ) {
+                                    Ok(next) => next,
+                                    Err(error) => {
+                                        let _ = events.send(ReplEvent::Warning(format!(
+                                            "goal> cannot advance milestone: {error}"
+                                        )));
+                                        break;
+                                    }
+                                };
+                                let _ = events.send(ReplEvent::Notice(format!(
+                                    "goal> verifier: {:?} (milestone {}/{})",
+                                    next.status, next.current_milestone, next.total_milestones
+                                )));
+                                if next.status == crate::goal::GoalStatus::Converged
+                                    || next.status == crate::goal::GoalStatus::Failed
+                                {
+                                    approval.set_goal_dir(None);
+                                    goal_objective = None;
+                                    break;
+                                }
+                                let objective = goal_objective.clone().unwrap_or(prompt.clone());
+                                command = WorkerCommand::Prompt(crate::goal::goal_turn_prompt(
+                                    &objective,
+                                    next.current_milestone,
+                                    next.total_milestones,
+                                ));
+                                continue;
+                            }
+                            Err(error) => {
+                                report_run_error(&events, &error);
+                                if let Some(goal_dir) = approval.goal_dir() {
+                                    let session_dir = goal_dir
+                                        .parent()
+                                        .map(PathBuf::from)
+                                        .unwrap_or_else(|| world.workspace().to_path_buf());
+                                    let _ = crate::goal::fail_goal(&session_dir);
+                                    approval.set_goal_dir(None);
+                                    goal_objective = None;
+                                }
+                            }
                         }
                     }
                     WorkerCommand::ClearHistory => {
@@ -686,6 +831,15 @@ fn spawn_worker(
                         approval: mode,
                         copilot: new_copilot,
                     } => {
+                        if !new_copilot && let Some(goal_dir) = approval.goal_dir() {
+                            let session_dir = goal_dir
+                                .parent()
+                                .map(PathBuf::from)
+                                .unwrap_or_else(|| world.workspace().to_path_buf());
+                            let _ = crate::goal::pause_goal(&session_dir);
+                            approval.set_goal_dir(None);
+                            goal_objective = None;
+                        }
                         copilot = new_copilot;
                         approval.set_mode(mode);
                         let mut config = harness_config_auto(copilot, auto_max_steps);
@@ -734,6 +888,7 @@ fn spawn_worker(
                             ) {
                                 Ok(plan_file) => {
                                     approval.set_goal_dir(None);
+                                    goal_objective = None;
                                     approval.set_living_plan(Some(plan_file.clone()));
                                     let mut config = harness_config_auto(copilot, auto_max_steps);
                                     config.system_prompt =
@@ -771,12 +926,26 @@ fn spawn_worker(
                         }
                     }
                     WorkerCommand::StartGoal(objective) => {
+                        if durable.is_none() {
+                            let _ = events.send(ReplEvent::Warning(
+                                "goal> requires a durable session; restart without --ephemeral"
+                                    .to_string(),
+                            ));
+                            break;
+                        }
+                        if let Err(error) = runtime_config.mentor_provider_settings() {
+                            let _ = events.send(ReplEvent::Warning(format!(
+                                "goal> requires an independent verifier: {error}"
+                            )));
+                            break;
+                        }
                         let session_dir = durable
                             .as_ref()
                             .and_then(|opened| opened.store.path().parent())
                             .unwrap_or(world.workspace());
                         match crate::goal::init_goal_workspace(session_dir, &objective, 20) {
                             Ok(state) => {
+                                goal_objective = Some(objective.clone());
                                 approval.set_living_plan(None);
                                 let goal_dir = session_dir.join("goal");
                                 approval.set_goal_dir(Some(goal_dir.clone()));
@@ -784,6 +953,11 @@ fn spawn_worker(
                                 copilot = true;
                                 approval.set_mode(ApprovalMode::Automatic);
                                 let mut config = harness_config_auto(true, auto_max_steps);
+                                config.max_steps = if config.max_steps == 0 {
+                                    state.milestone_step_budget
+                                } else {
+                                    config.max_steps.min(state.milestone_step_budget)
+                                };
                                 config.system_prompt.clone_from(&stable_system_prompt);
                                 harness.replace_config(config);
                                 let goal_plan = goal_dir.join("plan.md");

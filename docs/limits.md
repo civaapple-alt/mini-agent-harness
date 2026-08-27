@@ -7,7 +7,7 @@ defaults are part of the harness rather than terminal flags.
 | --- | ---: | --- |
 | one host context item | 8 KiB | reject before retaining the item |
 | user input | 32 KiB | reject before retaining or tracing the text |
-| model response | 384 KiB | reject before retaining text or tool calls |
+| model response | 64 KiB | reject before retaining text or tool calls |
 | tool calls in one model step | 8 | reject the whole proposal before effects |
 | one tool result | 16 KiB | retain UTF-8-safe head and tail |
 | model request context | 1 MiB | reject before the provider request |
@@ -17,7 +17,7 @@ Context size is the byte length of the system prompt plus JSON-serialized
 messages and tool specifications. It is a provider-neutral safety ceiling, not
 a prediction of provider tokenization. DeepSeek V4 advertises a 1M-token
 context and 384K-token output; the harness still caps a request at 1 MiB and a
-model step at 384 KiB so one turn cannot fill that window. Provider-reported
+model step at 64 KiB so one turn cannot fill that window. Provider-reported
 token counts remain available separately in model-response events.
 
 Reasoning and assistant text deltas share the model-response ceiling. They stop
@@ -139,7 +139,7 @@ new records are appended. One lock file prevents concurrent writers; a stale
 lock is never ignored automatically.
 
 Mentor analysis restores only the newest settled checkpoint under the same
-session lock. It uses the normal 1 MiB context and 384 KiB response ceilings,
+session lock. It uses the normal 1 MiB context and 64 KiB response ceilings,
 rejects any proposed tool call, and appends its result under the existing
 512 KiB record and 32 MiB session limits. Its deterministic FNV-1a source
 fingerprint is a change-detection aid, not a cryptographic integrity proof; the

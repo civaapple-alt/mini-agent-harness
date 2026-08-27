@@ -185,6 +185,8 @@ impl ProcessSandbox {
         if let Some(ref job) = self.job_object {
             job.assign_child(child);
         }
+        #[cfg(not(windows))]
+        let _ = child;
     }
 
     pub fn terminate(&self, child: &mut Child) -> io::Result<ExitStatus> {

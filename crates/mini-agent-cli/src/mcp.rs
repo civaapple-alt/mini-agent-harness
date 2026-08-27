@@ -154,6 +154,7 @@ impl Tool for McpTool {
     }
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        self.approval.ensure_plan_mode_unlocked()?;
         self.approval.approve(&format!(
             "call MCP tool {:?} on {}",
             self.remote_name, self.server_label

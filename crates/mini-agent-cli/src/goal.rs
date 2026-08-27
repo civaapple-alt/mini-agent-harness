@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const GOAL_SCHEMA_VERSION: u32 = 1;
+pub const MAX_GOAL_PLAN_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -180,7 +181,7 @@ pub fn planning_turn_prompt(request: &str) -> String {
 
 pub fn goal_turn_prompt(objective: &str, milestone: usize, total: usize) -> String {
     format!(
-        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Current milestone {milestone}/{total}. Read and update goal/plan.md (relative path maps to the session goal file). Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
+        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Current milestone {milestone}/{total}. Read and update goal/plan.md (relative path maps to the session goal file). If a previous verifier rejected the milestone, read goal/verifier_verdict.md and address its findings. Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
     )
 }
 
@@ -321,6 +322,44 @@ pub fn load_goal_state(session_dir: &Path) -> io::Result<Option<GoalState>> {
     Ok(Some(state))
 }
 
+pub fn goal_verification_criteria(session_dir: &Path) -> io::Result<String> {
+    let plan = fs::read_to_string(session_dir.join("goal").join("plan.md"))?;
+    if plan.len() > MAX_GOAL_PLAN_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("goal plan exceeds {MAX_GOAL_PLAN_BYTES} byte limit"),
+        ));
+    }
+    Ok(plan)
+}
+
+pub fn record_verifier_verdict(
+    session_dir: &Path,
+    checkpoint_seq: u64,
+    output: &str,
+) -> io::Result<()> {
+    let record = format!("source_checkpoint_seq: {checkpoint_seq}\n\n{output}");
+    if record.len() > MAX_GOAL_PLAN_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("verifier output exceeds {MAX_GOAL_PLAN_BYTES} byte limit"),
+        ));
+    }
+    fs::write(session_dir.join("goal").join("verifier_verdict.md"), record)
+}
+
+pub fn fail_goal(session_dir: &Path) -> io::Result<GoalState> {
+    let state_file = session_dir.join("goal").join("state.json");
+    let mut state = load_goal_state(session_dir)?
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "goal state not found"))?;
+    state.status = GoalStatus::Failed;
+    state.updated_at_ms = current_time_ms();
+    let state_json = serde_json::to_vec_pretty(&state)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    fs::write(state_file, state_json)?;
+    Ok(state)
+}
+
 #[allow(dead_code)]
 pub fn parse_verifier_verdict(content: &str) -> VerifierVerdict {
     let lower = content.to_ascii_lowercase();
@@ -377,19 +416,17 @@ pub fn advance_goal_milestone(
     state.loop_count += 1;
     if let Some(ref v) = verdict {
         state.last_verifier_score = v.score;
-        if v.outcome == VerdictOutcome::Rejected && state.loop_count >= state.max_loops {
-            state.status = GoalStatus::Failed;
-        } else if v.outcome == VerdictOutcome::Approved {
+        if v.outcome == VerdictOutcome::Approved {
             if state.current_milestone >= state.total_milestones {
                 state.status = GoalStatus::Converged;
             } else {
                 state.current_milestone += 1;
             }
+        } else if state.loop_count >= state.max_loops {
+            state.status = GoalStatus::Failed;
         }
-    } else if state.current_milestone >= state.total_milestones {
-        state.status = GoalStatus::Converged;
-    } else {
-        state.current_milestone += 1;
+    } else if state.loop_count >= state.max_loops {
+        state.status = GoalStatus::Failed;
     }
 
     state.updated_at_ms = current_time_ms();
@@ -566,6 +603,27 @@ mod tests {
         let paused = load_goal_state(&dir).unwrap().unwrap();
         assert_eq!(paused.status, GoalStatus::UserPaused);
 
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejected_verdict_does_not_advance_milestone() {
+        let dir = test_dir();
+        let state = init_goal_workspace(&dir, "Investigate", 2).unwrap();
+        let next = advance_goal_milestone(
+            &dir,
+            Some(VerifierVerdict {
+                outcome: VerdictOutcome::Rejected,
+                score: Some(30),
+                summary: "Needs more evidence".to_string(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(next.current_milestone, state.current_milestone);
+        assert_eq!(next.status, GoalStatus::Running);
+
+        let failed = fail_goal(&dir).unwrap();
+        assert_eq!(failed.status, GoalStatus::Failed);
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -199,6 +199,7 @@ impl Tool for SpawnAgent {
             return Err(ToolError("message cannot be empty".to_string()));
         }
 
+        self.0.approval.ensure_plan_mode_unlocked()?;
         self.0.approve(&format!("spawn subagent `{task_name}`"))?;
 
         let agent_type = args
@@ -436,6 +437,7 @@ impl Tool for SendSubagentMessage {
             return Err(ToolError("message cannot be empty".to_string()));
         }
 
+        self.0.approval.ensure_plan_mode_unlocked()?;
         self.0
             .approve(&format!("send message to subagent `{session_id}`"))?;
 

@@ -676,9 +676,9 @@ fn assemble_compacted(
 ) -> Vec<Message> {
     let mut compacted = Vec::new();
     if let Some(summary) = summary {
-        let bounded_summary = truncate_utf8(summary.to_string(), max_user_input_bytes);
+        let full_summary = format!("{COMPACTION_PREFIX}\n{summary}");
         compacted.push(Message::User {
-            text: format!("{COMPACTION_PREFIX}\n{bounded_summary}"),
+            text: truncate_utf8(full_summary, max_user_input_bytes),
         });
     }
     if let Some(context) = context {

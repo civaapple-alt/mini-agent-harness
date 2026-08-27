@@ -940,6 +940,22 @@ async fn rejects_oversized_user_input_without_retaining_it() {
     );
 }
 
+#[test]
+fn compaction_summary_includes_prefix_within_user_limit() {
+    let compacted = assemble_compacted(
+        Some("这是一个足够长的压缩摘要，用于验证 UTF-8 截断"),
+        None,
+        Vec::new(),
+        32,
+    );
+
+    let Some(Message::User { text }) = compacted.first() else {
+        panic!("compaction should produce a summary user message");
+    };
+    assert!(text.len() <= 32);
+    assert!(text.is_char_boundary(text.len()));
+}
+
 #[tokio::test]
 async fn rejects_context_before_calling_the_model() {
     let model = ScriptedModel {
