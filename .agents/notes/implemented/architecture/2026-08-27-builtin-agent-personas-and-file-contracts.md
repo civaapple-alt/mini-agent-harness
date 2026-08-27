@@ -51,97 +51,97 @@ Personas define the **micro-domain responsibilities, review checklists, and I/O 
 
 ```mermaid
 graph TD
-    subgraph AgentFoundations ["第一层：基础 Agent 形态 (Agent Foundations - 物理权限与运行模式)"]
-        EXP["explore<br/>(只读探索基座)"]
-        PLN["plan<br/>(规划设计基座)"]
-        GEN["general<br/>(全功能执行基座)"]
+    subgraph AgentFoundations ["Layer 1: Agent Foundations (Physical Permissions & Execution Mode)"]
+        EXP["explore<br/>(Read-Only Exploration Base)"]
+        PLN["plan<br/>(Architecture Planning Base)"]
+        GEN["general<br/>(Full-Capability Execution Base)"]
     end
 
-    subgraph Personas ["第二层：专业角色与契约 (Specialized Personas - 领域 SOP 与文件契约)"]
-        RSR["researcher<br/>(深度调研 / 证据链)"]
-        DDW["design-doc-writer<br/>(RFC / 系统设计文档)"]
-        DDR["design-doc-reviewer<br/>(架构评审 / 可行性审计)"]
-        REV["reviewer<br/>(代码质量 / 缺陷审查)"]
-        SEC["security-auditor<br/>(OWASP / 安全漏洞审计)"]
-        IMP["implementer<br/>(业务实现 / Issue 修复)"]
-        TST["test-writer<br/>(单测与集成测试编写)"]
+    subgraph Personas ["Layer 2: Specialized Personas (Domain SOP & File I/O Contracts)"]
+        RSR["researcher<br/>(Deep Research / Evidence Chain)"]
+        DDW["design-doc-writer<br/>(RFC / System Design Docs)"]
+        DDR["design-doc-reviewer<br/>(Architecture Review / Feasibility Audit)"]
+        REV["reviewer<br/>(Code Quality / Defect Review)"]
+        SEC["security-auditor<br/>(OWASP / Vulnerability Audit)"]
+        IMP["implementer<br/>(Code Implementation / Issue Fixing)"]
+        TST["test-writer<br/>(Unit & Integration Test Suite)"]
     end
 
-    EXP -.->|特化为只读研究员| RSR
-    PLN -.->|特化为架构设计者| DDW
-    PLN -.->|特化为架构评审员| DDR
-    GEN -.->|特化为代码审查员 (Scratch)| REV
-    GEN -.->|特化为安全审计员 (Scratch)| SEC
-    GEN -.->|特化为工程实现者 (All)| IMP
-    GEN -.->|特化为测试工程师 (All)| TST
+    EXP -.->|Specialized as Read-Only Researcher| RSR
+    PLN -.->|Specialized as Architecture Designer| DDW
+    PLN -.->|Specialized as Architecture Reviewer| DDR
+    GEN -.->|Specialized as Code Reviewer (Scratch-Only)| REV
+    GEN -.->|Specialized as Security Auditor (Scratch-Only)| SEC
+    GEN -.->|Specialized as Implementer (All)| IMP
+    GEN -.->|Specialized as Test Engineer (All)| TST
 ```
 
-#### 正交矩阵对比
+#### Orthogonal Matrix Comparison
 
-| 维度 | Three Agent Foundations (基础形态) | Seven Specialized Personas (专业角色) |
+| Dimension | Three Agent Foundations | Seven Specialized Personas |
 | :--- | :--- | :--- |
-| **关注点** | **“你怎么运行”**（运行时沙箱、权限天花板、上下文策略） | **“你做什么事情”**（领域专业性、SOP 流程、输出契约） |
-| **权限天花板** | 决定进程是否可以写文件（`read-only` vs `all`） | 在权限天花板下自我约束（如 Reviewer 自律不碰代码） |
-| **上下文策略** | `fork_context`（是否继承父会话历史） | 决定关注点（如 Security Auditor 关注数据流和注入点） |
-| **协作机制** | 独立的单次或多次 Tool 调用 | **双模文件契约**（`With review_file` 修复 vs `Without review_file` 初始） |
-| **状态机驱动** | 进程级别的 Exit Code / Timeout | **业务级别的 Issue 状态机**（`Status: open -> fixed / wontfix`） |
+| **Focus** | **"How to run"** (Runtime sandbox, permission ceiling, context strategy) | **"What to do"** (Domain expertise, SOP pipeline, output contracts) |
+| **Permission Ceiling** | Controls process-level write access (`read-only` vs `all`) | Self-restrained within ceiling (e.g. Reviewer refrains from editing source) |
+| **Context Strategy** | `fork_context` (whether to inherit parent conversation history) | Domain focus (e.g. Security Auditor tracks data flow and injection sinks) |
+| **Collaboration** | Single or multi-turn subprocess invocations | **Dual-mode file contracts** (`With review_file` fix pass vs `Without review_file` init pass) |
+| **State Machine** | Process-level Exit Code / Timeout | **Business-level issue state machine** (`Status: open -> fixed / wontfix`) |
 
 ---
 
-## 3. End-to-End Automated Runtime Lifecycle (用户提问时的自动运行机制)
+## 3. End-to-End Automated Runtime Lifecycle
 
-当用户提出复杂任务（例如：*“帮我审查 session 模块的安全性并修复”*）时，Foundation 与 Persona 的全自动运行时编排链路如下：
+When a user submits a multi-stage request (e.g. *"Audit the session module for security vulnerabilities and fix any identified issues"*), the automated orchestration lifecycle proceeds as follows:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as 用户 (User)
-    participant Parent as 父 Agent (Orchestrator 主进程)
+    actor User as User
+    participant Parent as Parent Agent (Orchestrator Process)
     participant Tool as Tool: spawn_agent
     participant PersonaEngine as persona::render_subagent_prompt
-    participant Child as 子 Agent 独立进程 (Subprocess CLI)
-    participant Scratch as 文件系统 (.agents/scratch/)
+    participant Child as Subagent Process (Subprocess CLI)
+    participant Scratch as Filesystem (.agents/scratch/)
 
-    User->>Parent: "审查 session.rs 的安全性并修复"
-    Note over Parent: 1. 父模型分析需求，决定委派安全审计<br/>选择 agent_type="general", persona="security-auditor"
+    User->>Parent: "Audit session.rs for security issues and fix them"
+    Note over Parent: 1. Parent LLM analyzes intent, delegates security audit<br/>Selects agent_type="general", persona="security-auditor"
     
     Parent->>Tool: spawn_agent(persona="security-auditor", review_file=".agents/scratch/audit.md", message="...")
-    Tool->>PersonaEngine: 组合 Foundation + Persona + File Contract + User Prompt
-    PersonaEngine-->>Tool: 生成具有严密约束的完整 Prompt
+    Tool->>PersonaEngine: Compose Foundation + Persona + File Contract + User Prompt
+    PersonaEngine-->>Tool: Return fully formed prompt with strict boundary constraints
     
-    Tool->>Child: 启动子进程 mini-agent ask "<prompt>" --json --session-id sub-001
-    Note over Child: 2. 子进程化身为 Security Auditor<br/>只读分析代码，严禁改源码<br/>将 2 个 open 漏洞写入 scratch/audit.md
-    Child->>Scratch: 写入 audit.md (包含 2 个 Status: open)
-    Child-->>Tool: 返回结构化 JSON 报告
+    Tool->>Child: Launch child subprocess: mini-agent ask "<prompt>" --json --session-id sub-001
+    Note over Child: 2. Subprocess assumes Security Auditor persona<br/>Inspects code in read-only mode, no source edits<br/>Writes 2 open findings to scratch/audit.md
+    Child->>Scratch: Write audit.md (containing 2 x Status: open)
+    Child-->>Tool: Return structured JSON execution result
     
-    Tool->>Scratch: 读取 audit.md 并解析 ReviewStats (open: 2)
-    Tool-->>Parent: "Subagent completed [open: 2, fixed: 0]: 发现 2 个安全隐患"
+    Tool->>Scratch: Read audit.md and compute ReviewStats (open: 2)
+    Tool-->>Parent: "Subagent completed [open: 2, fixed: 0]: Found 2 security vulnerabilities"
     
-    Note over Parent: 3. 父模型看到 open: 2，自动触发第二阶段：<br/>委派 Implementer 针对 audit.md 进行修复
-    Parent->>Tool: spawn_agent(persona="implementer", review_file=".agents/scratch/audit.md", message="修复这些问题")
-    Tool->>PersonaEngine: 组装 Implementer + With review_file 双模 Prompt
-    Tool->>Child: 启动子进程 mini-agent ask "<prompt>" --json
-    Note over Child: 4. 子进程化身为 Implementer<br/>读取 audit.md，就地修改源码，跑 cargo test<br/>将 Status 改为 fixed，追加 Response
-    Child->>Scratch: 更新 audit.md (Status: open -> fixed)
-    Child-->>Tool: 返回修复完成
+    Note over Parent: 3. Parent LLM detects open: 2, triggers fix phase:<br/>Delegates to Implementer targeting audit.md
+    Parent->>Tool: spawn_agent(persona="implementer", review_file=".agents/scratch/audit.md", message="Fix these issues")
+    Tool->>PersonaEngine: Compose Implementer + With review_file dual-mode prompt
+    Tool->>Child: Launch child subprocess: mini-agent ask "<prompt>" --json
+    Note over Child: 4. Subprocess assumes Implementer persona<br/>Reads audit.md, applies minimal code fixes, runs cargo test<br/>Flips Status: open -> fixed, appends Response
+    Child->>Scratch: Update audit.md (Status: open -> fixed)
+    Child-->>Tool: Return implementation completion
     
-    Tool-->>Parent: "Subagent completed [open: 0, fixed: 2]: 修复已全部验证通过"
-    Parent-->>User: "安全审计与修复全部完成，共修复 2 处隐患，测试全绿。"
+    Tool-->>Parent: "Subagent completed [open: 0, fixed: 2]: All fixes verified and passing"
+    Parent-->>User: "Security audit and implementation complete: 2 vulnerabilities fixed, tests passing."
 ```
 
-### 运行时三大核心阶段
+### Three Core Runtime Stages
 
-1. **契约暴露阶段**：
-   `crates/mini-agent-cli/src/subagent.rs` 向模型暴露 `spawn_agent` 的参数架构（`agent_type`, `persona`, `review_file`, `summary_file`），主 LLM 根据意图自主选择装配。
-2. **动态提示词编织阶段 (`crates/mini-agent-cli/src/persona.rs`)**：
-   - 自动匹配 Persona 专业规则与双模契约；
-   - 注入输出文件路径要求（`Output file: Write to ...` 或 `Review notes file: ...`）；
-   - 拼接用户任务指令。
-3. **状态度量与闭环反馈阶段**：
-   - 子进程退出后，`SpawnAgent` 自动读取 `review_file`；
-   - 调用 `parse_review_stats` 实时统计 `[open: N, fixed: M]`；
-   - 遥测数据落盘至 `.agents/sessions/<session_id>/subagents/<child_id>/meta.json`；
-   - 父 Agent 依据状态机量化统计判断是否收敛闭环。
+1. **Schema Exposure & Selection**:
+   `crates/mini-agent-cli/src/subagent.rs` exposes tool parameters (`agent_type`, `persona`, `review_file`, `summary_file`) via JSON schema; the parent LLM autonomously selects the appropriate combination based on user intent.
+2. **Dynamic Prompt Assembly (`crates/mini-agent-cli/src/persona.rs`)**:
+   - Matches specialized Persona rules and active dual-mode file contracts;
+   - Injects explicit output file locations (`Output file: Write to ...` or `Review notes file: ...`);
+   - Appends specific task instructions.
+3. **State Measurement & Convergence Feedback**:
+   - Upon child exit, `SpawnAgent` automatically reads `review_file`;
+   - Calls `parse_review_stats` to extract live `[open: N, fixed: M, wontfix: K]`;
+   - Persists telemetry into `.agents/sessions/<session_id>/subagents/<child_id>/meta.json`;
+   - The parent LLM evaluates the numerical issue counts to determine whether the workflow has converged.
 
 ---
 
