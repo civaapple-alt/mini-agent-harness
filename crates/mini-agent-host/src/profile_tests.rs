@@ -11,6 +11,10 @@ fn default_profile_exposes_tools_and_prompt_rule_sources() {
     let manifest = profile.manifest();
 
     assert_eq!(manifest.profile, "interactive");
+    assert_eq!(manifest.model_provider, "openai");
+    assert_eq!(manifest.tool_provider, "builtin");
+    assert_eq!(manifest.extension_provider, "builtin");
+    assert_eq!(manifest.policy_provider, "builtin");
     assert!(manifest.enabled.contains(&"workspace".to_string()));
     assert_eq!(
         manifest.prompt_sources,
@@ -185,6 +189,9 @@ fn workspace_profile_file_overlays_bounded_selections() {
         r#"{
             "name": "repo-review",
             "modelProvider": "openai",
+            "toolProvider": "builtin",
+            "extensionProvider": "builtin",
+            "policyProvider": "builtin",
             "tools": "none",
             "extensionDepth": "selected",
             "selectedExtensions": ["review"],
@@ -203,6 +210,9 @@ fn workspace_profile_file_overlays_bounded_selections() {
 
     assert_eq!(profile.name, "repo-review");
     assert_eq!(profile.model_provider, "openai");
+    assert_eq!(profile.tool_provider, "builtin");
+    assert_eq!(profile.extension_provider, "builtin");
+    assert_eq!(profile.policy_provider, "builtin");
     assert_eq!(profile.tools, ToolScope::None);
     assert_eq!(profile.extensions, ExtensionLoadDepth::Selected);
     assert_eq!(
@@ -228,6 +238,22 @@ fn workspace_profile_file_rejects_unknown_fields() {
     let error = load_workspace_profile(&root, RuntimeProfile::default()).unwrap_err();
 
     assert!(error.contains("cannot parse"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_profile_file_rejects_unknown_capability_provider() {
+    let root = test_root();
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/profile.json"),
+        r#"{"toolProvider":"remote"}"#,
+    )
+    .unwrap();
+
+    let error = load_workspace_profile(&root, RuntimeProfile::default()).unwrap_err();
+
+    assert!(error.contains("unknown Tool provider"));
     fs::remove_dir_all(root).unwrap();
 }
 

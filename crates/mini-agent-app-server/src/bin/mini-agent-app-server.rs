@@ -2,6 +2,7 @@ use mini_agent_app_server::AppServerError;
 use mini_agent_app_server::ApprovalBroker;
 use mini_agent_app_server::capability_manifest_to_protocol;
 use mini_agent_app_server::serve_stdio_with_startup;
+use mini_agent_app_server_protocol::CapabilityProviderSelection;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
 use mini_agent_core::ThreadId;
@@ -38,7 +39,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .ok_or_else(|| format!("unknown startup profile `{name}`"))?,
             None => base_profile.clone(),
         };
-        let profile = load_workspace_profile(&startup_config.workspace(), base_profile)?;
+        let mut profile = load_workspace_profile(&startup_config.workspace(), base_profile)?;
+        apply_provider_selection(&mut profile, params.providers.as_ref())?;
         let factory_profile = profile.clone();
         let approval = approval_for(startup_broker.clone());
         let runtime = HostRuntimeFactory::new(
@@ -72,6 +74,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Ok((server, capability_manifest))
     })
     .await?;
+    Ok(())
+}
+
+fn apply_provider_selection(
+    profile: &mut RuntimeProfile,
+    providers: Option<&CapabilityProviderSelection>,
+) -> Result<(), String> {
+    let Some(providers) = providers else {
+        return Ok(());
+    };
+    if let Some(provider) = providers.model.as_deref() {
+        profile.model_provider = provider.to_string();
+    }
+    if let Some(provider) = providers.tools.as_deref() {
+        profile.tool_provider = provider.to_string();
+    }
+    if let Some(provider) = providers.extensions.as_deref() {
+        profile.extension_provider = provider.to_string();
+    }
+    if let Some(provider) = providers.policy.as_deref() {
+        profile.policy_provider = provider.to_string();
+    }
     Ok(())
 }
 

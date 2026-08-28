@@ -21,7 +21,7 @@ cargo run --release -p mini-agent-app-server --bin mini-agent-app-server
 The first request must negotiate protocol version 1:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientName":"example","clientVersion":"0","capabilities":{},"profile":"interactive"}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientName":"example","clientVersion":"0","capabilities":{},"profile":"interactive","providers":{"model":"openai","tools":"builtin","extensions":"builtin","policy":"builtin"}}}
 ```
 
 Then start the configured thread and submit a turn:
@@ -70,3 +70,11 @@ advertised manifest consistent for the lifetime of the process.
 Set `MINI_AGENT_PROFILE` before starting the standalone binary to select one
 of the six builtin profiles; unknown names fail closed before a provider or
 thread is created.
+
+`initialize.params.providers` is an optional selector for the four local
+provider categories (`model`, `tools`, `extensions`, and `policy`). The
+standalone server applies these bounded IDs before constructing the first
+Thread; an embedded runtime and ACP require requested IDs to match the frozen
+profile. Provider instances, credentials, commands, and paths never cross the
+JSON-RPC boundary. The current registry exposes `openai` for models and
+`builtin` for the other three categories.

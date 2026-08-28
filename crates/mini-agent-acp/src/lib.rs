@@ -7,6 +7,7 @@
 
 use mini_agent_app_server::AppServerConnection;
 use mini_agent_app_server::AppServerRuntime;
+use mini_agent_app_server_protocol::CapabilityProviderSelection;
 use mini_agent_app_server_protocol::InitializeParams;
 use mini_agent_app_server_protocol::JsonRpcError;
 use mini_agent_app_server_protocol::JsonRpcRequest;
@@ -54,6 +55,8 @@ pub struct AcpInitializeParams {
     pub client_info: Option<AcpClientInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub providers: Option<CapabilityProviderSelection>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -254,6 +257,52 @@ where
                 )),
             ));
         }
+        if let Some(providers) = params.providers.as_ref() {
+            if let Some(provider) = providers.model.as_deref()
+                && provider != self.profile.model_provider
+            {
+                return Some(JsonRpcResponse::error(
+                    request.id,
+                    JsonRpcError::invalid_params(format!(
+                        "model provider `{provider}` is unavailable; active provider is `{}`",
+                        self.profile.model_provider
+                    )),
+                ));
+            }
+            if let Some(provider) = providers.tools.as_deref()
+                && provider != self.profile.tool_provider
+            {
+                return Some(JsonRpcResponse::error(
+                    request.id,
+                    JsonRpcError::invalid_params(format!(
+                        "tool provider `{provider}` is unavailable; active provider is `{}`",
+                        self.profile.tool_provider
+                    )),
+                ));
+            }
+            if let Some(provider) = providers.extensions.as_deref()
+                && provider != self.profile.extension_provider
+            {
+                return Some(JsonRpcResponse::error(
+                    request.id,
+                    JsonRpcError::invalid_params(format!(
+                        "extension provider `{provider}` is unavailable; active provider is `{}`",
+                        self.profile.extension_provider
+                    )),
+                ));
+            }
+            if let Some(provider) = providers.policy.as_deref()
+                && provider != self.profile.policy_provider
+            {
+                return Some(JsonRpcResponse::error(
+                    request.id,
+                    JsonRpcError::invalid_params(format!(
+                        "policy provider `{provider}` is unavailable; active provider is `{}`",
+                        self.profile.policy_provider
+                    )),
+                ));
+            }
+        }
         let app_params = InitializeParams {
             protocol_version: PROTOCOL_VERSION,
             client_name: params
@@ -268,6 +317,7 @@ where
                 .unwrap_or_else(|| "unknown".to_string()),
             capabilities: Default::default(),
             profile: None,
+            providers: params.providers,
         };
         let app_request = JsonRpcRequest::request(
             request.id.clone().unwrap_or(Value::Null),
@@ -668,6 +718,7 @@ mod tests {
                     client_capabilities: Value::Null,
                     client_info: None,
                     profile: None,
+                    providers: None,
                 }),
             ))
             .await
@@ -741,6 +792,31 @@ mod tests {
                     client_capabilities: Value::Null,
                     client_info: None,
                     profile: Some("acp-minimal".to_string()),
+                    providers: None,
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.error.unwrap().code, -32602);
+    }
+
+    #[tokio::test]
+    async fn rejects_an_unavailable_requested_provider() {
+        let mut bridge = bridge();
+        let response = bridge
+            .handle_request(JsonRpcRequest::request(
+                1,
+                METHOD_INITIALIZE,
+                serde_json::json!(AcpInitializeParams {
+                    protocol_version: ACP_PROTOCOL_VERSION,
+                    client_capabilities: Value::Null,
+                    client_info: None,
+                    profile: None,
+                    providers: Some(CapabilityProviderSelection {
+                        tools: Some("remote".to_string()),
+                        ..CapabilityProviderSelection::default()
+                    }),
                 }),
             ))
             .await
@@ -761,6 +837,7 @@ mod tests {
                     client_capabilities: Value::Null,
                     client_info: None,
                     profile: None,
+                    providers: None,
                 }),
             ))
             .await
@@ -815,6 +892,7 @@ mod tests {
                 client_version: "0".to_string(),
                 capabilities: Default::default(),
                 profile: None,
+                providers: None,
             }),
         ))
         .await;

@@ -20,6 +20,9 @@ const MAX_EXTENSION_NAME_BYTES: usize = 128;
 struct ProfileFile {
     name: Option<String>,
     model_provider: Option<String>,
+    tool_provider: Option<String>,
+    extension_provider: Option<String>,
+    policy_provider: Option<String>,
     tools: Option<ToolScope>,
     extension_depth: Option<ExtensionLoadDepth>,
     selected_extensions: Option<Vec<String>>,
@@ -63,6 +66,21 @@ pub fn load_workspace_profile(
     if let Some(provider) = file.model_provider {
         validate_model_provider(&provider)?;
         base.model_provider = provider;
+    }
+    if let Some(provider) = file.tool_provider {
+        validate_provider(mini_agent_capabilities::CapabilityKind::Tool, &provider)?;
+        base.tool_provider = provider;
+    }
+    if let Some(provider) = file.extension_provider {
+        validate_provider(
+            mini_agent_capabilities::CapabilityKind::Extension,
+            &provider,
+        )?;
+        base.extension_provider = provider;
+    }
+    if let Some(provider) = file.policy_provider {
+        validate_provider(mini_agent_capabilities::CapabilityKind::Policy, &provider)?;
+        base.policy_provider = provider;
     }
     if let Some(tools) = file.tools {
         base.tools = tools;
@@ -136,9 +154,14 @@ fn validate_extension_names(names: &[String]) -> Result<(), String> {
 }
 
 fn validate_model_provider(provider: &str) -> Result<(), String> {
-    if mini_agent_capabilities::CapabilityRegistry::builtin().contains_model(provider) {
-        Ok(())
-    } else {
-        Err(format!("unknown model provider {provider:?}"))
-    }
+    validate_provider(mini_agent_capabilities::CapabilityKind::Model, provider)
+}
+
+fn validate_provider(
+    kind: mini_agent_capabilities::CapabilityKind,
+    provider: &str,
+) -> Result<(), String> {
+    mini_agent_capabilities::CapabilityRegistry::builtin()
+        .validate(kind, provider)
+        .map_err(|_| format!("unknown {kind:?} provider {provider:?}"))
 }

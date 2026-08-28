@@ -35,6 +35,7 @@ pub use openai::OpenAiModel;
 pub use registry::CapabilityDescriptor;
 pub use registry::CapabilityKind;
 pub use registry::CapabilityRegistry;
+pub use registry::ToolBuildRequest;
 pub use sandbox::SandboxKind;
 pub use security::SecurityPreset;
 pub use session::OpenedSession;
@@ -46,6 +47,15 @@ pub use skills::McpServerConfig;
 
 /// Stable identifier for the built-in OpenAI-compatible model provider.
 pub const OPENAI_MODEL_PROVIDER: &str = "openai";
+
+/// Stable identifier for the built-in tool provider.
+pub const BUILTIN_TOOL_PROVIDER: &str = "builtin";
+
+/// Stable identifier for the built-in extension provider.
+pub const BUILTIN_EXTENSION_PROVIDER: &str = "builtin";
+
+/// Stable identifier for the built-in policy provider.
+pub const BUILTIN_POLICY_PROVIDER: &str = "builtin";
 
 /// Lists the concrete model providers currently available to a host registry.
 pub fn model_provider_ids() -> &'static [&'static str] {

@@ -531,6 +531,9 @@ pub fn capability_manifest_to_protocol(
     ProtocolCapabilityManifest {
         profile: manifest.profile.clone(),
         model_provider: manifest.model_provider.clone(),
+        tool_provider: manifest.tool_provider.clone(),
+        extension_provider: manifest.extension_provider.clone(),
+        policy_provider: manifest.policy_provider.clone(),
         enabled: manifest.enabled.clone(),
         disabled: manifest
             .disabled

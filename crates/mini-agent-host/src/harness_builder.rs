@@ -156,12 +156,23 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
     profile: RuntimeProfile,
     results: ResultStore,
 ) -> Result<HarnessBuild, String> {
-    if !CapabilityRegistry::builtin().contains_model(&profile.model_provider) {
-        return Err(format!(
-            "unknown model provider `{}`",
-            profile.model_provider
-        ));
-    }
+    let registry = CapabilityRegistry::builtin();
+    registry.validate(
+        mini_agent_capabilities::CapabilityKind::Model,
+        &profile.model_provider,
+    )?;
+    registry.validate(
+        mini_agent_capabilities::CapabilityKind::Tool,
+        &profile.tool_provider,
+    )?;
+    registry.validate(
+        mini_agent_capabilities::CapabilityKind::Extension,
+        &profile.extension_provider,
+    )?;
+    registry.validate(
+        mini_agent_capabilities::CapabilityKind::Policy,
+        &profile.policy_provider,
+    )?;
     let provider = runtime_config.provider_settings()?;
     let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
     let images = ImageStore::for_provider(provider.api_key.clone(), &provider.base_url);
@@ -200,7 +211,8 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
         };
     let mut skill_discovery = (profile.extensions != ExtensionLoadDepth::None
         && (profile.regular_agent.prompts.extensions || profile.regular_agent.rules.extensions))
-        .then(|| CapabilityRegistry::builtin().discover_extensions(&workspace));
+        .then(|| registry.discover_extensions(&profile.extension_provider, &workspace))
+        .transpose()?;
     if let Some(discovery) = &mut skill_discovery {
         if let ExtensionSelection::Named(names) = &profile.extension_selection {
             discovery.retain_selected(names);
@@ -253,14 +265,15 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
         let extra_read_roots = skill_discovery
             .as_ref()
             .map_or_else(Vec::new, |discovery| discovery.extra_read_roots().to_vec());
-        match CapabilityRegistry::builtin().build_tools(
-            workspace.clone(),
-            approval.clone(),
+        match registry.build_tools(mini_agent_capabilities::ToolBuildRequest {
+            provider_id: profile.tool_provider.clone(),
+            workspace: workspace.clone(),
+            approval: approval.clone(),
             extra_read_roots,
             sandbox,
-            images.clone(),
+            images: images.clone(),
             results,
-        ) {
+        }) {
             Ok(tools) => tools,
             Err(error) => return Err(error.to_string()),
         }
@@ -281,7 +294,13 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
         loaded_servers,
         diagnostics,
     } = if profile.extensions == ExtensionLoadDepth::Enabled && profile.tools == ToolScope::All {
-        CapabilityRegistry::builtin().load_mcp(&configured_mcp_servers, approval)
+        registry
+            .load_mcp(
+                &profile.extension_provider,
+                &configured_mcp_servers,
+                approval,
+            )
+            .map_err(|error| error.to_string())?
     } else {
         McpLoadResult {
             tools: Vec::new(),

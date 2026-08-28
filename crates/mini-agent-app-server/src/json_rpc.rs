@@ -231,6 +231,43 @@ where
                 )),
             );
         }
+        if let Some(providers) = params.providers.as_ref() {
+            let provider_checks = [
+                (
+                    "model",
+                    providers.model.as_deref(),
+                    self.capability_manifest.model_provider.as_str(),
+                ),
+                (
+                    "tool",
+                    providers.tools.as_deref(),
+                    self.capability_manifest.tool_provider.as_str(),
+                ),
+                (
+                    "extension",
+                    providers.extensions.as_deref(),
+                    self.capability_manifest.extension_provider.as_str(),
+                ),
+                (
+                    "policy",
+                    providers.policy.as_deref(),
+                    self.capability_manifest.policy_provider.as_str(),
+                ),
+            ];
+            if let Some((kind, requested, active)) =
+                provider_checks.into_iter().find(|(_, requested, active)| {
+                    requested.is_some_and(|requested| requested != *active)
+                })
+            {
+                return response_error(
+                    request.id,
+                    JsonRpcError::invalid_params(format!(
+                        "{kind} provider `{}` is unavailable; active provider is `{active}`",
+                        requested.expect("mismatched provider is present")
+                    )),
+                );
+            }
+        }
         let result = InitializeResult {
             protocol_version: PROTOCOL_VERSION,
             server_name: "mini-agent-app-server".to_string(),
@@ -710,6 +747,9 @@ fn default_capability_manifest() -> CapabilityManifest {
     CapabilityManifest {
         profile: "unknown".to_string(),
         model_provider: "unknown".to_string(),
+        tool_provider: "unknown".to_string(),
+        extension_provider: "unknown".to_string(),
+        policy_provider: "unknown".to_string(),
         enabled: Vec::new(),
         disabled: vec![DisabledCapability {
             name: "host-profile".to_string(),
@@ -766,6 +806,7 @@ fn map_server_error(error: AppServerError) -> JsonRpcError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mini_agent_app_server_protocol::CapabilityProviderSelection;
     use mini_agent_app_server_protocol::ClientCapabilities;
     use mini_agent_core::Harness;
     use mini_agent_core::HarnessConfig;
@@ -826,6 +867,7 @@ mod tests {
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
                     profile: None,
+                    providers: None,
                 }),
             ))
             .await
@@ -877,6 +919,33 @@ mod tests {
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
                     profile: Some("acp".to_string()),
+                    providers: None,
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.error.unwrap().code, -32602);
+        assert!(!connection.initialized());
+    }
+
+    #[tokio::test]
+    async fn rejects_an_unavailable_requested_provider() {
+        let mut connection = connection();
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                1,
+                METHOD_INITIALIZE,
+                serde_json::json!(InitializeParams {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test".to_string(),
+                    client_version: "0".to_string(),
+                    capabilities: ClientCapabilities::default(),
+                    profile: None,
+                    providers: Some(CapabilityProviderSelection {
+                        tools: Some("builtin".to_string()),
+                        ..CapabilityProviderSelection::default()
+                    }),
                 }),
             ))
             .await
@@ -897,6 +966,7 @@ mod tests {
                 client_version: "0".to_string(),
                 capabilities: ClientCapabilities::default(),
                 profile: Some("acp".to_string()),
+                providers: None,
             }),
         );
         let input = format!("{}\n", serde_json::to_string(&request).unwrap());
@@ -932,6 +1002,7 @@ mod tests {
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
                     profile: None,
+                    providers: None,
                 }),
             ))
             .await;
@@ -968,6 +1039,7 @@ mod tests {
                 client_version: "0".to_string(),
                 capabilities: ClientCapabilities::default(),
                 profile: None,
+                providers: None,
             }),
         );
         input
@@ -1047,6 +1119,7 @@ mod tests {
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
                     profile: None,
+                    providers: None,
                 })
                 .unwrap(),
             ))
@@ -1094,6 +1167,7 @@ mod tests {
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
                     profile: None,
+                    providers: None,
                 }),
             ))
             .await;
@@ -1154,6 +1228,7 @@ mod tests {
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
                     profile: None,
+                    providers: None,
                 }),
             ))
             .await;
@@ -1199,6 +1274,7 @@ mod tests {
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
                     profile: None,
+                    providers: None,
                 }),
             ))
             .await;
@@ -1249,6 +1325,7 @@ mod tests {
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
                     profile: None,
+                    providers: None,
                 }),
             ))
             .await;

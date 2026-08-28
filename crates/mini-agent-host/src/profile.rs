@@ -141,6 +141,12 @@ pub struct RuntimeProfile {
     pub name: String,
     /// Bounded identifier resolved by the capability provider registry.
     pub model_provider: String,
+    /// Bounded identifier for the tool provider selected by this profile.
+    pub tool_provider: String,
+    /// Bounded identifier for the extension provider selected by this profile.
+    pub extension_provider: String,
+    /// Bounded identifier for the sandbox, security, and approval provider.
+    pub policy_provider: String,
     pub tools: ToolScope,
     pub extensions: ExtensionLoadDepth,
     pub extension_selection: ExtensionSelection,
@@ -232,6 +238,24 @@ impl RuntimeProfile {
         self
     }
 
+    /// Selects an allowlisted tool provider by stable identifier.
+    pub fn with_tool_provider(mut self, provider: impl Into<String>) -> Self {
+        self.tool_provider = provider.into();
+        self
+    }
+
+    /// Selects an allowlisted extension provider by stable identifier.
+    pub fn with_extension_provider(mut self, provider: impl Into<String>) -> Self {
+        self.extension_provider = provider.into();
+        self
+    }
+
+    /// Selects an allowlisted policy provider by stable identifier.
+    pub fn with_policy_provider(mut self, provider: impl Into<String>) -> Self {
+        self.policy_provider = provider.into();
+        self
+    }
+
     /// Replaces the prompt-source selection for a regular agent.
     pub fn with_prompt_sources(mut self, prompts: PromptSources) -> Self {
         self.regular_agent.prompts = prompts;
@@ -303,6 +327,9 @@ impl RuntimeProfile {
         Self {
             name: name.to_string(),
             model_provider: mini_agent_capabilities::OPENAI_MODEL_PROVIDER.to_string(),
+            tool_provider: mini_agent_capabilities::BUILTIN_TOOL_PROVIDER.to_string(),
+            extension_provider: mini_agent_capabilities::BUILTIN_EXTENSION_PROVIDER.to_string(),
+            policy_provider: mini_agent_capabilities::BUILTIN_POLICY_PROVIDER.to_string(),
             tools,
             extensions,
             extension_selection: ExtensionSelection::All,

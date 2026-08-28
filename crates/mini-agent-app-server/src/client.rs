@@ -1,6 +1,7 @@
 //! In-process client for the same versioned service boundary used by JSON-RPC.
 
 use crate::AppServerConnection;
+use mini_agent_app_server_protocol::CapabilityProviderSelection;
 use mini_agent_app_server_protocol::ClientCapabilities;
 use mini_agent_app_server_protocol::InitializeParams;
 use mini_agent_app_server_protocol::InitializeResult;
@@ -76,6 +77,17 @@ where
         client_version: impl Into<String>,
         profile: Option<String>,
     ) -> Result<InitializeResult, JsonRpcError> {
+        self.initialize_with_profile_and_providers(client_name, client_version, profile, None)
+            .await
+    }
+
+    pub async fn initialize_with_profile_and_providers(
+        &mut self,
+        client_name: impl Into<String>,
+        client_version: impl Into<String>,
+        profile: Option<String>,
+        providers: Option<CapabilityProviderSelection>,
+    ) -> Result<InitializeResult, JsonRpcError> {
         self.call(
             METHOD_INITIALIZE,
             InitializeParams {
@@ -84,6 +96,7 @@ where
                 client_version: client_version.into(),
                 capabilities: ClientCapabilities::default(),
                 profile,
+                providers,
             },
         )
         .await

@@ -263,6 +263,9 @@ impl RuntimeProfile {
         CapabilityManifest {
             profile: self.name.clone(),
             model_provider: self.model_provider.clone(),
+            tool_provider: self.tool_provider.clone(),
+            extension_provider: self.extension_provider.clone(),
+            policy_provider: self.policy_provider.clone(),
             enabled,
             disabled,
             extension_depth: self.extensions,
@@ -307,6 +310,9 @@ impl RuntimeProfile {
 pub struct CapabilityManifest {
     pub profile: String,
     pub model_provider: String,
+    pub tool_provider: String,
+    pub extension_provider: String,
+    pub policy_provider: String,
     pub enabled: Vec<String>,
     pub disabled: Vec<(String, String)>,
     pub extension_depth: ExtensionLoadDepth,

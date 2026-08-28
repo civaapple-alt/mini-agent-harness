@@ -19,5 +19,7 @@ supported capabilities.
 
 Use `AcpBridge` when embedding the service and keep the existing stdio JSON-RPC
 transport for app-server clients. ACP initialize accepts an optional profile
-name and rejects names that do not match the allowlisted runtime profile; the
-bridge returns the active profile and capability manifest to the client.
+name and bounded `providers` selectors (`model`, `tools`, `extensions`, and
+`policy`). Requests that do not match the frozen runtime profile are rejected;
+the bridge returns the active provider IDs and capability manifest to the
+client. Provider instances and credentials remain local to the host.

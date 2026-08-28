@@ -34,11 +34,39 @@ pub struct CapabilityDescriptor {
     pub description: &'static str,
 }
 
-const BUILTIN_DESCRIPTORS: [CapabilityDescriptor; 1] = [CapabilityDescriptor {
-    id: crate::OPENAI_MODEL_PROVIDER,
-    kind: CapabilityKind::Model,
-    description: "OpenAI-compatible Responses model provider",
-}];
+/// Inputs required to assemble a selected tool provider.
+pub struct ToolBuildRequest {
+    pub provider_id: String,
+    pub workspace: PathBuf,
+    pub approval: ApprovalController,
+    pub extra_read_roots: Vec<PathBuf>,
+    pub sandbox: SandboxKind,
+    pub images: ImageStore,
+    pub results: ResultStore,
+}
+
+const BUILTIN_DESCRIPTORS: [CapabilityDescriptor; 4] = [
+    CapabilityDescriptor {
+        id: crate::OPENAI_MODEL_PROVIDER,
+        kind: CapabilityKind::Model,
+        description: "OpenAI-compatible Responses model provider",
+    },
+    CapabilityDescriptor {
+        id: crate::BUILTIN_TOOL_PROVIDER,
+        kind: CapabilityKind::Tool,
+        description: "Built-in workspace, process, web, image, and subagent tools",
+    },
+    CapabilityDescriptor {
+        id: crate::BUILTIN_EXTENSION_PROVIDER,
+        kind: CapabilityKind::Extension,
+        description: "Built-in skill, plugin, marketplace, and MCP extensions",
+    },
+    CapabilityDescriptor {
+        id: crate::BUILTIN_POLICY_PROVIDER,
+        kind: CapabilityKind::Policy,
+        description: "Built-in sandbox, security, and approval policy",
+    },
+];
 
 /// Registry of concrete providers available to a local Host.
 ///
@@ -58,45 +86,62 @@ impl CapabilityRegistry {
     }
 
     pub fn contains_model(self, provider_id: &str) -> bool {
-        self.descriptors().iter().any(|descriptor| {
-            descriptor.kind == CapabilityKind::Model && descriptor.id == provider_id
-        })
+        self.contains(CapabilityKind::Model, provider_id)
+    }
+
+    /// Returns whether a stable provider ID is registered for a capability
+    /// category.
+    pub fn contains(self, kind: CapabilityKind, provider_id: &str) -> bool {
+        self.descriptors()
+            .iter()
+            .any(|descriptor| descriptor.kind == kind && descriptor.id == provider_id)
+    }
+
+    /// Validates a provider selection before any local resources are opened.
+    pub fn validate(self, kind: CapabilityKind, provider_id: &str) -> Result<(), String> {
+        if self.contains(kind, provider_id) {
+            Ok(())
+        } else {
+            Err(format!("unknown {:?} provider `{provider_id}`", kind))
+        }
     }
 
     /// Builds the selected built-in tool provider without exposing its
     /// concrete workspace, process, web, or subagent implementations to Host.
-    pub fn build_tools(
-        self,
-        workspace: PathBuf,
-        approval: ApprovalController,
-        extra_read_roots: Vec<PathBuf>,
-        sandbox: SandboxKind,
-        images: ImageStore,
-        results: ResultStore,
-    ) -> Result<Vec<Box<dyn Tool>>, ToolError> {
+    pub fn build_tools(self, request: ToolBuildRequest) -> Result<Vec<Box<dyn Tool>>, ToolError> {
+        if let Err(error) = self.validate(CapabilityKind::Tool, &request.provider_id) {
+            return Err(ToolError(error));
+        }
         crate::workspace::workspace_tools_with_read_roots_and_results(
-            workspace,
-            approval,
-            extra_read_roots,
-            sandbox,
-            images,
-            results,
+            request.workspace,
+            request.approval,
+            request.extra_read_roots,
+            request.sandbox,
+            request.images,
+            request.results,
         )
     }
 
     /// Discovers the selected extension provider inputs once for a runtime.
-    pub fn discover_extensions(self, workspace: &Path) -> skills::Discovery {
-        skills::discover(workspace)
+    pub fn discover_extensions(
+        self,
+        provider_id: &str,
+        workspace: &Path,
+    ) -> Result<skills::Discovery, String> {
+        self.validate(CapabilityKind::Extension, provider_id)?;
+        Ok(skills::discover(workspace))
     }
 
     /// Starts selected MCP provider entries after Host policy has resolved the
     /// approval controller.
     pub fn load_mcp(
         self,
+        provider_id: &str,
         servers: &[skills::McpServerConfig],
         approval: ApprovalController,
-    ) -> crate::mcp::LoadResult {
-        crate::mcp::load(servers, approval)
+    ) -> Result<crate::mcp::LoadResult, String> {
+        self.validate(CapabilityKind::Extension, provider_id)?;
+        Ok(crate::mcp::load(servers, approval))
     }
 }
 

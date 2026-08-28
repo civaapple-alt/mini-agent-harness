@@ -166,6 +166,26 @@ pub struct InitializeParams {
     pub capabilities: ClientCapabilities,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub providers: Option<CapabilityProviderSelection>,
+}
+
+/// Optional, bounded provider IDs requested at service startup.
+///
+/// The IDs are resolved against the host's local capability registry. This
+/// type carries selectors only; credentials, tools, and provider instances
+/// never cross the JSON-RPC boundary.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityProviderSelection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -208,6 +228,9 @@ pub struct InitializeResult {
 pub struct CapabilityManifest {
     pub profile: String,
     pub model_provider: String,
+    pub tool_provider: String,
+    pub extension_provider: String,
+    pub policy_provider: String,
     pub enabled: Vec<String>,
     pub disabled: Vec<DisabledCapability>,
     pub extension_depth: String,
@@ -471,9 +494,17 @@ mod tests {
             client_version: "0".to_string(),
             capabilities: ClientCapabilities::default(),
             profile: None,
+            providers: Some(CapabilityProviderSelection {
+                model: Some("openai".to_string()),
+                tools: Some("builtin".to_string()),
+                extensions: Some("builtin".to_string()),
+                policy: Some("builtin".to_string()),
+            }),
         })
         .unwrap();
         assert!(value.get("protocolVersion").is_some());
+        assert_eq!(value["providers"]["model"], "openai");
+        assert_eq!(value["providers"]["tools"], "builtin");
         assert!(value.get("protocol_version").is_none());
     }
 

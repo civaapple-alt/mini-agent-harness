@@ -67,7 +67,8 @@ resolver phase, and the effective bounded context limits; it never includes
 prompt bodies or secrets.
 
 An optional `.agents/profile.json` can override bounded profile selections for
-the local CLI and standalone App Server. It accepts `tools`, `extensionDepth`,
+the local CLI and standalone App Server. It accepts `modelProvider`,
+`toolProvider`, `extensionProvider`, `policyProvider`, `tools`, `extensionDepth`,
 `selectedExtensions`, `agent`, `persona`, `workflows`, `promptSources`,
 `ruleSources`, `sandbox`, and `security`; unknown fields, oversized files,
 unsafe names, credentials, commands, paths, and arbitrary prompt text are
@@ -77,6 +78,10 @@ after the file.
 ```json
 {
   "name": "repo-review",
+  "modelProvider": "openai",
+  "toolProvider": "builtin",
+  "extensionProvider": "builtin",
+  "policyProvider": "builtin",
   "tools": "all",
   "extensionDepth": "enabled",
   "selectedExtensions": ["review"],

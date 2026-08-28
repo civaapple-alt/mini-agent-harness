@@ -1,6 +1,6 @@
 # Host Capability Profiles and Runtime Seams
 
-Status: Stage 1 implemented; Stage 2 provider extraction in progress (Windows scope)
+Status: Stage 2 implemented; Stage 3 frontend routing and provider selection in progress (Windows scope)
 Date: 2026-08-28
 
 ## Implementation update (2026-08-28)
@@ -57,9 +57,10 @@ the base prompt remains the bounded `HarnessConfig` default, output formatting
 stays at the frontend edge, and context limits remain a Core contract.
 
 Verification completed on Windows: workspace `cargo check --workspace
---all-targets`, scoped Clippy with `-D warnings`, and the complete affected
-crate test run pass serially (`mini-agent-host` 163, CLI integration 35, App
-Server 22, ACP 3, protocol 4). CLI and ACP/App Server protocol tests prove
+--all-targets`, scoped Clippy with `-D warnings`, and the affected provider
+seam test run pass serially (`mini-agent-capabilities` 111,
+`mini-agent-host` 55, App Server 23, ACP 4, protocol 4). CLI and ACP/App
+Server protocol tests prove
 unavailable profile requests are rejected, and a CLI integration test proves
 `ask --no-tools` sends an empty tool catalog and omits extension instructions.
 Profile-file parsing and CLI integration tests also pass.
@@ -79,7 +80,7 @@ construction, and the selected-extension integration test proves an omitted
 MCP server is not started. The complete Windows workspace test run passes
 serially.
 
-The Stage 2 migration has started with a real provider boundary: the new
+The Stage 2 migration established a real provider boundary: the new
 `mini-agent-capabilities` crate now owns the image, OpenAI-compatible model,
 sandbox, security, marketplace, workspace, process, web, subagent, session,
 Result Store, skills, and MCP implementations. Host keeps compatibility
@@ -88,6 +89,17 @@ extension discovery, and MCP loading through the capabilities registry. The
 resolved profile carries an allowlisted `modelProvider` identifier. Host no
 longer owns concrete Harness hands and feet; it retains profile resolution,
 context/workflow composition, and application-level binding.
+
+Provider selection now crosses the same bounded seam. The capabilities registry
+publishes stable IDs for model, tool, extension, and policy providers; the
+resolved `RuntimeProfile`, workspace profile file, and capability manifest carry
+those IDs without carrying live provider instances or secrets. App Server and
+ACP initialization accept an optional `providers` selector and fail closed when
+it does not match the frozen runtime. The standalone App Server applies the
+selector before constructing its first Thread, while in-process clients and ACP
+verify that their request matches the already assembled profile. Only the
+built-in provider IDs are available today; adding a new implementation requires
+registering it in `mini-agent-capabilities` before it can be selected.
 
 ## Problem
 
