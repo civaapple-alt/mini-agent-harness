@@ -222,8 +222,10 @@ python3 scripts/line_budget.py
 ```
 
   The line-budget report breaks Rust source down by the runtime layers: `core`,
-  `protocol`, `host`, `app-server`, `acp`, and `cli`, followed by the enforced
-  workspace total. Each layer and the
+  `protocol`, `capabilities`, `host`, `app-server`, `acp`, and `cli`, followed by the enforced
+  workspace total. `capabilities` is the separately reported provider
+  implementation group behind Host and is not part of the runtime-layer gate.
+  Each layer and the
   workspace total also show `production`, `unit`, and `integration` lines:
   inline `#[cfg(test)]` modules and `*_tests.rs` files are counted as unit
   tests, while Rust files below a `tests/` directory are counted as

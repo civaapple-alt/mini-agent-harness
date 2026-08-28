@@ -1,6 +1,6 @@
 # Host Capability Profiles and Runtime Seams
 
-Status: Stage 3 frontend routing and provider selection implemented; Stage 4 line-budget reduction pending (Windows scope)
+Status: Stage 3 frontend routing and provider selection implemented; Stage 4 workspace-budget reduction pending (Windows scope)
 Date: 2026-08-28
 
 ## Implementation update (2026-08-28)
@@ -65,8 +65,11 @@ unavailable profile requests are rejected, and a CLI integration test proves
 `ask --no-tools` sends an empty tool catalog and omits extension instructions.
 Profile-file parsing and CLI integration tests also pass.
 The line-budget report now separates capabilities from Host and ACP from App
-Server; the current runtime total is 28,277/20,000 lines, so Stage 4 must
-reduce implementation/test weight or revise the budget with explicit evidence.
+Server. Under the established gate, runtime (`core + protocol + host +
+app-server`) is 14,414/20,000 lines; capabilities is 13,863 lines and remains
+separately visible as provider implementation weight. All Rust source is
+36,888/30,000 lines, so Stage 4 must reduce workspace implementation/test
+weight or revise that budget with explicit evidence.
 Source-specific rule-body resolution (the current source fields select and
 diagnoses bounded inputs rather than parse user-authored rule bodies) is
 resolved by the fail-closed design: rule bodies are never accepted as an

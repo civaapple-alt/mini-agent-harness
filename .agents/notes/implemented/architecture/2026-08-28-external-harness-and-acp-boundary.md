@@ -6,8 +6,10 @@ Status: implemented
 
 The external harness boundary is implemented in four conceptual layers:
 
-- `mini-agent-host` owns provider, tool, MCP, skills, policy, workspace,
-  session, trace, and workflow composition through `RuntimeBuilder`.
+- `mini-agent-host` resolves profiles and composes runtime/workflow state
+  through `RuntimeBuilder`; concrete provider, tool, MCP, skills, policy,
+  workspace, session, and Result Store implementations live in
+  `mini-agent-capabilities`.
 - `mini-agent-cli` consumes that host as a frontend and keeps REPL, headless,
   and output concerns at the edge.
 - `mini-agent-app-server-protocol` defines versioned JSON-RPC DTOs for
@@ -50,18 +52,16 @@ Using temporary Zig compiler/linker/archive wrappers on Windows,
 `cargo check --workspace --target x86_64-unknown-linux-gnu` also passed. This
 is a Linux-target compile check, not a native Linux runtime or CI result.
 
-The source-line gate currently reports the runtime layers at 25,863/20,000 and
-all Rust source at 34,377/30,000. The diagnostic layer breakdown is core
-4,058, protocol 699, host 18,213, app-server 2,893, acp 667, and CLI 7,847
-lines. The report now also separates production, unit, and integration lines:
-core `1,781/1,928/349`, protocol `519/180/0`, host `13,117/5,096/0`,
-app-server `2,105/788/0`, acp `557/110/0`, CLI `4,904/486/2,457`, in that
-order. The ACP edge is reported separately and is excluded from the runtime
-limit, but remains included in the workspace total. The current runtime and
-workspace overage remains an intentional follow-up gate. The host extraction
-preserves the existing CLI implementation while the new app-server, wire
-protocol, and ACP edge add boundary code. This proposal does not claim that
-the repository-wide line budget has passed; the next cleanup stage must remove
+The source-line report separates the provider implementation group from the
+runtime-layer gate. The current breakdown is core 4,058, protocol 699,
+capabilities 13,863, host 4,787, app-server 4,870, acp 922, and CLI 7,689
+lines. The runtime gate (`core + protocol + host + app-server`) is
+14,414/20,000; capabilities and ACP remain separately visible and excluded
+from that gate. All Rust source is 36,888/30,000, so the repository-wide line
+budget remains an intentional follow-up gate. The host extraction preserves
+the existing CLI implementation while provider implementations are isolated
+behind the capabilities group. This proposal does not claim that the
+repository-wide line budget has passed; the next cleanup stage must remove
 duplication or split the budgeted change before release.
 
 These are local Windows results plus a Linux-target compile check. Native

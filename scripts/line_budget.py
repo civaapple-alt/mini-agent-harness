@@ -7,8 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_LIMIT = 20_000
 PROJECT_LIMIT = 30_000
 
-# Keep the report aligned with the conceptual runtime layers. Protocol and ACP
-# are reported separately so each externally visible boundary remains visible.
+# Keep the report aligned with the conceptual runtime layers. Capabilities are
+# reported separately because they are provider implementations behind Host;
+# protocol and ACP are also reported separately so each external boundary stays
+# visible.
 LAYERS = (
     ("core", ("mini-agent-core",)),
     ("protocol", ("mini-agent-protocol",)),
@@ -24,7 +26,6 @@ LAYERS = (
 RUNTIME_PACKAGES = (
     "mini-agent-core",
     "mini-agent-protocol",
-    "mini-agent-capabilities",
     "mini-agent-host",
     "mini-agent-app-server",
     "mini-agent-app-server-protocol",
@@ -213,7 +214,7 @@ def check(root: Path = ROOT) -> int:
         layer_counts(root, RUNTIME_PACKAGES)
     )
     print(
-        f"runtime (core + protocol + capabilities + host + app-server): "
+        f"runtime (core + protocol + host + app-server): "
         f"{runtime_total}/{RUNTIME_LIMIT} lines "
         f"(production {runtime_production}, unit {runtime_unit}, "
         f"integration {runtime_integration})"
