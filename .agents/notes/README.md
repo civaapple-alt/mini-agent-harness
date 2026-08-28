@@ -96,11 +96,6 @@ If a proposed approach is rejected during review:
 |---|---|---|
 | 2026-08-27 | [Stabilization and Evidence Gates](proposed/process/2026-08-27-stabilization-and-evidence-gates.md) | Close runtime boundary defects, verify complete workflows, and align release claims with evidence before expanding scope |
 
-#### Features & Extensions (`proposed/feature/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-26 | [Prompt Weight Evaluation](proposed/feature/2026-08-26-prompt-weight-evaluation.md) | Real-model evaluation of minimal vs verbose system prompt policies |
-
 ---
 
 ### Active Implemented Notes (`implemented/`)
@@ -165,6 +160,8 @@ If a proposed approach is rejected during review:
 |---|---|---|
 | 2026-08-24 | [Un-Settled Effect Replay](rejected/feature/2026-08-24-un-settled-effect-replay.md) | Replaying interrupted effects produces duplicate non-idempotent actions |
 | 2026-08-24 | [Unrestricted Whole-File Rewrite](rejected/feature/2026-08-24-unrestricted-whole-file-rewrite.md) | Full rewrites drop unrelated code in long contexts; exact replacement is safer |
+| 2026-08-24 | [Prompt Weight Protocol](rejected/feature/2026-08-24-prompt-weight.md) | Prompt-weight benchmarking is optional and outside the project mainline |
+| 2026-08-26 | [Prompt Weight Evaluation](rejected/feature/2026-08-26-prompt-weight-evaluation.md) | Real-model prompt comparison is optional and outside the project mainline |
 
 ---
 
@@ -177,7 +174,6 @@ If a proposed approach is rejected during review:
 | 2026-08-24 | [Edit Surface Comparison](archived/experiments/2026-08-24-edit-surface.md) | Exact unique replacement preserves collateral content over full rewrite |
 | 2026-08-24 | [Tool-Output Retention](archived/experiments/2026-08-24-tool-output-retention.md) | Head-plus-tail truncation preserves both orientation and final verdict |
 | 2026-08-24 | [Effect Recovery Boundary](archived/experiments/2026-08-24-effect-recovery.md) | Replay safety simulation across non-idempotent crash boundaries |
-| 2026-08-24 | [Prompt Weight Protocol](archived/experiments/2026-08-24-prompt-weight.md) | Benchmark protocol comparing minimal vs expanded operational system prompts |
 
 #### Features (`archived/feature/`)
 | Date | Title | Focus |

@@ -1,6 +1,11 @@
 # Real-Model Evaluation of Minimalist vs Heavy System Prompts
 
-Status: proposed
+Status: rejected — Real-model prompt-weight evaluation is outside the project mainline.
+
+## Rejection
+
+Do not schedule this benchmark as a project delivery task. Keep the existing
+example and protocol only as an optional, explicitly authorized experiment.
 
 ## Context
 
@@ -8,7 +13,7 @@ Agent frameworks often inject extensive persona, guideline, and formatting instr
 
 ## Proposal
 
-Execute the prompt weight evaluation benchmark ([Prompt Weight Protocol](../../archived/experiments/2026-08-24-prompt-weight.md)) against real authorized provider models (e.g. DeepSeek V4 / OpenAI models):
+Execute the prompt weight evaluation benchmark ([Prompt Weight Protocol](2026-08-24-prompt-weight.md)) against real authorized provider models (e.g. DeepSeek V4 / OpenAI models):
 1. Fix all WHAT parameters (task fixture, verifiers, tool catalog).
 2. Compare Treatment A (minimal prompt: ~15 words) against Treatment B (verbose prompt: ~400 words with formatting rules).
 3. Record latency, token consumption, model step counts, and deterministic verification pass rates in JSONL traces.

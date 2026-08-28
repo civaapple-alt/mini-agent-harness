@@ -1,11 +1,19 @@
 # System-Prompt Weight Experiment Protocol
 
-Status: implemented
-Archived: 2026-08-24
+Status: rejected — Prompt-weight benchmarking is outside the project mainline and remains optional.
 
 ## Status
 
-The repeatable evaluation entry point is implemented. No model-backed result has been recorded yet because running it consumes provider capacity and must be an explicit operator action.
+The repeatable evaluation entry point exists as an optional example. No
+model-backed result has been recorded because running it consumes provider
+capacity and must be an explicit operator action.
+
+## Rejection
+
+This experiment is not a mainline task. The runtime and prompt policy should be
+kept focused on deterministic execution behavior and bounded integration
+evidence; comparative prompt-weight benchmarking can be run independently when
+an operator explicitly needs it.
 
 ## Question
 
@@ -20,7 +28,7 @@ Does an expanded operational system prompt improve tool-use correctness enough t
 - treatment order alternated across tasks and repetitions;
 - full ordered events, latency, and reported token usage in JSONL.
 
-Only the system prompt changes. The prompt fixtures are [minimal](../../../../docs/experiments/fixtures/prompt-weight-minimal.txt) and [expanded](../../../../docs/experiments/fixtures/prompt-weight-expanded.txt). They have aligned operational intent but are not claimed to be logically identical.
+Only the system prompt changes. The prompt fixtures are [minimal](resources/prompt-weight/prompt-weight-minimal.txt) and [expanded](resources/prompt-weight/prompt-weight-expanded.txt). They have aligned operational intent but are not claimed to be logically identical.
 
 ## Run
 

@@ -21,10 +21,12 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
-const MINIMAL_PROMPT: &str =
-    include_str!("../../../docs/experiments/fixtures/prompt-weight-minimal.txt");
-const EXPANDED_PROMPT: &str =
-    include_str!("../../../docs/experiments/fixtures/prompt-weight-expanded.txt");
+const MINIMAL_PROMPT: &str = include_str!(
+    "../../../.agents/notes/rejected/feature/resources/prompt-weight/prompt-weight-minimal.txt"
+);
+const EXPANDED_PROMPT: &str = include_str!(
+    "../../../.agents/notes/rejected/feature/resources/prompt-weight/prompt-weight-expanded.txt"
+);
 const HELP: &str = "prompt-weight experiment\n\nUSAGE:\n    cargo run -p mini-agent-cli --example prompt_weight -- [--runs N] [--output PATH]\n\nEach repetition normally issues 12 and may issue up to 18 model responses. Output paths must not already exist.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
