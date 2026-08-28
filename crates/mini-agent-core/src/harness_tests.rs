@@ -381,6 +381,14 @@ async fn preserves_structured_tool_policy_outcome_in_events() {
             ..
         }
     )));
+    assert!(harness.messages().iter().any(|message| matches!(
+        message,
+        Message::Tool {
+            outcome: Some(ToolExecutionStatus::NeedsApproval),
+            is_error: true,
+            ..
+        }
+    )));
 }
 
 #[tokio::test]

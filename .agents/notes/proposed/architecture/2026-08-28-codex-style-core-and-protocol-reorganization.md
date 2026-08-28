@@ -339,6 +339,8 @@ The following pieces are implemented in the current workspace:
   adapter. Existing approval, Plan Mode, timeout, and circuit-breaker results
   are classified as `NeedsApproval`, `Deferred`, or `Retryable` while their
   user-visible error content remains unchanged;
+- the host adapter has deterministic coverage for rejected approval, deferred
+  Plan Mode, retryable timeout, and ordinary failure classification;
 - `mini-agent-core` now exposes `ToolRouter` with `ToolRegistry` as a
   compatibility alias. The router owns capability lookup, while a host tool
   may override `Tool::execute_outcome` to report policy-aware results;
