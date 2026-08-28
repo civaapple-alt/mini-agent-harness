@@ -1,4 +1,6 @@
 use super::*;
+use crate::workspace::ApprovalMode;
+use std::process::Command;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
@@ -33,7 +35,7 @@ fn discovers_project_and_plugin_skills_with_progressive_disclosure() {
     assert!(!prompt.contains("MUST LOAD ON DEMAND"));
     let fingerprint = discovery.prompt_fingerprint().unwrap().unwrap();
     assert_eq!(fingerprint.len(), 16);
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&root);
 }
 
 #[test]
@@ -128,6 +130,74 @@ fn discovers_stdio_and_http_mcp_transports() {
     );
     assert!(discovery.diagnostics().is_empty());
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn selected_extension_starts_only_selected_mcp_server() {
+    let root = test_root();
+    let plugin = root.join(".agents/plugins/tools");
+    write_plugin_manifest(&plugin, "example.tools");
+    let script = root.join("server.py");
+    fs::write(
+        &script,
+        r#"import json
+import sys
+
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "initialize":
+        result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "fixture", "version": "1.0.0"}}
+    elif method == "tools/list":
+        result = {"resultType": "complete", "tools": []}
+    else:
+        continue
+    print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+"#,
+    )
+    .unwrap();
+    fs::write(
+        plugin.join("mcp.json"),
+        serde_json::to_vec_pretty(&json!({
+            "$schema": MCP_SCHEMA,
+            "mcpServers": {
+                "keep": {
+                    "type": "stdio",
+                    "command": python_command(),
+                    "args": [script.to_string_lossy()]
+                },
+                "drop": {
+                    "type": "stdio",
+                    "command": "mini-agent-command-must-not-run"
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut discovery = discover(&root);
+    discovery.retain_selected(&["keep".to_string()]);
+    assert_eq!(discovery.mcp_server_labels(), ["example.tools/keep"]);
+    assert!(
+        !discovery
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.contains("drop"))
+    );
+
+    {
+        let loaded = crate::mcp::load(
+            discovery.mcp_servers(),
+            crate::workspace::ApprovalController::new(ApprovalMode::Automatic),
+        );
+        assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+        assert_eq!(
+            loaded.loaded_servers,
+            std::collections::BTreeSet::from(["example.tools/keep".to_string()])
+        );
+    }
+    remove_test_root(&root);
 }
 
 #[test]
@@ -513,6 +583,29 @@ fn write_skill(root: &Path, name: &str, description: &str, body: &str) {
         format!("---\nname: {name}\ndescription: {description}\n---\n{body}\n"),
     )
     .unwrap();
+}
+
+fn python_command() -> String {
+    ["python3", "python"]
+        .into_iter()
+        .find(|command| {
+            Command::new(command)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+        })
+        .expect("Python 3 is required by the repository verification scripts")
+        .to_string()
+}
+
+fn remove_test_root(root: &Path) {
+    for _ in 0..50 {
+        match fs::remove_dir_all(root) {
+            Ok(()) => return,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
 }
 
 fn test_root() -> PathBuf {

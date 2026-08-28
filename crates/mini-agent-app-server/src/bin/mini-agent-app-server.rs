@@ -1,7 +1,7 @@
 use mini_agent_app_server::AppServerError;
 use mini_agent_app_server::ApprovalBroker;
 use mini_agent_app_server::capability_manifest_to_protocol;
-use mini_agent_app_server::serve_stdio_with_approval_and_manifest;
+use mini_agent_app_server::serve_stdio_with_startup;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
 use mini_agent_core::ThreadId;
@@ -22,67 +22,63 @@ use tokio::io::BufReader;
 async fn main() -> Result<(), Box<dyn Error>> {
     let runtime_config = RuntimeConfig::load().map_err(std::io::Error::other)?;
     let broker = ApprovalBroker::new();
-    let approval_broker = broker.clone();
-    let approval = ApprovalController::with_policy_and_callback(
-        ApprovalMode::Interactive,
-        mini_agent_host::security::SecurityPolicy::for_preset(SecurityPreset::Default),
-        move |action| {
-            approval_broker
-                .request(action)
-                .map_err(mini_agent_core::ToolError)
-        },
-    );
     let base_profile = match env::var("MINI_AGENT_PROFILE") {
         Ok(name) => RuntimeProfile::builtin(&name)
             .ok_or_else(|| std::io::Error::other(format!("unknown MINI_AGENT_PROFILE `{name}`")))?,
         Err(env::VarError::NotPresent) => RuntimeProfile::interactive_default(),
         Err(error) => return Err(Box::new(error) as Box<dyn Error>),
     };
-    let profile = load_workspace_profile(&runtime_config.workspace(), base_profile)
-        .map_err(std::io::Error::other)?;
-    let factory_profile = profile.clone();
-    let runtime = HostRuntimeFactory::new(
-        &runtime_config,
-        approval,
-        HarnessConfig::default(),
-        SandboxKind::Native,
-    )
-    .build(profile, Default::default())
-    .map_err(std::io::Error::other)?;
-    let capability_manifest = capability_manifest_to_protocol(&runtime.capability_manifest);
-    let thread_id = ThreadId::new("default");
-    let thread = Thread::new(thread_id.clone(), runtime.harness);
-    let factory_broker = broker.clone();
-    let server = mini_agent_app_server::AppServer::with_thread_factory(
-        ThreadStart::new(thread_id),
-        vec![thread],
-        move |thread_id| {
-            let runtime_config = RuntimeConfig::load()
-                .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-            let callback_broker = factory_broker.clone();
-            let approval = ApprovalController::with_policy_and_callback(
-                ApprovalMode::Interactive,
-                mini_agent_host::security::SecurityPolicy::for_preset(SecurityPreset::Default),
-                move |action| {
-                    callback_broker
-                        .request(action)
-                        .map_err(mini_agent_core::ToolError)
-                },
-            );
-            let runtime = HostRuntimeFactory::new(
-                &runtime_config,
-                approval,
-                HarnessConfig::default(),
-                SandboxKind::Native,
-            )
-            .build(factory_profile.clone(), Default::default())
-            .map_err(AppServerError::Checkpoint)?;
-            Ok(Thread::new(thread_id, runtime.harness))
-        },
-    );
+    let startup_config = runtime_config.clone();
+    let startup_broker = broker.clone();
     let stdin = BufReader::new(tokio::io::stdin());
     let stdout = tokio::io::stdout();
-    serve_stdio_with_approval_and_manifest(server, broker, capability_manifest, stdin, stdout)
-        .await?;
+    serve_stdio_with_startup(broker, stdin, stdout, move |params| {
+        let base_profile = match params.profile {
+            Some(name) => RuntimeProfile::builtin(&name)
+                .ok_or_else(|| format!("unknown startup profile `{name}`"))?,
+            None => base_profile.clone(),
+        };
+        let profile = load_workspace_profile(&startup_config.workspace(), base_profile)?;
+        let factory_profile = profile.clone();
+        let approval = approval_for(startup_broker.clone());
+        let runtime = HostRuntimeFactory::new(
+            &startup_config,
+            approval,
+            HarnessConfig::default(),
+            SandboxKind::Native,
+        )
+        .build(profile, Default::default())?;
+        let capability_manifest = capability_manifest_to_protocol(&runtime.capability_manifest);
+        let thread_id = ThreadId::new("default");
+        let thread = Thread::new(thread_id.clone(), runtime.harness);
+        let factory_broker = startup_broker.clone();
+        let factory_config = startup_config.clone();
+        let server = mini_agent_app_server::AppServer::with_thread_factory(
+            ThreadStart::new(thread_id),
+            vec![thread],
+            move |thread_id| {
+                let approval = approval_for(factory_broker.clone());
+                let runtime = HostRuntimeFactory::new(
+                    &factory_config,
+                    approval,
+                    HarnessConfig::default(),
+                    SandboxKind::Native,
+                )
+                .build(factory_profile.clone(), Default::default())
+                .map_err(AppServerError::Checkpoint)?;
+                Ok(Thread::new(thread_id, runtime.harness))
+            },
+        );
+        Ok((server, capability_manifest))
+    })
+    .await?;
     Ok(())
+}
+
+fn approval_for(broker: ApprovalBroker) -> ApprovalController {
+    ApprovalController::with_policy_and_callback(
+        ApprovalMode::Interactive,
+        mini_agent_host::security::SecurityPolicy::for_preset(SecurityPreset::Default),
+        move |action| broker.request(action).map_err(mini_agent_core::ToolError),
+    )
 }

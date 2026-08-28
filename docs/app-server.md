@@ -48,9 +48,12 @@ Host construction is kept outside the service worker: callers use
 runtime to the App Server or an edge adapter. The App Server does not discover
 extensions or infer capabilities from transport method names.
 
-`initialize.params.profile` is optional. When supplied, it must match the
-allowlisted profile already used to build the service; unavailable profile
-names are rejected before initialization. The initialize result includes the
+`initialize.params.profile` is optional for the stdio server. The standalone
+server reads the first initialize request before constructing its first Thread,
+resolves the requested allowlisted profile plus the bounded workspace profile,
+and freezes that selection for the service lifetime. Unavailable profile names
+are rejected before Thread construction. For an already constructed embedded
+runtime, the request must match the active profile. The initialize result includes the
 selected `profile` and structured `capabilityManifest` with enabled,
 disabled, extension depth, selected extension names, prompt, and rule source
 metadata, precedence, typed rule policy, per-source rule status, resolver

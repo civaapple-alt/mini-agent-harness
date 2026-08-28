@@ -83,7 +83,6 @@ If a proposed approach is rejected during review:
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Make App Server the single CLI, JSON-RPC, and ACP execution base and remove parallel turn orchestration |
-| 2026-08-28 | [Host Capability Profiles and Runtime Seams](proposed/architecture/2026-08-28-host-capability-profiles-and-runtime-seams.md) | Let REPL, ACP, and headless callers assemble explicit capability profiles, prompt/rule sources, and observable `--no-tools` scope |
 
 #### Bug Fixes (`proposed/bug-fix/`)
 
@@ -123,6 +122,7 @@ If a proposed approach is rejected during review:
 | 2026-08-27 | [Goal and Plan Subsystem Architecture](implemented/architecture/2026-08-27-goal-and-plan-subsystem-architecture.md) | Explicit triggers, Living Plan protocol (plan.md), and autonomous verification state machine (goal/) |
 | 2026-08-27 | [web_fetch / read_image session impact](implemented/architecture/2026-08-27-web-fetch-and-read-image-session-impact.md) | Envelope-only history; resume/fork attachments; compact empty tools; prefix-cache misses |
 | 2026-08-28 | [Interactive Steer and Follow-up Run Control](implemented/architecture/2026-08-28-steer-and-follow-up-run-control.md) | `/steer` priority correction, FIFO follow-up queue, cooperative safe checkpoints, and durable `steered` turns |
+| 2026-08-28 | [Host Capability Profiles and Runtime Seams](implemented/architecture/2026-08-28-host-capability-profiles-and-runtime-seams.md) | CLI/App Server/ACP profile selection, regular-agent prompt/rule scope, bounded manifests, startup profile resolution, and selected MCP loading |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |

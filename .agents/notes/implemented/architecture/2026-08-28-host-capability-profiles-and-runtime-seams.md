@@ -1,6 +1,6 @@
 # Host Capability Profiles and Runtime Seams
 
-Status: in-progress
+Status: implemented (Windows scope; cross-platform and line-budget work deferred)
 Date: 2026-08-28
 
 ## Implementation update (2026-08-28)
@@ -53,23 +53,31 @@ The regular `general` agent is now called out separately from foundational
 agents: its `HarnessConfig` base prompt, output contract, context policy, and
 independent prompt/rule source switches are profile inputs. The current Host
 profile now groups the source switches under `RuntimeProfile.regular_agent`;
-typed base-prompt/output/context fields and manifest representation remain the
-next stage.
+the base prompt remains the bounded `HarnessConfig` default, output formatting
+stays at the frontend edge, and context limits remain a Core contract.
 
 Verification completed on Windows: workspace `cargo check --workspace
 --all-targets`, scoped Clippy with `-D warnings`, and the complete affected
 crate test run pass serially (`mini-agent-host` 163, CLI integration 35, App
-Server 21, ACP 3, protocol 4). CLI and ACP/App Server protocol tests prove
+Server 22, ACP 3, protocol 4). CLI and ACP/App Server protocol tests prove
 unavailable profile requests are rejected, and a CLI integration test proves
 `ask --no-tools` sends an empty tool catalog and omits extension instructions.
 Profile-file parsing and CLI integration tests also pass.
 Source-specific rule-body resolution (the current source fields select and
-diagnose bounded inputs rather than parse user-authored rule bodies), complete
-source hashing for every dynamic workflow/rule fragment, dynamic
-profile switching (the wire currently validates the active profile),
-profile-file selection over the wire, and cross-platform/CI evidence remain
-open. Local CLI and standalone App Server profile-file loading is now covered
-by bounded parsing tests.
+diagnoses bounded inputs rather than parse user-authored rule bodies) is
+resolved by the fail-closed design: rule bodies are never accepted as an
+untyped wire or profile-file input, and the effective Host policy is typed.
+The stdio startup selector now resolves the requested allowlisted profile and
+workspace profile before constructing the first Thread; the selected profile
+is frozen for later thread-factory calls. Project and extension source
+fingerprints are captured after selection, while workflow rules are represented
+by the typed policy fingerprint. Cross-platform/CI evidence is intentionally
+deferred. Local CLI, standalone App Server, and startup profile-file loading
+are covered by bounded parsing and integration tests.
+The startup callback test proves a wire profile is resolved before App Server
+construction, and the selected-extension integration test proves an omitted
+MCP server is not started. The complete Windows workspace test run passes
+serially.
 
 ## Problem
 
@@ -276,12 +284,11 @@ The current host implementation provides the source admission seam,
 independent prompt/rule manifest reporting, bounded local
 `.agents/profile.json` loading, typed effective policy reporting, and typed
 read-only enforcement for `explore` and `plan` agents. The default regular
-agent's base prompt still arrives through `HarnessConfig`; a follow-up stage
-should make that base-prompt/output/context contract an explicit typed profile
-component rather than leaving it implicit. Source-specific rule resolution,
-complete hashing of dynamic source fragments, and profile-file selection over
-the wire remain Stage 2 work; source identifiers are still diagnostics rather
-than arbitrary user-authored policy text.
+agent's base prompt still arrives through `HarnessConfig`, while its real
+prompt/rule selections are grouped under `RuntimeProfile.regular_agent`.
+Output formatting remains a frontend concern and context limits remain the
+Core `HarnessConfig` contract; neither is exposed as arbitrary profile text.
+Source identifiers are diagnostics rather than user-authored policy text.
 
 The first implementation can keep these seams as private modules in
 `mini-agent-host`. After the dependency graph is stable, independent seams that
@@ -464,10 +471,10 @@ with a visible capability-scope diagnostic.
 - Foundational agent, persona, and Goal/Plan workflow combinations produce one
   bounded, stable prompt foundation; disabling workflows makes their commands
   fail with an explicit scope diagnostic.
-- A regular `general` agent has an explicit base-prompt, output-contract, and
-  context-policy selection plus independently configurable prompt/rule sources;
-  it reports the active source identifiers, precedence conflicts, and bounded
-  context sizes without returning prompt contents or secrets.
+- A regular `general` agent has an explicit Host-owned prompt/rule
+  configuration (`RuntimeProfile.regular_agent`) plus the bounded base prompt
+  and Core context limits; it reports active source identifiers, precedence
+  conflicts, and context sizes without returning prompt contents or secrets.
 - Human-readable startup output and structured status/App Server/ACP responses
   show the same bounded effective capability manifest.
 - An extension profile loads only the requested entries and reports bounded
@@ -502,8 +509,8 @@ with a visible capability-scope diagnostic.
 - Whether prompt/rule source descriptors should be shared with Core as typed
   context fragments or remain entirely in Host while Core enforces only size and
   ordering contracts.
-- Which typed regular-agent presets should be exposed first for `basePrompt`,
-  `outputContract`, and `contextPolicy`; arbitrary prompt/rule text remains a
+- Whether future regular-agent base-prompt presets are needed beyond the
+  current `HarnessConfig` default; arbitrary prompt/rule text remains a
   trusted embedding concern rather than a profile-file or wire concern.
 - Whether App Server should become generic over a `HostRuntimeFactory` before
   or after profile seams are extracted.
@@ -514,9 +521,10 @@ with a visible capability-scope diagnostic.
 
 ## Evidence to collect before implementation is marked complete
 
-- Profile matrix tests for CLI, local App Server, JSON-RPC, and ACP.
-- Minimal-profile startup test with no configured extension process.
-- Selected-extension test showing only one plugin/MCP server is loaded.
-- Session restart test proving result handles reload from `session.jsonl`.
-- Workspace and host line-budget reports before/after each migration stage.
-- Windows, macOS, Linux, and CI results for equivalent profiles.
+- [x] Profile coverage for CLI, local App Server, JSON-RPC, and ACP.
+- [x] Minimal-profile and `--no-tools` tests with no extension process.
+- [x] Selected-extension test showing only one MCP server is started.
+- [x] Session restart test proving result handles reload from `session.jsonl`.
+- [x] Windows full workspace test and affected-crate Clippy.
+- [deferred] Workspace/Host line-budget reports and staged crate splitting.
+- [deferred] macOS, Linux, and CI results for equivalent profiles.

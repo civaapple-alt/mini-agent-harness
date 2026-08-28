@@ -537,8 +537,8 @@ pub async fn serve_stdio_with_approval_and_manifest<M, R, W>(
     server: AppServer<M>,
     approval: ApprovalBroker,
     capability_manifest: CapabilityManifest,
-    mut reader: R,
-    mut writer: W,
+    reader: R,
+    writer: W,
 ) -> Result<(), std::io::Error>
 where
     M: Model + Send + 'static,
@@ -550,6 +550,107 @@ where
         approval.clone(),
         capability_manifest,
     );
+    serve_connection(&mut connection, approval, reader, writer).await
+}
+
+/// Serves stdio after selecting the host profile from the first initialize
+/// request. The callback runs before a Thread or App Server is constructed,
+/// so profile selection is a startup decision and remains frozen for the
+/// service lifetime.
+pub async fn serve_stdio_with_startup<M, R, W, F>(
+    approval: ApprovalBroker,
+    mut reader: R,
+    mut writer: W,
+    startup: F,
+) -> Result<(), std::io::Error>
+where
+    M: Model + Send + 'static,
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+    F: FnOnce(InitializeParams) -> Result<(AppServer<M>, CapabilityManifest), String>,
+{
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).await?;
+    if read == 0 {
+        return Ok(());
+    }
+    let request = match serde_json::from_str::<JsonRpcRequest>(line.trim()) {
+        Ok(request) => request,
+        Err(error) => {
+            write_json_line(
+                &mut writer,
+                &JsonRpcResponse::error(None, JsonRpcError::parse_error(error.to_string())),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    if request.method != METHOD_INITIALIZE {
+        write_json_line(
+            &mut writer,
+            &JsonRpcResponse::error(
+                request.id.clone(),
+                JsonRpcError::invalid_request("first request must be initialize"),
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+    let params = match request.decode_params::<InitializeParams>() {
+        Ok(params) => params,
+        Err(error) => {
+            write_json_line(&mut writer, &JsonRpcResponse::error(request.id, error)).await?;
+            return Ok(());
+        }
+    };
+    if params.protocol_version != PROTOCOL_VERSION {
+        write_json_line(
+            &mut writer,
+            &JsonRpcResponse::error(
+                request.id,
+                JsonRpcError::server_error(format!(
+                    "unsupported protocol version {}; expected {PROTOCOL_VERSION}",
+                    params.protocol_version
+                )),
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+    let (server, capability_manifest) = match startup(params) {
+        Ok(started) => started,
+        Err(error) => {
+            write_json_line(
+                &mut writer,
+                &JsonRpcResponse::error(request.id, JsonRpcError::server_error(error)),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let mut connection = AppServerConnection::with_approval_broker_and_capability_manifest(
+        server,
+        approval.clone(),
+        capability_manifest,
+    );
+    if let Some(response) = connection.handle_request(request).await {
+        write_json_line(&mut writer, &response).await?;
+    }
+    serve_connection(&mut connection, approval, reader, writer).await
+}
+
+async fn serve_connection<M, R, W>(
+    connection: &mut AppServerConnection<M>,
+    approval: ApprovalBroker,
+    mut reader: R,
+    mut writer: W,
+) -> Result<(), std::io::Error>
+where
+    M: Model + Send + 'static,
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let server = connection.server.clone();
     let mut events = server.subscribe();
     let mut line = String::new();
     loop {
@@ -782,6 +883,39 @@ mod tests {
 
         assert_eq!(response.error.unwrap().code, -32602);
         assert!(!connection.initialized());
+    }
+
+    #[tokio::test]
+    async fn selects_profile_before_starting_stdio_service() {
+        let request = JsonRpcRequest::request(
+            1,
+            METHOD_INITIALIZE,
+            serde_json::json!(InitializeParams {
+                protocol_version: PROTOCOL_VERSION,
+                client_name: "startup-profile-test".to_string(),
+                client_version: "0".to_string(),
+                capabilities: ClientCapabilities::default(),
+                profile: Some("acp".to_string()),
+            }),
+        );
+        let input = format!("{}\n", serde_json::to_string(&request).unwrap());
+        let mut output = Vec::new();
+        let broker = ApprovalBroker::new();
+        serve_stdio_with_startup(
+            broker,
+            tokio::io::BufReader::new(std::io::Cursor::new(input.into_bytes())),
+            &mut output,
+            |params| {
+                assert_eq!(params.profile.as_deref(), Some("acp"));
+                let mut manifest = default_capability_manifest();
+                manifest.profile = "acp".to_string();
+                Ok((connection().server, manifest))
+            },
+        )
+        .await
+        .unwrap();
+        let response: JsonRpcResponse = serde_json::from_slice(output.trim_ascii()).unwrap();
+        assert_eq!(response.result.unwrap()["profile"], "acp");
     }
 
     #[tokio::test]
