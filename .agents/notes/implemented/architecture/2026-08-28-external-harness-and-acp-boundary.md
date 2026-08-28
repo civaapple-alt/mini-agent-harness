@@ -67,6 +67,8 @@ change before release.
 Follow-up verification on 2026-08-29 at `e317b14` passed
 `cargo test --workspace --all-targets -- --test-threads=1` and
 `cargo clippy --workspace --all-targets --locked -- -D warnings` on Windows.
+The same revision passed `cargo +1.88.0 check --workspace --all-targets
+--locked` and `cargo build --workspace --release --locked`.
 The worktree is clean. Native macOS/Linux runtime, candidate CI, and a real
 provider Goal run remain unverified.
 

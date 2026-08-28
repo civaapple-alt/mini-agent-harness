@@ -74,7 +74,9 @@ Current evidence update (2026-08-29, `e317b14`): the complete workspace
 workspace Clippy with `-D warnings`. The line report is now runtime
 `14,384/20,000` and all Rust source `36,858/30,000`; the latter remains an
 open gate. The current tree is committed and clean, but candidate CI and
-native macOS/Linux runtime evidence are still absent.
+native macOS/Linux runtime evidence are still absent. MSRV
+`cargo +1.88.0 check --workspace --all-targets --locked` and
+`cargo build --workspace --release --locked` also passed on Windows.
 
 ## Proposal
 

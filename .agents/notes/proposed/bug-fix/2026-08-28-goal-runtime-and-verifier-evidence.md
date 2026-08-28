@@ -52,6 +52,9 @@ evidence below is from the current working tree:
   capabilities 111, CLI 16 unit + 35 interactive + 3 prompt-weight + 3
   real-LLM example tests, core 40 unit + 2 integration, Host 55, and the
   remaining protocol suites). Workspace Clippy with `-D warnings` also passed.
+- The same committed tree passed `cargo +1.88.0 check --workspace
+  --all-targets --locked` and `cargo build --workspace --release --locked` on
+  Windows.
 - `cargo +1.88.0 check --workspace --locked` passes on Windows, covering the
   new host, app-server, wire protocol, and ACP crates against the declared
   minimum compiler.

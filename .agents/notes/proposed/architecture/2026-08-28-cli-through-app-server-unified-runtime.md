@@ -43,7 +43,9 @@ Follow-up verification on 2026-08-29 at `e317b14` passed
 current Windows evidence; it does not close the cross-platform CI or real
 provider gaps. `python scripts/line_budget.py` still reports the real
 workspace overage (`36,858/30,000`) while the runtime gate remains within
-budget.
+budget. The same revision also passed
+`cargo +1.88.0 check --workspace --all-targets --locked` and
+`cargo build --workspace --release --locked` on Windows.
 
 The runtime simplification follow-up now makes session JSONL the single durable
 record and removes the external trace writer/replay surface. Result handles are
