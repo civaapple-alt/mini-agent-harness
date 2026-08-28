@@ -146,10 +146,20 @@ impl<M: Model> Thread<M> {
         steering_mode: SteeringMode,
     ) -> Result<TurnResult, ThreadError<M::Error>> {
         let id = self.begin_turn(&input)?;
+        observer.observe(&Event::TurnStarted {
+            mode: input.mode,
+            prompt: input.text.clone(),
+        });
         let outcome = self
             .harness
             .run_with_control_mode(input.text, observer, control, steering_mode)
             .await;
+        observer.observe(&Event::TurnFinished {
+            status: outcome
+                .as_ref()
+                .map(status_for_outcome)
+                .unwrap_or(TurnStatus::Failed),
+        });
         self.finish_turn(id, outcome)
     }
 
@@ -167,10 +177,20 @@ impl<M: Model> Thread<M> {
             turn_id: id.clone(),
             next_sequence: self.next_event_sequence,
         };
+        observer.observe(&Event::TurnStarted {
+            mode: input.mode,
+            prompt: input.text.clone(),
+        });
         let outcome = self
             .harness
             .run_with_control_mode(input.text, &mut observer, control, steering_mode)
             .await;
+        observer.observe(&Event::TurnFinished {
+            status: outcome
+                .as_ref()
+                .map(status_for_outcome)
+                .unwrap_or(TurnStatus::Failed),
+        });
         self.next_event_sequence = observer.next_sequence;
         self.finish_turn(id, outcome)
     }
@@ -235,12 +255,7 @@ impl<M: Model> Thread<M> {
     ) -> Result<TurnResult, ThreadError<M::Error>> {
         match outcome {
             Ok(outcome) => {
-                let status = match outcome.stop_reason {
-                    crate::StopReason::Completed => TurnStatus::Completed,
-                    crate::StopReason::StepLimit => TurnStatus::StepLimit,
-                    crate::StopReason::Steered => TurnStatus::Steered,
-                    crate::StopReason::Cancelled => TurnStatus::Cancelled,
-                };
+                let status = status_for_outcome(&outcome);
                 self.status = ThreadStatus::Idle;
                 Ok(TurnResult {
                     id,
@@ -253,6 +268,15 @@ impl<M: Model> Thread<M> {
                 Err(ThreadError::Harness(error))
             }
         }
+    }
+}
+
+fn status_for_outcome(outcome: &RunOutcome) -> TurnStatus {
+    match outcome.stop_reason {
+        crate::StopReason::Completed => TurnStatus::Completed,
+        crate::StopReason::StepLimit => TurnStatus::StepLimit,
+        crate::StopReason::Steered => TurnStatus::Steered,
+        crate::StopReason::Cancelled => TurnStatus::Cancelled,
     }
 }
 

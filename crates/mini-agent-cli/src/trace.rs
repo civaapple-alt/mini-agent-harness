@@ -1,4 +1,5 @@
 use mini_agent_core::Event;
+use mini_agent_core::EventEnvelope;
 use mini_agent_core::RunFailure;
 use mini_agent_core::StopReason;
 use mini_agent_core::ToolCall;
@@ -47,16 +48,23 @@ pub fn load_events(path: &Path) -> Result<Vec<Event>, String> {
         return Ok(Vec::new());
     }
 
-    // Try parsing as native observation trace events
+    // Parse native events and protocol envelopes. Envelopes are unwrapped for
+    // the legacy replay API while retaining their metadata in the trace file.
     let mut trace_events = Vec::new();
     let mut trace_err = None;
     for (line_no, line) in raw_lines.iter().enumerate() {
         match serde_json::from_str::<Event>(line) {
             Ok(event) => trace_events.push(event),
-            Err(e) => {
-                trace_err = Some(format!("error parsing event at line {}: {e}", line_no + 1));
-                break;
-            }
+            Err(e) => match serde_json::from_str::<EventEnvelope>(line) {
+                Ok(envelope) => trace_events.push(envelope.event),
+                Err(envelope_error) => {
+                    trace_err = Some(format!(
+                        "error parsing event at line {}: {e}; envelope: {envelope_error}",
+                        line_no + 1
+                    ));
+                    break;
+                }
+            },
         }
     }
 
@@ -82,6 +90,7 @@ pub fn compute_summary(path: &Path, events: &[Event]) -> TraceSummary {
 
     for event in events {
         match event {
+            Event::TurnStarted { .. } | Event::TurnFinished { .. } => {}
             Event::RunStarted { prompt } => {
                 if summary.prompt.is_none() {
                     summary.prompt = Some(prompt.clone());
@@ -189,6 +198,13 @@ pub fn replay(path: &Path, json_output: bool) -> ExitCode {
 
     for event in &events {
         match event {
+            Event::TurnStarted { prompt, .. } => {
+                println!(
+                    "{} {}",
+                    styled_tag("turn[start]>", TagColor::Green, color),
+                    prompt
+                );
+            }
             Event::RunStarted { prompt } => {
                 println!(
                     "{} {}",
@@ -296,6 +312,17 @@ pub fn replay(path: &Path, json_output: bool) -> ExitCode {
                 println!(
                     "{} steps: {steps}, stop_reason: {stop_reason:?}",
                     styled_tag("run[finish]>", TagColor::Green, color)
+                );
+            }
+            Event::TurnFinished { status } => {
+                if in_reasoning || in_assistant {
+                    println!();
+                    in_reasoning = false;
+                    in_assistant = false;
+                }
+                println!(
+                    "{} status: {status:?}",
+                    styled_tag("turn[finish]>", TagColor::Green, color)
                 );
             }
             Event::RunFailed { reason } => {

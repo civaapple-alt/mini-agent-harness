@@ -191,17 +191,26 @@ async fn thread_cancellation_emits_ordered_events_and_settles() {
     assert_eq!(result.status, TurnStatus::Cancelled);
     assert_eq!(result.outcome.stop_reason, crate::StopReason::Cancelled);
     assert_eq!(thread.status(), ThreadStatus::Idle);
-    assert_eq!(sink.0.len(), 2);
+    assert_eq!(sink.0.len(), 4);
     assert_eq!(sink.0[0].sequence, 1);
     assert_eq!(sink.0[1].sequence, 2);
+    assert_eq!(sink.0[2].sequence, 3);
+    assert_eq!(sink.0[3].sequence, 4);
     assert_eq!(sink.0[0].thread_id, ThreadId::new("thread-1"));
     assert_eq!(sink.0[0].turn_id, Some(TurnId::new("turn-1")));
-    assert!(matches!(sink.0[0].event, Event::RunStarted { .. }));
+    assert!(matches!(sink.0[0].event, Event::TurnStarted { .. }));
+    assert!(matches!(sink.0[1].event, Event::RunStarted { .. }));
     assert!(matches!(
-        sink.0[1].event,
+        sink.0[2].event,
         Event::RunFinished {
             stop_reason: crate::StopReason::Cancelled,
             ..
+        }
+    ));
+    assert!(matches!(
+        sink.0[3].event,
+        Event::TurnFinished {
+            status: TurnStatus::Cancelled,
         }
     ));
 }

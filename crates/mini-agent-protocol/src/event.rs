@@ -4,12 +4,18 @@ use crate::StopReason;
 use crate::ThreadId;
 use crate::ToolCall;
 use crate::TurnId;
+use crate::TurnInputMode;
+use crate::TurnStatus;
 use serde::Deserialize;
 use serde::Serialize;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    TurnStarted {
+        mode: TurnInputMode,
+        prompt: String,
+    },
     RunStarted {
         prompt: String,
     },
@@ -49,6 +55,9 @@ pub enum Event {
     RunFinished {
         stop_reason: StopReason,
         steps: usize,
+    },
+    TurnFinished {
+        status: TurnStatus,
     },
     RunFailed {
         reason: RunFailure,

@@ -285,6 +285,8 @@ Stage 1 has started in the current working tree:
 - protocol now defines `EventEnvelope`/`EventSink` for ordered host projections,
   and `Thread::run_turn_with_events` attaches thread/turn identity while
   preserving the legacy `Observer` path;
+- the enveloped stream now includes explicit `TurnStarted` and
+  `TurnFinished` lifecycle events, including failed and cancelled closure;
 - the durable REPL worker now enters through the enveloped event path; its
   host event channel carries the envelope to `RunObserver`, which forwards the
   payload to existing terminal and trace rendering while core remains the
@@ -295,8 +297,8 @@ Stage 1 has started in the current working tree:
 - existing core and CLI session, compaction, restart, and interactive tests
   pass after the migration.
 
-The proposal remains `proposed`: the event envelope does not yet synthesize a
-separate Thread/Turn lifecycle event taxonomy, the CLI trace format remains
-backward-compatible payload-only JSONL, and no external protocol adapter exists. The current
+The proposal remains `proposed`: Thread lifecycle events and envelope-backed
+REPL traces are now present, while the trace loader remains backward-compatible
+with payload-only JSONL and no external protocol adapter exists. The current
 `StopAtCheckpoint` CLI behavior remains compatible; `ContinueSameTurn` and
 enveloped events are covered at the core boundary for the next host migration.

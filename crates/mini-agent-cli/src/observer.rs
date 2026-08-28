@@ -3,6 +3,7 @@ use mini_agent_core::EventEnvelope;
 use mini_agent_core::EventSink;
 use mini_agent_core::Observer;
 use mini_agent_core::ToolCall;
+use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
 use std::fs::OpenOptions;
@@ -165,6 +166,18 @@ pub fn print_final_answer(text: &str) {
 
 impl Observer for RunObserver {
     fn observe(&mut self, event: &Event) {
+        self.observe_with_record(event, event);
+    }
+}
+
+impl EventSink for RunObserver {
+    fn emit(&mut self, event: EventEnvelope) {
+        self.observe_with_record(&event.event, &event);
+    }
+}
+
+impl RunObserver {
+    fn observe_with_record<T: Serialize>(&mut self, event: &Event, record: &T) {
         self.terminal.observe(event);
         match event {
             Event::ModelResponded { usage, .. } => {
@@ -186,7 +199,9 @@ impl Observer for RunObserver {
                     "status": if *is_error { "error" } else { "success" }
                 }));
             }
-            Event::RunStarted { .. }
+            Event::TurnStarted { .. }
+            | Event::TurnFinished { .. }
+            | Event::RunStarted { .. }
             | Event::ModelStarted { .. }
             | Event::AssistantReasoningDelta { .. }
             | Event::AssistantTextDelta { .. }
@@ -200,18 +215,12 @@ impl Observer for RunObserver {
             return;
         }
         if let Some(trace) = &mut self.trace
-            && let Err(error) = serde_json::to_writer(&mut *trace, event)
+            && let Err(error) = serde_json::to_writer(&mut *trace, record)
                 .and_then(|()| writeln!(trace).map_err(serde_json::Error::io))
                 .and_then(|()| trace.flush().map_err(serde_json::Error::io))
         {
             self.trace_error = Some(error.to_string());
         }
-    }
-}
-
-impl EventSink for RunObserver {
-    fn emit(&mut self, event: EventEnvelope) {
-        self.observe(&event.event);
     }
 }
 
@@ -487,7 +496,11 @@ impl Observer for TerminalObserver {
                 ));
             }
             Event::RunFinished { .. } => self.end_stream(),
-            Event::RunStarted { .. } | Event::ModelResponded { .. } | Event::RunFailed { .. } => {}
+            Event::TurnStarted { .. }
+            | Event::TurnFinished { .. }
+            | Event::RunStarted { .. }
+            | Event::ModelResponded { .. }
+            | Event::RunFailed { .. } => {}
         }
     }
 }

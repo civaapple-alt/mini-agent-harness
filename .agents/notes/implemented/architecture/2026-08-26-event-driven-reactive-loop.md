@@ -19,8 +19,11 @@ The harness adopts a pure, passive event-driven architecture based on [`Observer
    - Core `Thread::run_turn_with_events` can additionally project these
      immutable events as protocol `EventEnvelope` values with stable
      `thread_id`, `turn_id`, and monotonically increasing sequence metadata.
-   - The durable REPL carries the envelope through its host event channel;
-     terminal rendering and the legacy payload-only trace remain host concerns.
+     The envelope stream begins and closes each turn with explicit
+     `TurnStarted`/`TurnFinished` events, including failure and cancellation.
+   - The durable REPL carries the envelope through its host event channel and
+     persists envelope records in its trace; terminal rendering remains a host
+     concern, and the loader accepts both envelope and legacy payload traces.
 3. **Reactive Turn Progression**:
    - Tool results are emitted via `Event::ToolFinished` and converted into `Message::Tool` items, reactively triggering the next model turn step until `tool_calls` is empty or a hard limit is reached.
 4. **Cooperative Interactive Control**:
