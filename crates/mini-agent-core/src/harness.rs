@@ -1,14 +1,15 @@
-use crate::Event;
-use crate::Message;
-use crate::Model;
-use crate::ModelEvent;
-use crate::ModelEventSink;
-use crate::ModelRequest;
-use crate::ModelResponse;
-use crate::Observer;
 use crate::ToolRegistry;
-use serde::Deserialize;
-use serde::Serialize;
+use mini_agent_protocol::Event;
+use mini_agent_protocol::LimitExceeded;
+use mini_agent_protocol::LimitKind;
+use mini_agent_protocol::Message;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ModelEvent;
+use mini_agent_protocol::ModelEventSink;
+use mini_agent_protocol::ModelRequest;
+use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::Observer;
+use mini_agent_protocol::StopReason;
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
@@ -57,55 +58,6 @@ impl Default for HarnessConfig {
             context_limit_behavior: ContextLimitBehavior::Reject,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LimitKind {
-    ContextItemBytes,
-    UserInputBytes,
-    ModelResponseBytes,
-    ToolCallsPerStep,
-    ToolOutputBytes,
-    ContextBytes,
-}
-
-impl fmt::Display for LimitKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::ContextItemBytes => "context item bytes",
-            Self::UserInputBytes => "user input bytes",
-            Self::ModelResponseBytes => "model response bytes",
-            Self::ToolCallsPerStep => "tool calls per step",
-            Self::ToolOutputBytes => "tool output bytes",
-            Self::ContextBytes => "context bytes",
-        })
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
-pub struct LimitExceeded {
-    pub kind: LimitKind,
-    pub limit: usize,
-    pub actual: usize,
-}
-
-impl fmt::Display for LimitExceeded {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{} limit exceeded: {} > {}",
-            self.kind, self.actual, self.limit
-        )
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StopReason {
-    Completed,
-    StepLimit,
-    Steered,
 }
 
 /// Cooperative control for a running turn.

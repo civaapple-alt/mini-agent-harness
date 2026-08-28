@@ -805,9 +805,18 @@ dependencies = [
 name = "mini-agent-core"
 version = "0.3.0"
 dependencies = [
+ "mini-agent-protocol",
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "mini-agent-protocol"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

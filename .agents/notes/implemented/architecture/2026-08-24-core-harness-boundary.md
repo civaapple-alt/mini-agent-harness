@@ -8,19 +8,31 @@ Many agent frameworks accumulate premature abstractions: policy frameworks, stor
 
 ## Decision
 
-The project defines `agent = model + harness` with an uncompromising boundary between two crates:
+The project defines `agent = model + harness` with an uncompromising boundary
+between a protocol crate, an execution-kernel crate, and host adapters:
 
-1. **`mini-agent-core`**:
-   - Owns the explicit agent run loop (`prepare -> model -> tool -> observer`).
-   - Owns pure contracts for [`Model`](../../../../crates/mini-agent-core/src/model.rs), [`Tool`](../../../../crates/mini-agent-core/src/tool.rs), and [`Observer`](../../../../crates/mini-agent-core/src/event.rs).
-   - Enforces hard limits, stop classification, and immutable observation event emitting.
-   - Strictly contains **no** provider HTTP clients, filesystem access, process spawning, MCP protocol implementations, TUI frameworks, or persistence storage.
+1. **`mini-agent-protocol`**:
+   - Owns the in-process contracts for [`Model`](../../../../crates/mini-agent-protocol/src/model.rs), [`Tool`](../../../../crates/mini-agent-protocol/src/tool.rs), and [`Observer`](../../../../crates/mini-agent-protocol/src/event.rs).
+   - Defines portable messages, model requests/responses, tool calls, events,
+     stop reasons, and bounded error values.
+   - Contains no harness orchestration, provider client, filesystem access,
+     process spawning, MCP implementation, or persistence storage.
 
-2. **`mini-agent-cli`**:
+2. **`mini-agent-core`**:
+   - Owns the explicit execution run loop (`prepare -> model -> tool -> observer`).
+   - Enforces context hard limits, compaction, step control, and cooperative
+     `RunControl` steering boundaries.
+   - Owns `ToolRegistry` as the in-process dispatch implementation.
+   - Re-exports protocol types as a compatibility facade while callers migrate
+     to the protocol crate directly.
+   - Strictly contains **no** provider HTTP clients, filesystem access, process
+     spawning, MCP protocol implementations, TUI frameworks, or persistence storage.
+
+3. **`mini-agent-cli`**:
    - Acts as the host adapter and CLI edge.
    - Manages OpenAI API streaming adapters, workspace tool implementations (file I/O, subprocesses), MCP client connections, approval UI, and session storage.
 
-3. **External Effect Boundary**:
+4. **External Effect Boundary**:
    - Every external action has three explicit moments:
      ```text
      prepare intent -> perform uncertain effect -> settle outcome
@@ -29,6 +41,8 @@ The project defines `agent = model + harness` with an uncompromising boundary be
 
 ## Consequences
 
-- The core loop is fully testable deterministically in memory without mocking complex storage or external networks.
+- The protocol crate can be reused by another host without importing the
+  execution kernel; the core loop remains fully testable deterministically in
+  memory without mocking complex storage or external networks.
 - Adding a feature to core requires passing a four-part admission test (hypothesis, trace evidence, why edge cannot own it, complexity budget).
 - Host-specific capabilities (like TTY approval, interactive terminal colors, and MCP protocols) remain at the edge without polluting portable execution contracts.
