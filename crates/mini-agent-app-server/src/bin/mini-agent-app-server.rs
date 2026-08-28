@@ -3,17 +3,18 @@ use mini_agent_app_server::ApprovalBroker;
 use mini_agent_app_server::capability_manifest_to_protocol;
 use mini_agent_app_server::serve_stdio_with_startup;
 use mini_agent_app_server_protocol::CapabilityProviderSelection;
+use mini_agent_capabilities::SandboxKind;
+use mini_agent_capabilities::SecurityPreset;
+use mini_agent_capabilities::security::SecurityPolicy;
+use mini_agent_capabilities::workspace::ApprovalController;
+use mini_agent_capabilities::workspace::ApprovalMode;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
 use mini_agent_core::ThreadId;
 use mini_agent_core::ThreadStart;
-use mini_agent_host::ApprovalController;
-use mini_agent_host::ApprovalMode;
 use mini_agent_host::HostRuntimeFactory;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
-use mini_agent_host::SandboxKind;
-use mini_agent_host::SecurityPreset;
 use mini_agent_host::load_workspace_profile;
 use std::env;
 use std::error::Error;
@@ -102,7 +103,7 @@ fn apply_provider_selection(
 fn approval_for(broker: ApprovalBroker) -> ApprovalController {
     ApprovalController::with_policy_and_callback(
         ApprovalMode::Interactive,
-        mini_agent_host::security::SecurityPolicy::for_preset(SecurityPreset::Default),
+        SecurityPolicy::for_preset(SecurityPreset::Default),
         move |action| broker.request(action).map_err(mini_agent_core::ToolError),
     )
 }

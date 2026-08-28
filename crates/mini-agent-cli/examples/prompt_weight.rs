@@ -1,3 +1,4 @@
+use mini_agent_capabilities::openai::OpenAiModel;
 use mini_agent_core::Event;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
@@ -8,7 +9,6 @@ use mini_agent_core::ToolError;
 use mini_agent_core::ToolRegistry;
 use mini_agent_core::ToolSpec;
 use mini_agent_host::env_file::Environment;
-use mini_agent_host::openai::OpenAiModel;
 use serde_json::Value;
 use serde_json::json;
 use std::env;
@@ -165,7 +165,7 @@ async fn run_case(
         model_name.to_string(),
         base_url.to_string(),
         false,
-        mini_agent_host::image::ImageStore::memory_only(),
+        mini_agent_capabilities::image::ImageStore::memory_only(),
     ) {
         Ok(model) => model,
         Err(error) => return error_record(repetition, task, treatment, error.to_string()),

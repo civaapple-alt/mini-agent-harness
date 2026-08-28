@@ -1,6 +1,13 @@
 use mini_agent_app_server::AppServerRuntime;
 use mini_agent_app_server::ThreadUpdate;
 use mini_agent_app_server::mentor;
+use mini_agent_capabilities::mcp;
+use mini_agent_capabilities::sandbox::SandboxKind;
+use mini_agent_capabilities::security::{SecurityPolicy, SecurityPreset};
+use mini_agent_capabilities::session;
+use mini_agent_capabilities::session::SessionRequest;
+use mini_agent_capabilities::skills;
+use mini_agent_capabilities::workspace::{ApprovalController, ApprovalMode};
 use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
 use mini_agent_core::EventEnvelope;
 use mini_agent_core::EventSink;
@@ -13,15 +20,9 @@ use mini_agent_host::RuntimeProfile;
 use mini_agent_host::WorkflowScope;
 use mini_agent_host::config::RuntimeConfig;
 use mini_agent_host::harness_config_auto;
-use mini_agent_host::mcp;
 use mini_agent_host::observer::RunObserver;
 use mini_agent_host::print_auto_warning;
-use mini_agent_host::session;
-use mini_agent_host::session::SessionRequest;
-use mini_agent_host::skills;
 use mini_agent_host::tool_outcome::classify_tools;
-use mini_agent_host::workspace::ApprovalController;
-use mini_agent_host::workspace::ApprovalMode;
 use mini_agent_host::world::WorldState;
 use std::collections::VecDeque;
 use std::io;
@@ -87,8 +88,8 @@ pub async fn run(
     copilot: bool,
     no_tools: bool,
     session_request: SessionRequest,
-    preset: mini_agent_host::security::SecurityPreset,
-    sandbox_kind: mini_agent_host::sandbox::SandboxKind,
+    preset: SecurityPreset,
+    sandbox_kind: SandboxKind,
     web_search_override: Option<bool>,
 ) -> ExitCode {
     let (event_tx, event_rx) = mpsc::sync_channel(EVENT_BUFFER);
@@ -96,7 +97,7 @@ pub async fn run(
     let interactive_terminal = io::stdin().is_terminal();
     let approval = ApprovalController::with_policy_and_callback(
         initial_approval,
-        mini_agent_host::security::SecurityPolicy::for_preset(preset),
+        SecurityPolicy::for_preset(preset),
         move |action| {
             if interactive_terminal {
                 request_approval(&approval_events, action)
@@ -430,8 +431,8 @@ fn spawn_worker(
     no_tools: bool,
     approval: ApprovalController,
     session_request: SessionRequest,
-    preset: mini_agent_host::security::SecurityPreset,
-    sandbox_kind: mini_agent_host::sandbox::SandboxKind,
+    preset: SecurityPreset,
+    sandbox_kind: SandboxKind,
     web_search_override: Option<bool>,
     commands: mpsc::Receiver<WorkerCommand>,
     events: mpsc::SyncSender<ReplEvent>,

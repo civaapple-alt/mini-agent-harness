@@ -14,6 +14,7 @@ categories.workspace = true
 [dependencies]
 mini-agent-app-server = { version = "0.3.0", path = "../mini-agent-app-server" }
 mini-agent-app-server-protocol = { version = "0.3.0", path = "../mini-agent-app-server-protocol" }
+mini-agent-capabilities = { version = "0.3.0", path = "../mini-agent-capabilities" }
 mini-agent-core = { version = "0.3.0", path = "../mini-agent-core" }
 mini-agent-host = { version = "0.3.0", path = "../mini-agent-host" }
 serde.workspace = true

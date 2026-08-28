@@ -16,6 +16,15 @@ use mini_agent_app_server_protocol::RulePolicy as ProtocolRulePolicy;
 use mini_agent_app_server_protocol::RuleSourceStatus as ProtocolRuleSourceStatus;
 use mini_agent_app_server_protocol::SourceFingerprint as ProtocolSourceFingerprint;
 use mini_agent_app_server_protocol::TurnReadResult;
+use mini_agent_capabilities::ImageStore;
+use mini_agent_capabilities::OpenAiModel;
+use mini_agent_capabilities::OpenedSession;
+use mini_agent_capabilities::SessionRequest;
+use mini_agent_capabilities::SessionStore;
+use mini_agent_capabilities::TurnCommit;
+use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
+use mini_agent_capabilities::sandbox::SandboxKind;
+use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_core::Event;
 use mini_agent_core::EventSink;
 use mini_agent_core::HarnessConfig;
@@ -26,19 +35,10 @@ use mini_agent_core::ThreadStart;
 use mini_agent_core::TurnInput;
 use mini_agent_core::TurnInputMode;
 use mini_agent_core::TurnStatus;
-use mini_agent_host::ApprovalController;
 use mini_agent_host::CapabilityManifest;
 use mini_agent_host::HostRuntimeFactory;
-use mini_agent_host::ImageStore;
-use mini_agent_host::OpenAiModel;
-use mini_agent_host::OpenedSession;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
-use mini_agent_host::SandboxKind;
-use mini_agent_host::SessionRequest;
-use mini_agent_host::SessionStore;
-use mini_agent_host::TurnCommit;
-use mini_agent_host::TurnStatus as SessionTurnStatus;
 
 /// The settled result projected by the local App Server runtime.
 pub type RuntimeTurnResult = TurnReadResult;
@@ -64,7 +64,7 @@ pub struct AppServerRuntime {
     world: mini_agent_host::WorldState,
     enabled_mcp_servers: Vec<String>,
     mcp_tool_count: usize,
-    retry_mcp_servers: Vec<mini_agent_host::skills::McpServerConfig>,
+    retry_mcp_servers: Vec<mini_agent_capabilities::McpServerConfig>,
     capability_manifest: CapabilityManifest,
 }
 
@@ -277,7 +277,7 @@ impl AppServerRuntime {
         &self.capability_manifest
     }
 
-    pub fn retry_mcp_servers(&self) -> &[mini_agent_host::skills::McpServerConfig] {
+    pub fn retry_mcp_servers(&self) -> &[mini_agent_capabilities::McpServerConfig] {
         &self.retry_mcp_servers
     }
 

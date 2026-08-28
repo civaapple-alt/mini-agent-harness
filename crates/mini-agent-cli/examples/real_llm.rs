@@ -1,3 +1,8 @@
+use mini_agent_capabilities::image::DeepSeekFiles;
+use mini_agent_capabilities::image::FileUploader;
+use mini_agent_capabilities::image::ImageStore;
+use mini_agent_capabilities::openai::OpenAiError;
+use mini_agent_capabilities::openai::OpenAiModel;
 use mini_agent_core::ContextLimitBehavior;
 use mini_agent_core::Event;
 use mini_agent_core::Harness;
@@ -16,11 +21,6 @@ use mini_agent_core::ToolError;
 use mini_agent_core::ToolRegistry;
 use mini_agent_core::ToolSpec;
 use mini_agent_host::env_file::Environment;
-use mini_agent_host::image::DeepSeekFiles;
-use mini_agent_host::image::FileUploader;
-use mini_agent_host::image::ImageStore;
-use mini_agent_host::openai::OpenAiError;
-use mini_agent_host::openai::OpenAiModel;
 use serde_json::Value;
 use serde_json::json;
 #[cfg(not(test))]
@@ -313,7 +313,7 @@ impl Tool for ReadImageFixture {
             .images
             .get(&self.id)
             .ok_or_else(|| ToolError("image fixture is no longer available".to_string()))?;
-        Ok(mini_agent_host::image::format_envelope(&stored))
+        Ok(mini_agent_capabilities::image::format_envelope(&stored))
     }
 }
 
@@ -808,7 +808,7 @@ async fn run_persistence(
         Ok(workspace) => workspace,
         Err(error) => return error_record("persistence", error.to_string()),
     };
-    let session_root = match mini_agent_host::session::session_directory(&workspace) {
+    let session_root = match mini_agent_capabilities::session::session_directory(&workspace) {
         Ok(path) => path,
         Err(error) => return error_record("persistence", error),
     };
@@ -821,9 +821,9 @@ async fn run_persistence(
     let cleanup = || {
         let _ = fs::remove_dir_all(&session_path);
     };
-    let mut opened = match mini_agent_host::session::SessionStore::open(
+    let mut opened = match mini_agent_capabilities::session::SessionStore::open(
         &workspace,
-        mini_agent_host::session::SessionRequest::Named(session_id.clone()),
+        mini_agent_capabilities::session::SessionRequest::Named(session_id.clone()),
     ) {
         Ok(opened) => opened,
         Err(error) => return error_record("persistence", error),
@@ -858,10 +858,10 @@ async fn run_persistence(
     }
     if let Err(error) = opened
         .store
-        .record_turn(mini_agent_host::session::TurnCommit {
+        .record_turn(mini_agent_capabilities::session::TurnCommit {
             started_at_ms: timestamp as u64,
             prompt: first_prompt,
-            status: mini_agent_host::session::TurnStatus::Completed,
+            status: mini_agent_capabilities::session::TurnStatus::Completed,
             steps: first.steps,
             error: None,
             messages: harness.messages(),
@@ -874,9 +874,9 @@ async fn run_persistence(
     }
     drop(opened);
 
-    let mut resumed = match mini_agent_host::session::SessionStore::open(
+    let mut resumed = match mini_agent_capabilities::session::SessionStore::open(
         &workspace,
-        mini_agent_host::session::SessionRequest::Resume(session_id.clone()),
+        mini_agent_capabilities::session::SessionRequest::Resume(session_id.clone()),
     ) {
         Ok(opened) => opened,
         Err(error) => {
@@ -984,7 +984,7 @@ async fn run_mentor(
         .unwrap_or_default()
         .as_millis();
     let session_id = format!("real-mentor-{timestamp}-{}", used.load(Ordering::SeqCst));
-    let session_root = match mini_agent_host::session::session_directory(&workspace) {
+    let session_root = match mini_agent_capabilities::session::session_directory(&workspace) {
         Ok(path) => path,
         Err(error) => return error_record("mentor", error),
     };
@@ -992,9 +992,9 @@ async fn run_mentor(
     let cleanup = || {
         let _ = fs::remove_dir_all(&session_path);
     };
-    let mut opened = match mini_agent_host::session::SessionStore::open(
+    let mut opened = match mini_agent_capabilities::session::SessionStore::open(
         &workspace,
-        mini_agent_host::session::SessionRequest::Named(session_id.clone()),
+        mini_agent_capabilities::session::SessionRequest::Named(session_id.clone()),
     ) {
         Ok(opened) => opened,
         Err(error) => return error_record("mentor", error),
@@ -1011,10 +1011,10 @@ async fn run_mentor(
     ];
     if let Err(error) = opened
         .store
-        .record_turn(mini_agent_host::session::TurnCommit {
+        .record_turn(mini_agent_capabilities::session::TurnCommit {
             started_at_ms: timestamp as u64,
             prompt: "Inspect the release checklist and report the result.",
-            status: mini_agent_host::session::TurnStatus::Completed,
+            status: mini_agent_capabilities::session::TurnStatus::Completed,
             steps: 1,
             error: None,
             messages: &source_messages,
@@ -1027,9 +1027,9 @@ async fn run_mentor(
     }
     drop(opened);
 
-    let mut resumed = match mini_agent_host::session::SessionStore::open(
+    let mut resumed = match mini_agent_capabilities::session::SessionStore::open(
         &workspace,
-        mini_agent_host::session::SessionRequest::Resume(session_id.clone()),
+        mini_agent_capabilities::session::SessionRequest::Resume(session_id.clone()),
     ) {
         Ok(opened) => opened,
         Err(error) => {
@@ -1088,7 +1088,7 @@ async fn run_mentor(
     let marker_found = final_text.contains("MENTOR-LLM-OK");
     let derived_recorded = resumed
         .store
-        .record_derived(mini_agent_host::session::DerivedItem {
+        .record_derived(mini_agent_capabilities::session::DerivedItem {
             item_kind: "mentor_insight",
             provider: "openai_responses",
             model: &mentor_model,
@@ -1366,24 +1366,24 @@ async fn run_mcp(
             return error_record("mcp", error.to_string());
         }
     };
-    let mcp_config = mini_agent_host::skills::McpServerConfig {
+    let mcp_config = mini_agent_capabilities::skills::McpServerConfig {
         plugin_name: "real_llm.fixture".to_string(),
         server_name: "release".to_string(),
         workspace_root: canonical_root.clone(),
         plugin_root: canonical_root.clone(),
         plugin_data: canonical_root.join(".agents/plugin-data/real_llm.fixture"),
         connect_timeout: Duration::from_secs(20),
-        transport: mini_agent_host::skills::McpTransportConfig::Stdio {
+        transport: mini_agent_capabilities::skills::McpTransportConfig::Stdio {
             command,
             args: vec![script.to_string_lossy().into_owned()],
             env: BTreeMap::new(),
             cwd: None,
         },
     };
-    let mut loaded = mini_agent_host::mcp::load(
+    let mut loaded = mini_agent_capabilities::mcp::load(
         &[mcp_config],
-        mini_agent_host::workspace::ApprovalController::new(
-            mini_agent_host::workspace::ApprovalMode::Automatic,
+        mini_agent_capabilities::workspace::ApprovalController::new(
+            mini_agent_capabilities::workspace::ApprovalMode::Automatic,
         ),
     );
     if !loaded.diagnostics.is_empty() || loaded.tools.len() != 1 || loaded.loaded_servers.len() != 1
@@ -1481,7 +1481,7 @@ async fn run_vision(
     used: Arc<AtomicUsize>,
     max_requests: usize,
 ) -> Value {
-    let uses_files = mini_agent_host::image::uses_deepseek_files(base_url);
+    let uses_files = mini_agent_capabilities::image::uses_deepseek_files(base_url);
     let images = if uses_files {
         ImageStore::with_uploader(Arc::new(BudgetedUploader {
             inner: DeepSeekFiles::new(api_key.to_string(), base_url),

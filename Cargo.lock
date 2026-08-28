@@ -790,6 +790,7 @@ version = "0.3.0"
 dependencies = [
  "mini-agent-app-server",
  "mini-agent-app-server-protocol",
+ "mini-agent-capabilities",
  "mini-agent-core",
  "mini-agent-host",
  "serde",
@@ -802,6 +803,7 @@ name = "mini-agent-app-server"
 version = "0.3.0"
 dependencies = [
  "mini-agent-app-server-protocol",
+ "mini-agent-capabilities",
  "mini-agent-core",
  "mini-agent-host",
  "mini-agent-protocol",
@@ -841,6 +843,7 @@ name = "mini-agent-cli"
 version = "0.3.0"
 dependencies = [
  "mini-agent-app-server",
+ "mini-agent-capabilities",
  "mini-agent-core",
  "mini-agent-host",
  "serde_json",
