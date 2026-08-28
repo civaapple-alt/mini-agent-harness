@@ -264,7 +264,7 @@ impl<M: Model> Thread<M> {
             .map(|result| result.outcome)
             .map_err(|error| match error {
                 ThreadError::Harness(error) => error,
-                other => HarnessError::Compaction(other.to_string()),
+                other => HarnessError::Thread(other.to_string()),
             })
     }
 
@@ -280,7 +280,7 @@ impl<M: Model> Thread<M> {
             .map(|result| result.outcome)
             .map_err(|error| match error {
                 ThreadError::Harness(error) => error,
-                other => HarnessError::Compaction(other.to_string()),
+                other => HarnessError::Thread(other.to_string()),
             })
     }
 

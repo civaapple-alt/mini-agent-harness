@@ -154,6 +154,7 @@ pub enum HarnessError<E> {
     Model(E),
     Compaction(String),
     Limit(LimitExceeded),
+    Thread(String),
 }
 
 impl<E: fmt::Display> fmt::Display for HarnessError<E> {
@@ -162,6 +163,7 @@ impl<E: fmt::Display> fmt::Display for HarnessError<E> {
             Self::Model(error) => write!(formatter, "model request failed: {error}"),
             Self::Compaction(error) => write!(formatter, "context compaction failed: {error}"),
             Self::Limit(error) => error.fmt(formatter),
+            Self::Thread(error) => write!(formatter, "thread operation failed: {error}"),
         }
     }
 }

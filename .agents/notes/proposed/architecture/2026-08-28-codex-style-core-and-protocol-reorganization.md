@@ -339,6 +339,8 @@ The following pieces are implemented in the current workspace:
   `SessionState`, identity, turn numbering, and event sequence. Restoring a
   checkpoint validates it through the active Harness limits and never replays
   an uncertain tool effect;
+- Thread lifecycle errors now remain distinct from model, compaction, and
+  limit errors when the compatibility outcome helpers are used;
 - `mini-agent-app-server` now provides a thin in-process control-plane facade
   over one core `Thread`: it serializes `turn/start` and `turn/cancel`, routes
   running `Steer` and `FollowUp` submissions, and broadcasts ordered
