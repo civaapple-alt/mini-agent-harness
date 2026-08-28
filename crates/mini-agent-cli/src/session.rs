@@ -67,6 +67,7 @@ pub(crate) enum TurnStatus {
     Completed,
     StepLimit,
     Steered,
+    Cancelled,
     Failed,
 }
 
@@ -554,6 +555,7 @@ impl TurnStatus {
             Self::Completed => "completed",
             Self::StepLimit => "step_limit",
             Self::Steered => "steered",
+            Self::Cancelled => "cancelled",
             Self::Failed => "failed",
         }
     }

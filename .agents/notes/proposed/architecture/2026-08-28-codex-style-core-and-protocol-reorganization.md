@@ -282,10 +282,17 @@ Stage 1 has started in the current working tree:
 - the durable REPL worker now executes through `Thread`, and its JSONL session
   adapter persists the core `TurnId`; resume derives the next ID from the
   current thread's settled turns, while `/new` starts a fresh thread sequence;
+- protocol now defines `EventEnvelope`/`EventSink` for ordered host projections,
+  and `Thread::run_turn_with_events` attaches thread/turn identity while
+  preserving the legacy `Observer` path;
+- protocol and core now expose cooperative cancellation (`TurnCancel`,
+  `RunControl::request_cancel`, and `StopReason::Cancelled`), observed only
+  after model sampling or a complete tool batch;
 - existing core and CLI session, compaction, restart, and interactive tests
   pass after the migration.
 
-The proposal remains `proposed`: Turn lifecycle events and cancellation are
-not fully exposed, and no external protocol adapter exists. The current
-`StopAtCheckpoint` CLI behavior remains compatible; `ContinueSameTurn` is
-covered at the core boundary for the next host migration.
+The proposal remains `proposed`: the event envelope does not yet synthesize a
+separate Thread/Turn lifecycle event taxonomy, the CLI has not adopted the
+enveloped sink, and no external protocol adapter exists. The current
+`StopAtCheckpoint` CLI behavior remains compatible; `ContinueSameTurn` and
+enveloped events are covered at the core boundary for the next host migration.

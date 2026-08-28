@@ -1,7 +1,9 @@
 use crate::LimitExceeded;
 use crate::ModelUsage;
 use crate::StopReason;
+use crate::ThreadId;
 use crate::ToolCall;
+use crate::TurnId;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -61,8 +63,34 @@ pub enum RunFailure {
     LimitExceeded(LimitExceeded),
 }
 
+/// An observer event with the identity and ordering metadata required by a
+/// host projection or a future wire adapter.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct EventEnvelope {
+    pub thread_id: ThreadId,
+    pub turn_id: Option<TurnId>,
+    pub sequence: u64,
+    pub event: Event,
+}
+
+impl EventEnvelope {
+    pub fn new(thread_id: ThreadId, turn_id: Option<TurnId>, sequence: u64, event: Event) -> Self {
+        Self {
+            thread_id,
+            turn_id,
+            sequence,
+            event,
+        }
+    }
+}
+
 pub trait Observer {
     fn observe(&mut self, event: &Event);
+}
+
+/// Receives ordered events emitted by a core Thread.
+pub trait EventSink {
+    fn emit(&mut self, event: EventEnvelope);
 }
 
 impl Observer for () {

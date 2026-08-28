@@ -4,6 +4,8 @@ mod tool;
 mod turn;
 
 pub use event::Event;
+pub use event::EventEnvelope;
+pub use event::EventSink;
 pub use event::Observer;
 pub use event::RunFailure;
 pub use model::Message;
@@ -19,6 +21,7 @@ pub use tool::ToolError;
 pub use tool::ToolSpec;
 pub use turn::ThreadId;
 pub use turn::ThreadStatus;
+pub use turn::TurnCancel;
 pub use turn::TurnId;
 pub use turn::TurnInput;
 pub use turn::TurnInputMode;
@@ -81,5 +84,6 @@ mod run {
         Completed,
         StepLimit,
         Steered,
+        Cancelled,
     }
 }

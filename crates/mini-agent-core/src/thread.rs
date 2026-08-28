@@ -5,8 +5,12 @@ use crate::Observer;
 use crate::RunControl;
 use crate::RunOutcome;
 use crate::SteeringMode;
+use mini_agent_protocol::Event;
+use mini_agent_protocol::EventEnvelope;
+use mini_agent_protocol::EventSink;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStatus;
+use mini_agent_protocol::TurnCancel;
 use mini_agent_protocol::TurnId;
 use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
@@ -21,6 +25,8 @@ pub enum ThreadError<E> {
     Harness(HarnessError<E>),
     Busy,
     Closed,
+    NoActiveTurn,
+    TurnNotActive(TurnId),
     InvalidInputMode(TurnInputMode),
 }
 
@@ -30,6 +36,10 @@ impl<E: fmt::Display> fmt::Display for ThreadError<E> {
             Self::Harness(error) => error.fmt(formatter),
             Self::Busy => formatter.write_str("thread already has an active turn"),
             Self::Closed => formatter.write_str("thread is closed"),
+            Self::NoActiveTurn => formatter.write_str("thread has no active turn"),
+            Self::TurnNotActive(turn_id) => {
+                write!(formatter, "turn {} is not active", turn_id.as_str())
+            }
             Self::InvalidInputMode(mode) => write!(formatter, "cannot start turn with {mode:?}"),
         }
     }
@@ -50,6 +60,7 @@ pub struct Thread<M> {
     status: ThreadStatus,
     next_turn_number: u64,
     last_turn_id: Option<TurnId>,
+    next_event_sequence: u64,
 }
 
 impl<M: Model> Thread<M> {
@@ -60,6 +71,7 @@ impl<M: Model> Thread<M> {
             status: ThreadStatus::Idle,
             next_turn_number: 1,
             last_turn_id: None,
+            next_event_sequence: 1,
         }
     }
 
@@ -76,6 +88,7 @@ impl<M: Model> Thread<M> {
             self.id = id;
             self.next_turn_number = 1;
             self.last_turn_id = None;
+            self.next_event_sequence = 1;
         }
     }
 
@@ -85,6 +98,10 @@ impl<M: Model> Thread<M> {
 
     pub fn last_turn_id(&self) -> Option<&TurnId> {
         self.last_turn_id.as_ref()
+    }
+
+    pub fn next_event_sequence(&self) -> u64 {
+        self.next_event_sequence
     }
 
     pub fn harness(&self) -> &Harness<M> {
@@ -103,6 +120,24 @@ impl<M: Model> Thread<M> {
         Ok(())
     }
 
+    pub fn cancel_turn(
+        &self,
+        cancel: TurnCancel,
+        control: &RunControl,
+    ) -> Result<(), ThreadError<M::Error>> {
+        if self.status == ThreadStatus::Closed {
+            return Err(ThreadError::Closed);
+        }
+        if self.status != ThreadStatus::Running {
+            return Err(ThreadError::NoActiveTurn);
+        }
+        if self.last_turn_id.as_ref() != Some(&cancel.turn_id) {
+            return Err(ThreadError::TurnNotActive(cancel.turn_id));
+        }
+        control.request_cancel();
+        Ok(())
+    }
+
     pub async fn run_turn<O: Observer + Send>(
         &mut self,
         input: TurnInput,
@@ -110,6 +145,53 @@ impl<M: Model> Thread<M> {
         control: &RunControl,
         steering_mode: SteeringMode,
     ) -> Result<TurnResult, ThreadError<M::Error>> {
+        let id = self.begin_turn(&input)?;
+        let outcome = self
+            .harness
+            .run_with_control_mode(input.text, observer, control, steering_mode)
+            .await;
+        self.finish_turn(id, outcome)
+    }
+
+    pub async fn run_turn_with_events<S: EventSink + Send>(
+        &mut self,
+        input: TurnInput,
+        sink: &mut S,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+    ) -> Result<TurnResult, ThreadError<M::Error>> {
+        let id = self.begin_turn(&input)?;
+        let mut observer = EnvelopeObserver {
+            sink,
+            thread_id: self.id.clone(),
+            turn_id: id.clone(),
+            next_sequence: self.next_event_sequence,
+        };
+        let outcome = self
+            .harness
+            .run_with_control_mode(input.text, &mut observer, control, steering_mode)
+            .await;
+        self.next_event_sequence = observer.next_sequence;
+        self.finish_turn(id, outcome)
+    }
+
+    pub async fn run_turn_outcome<O: Observer + Send>(
+        &mut self,
+        input: TurnInput,
+        observer: &mut O,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+    ) -> Result<RunOutcome, HarnessError<M::Error>> {
+        self.run_turn(input, observer, control, steering_mode)
+            .await
+            .map(|result| result.outcome)
+            .map_err(|error| match error {
+                ThreadError::Harness(error) => error,
+                other => HarnessError::Compaction(other.to_string()),
+            })
+    }
+
+    fn begin_turn(&mut self, input: &TurnInput) -> Result<TurnId, ThreadError<M::Error>> {
         if self.status == ThreadStatus::Closed {
             return Err(ThreadError::Closed);
         }
@@ -127,16 +209,21 @@ impl<M: Model> Thread<M> {
         self.next_turn_number = self.next_turn_number.saturating_add(1);
         self.last_turn_id = Some(id.clone());
         self.status = ThreadStatus::Running;
-        let outcome = self
-            .harness
-            .run_with_control_mode(input.text, observer, control, steering_mode)
-            .await;
+        Ok(id)
+    }
+
+    fn finish_turn(
+        &mut self,
+        id: TurnId,
+        outcome: Result<RunOutcome, HarnessError<M::Error>>,
+    ) -> Result<TurnResult, ThreadError<M::Error>> {
         match outcome {
             Ok(outcome) => {
                 let status = match outcome.stop_reason {
                     crate::StopReason::Completed => TurnStatus::Completed,
                     crate::StopReason::StepLimit => TurnStatus::StepLimit,
                     crate::StopReason::Steered => TurnStatus::Steered,
+                    crate::StopReason::Cancelled => TurnStatus::Cancelled,
                 };
                 self.status = ThreadStatus::Idle;
                 Ok(TurnResult {
@@ -151,21 +238,25 @@ impl<M: Model> Thread<M> {
             }
         }
     }
+}
 
-    pub async fn run_turn_outcome<O: Observer + Send>(
-        &mut self,
-        input: TurnInput,
-        observer: &mut O,
-        control: &RunControl,
-        steering_mode: SteeringMode,
-    ) -> Result<RunOutcome, HarnessError<M::Error>> {
-        self.run_turn(input, observer, control, steering_mode)
-            .await
-            .map(|result| result.outcome)
-            .map_err(|error| match error {
-                ThreadError::Harness(error) => error,
-                other => HarnessError::Compaction(other.to_string()),
-            })
+struct EnvelopeObserver<'a, S> {
+    sink: &'a mut S,
+    thread_id: ThreadId,
+    turn_id: TurnId,
+    next_sequence: u64,
+}
+
+impl<S: EventSink> Observer for EnvelopeObserver<'_, S> {
+    fn observe(&mut self, event: &Event) {
+        let sequence = self.next_sequence;
+        self.next_sequence = self.next_sequence.saturating_add(1);
+        self.sink.emit(EventEnvelope::new(
+            self.thread_id.clone(),
+            Some(self.turn_id.clone()),
+            sequence,
+            event.clone(),
+        ));
     }
 }
 

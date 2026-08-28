@@ -80,6 +80,7 @@ impl Default for HarnessConfig {
 #[derive(Clone, Default)]
 pub struct RunControl {
     steer_requested: Arc<AtomicBool>,
+    cancel_requested: Arc<AtomicBool>,
     pending_inputs: PendingInputQueue,
 }
 
@@ -90,6 +91,15 @@ impl RunControl {
 
     pub fn request_steer(&self) {
         self.steer_requested.store(true, Ordering::Release);
+    }
+
+    /// Requests cancellation at the next safe boundary of the active turn.
+    pub fn request_cancel(&self) {
+        self.cancel_requested.store(true, Ordering::Release);
+    }
+
+    pub fn clear_cancel(&self) {
+        self.cancel_requested.store(false, Ordering::Release);
     }
 
     pub fn submit(&self, input: TurnInput) -> Result<(), InputQueueError> {
@@ -123,6 +133,10 @@ impl RunControl {
 
     fn is_steer_requested(&self) -> bool {
         self.steer_requested.load(Ordering::Acquire)
+    }
+
+    fn take_cancel_requested(&self) -> bool {
+        self.cancel_requested.swap(false, Ordering::AcqRel)
     }
 }
 
@@ -337,6 +351,15 @@ impl<M: Model> Harness<M> {
         let mut last_tool_batch: Option<Vec<(String, serde_json::Value, String)>> = None;
 
         loop {
+            if control.take_cancel_requested() {
+                return Ok(finish(
+                    final_text,
+                    self.session.messages().to_vec(),
+                    step,
+                    StopReason::Cancelled,
+                    observer,
+                ));
+            }
             if steering_mode == SteeringMode::ContinueSameTurn
                 && let Some(input) = control.take_steer_input()
             {
@@ -429,6 +452,16 @@ impl<M: Model> Harness<M> {
                 tool_calls: response.tool_calls.clone(),
             });
 
+            if control.take_cancel_requested() {
+                return Ok(finish(
+                    final_text,
+                    self.session.messages().to_vec(),
+                    step,
+                    StopReason::Cancelled,
+                    observer,
+                ));
+            }
+
             if steering_mode == SteeringMode::ContinueSameTurn
                 && let Some(input) = control.take_steer_input()
             {
@@ -495,6 +528,16 @@ impl<M: Model> Harness<M> {
 
             if consecutive_duplicate_tool_batches >= 2 {
                 let _ = self.append_context(LOOP_WARNING_TEXT);
+            }
+
+            if control.take_cancel_requested() {
+                return Ok(finish(
+                    final_text,
+                    self.session.messages().to_vec(),
+                    step,
+                    StopReason::Cancelled,
+                    observer,
+                ));
             }
 
             if steering_mode == SteeringMode::ContinueSameTurn

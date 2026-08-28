@@ -16,12 +16,18 @@ The harness adopts a pure, passive event-driven architecture based on [`Observer
 2. **Dual-Path Presentation & Audit**:
    - **Client Live Streaming**: Real-time rendering of `thinking>` (reasoning deltas), `assistant>` (text deltas), and single-line tool previews (`tool[ok]>`) in interactive terminals.
    - **Rollout Trace Logging**: When `--trace PATH` is supplied, every lifecycle event (`RunStarted`, `ModelStarted`, `ModelResponded`, `ToolStarted`, `ToolFinished`, `RunFinished`) is appended to a structured JSONL trace with exact token counts, latencies, and truncation flags.
+   - Core `Thread::run_turn_with_events` can additionally project these
+     immutable events as protocol `EventEnvelope` values with stable
+     `thread_id`, `turn_id`, and monotonically increasing sequence metadata.
 3. **Reactive Turn Progression**:
    - Tool results are emitted via `Event::ToolFinished` and converted into `Message::Tool` items, reactively triggering the next model turn step until `tool_calls` is empty or a hard limit is reached.
 4. **Cooperative Interactive Control**:
    - Interactive `/steer` requests use the core `RunControl` signal and settle
      at a model-step or complete-tool-batch boundary, emitting
      `StopReason::Steered` for live output and session replay.
+   - `TurnCancel` and `RunControl::request_cancel` use the same boundary rule;
+     cancellation settles as `StopReason::Cancelled` without interrupting a
+     running external effect.
 
 ## Consequences
 

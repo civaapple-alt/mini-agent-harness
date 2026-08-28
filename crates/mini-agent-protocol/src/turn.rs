@@ -44,6 +44,18 @@ pub struct TurnInput {
     pub text: String,
 }
 
+/// Requests cooperative cancellation of one active turn.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct TurnCancel {
+    pub turn_id: TurnId,
+}
+
+impl TurnCancel {
+    pub fn new(turn_id: TurnId) -> Self {
+        Self { turn_id }
+    }
+}
+
 impl TurnInput {
     pub fn new(mode: TurnInputMode, text: impl Into<String>) -> Self {
         Self {

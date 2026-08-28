@@ -599,6 +599,9 @@ fn spawn_worker(
                             Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
                                 (TurnStatus::StepLimit, outcome.steps, None)
                             }
+                            Ok(outcome) if outcome.stop_reason == StopReason::Cancelled => {
+                                (TurnStatus::Cancelled, outcome.steps, None)
+                            }
                             Ok(outcome) => (TurnStatus::Completed, outcome.steps, None),
                             Err(error) => (TurnStatus::Failed, 0, Some(error.to_string())),
                         };

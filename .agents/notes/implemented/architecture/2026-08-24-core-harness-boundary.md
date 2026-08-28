@@ -33,6 +33,8 @@ between a protocol crate, an execution-kernel crate, and host adapters:
      through `Thread`, and the CLI session adapter persists the core Turn ID.
      `Harness` remains its compatibility execution facade for one-shot and
      remaining host paths.
+   - Exposes ordered `EventEnvelope` delivery and cooperative cancellation at
+     the Thread boundary; legacy `Observer` consumers remain source-compatible.
    - Owns `ToolRegistry` as the in-process dispatch implementation.
    - Re-exports protocol types as a compatibility facade while callers migrate
      to the protocol crate directly.
