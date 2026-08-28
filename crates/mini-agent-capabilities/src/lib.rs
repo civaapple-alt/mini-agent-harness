@@ -9,8 +9,10 @@ pub mod marketplaces;
 pub mod model;
 pub mod openai;
 pub mod registry;
+pub mod result_store;
 pub mod sandbox;
 pub mod security;
+pub mod session;
 
 pub use image::DeepSeekFiles;
 pub use image::FileUploader;
@@ -26,6 +28,11 @@ pub use registry::CapabilityKind;
 pub use registry::CapabilityRegistry;
 pub use sandbox::SandboxKind;
 pub use security::SecurityPreset;
+pub use session::OpenedSession;
+pub use session::SessionRequest;
+pub use session::SessionStore;
+pub use session::TurnCommit;
+pub use session::TurnStatus;
 
 /// Stable identifier for the built-in OpenAI-compatible model provider.
 pub const OPENAI_MODEL_PROVIDER: &str = "openai";

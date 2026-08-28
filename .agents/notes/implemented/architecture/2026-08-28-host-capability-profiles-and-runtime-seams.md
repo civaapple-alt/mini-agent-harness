@@ -86,7 +86,9 @@ compatibility re-exports for existing callers, but `RuntimeBuilder` selects the
 model through the capabilities registry and the resolved profile carries an
 allowlisted `modelProvider` identifier. The remaining workspace/process/web,
 skills/MCP, and approval composition will move behind the same registry rather
-than being copied into private Host-only seams.
+than being copied into private Host-only seams. Session and Result Store
+implementations have also moved with the provider crate; Host retains their
+application-level binding and compatibility facade.
 
 ## Problem
 

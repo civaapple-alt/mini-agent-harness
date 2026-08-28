@@ -1,7 +1,8 @@
-//! Application-host capabilities and runtime composition for mini-agent.
+//! Application-host profile resolution and runtime composition for mini-agent.
 //!
-//! This crate owns concrete providers, tools, policy, extension discovery,
-//! persistence, and product workflows. It deliberately does not own terminal
+//! Concrete model, policy, marketplace, and persistence providers live in
+//! `mini-agent-capabilities`. This crate owns profile resolution, runtime
+//! composition, and product workflows. It deliberately does not own terminal
 //! input or command-line dispatch; those belong to `mini-agent-cli`.
 
 pub mod config;
@@ -14,9 +15,7 @@ pub mod persona;
 pub mod processes;
 pub mod profile;
 pub mod project_context;
-pub mod result_store;
 pub mod runtime_factory;
-pub mod session;
 pub mod skills;
 pub mod subagent;
 pub mod tool_outcome;
@@ -30,8 +29,10 @@ pub mod world;
 pub use mini_agent_capabilities::image;
 pub use mini_agent_capabilities::marketplaces;
 pub use mini_agent_capabilities::openai;
+pub use mini_agent_capabilities::result_store;
 pub use mini_agent_capabilities::sandbox;
 pub use mini_agent_capabilities::security;
+pub use mini_agent_capabilities::session;
 
 /// Build metadata used by host diagnostics and persisted status output.
 pub fn git_sha() -> &'static str {
