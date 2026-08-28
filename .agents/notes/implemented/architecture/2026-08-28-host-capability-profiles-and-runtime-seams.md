@@ -66,9 +66,9 @@ unavailable profile requests are rejected, and a CLI integration test proves
 Profile-file parsing and CLI integration tests also pass.
 The line-budget report now separates capabilities from Host and ACP from App
 Server. Under the established gate, runtime (`core + protocol + host +
-app-server`) is 14,415/20,000 lines; capabilities is 13,863 lines and remains
+app-server`) is 14,384/20,000 lines; capabilities is 13,863 lines and remains
 separately visible as provider implementation weight. All Rust source is
-36,889/30,000 lines, so Stage 4 must reduce workspace implementation/test
+36,858/30,000 lines, so Stage 4 must reduce workspace implementation/test
 weight or revise that budget with explicit evidence.
 Source-specific rule-body resolution (the current source fields select and
 diagnoses bounded inputs rather than parse user-authored rule bodies) is
