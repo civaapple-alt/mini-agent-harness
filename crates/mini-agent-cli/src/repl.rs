@@ -1302,6 +1302,9 @@ fn print_help() {
     println!("/new           Clear conversation history and start a fresh context");
     println!("/help          Display this list of interactive slash commands");
     println!("/exit          Finish queued work and quit");
+    println!(
+        "project> https://github.com/civaapple-alt/mini-agent-harness | creator: civaapple-alt | MIT"
+    );
 }
 
 fn print_prompt() {

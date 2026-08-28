@@ -3,83 +3,45 @@ use std::path::PathBuf;
 use crate::sandbox::SandboxKind;
 use crate::security::SecurityPreset;
 
-pub const HELP: &str =
-    "mini-agent — Native AI coding-agent harness with bounded tools and Responses API
+pub const HELP: &str = "mini-agent — bounded native coding-agent CLI
 
 USAGE:
-    mini-agent [OPTIONS]
-    mini-agent auto [OPTIONS] [--] [PROMPT]
-    mini-agent ask [OPTIONS] [--] [PROMPT]
-    mini-agent resume SESSION_ID [--trace PATH]
-    mini-agent fork SESSION_ID [--trace PATH]
-    mini-agent sessions
-    mini-agent status [--json]
-    mini-agent doctor [--json]
-    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]
-    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>
-    mini-agent trace replay PATH [--json]
-    mini-agent trace summary PATH [--json]
-    mini-agent demo [--trace PATH] [--] <PROMPT>
-    mini-agent help [COMMAND]
-    mini-agent --version
+    mini-agent                         Interactive session
+    mini-agent auto [PROMPT]           Autonomous session (REPL when omitted)
+    mini-agent ask [PROMPT]             One-shot/script-friendly turn
+    mini-agent <COMMAND> --help         Detailed command help
+
+QUICK START:
+    mini-agent doctor                  Check local setup (no provider call)
+    mini-agent demo \"make this loud\"  Run the offline demo (no credentials)
+    mini-agent ask \"summarize repo\"    Run one provider-backed turn
+    mini-agent auto                     Start the interactive copilot
 
 COMMANDS:
-    (default)       Start interactive REPL session (in-memory; use --persist for checkpoints)
-    auto            Autonomous copilot loop (unlimited steps unless capped, compacts context)
-    ask             Run a single script-facing turn (8 steps, no compaction; alias: run)
-    resume          Resume an existing session from its latest settled checkpoint
-    fork            Branch an existing session into a new independent session
-    sessions        List durable sessions stored for the current workspace
-    status          Inspect effective non-secret configuration, preset, and sandbox
-    doctor          Diagnose local prerequisites (credentials, shell, AGENTS.md, tools)
-    mentor          Run an independent, tool-free review model on a settled checkpoint
-    trace           Replay or summarize deterministic JSONL execution traces offline
-    demo            Run deterministic offline local demo without API keys
+    resume, fork, sessions              Durable session management
+    status, doctor                      Configuration and prerequisite checks
+    mentor, trace                       Review and replay settled runs
+    demo                                Deterministic offline run
 
-GLOBAL OPTIONS:
-    --security-preset PRESET
-        Security policy preset [default: default]
-        Values:
-          default       Block dangerous system/disk operations; allow standard project tools
-          turbomode     Relax prompts for faster automated workflows
-          full-machine  Permit full system access without restriction (for containers)
+COMMON OPTIONS:
+    --security-preset PRESET            default | turbomode | full-machine
+    --sandbox KIND                      native | docker
+    --web-search / --no-web-search      Built-in web search toggle
+    --persist / --ephemeral             Save or discard session checkpoints
+    --auto-approve, -y                  Allow sensitive tools in non-TTY ask
+    --json                              Machine-readable output
+    --trace PATH                        JSONL observation trace
 
-    --sandbox KIND
-        Process containment sandbox [default: native]
-        Values:
-          native        Win32 JobObject process tree isolation (Windows) / process groups (Unix)
-          docker        Execute commands inside an isolated Docker container
+CONFIG:
+    OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL
+    More provider and extension settings: `mini-agent help ask` and docs.
 
-    --web-search, --search
-        Enable built-in Responses API web search tool [default: enabled]
+PROJECT:
+    GitHub:  https://github.com/civaapple-alt/mini-agent-harness
+    Creator: civaapple-alt
+    License: MIT
 
-    --no-web-search, --no-search
-        Disable built-in Responses API web search tool
-
-    --ephemeral, --no-persist
-        Run temporary in-memory session without saving to ~/.mini-agent/sessions
-
-    --auto-approve, -y
-        Bypass per-step approval in non-interactive ask scripts
-
-    --json
-        Emit machine-readable structured JSON output
-
-    --trace PATH
-        Record detailed JSONL observation events to specified file
-
-ENVIRONMENT:
-    OPENAI_API_KEY           Bearer API credential for Responses endpoint (or ~/.mini-agent/.env)
-    OPENAI_MODEL             Model identifier (e.g. deepseek-v4-flash, gpt-4o)
-    OPENAI_BASE_URL          Responses API root; defaults to https://api.openai.com/v1
-    OPENAI_CHAT_BASE_URL     Optional Chat Completions API root (required for GLM image turns)
-    MINI_AGENT_WEB_SEARCH    Enable/disable built-in Responses web_search (default: true)
-    MINI_AGENT_MAX_STEPS     Copilot/auto step cap; 0 means unlimited (default: 0)
-    MENTOR_OPENAI_MODEL      Dedicated independent model for mentor commands
-    MENTOR_OPENAI_API_KEY    Mentor credential override (falls back to OPENAI_API_KEY)
-    MENTOR_OPENAI_BASE_URL   Mentor endpoint override (falls back to OPENAI_BASE_URL)
-
-Run `mini-agent help COMMAND` or `mini-agent COMMAND --help` for subcommand details.";
+Use `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.";
 
 pub const INTERACTIVE_HELP: &str = "mini-agent interactive
 
@@ -872,6 +834,15 @@ mod tests {
         let trace_flag = parse_args(vec!["trace".to_string(), "--help".to_string()]).unwrap();
         assert_eq!(trace_flag.command, Command::Help);
         assert_eq!(trace_flag.help_topic, HelpTopic::Trace);
+    }
+
+    #[test]
+    fn root_help_stays_actionable_and_identifies_the_project() {
+        assert!(HELP.lines().count() <= 60);
+        assert!(HELP.contains("QUICK START:"));
+        assert!(HELP.contains("https://github.com/civaapple-alt/mini-agent-harness"));
+        assert!(HELP.contains("Creator: civaapple-alt"));
+        assert!(HELP.contains("License: MIT"));
     }
 
     #[test]

@@ -7,6 +7,10 @@ line program is `mini-agent`.
 It is intentionally focused. It is not a full copy of Codex, Pi, fx, or Qi,
 and it does not promise feature parity with them.
 
+Project reference: [GitHub](https://github.com/civaapple-alt/mini-agent-harness).
+Created by [civaapple-alt](https://github.com/civaapple-alt) and released under
+the [MIT License](LICENSE).
+
 ## What you get
 
 - Interactive agent sessions and one-shot `ask` commands.
