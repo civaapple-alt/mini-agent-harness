@@ -294,6 +294,8 @@ Stage 1 has started in the current working tree:
 - protocol and core now expose cooperative cancellation (`TurnCancel`,
   `RunControl::request_cancel`, and `StopReason::Cancelled`), observed only
   after model sampling or a complete tool batch;
+- protocol now exposes typed `ThreadStart` and `TurnStart` control payloads,
+  and `TurnSubmission` carries `TurnId` values instead of untyped strings;
 - existing core and CLI session, compaction, restart, and interactive tests
   pass after the migration.
 

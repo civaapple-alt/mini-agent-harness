@@ -20,11 +20,13 @@ pub use tool::Tool;
 pub use tool::ToolError;
 pub use tool::ToolSpec;
 pub use turn::ThreadId;
+pub use turn::ThreadStart;
 pub use turn::ThreadStatus;
 pub use turn::TurnCancel;
 pub use turn::TurnId;
 pub use turn::TurnInput;
 pub use turn::TurnInputMode;
+pub use turn::TurnStart;
 pub use turn::TurnStatus;
 pub use turn::TurnSubmission;
 

@@ -44,6 +44,30 @@ pub struct TurnInput {
     pub text: String,
 }
 
+/// Starts a protocol-visible Thread with a stable identity.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct ThreadStart {
+    pub thread_id: ThreadId,
+}
+
+impl ThreadStart {
+    pub fn new(thread_id: ThreadId) -> Self {
+        Self { thread_id }
+    }
+}
+
+/// Starts one Turn on an existing Thread.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct TurnStart {
+    pub input: TurnInput,
+}
+
+impl TurnStart {
+    pub fn new(input: TurnInput) -> Self {
+        Self { input }
+    }
+}
+
 /// Requests cooperative cancellation of one active turn.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct TurnCancel {
@@ -92,8 +116,12 @@ pub enum TurnStatus {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum TurnSubmission {
-    Started { turn_id: String },
-    Steered { turn_id: String },
+    Started { turn_id: TurnId },
+    Steered { turn_id: TurnId },
     Queued,
     NotSubmitted { reason: String },
 }
+
+#[cfg(test)]
+#[path = "turn_tests.rs"]
+mod tests;
