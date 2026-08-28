@@ -1,6 +1,6 @@
 # Host Capability Profiles and Runtime Seams
 
-Status: Stage 2 implemented; Stage 3 frontend routing and provider selection in progress (Windows scope)
+Status: Stage 3 frontend routing and provider selection implemented; Stage 4 line-budget reduction pending (Windows scope)
 Date: 2026-08-28
 
 ## Implementation update (2026-08-28)
@@ -64,6 +64,9 @@ Server protocol tests prove
 unavailable profile requests are rejected, and a CLI integration test proves
 `ask --no-tools` sends an empty tool catalog and omits extension instructions.
 Profile-file parsing and CLI integration tests also pass.
+The line-budget report now separates capabilities from Host and ACP from App
+Server; the current runtime total is 28,277/20,000 lines, so Stage 4 must
+reduce implementation/test weight or revise the budget with explicit evidence.
 Source-specific rule-body resolution (the current source fields select and
 diagnoses bounded inputs rather than parse user-authored rule bodies) is
 resolved by the fail-closed design: rule bodies are never accepted as an
