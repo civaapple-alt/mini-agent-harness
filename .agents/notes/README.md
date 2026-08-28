@@ -82,7 +82,6 @@ If a proposed approach is rejected during review:
 
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-28 | [Codex-Style Core and Protocol Reorganization](proposed/architecture/2026-08-28-codex-style-core-and-protocol-reorganization.md) | Stabilize core-owned Context, Session, Thread, and Turn semantics, then keep app-server control-plane translation thin |
 
 #### Bug Fixes (`proposed/bug-fix/`)
 
@@ -109,6 +108,7 @@ If a proposed approach is rejected during review:
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-28 | [In-Process Agent Protocol](../../crates/mini-agent-protocol) | Portable model, tool, message, event, stop, and limit contracts shared by hosts |
+| 2026-08-28 | [Codex-Style Core and Protocol Reorganization](implemented/architecture/2026-08-28-codex-style-core-and-protocol-reorganization.md) | Core-owned runtime semantics, structured tool outcomes, storage-neutral checkpoints, and a thin app-server control plane |
 | 2026-08-24 | [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md) | Strict boundary between pure microkernel core and host CLI adapters |
 | 2026-08-24 | [Hard Limits System](implemented/architecture/2026-08-24-hard-limits-system.md) | Hard bounds on context, responses, step count, and UTF-8 head/tail truncation |
 | 2026-08-26 | [Event-Driven Reactive Loop](implemented/architecture/2026-08-26-event-driven-reactive-loop.md) | Passive immutable observers driving live client UI and rollout audit traces |
