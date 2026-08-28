@@ -43,8 +43,8 @@ reloaded from `result_stored` records on resume, and CLI/App Server persistence
 is always on. The line-budget report now treats `mini-agent-capabilities` as a
 separately reported provider implementation group. The established runtime
 gate remains `core + protocol + host + app-server`: it is currently
-14,414/20,000 lines; capabilities is 13,863 lines and ACP remains excluded.
-All Rust source is 36,888/30,000, so the workspace gate remains open and is
+14,415/20,000 lines; capabilities is 13,863 lines and ACP remains excluded.
+All Rust source is 36,889/30,000, so the workspace gate remains open and is
 not hidden by the layer split.
 
 Evidence from this slice:
@@ -303,8 +303,8 @@ At the proposal baseline, the runtime included 2,893 app-server lines while
 the CLI did not use that service. After this migration, the duplicate CLI turn
 owner is gone and concrete provider implementations are isolated in the
 separately reported `mini-agent-capabilities` group. The established runtime
-gate is now 14,414/20,000 lines. The full workspace remains
-36,888/30,000 lines, so the next cleanup must remove nonessential duplication
+gate is now 14,415/20,000 lines. The full workspace remains
+36,889/30,000 lines, so the next cleanup must remove nonessential duplication
 or explicitly retire optional code without restoring a second CLI orchestration
 path. If the migration leaves both paths in place, the proposal has failed even
 if all tests pass.
@@ -318,6 +318,6 @@ if all tests pass.
 | Session, Goal/Plan, MCP, restart behavior | Met by current local CLI integration coverage. |
 | App Server and ACP transport mapping | Met locally: Local-vs-JSON-RPC and ACP-vs-App-Server complete event trace fixtures pass; settled result checks also pass through the existing protocol/CLI tests. |
 | Workspace and lint checks | Met locally: workspace tests and Clippy pass. |
-| Runtime/workspace line budget | Runtime met: `14414/20000`; workspace open: `36888/30000` all Rust source. |
+| Runtime/workspace line budget | Runtime met: `14415/20000`; workspace open: `36889/30000` all Rust source. |
 | macOS/Linux/CI evidence | Open; not available from this local run. |
 | Real provider Goal behavior | Open; requires provider credentials and an explicitly authorized run. |
