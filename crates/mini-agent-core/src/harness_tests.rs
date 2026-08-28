@@ -5,6 +5,7 @@ use crate::Tool;
 use crate::ToolCall;
 use crate::ToolError;
 use crate::ToolSpec;
+use crate::TurnInputMode;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -191,6 +192,80 @@ async fn steering_stops_after_a_complete_tool_batch() {
         outcome.messages.last(),
         Some(Message::Tool { .. })
     ));
+}
+
+struct SubmitSteerDuringSampling {
+    control: RunControl,
+    calls: usize,
+}
+
+impl Model for SubmitSteerDuringSampling {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        let call = self.calls;
+        self.calls = self.calls.saturating_add(1);
+        if call == 0 {
+            self.control
+                .submit(TurnInput::new(
+                    TurnInputMode::Steer,
+                    "focus on the actual bug",
+                ))
+                .unwrap();
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "the first answer drifted".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        assert!(request.messages.iter().any(|message| matches!(
+            message,
+            Message::User { text } if text == "focus on the actual bug"
+        )));
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: "the corrected answer".to_string(),
+            tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn same_turn_steering_consumes_input_after_sampling() {
+    let control = RunControl::new();
+    let model = SubmitSteerDuringSampling {
+        control: control.clone(),
+        calls: 0,
+    };
+    let mut harness = Harness::new(model, ToolRegistry::default(), HarnessConfig::default());
+
+    let outcome = harness
+        .run_with_control_mode(
+            "initial request",
+            &mut (),
+            &control,
+            SteeringMode::ContinueSameTurn,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Completed);
+    assert_eq!(outcome.steps, 2);
+    assert_eq!(outcome.final_text, "the corrected answer");
+    assert_eq!(
+        outcome
+            .messages
+            .iter()
+            .filter(|message| matches!(message, Message::User { .. }))
+            .count(),
+        2
+    );
 }
 
 #[tokio::test]

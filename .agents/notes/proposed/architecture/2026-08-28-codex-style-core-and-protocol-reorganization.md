@@ -275,10 +275,15 @@ Stage 1 has started in the current working tree:
   `RunControl` owns a bounded pending input queue with Steer priority;
 - interactive follow-up text submitted while a Turn is running now enters the
   same core queue and is dispatched only after the current command settles;
+- core now exposes a `Thread` facade with Thread status, deterministic Turn ID
+  allocation, Start/StartIfIdle validation, and a
+  `ContinueSameTurn` steering mode that consumes payloads after safe sampling
+  boundaries;
 - existing core and CLI session, compaction, restart, and interactive tests
   pass after the migration.
 
-The proposal remains `proposed`: Thread/Turn identity, active Turn status,
-safe input consumption inside the run loop, and a protocol adapter are not
-implemented yet. The current queue is the first migration seam for those
-future semantics; it does not claim Codex-equivalent same-Turn steering.
+The proposal remains `proposed`: the CLI has not yet migrated its durable
+worker to the Thread facade, Turn lifecycle events and cancellation are not
+fully exposed, and no external protocol adapter exists. The current
+`StopAtCheckpoint` CLI behavior remains compatible; `ContinueSameTurn` is
+covered at the core boundary for the next host migration.

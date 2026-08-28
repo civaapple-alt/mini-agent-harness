@@ -34,6 +34,12 @@ pub enum ContextLimitBehavior {
     Compact,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SteeringMode {
+    StopAtCheckpoint,
+    ContinueSameTurn,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HarnessConfig {
     pub system_prompt: String,
@@ -97,7 +103,7 @@ impl RunControl {
 
     pub fn take_steer_input(&self) -> Option<TurnInput> {
         let input = self.pending_inputs.take_steer();
-        if input.is_none() {
+        if input.is_none() || !self.pending_inputs.has_steer() {
             self.clear_steer();
         }
         input
@@ -290,6 +296,17 @@ impl<M: Model> Harness<M> {
         observer: &mut O,
         control: &RunControl,
     ) -> Result<RunOutcome, HarnessError<M::Error>> {
+        self.run_with_control_mode(prompt, observer, control, SteeringMode::StopAtCheckpoint)
+            .await
+    }
+
+    pub async fn run_with_control_mode<O: Observer + Send>(
+        &mut self,
+        prompt: impl Into<String>,
+        observer: &mut O,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+    ) -> Result<RunOutcome, HarnessError<M::Error>> {
         let prompt = prompt.into();
         if prompt.len() > self.config.max_user_input_bytes {
             return Err(fail_limit(
@@ -320,6 +337,15 @@ impl<M: Model> Harness<M> {
         let mut last_tool_batch: Option<Vec<(String, serde_json::Value, String)>> = None;
 
         loop {
+            if steering_mode == SteeringMode::ContinueSameTurn
+                && let Some(input) = control.take_steer_input()
+            {
+                if let Err(limit) = self.append_user_input(input.text) {
+                    return Err(fail_limit(limit, observer));
+                }
+                final_text.clear();
+                continue;
+            }
             if control.is_steer_requested() {
                 return Ok(finish(
                     final_text,
@@ -403,6 +429,15 @@ impl<M: Model> Harness<M> {
                 tool_calls: response.tool_calls.clone(),
             });
 
+            if steering_mode == SteeringMode::ContinueSameTurn
+                && let Some(input) = control.take_steer_input()
+            {
+                if let Err(limit) = self.append_user_input(input.text) {
+                    return Err(fail_limit(limit, observer));
+                }
+                final_text.clear();
+                continue;
+            }
             if control.is_steer_requested() {
                 return Ok(finish(
                     final_text,
@@ -462,6 +497,15 @@ impl<M: Model> Harness<M> {
                 let _ = self.append_context(LOOP_WARNING_TEXT);
             }
 
+            if steering_mode == SteeringMode::ContinueSameTurn
+                && let Some(input) = control.take_steer_input()
+            {
+                if let Err(limit) = self.append_user_input(input.text) {
+                    return Err(fail_limit(limit, observer));
+                }
+                final_text.clear();
+                continue;
+            }
             if control.is_steer_requested() {
                 return Ok(finish(
                     final_text,
@@ -489,6 +533,18 @@ impl<M: Model> Harness<M> {
                 actual,
             })
         }
+    }
+
+    fn append_user_input(&mut self, text: String) -> Result<(), LimitExceeded> {
+        if text.len() > self.config.max_user_input_bytes {
+            return Err(LimitExceeded {
+                kind: LimitKind::UserInputBytes,
+                limit: self.config.max_user_input_bytes,
+                actual: text.len(),
+            });
+        }
+        self.session.push(Message::User { text });
+        Ok(())
     }
 
     fn context_bytes(&self, system_prompt: &str, tool_specs: &[crate::ToolSpec]) -> usize {

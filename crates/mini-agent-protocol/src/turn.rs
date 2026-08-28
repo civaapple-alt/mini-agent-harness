@@ -1,6 +1,32 @@
 use serde::Deserialize;
 use serde::Serialize;
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct ThreadId(pub String);
+
+impl ThreadId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct TurnId(pub String);
+
+impl TurnId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Identifies the kind of input submitted to a running conversation.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,6 +70,7 @@ pub enum ThreadStatus {
 pub enum TurnStatus {
     InProgress,
     Completed,
+    StepLimit,
     Steered,
     Cancelled,
     Failed,

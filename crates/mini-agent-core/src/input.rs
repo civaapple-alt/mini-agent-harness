@@ -73,6 +73,17 @@ impl PendingInputQueue {
         self.take_matching(|input| input.mode == TurnInputMode::FollowUp)
     }
 
+    pub fn has_steer(&self) -> bool {
+        self.inputs
+            .lock()
+            .map(|inputs| {
+                inputs
+                    .iter()
+                    .any(|input| input.mode == TurnInputMode::Steer)
+            })
+            .unwrap_or(false)
+    }
+
     pub fn len(&self) -> usize {
         self.inputs.lock().map(|inputs| inputs.len()).unwrap_or(0)
     }
