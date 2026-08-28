@@ -13,6 +13,8 @@ use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnStatus;
 use std::error::Error;
 use std::fmt;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
 #[derive(Debug)]
 pub enum ThreadError<E> {
@@ -47,6 +49,7 @@ pub struct Thread<M> {
     harness: Harness<M>,
     status: ThreadStatus,
     next_turn_number: u64,
+    last_turn_id: Option<TurnId>,
 }
 
 impl<M: Model> Thread<M> {
@@ -56,6 +59,7 @@ impl<M: Model> Thread<M> {
             harness,
             status: ThreadStatus::Idle,
             next_turn_number: 1,
+            last_turn_id: None,
         }
     }
 
@@ -65,6 +69,22 @@ impl<M: Model> Thread<M> {
 
     pub fn status(&self) -> ThreadStatus {
         self.status
+    }
+
+    pub fn set_id(&mut self, id: ThreadId) {
+        if self.id != id {
+            self.id = id;
+            self.next_turn_number = 1;
+            self.last_turn_id = None;
+        }
+    }
+
+    pub fn set_next_turn_number(&mut self, next_turn_number: u64) {
+        self.next_turn_number = next_turn_number.max(1);
+    }
+
+    pub fn last_turn_id(&self) -> Option<&TurnId> {
+        self.last_turn_id.as_ref()
     }
 
     pub fn harness(&self) -> &Harness<M> {
@@ -105,6 +125,7 @@ impl<M: Model> Thread<M> {
 
         let id = TurnId::new(format!("turn-{}", self.next_turn_number));
         self.next_turn_number = self.next_turn_number.saturating_add(1);
+        self.last_turn_id = Some(id.clone());
         self.status = ThreadStatus::Running;
         let outcome = self
             .harness
@@ -129,6 +150,36 @@ impl<M: Model> Thread<M> {
                 Err(ThreadError::Harness(error))
             }
         }
+    }
+
+    pub async fn run_turn_outcome<O: Observer + Send>(
+        &mut self,
+        input: TurnInput,
+        observer: &mut O,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+    ) -> Result<RunOutcome, HarnessError<M::Error>> {
+        self.run_turn(input, observer, control, steering_mode)
+            .await
+            .map(|result| result.outcome)
+            .map_err(|error| match error {
+                ThreadError::Harness(error) => error,
+                other => HarnessError::Compaction(other.to_string()),
+            })
+    }
+}
+
+impl<M> Deref for Thread<M> {
+    type Target = Harness<M>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.harness
+    }
+}
+
+impl<M> DerefMut for Thread<M> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.harness
     }
 }
 

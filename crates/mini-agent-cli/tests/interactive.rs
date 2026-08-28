@@ -671,6 +671,8 @@ fn durable_session_resumes_settled_history_after_restart() {
         .and_then(|line| line.split_once(" |"))
         .map(|(id, _)| id)
         .unwrap();
+    let first_session_records = fs::read_to_string(find_session_file(&root, session_id)).unwrap();
+    assert!(first_session_records.contains("\"turn_id\":\"turn-1\""));
     let second_stdout = run(&["resume", session_id], b"second question\n/exit\n");
 
     server.join().unwrap();
@@ -681,6 +683,8 @@ fn durable_session_resumes_settled_history_after_restart() {
     assert!(second["input"].to_string().contains("first question"));
     assert!(second["input"].to_string().contains("first durable answer"));
     assert!(second["input"].to_string().contains("second question"));
+    let resumed_session_records = fs::read_to_string(find_session_file(&root, session_id)).unwrap();
+    assert!(resumed_session_records.contains("\"turn_id\":\"turn-2\""));
     fs::remove_dir_all(root).unwrap();
 }
 

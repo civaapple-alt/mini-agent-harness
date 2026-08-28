@@ -29,8 +29,10 @@ between a protocol crate, an execution-kernel crate, and host adapters:
      ordered messages and context revision tracking. Hosts restore and persist
      these values but do not move storage I/O into core.
    - Owns the `Thread` facade, Turn ID allocation, lifecycle status, and
-     Start/StartIfIdle input validation. `Harness` remains its compatibility
-     execution facade while hosts migrate to Thread.
+     Start/StartIfIdle input validation. The durable REPL worker executes
+     through `Thread`, and the CLI session adapter persists the core Turn ID.
+     `Harness` remains its compatibility execution facade for one-shot and
+     remaining host paths.
    - Owns `ToolRegistry` as the in-process dispatch implementation.
    - Re-exports protocol types as a compatibility facade while callers migrate
      to the protocol crate directly.

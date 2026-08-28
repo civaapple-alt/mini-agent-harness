@@ -22,7 +22,10 @@ use mini_agent_core::LimitKind;
 use mini_agent_core::Observer;
 use mini_agent_core::RunControl;
 use mini_agent_core::SessionState;
+use mini_agent_core::SteeringMode;
 use mini_agent_core::StopReason;
+use mini_agent_core::Thread;
+use mini_agent_core::ThreadId;
 use mini_agent_core::ToolError;
 use mini_agent_core::TurnInput;
 use mini_agent_core::TurnInputMode;
@@ -427,7 +430,7 @@ fn spawn_worker(
                 }
             };
         let crate::HarnessBuild {
-            mut harness,
+            harness,
             images,
             stable_system_prompt,
             mut world,
@@ -435,6 +438,7 @@ fn spawn_worker(
             mcp_tool_count,
             mut retry_mcp_servers,
         } = build;
+        let mut harness = Thread::new(ThreadId::new("ephemeral"), harness);
         let mut copilot = copilot;
         let mut goal_objective: Option<String> = None;
         let mut durable = match session_request {
@@ -449,6 +453,8 @@ fn spawn_worker(
             },
         };
         if let Some(opened) = &mut durable {
+            harness.set_id(ThreadId::new(opened.store.thread_id()));
+            harness.set_next_turn_number(opened.store.thread_turn_count() as u64 + 1);
             approval.bind_session_file(opened.store.path());
             images.bind_session_file(opened.store.path());
             if opened.resumed {
@@ -555,10 +561,11 @@ fn spawn_worker(
                             match model_runtime.block_on(async {
                                 tokio::time::timeout(
                                     timeout,
-                                    harness.run_with_control(
-                                        prompt.clone(),
+                                    harness.run_turn_outcome(
+                                        TurnInput::new(TurnInputMode::Start, prompt.clone()),
                                         &mut observer,
                                         &run_control,
+                                        SteeringMode::StopAtCheckpoint,
                                     ),
                                 )
                                 .await
@@ -578,10 +585,11 @@ fn spawn_worker(
                                 }
                             }
                         } else {
-                            model_runtime.block_on(harness.run_with_control(
-                                prompt.clone(),
+                            model_runtime.block_on(harness.run_turn_outcome(
+                                TurnInput::new(TurnInputMode::Start, prompt.clone()),
                                 &mut observer,
                                 &run_control,
+                                SteeringMode::StopAtCheckpoint,
                             ))
                         };
                         let (status, steps, error) = match &result {
@@ -598,8 +606,8 @@ fn spawn_worker(
                             .messages()
                             .strip_prefix(previous_messages.as_slice())
                             .unwrap_or_else(|| harness.messages());
-                        if let Some(opened) = &mut durable
-                            && let Err(error) = opened.store.record_turn(TurnCommit {
+                        if let Some(opened) = &mut durable {
+                            let commit = TurnCommit {
                                 started_at_ms,
                                 prompt: &prompt,
                                 status,
@@ -607,12 +615,19 @@ fn spawn_worker(
                                 error: error.as_deref(),
                                 messages: turn_messages,
                                 checkpoint: harness.messages(),
-                            })
-                        {
-                            let _ = events.send(ReplEvent::Warning(format!(
-                                "warning: session persistence stopped: {error}"
-                            )));
-                            durable = None;
+                            };
+                            let result = match harness.last_turn_id() {
+                                Some(turn_id) => {
+                                    opened.store.record_turn_with_id(turn_id.as_str(), commit)
+                                }
+                                None => opened.store.record_turn(commit),
+                            };
+                            if let Err(error) = result {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "warning: session persistence stopped: {error}"
+                                )));
+                                durable = None;
+                            }
                         }
                         match result {
                             Ok(outcome) if outcome.stop_reason == StopReason::Steered => {
@@ -782,6 +797,8 @@ fn spawn_worker(
                                 "warning: session persistence stopped: {error}"
                             )));
                             durable = None;
+                        } else if let Some(opened) = &durable {
+                            harness.set_id(ThreadId::new(opened.store.thread_id()));
                         }
                         harness.clear_history();
                         match world.model_context() {

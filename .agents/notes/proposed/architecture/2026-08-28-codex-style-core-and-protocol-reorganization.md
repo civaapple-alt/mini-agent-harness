@@ -279,11 +279,13 @@ Stage 1 has started in the current working tree:
   allocation, Start/StartIfIdle validation, and a
   `ContinueSameTurn` steering mode that consumes payloads after safe sampling
   boundaries;
+- the durable REPL worker now executes through `Thread`, and its JSONL session
+  adapter persists the core `TurnId`; resume derives the next ID from the
+  current thread's settled turns, while `/new` starts a fresh thread sequence;
 - existing core and CLI session, compaction, restart, and interactive tests
   pass after the migration.
 
-The proposal remains `proposed`: the CLI has not yet migrated its durable
-worker to the Thread facade, Turn lifecycle events and cancellation are not
-fully exposed, and no external protocol adapter exists. The current
+The proposal remains `proposed`: Turn lifecycle events and cancellation are
+not fully exposed, and no external protocol adapter exists. The current
 `StopAtCheckpoint` CLI behavior remains compatible; `ContinueSameTurn` is
 covered at the core boundary for the next host migration.

@@ -2,6 +2,7 @@ use mini_agent_core::Message;
 use mini_agent_core::SessionState;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::fs::File;
@@ -56,6 +57,7 @@ pub(crate) struct SessionStore {
     next_seq: u64,
     checkpoint_seq: u64,
     turn_count: usize,
+    thread_turn_count: usize,
     created_at_ms: u64,
     _lock: SessionLock,
 }
@@ -110,6 +112,10 @@ impl SessionStore {
         &self.thread_id
     }
 
+    pub(crate) fn thread_turn_count(&self) -> usize {
+        self.thread_turn_count
+    }
+
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
@@ -127,6 +133,7 @@ impl SessionStore {
             "timestamp_ms": timestamp_ms(),
         })])?;
         self.thread_id = thread_id;
+        self.thread_turn_count = 0;
         Ok(())
     }
 
@@ -145,6 +152,14 @@ impl SessionStore {
 
     pub(crate) fn record_turn(&mut self, turn: TurnCommit<'_>) -> Result<(), String> {
         let turn_id = new_id("turn");
+        self.record_turn_with_id(&turn_id, turn)
+    }
+
+    pub(crate) fn record_turn_with_id(
+        &mut self,
+        turn_id: &str,
+        turn: TurnCommit<'_>,
+    ) -> Result<(), String> {
         let mut records = vec![json!({
             "kind": "turn_started",
             "thread_id": self.thread_id,
@@ -155,7 +170,7 @@ impl SessionStore {
         records.extend(
             turn.messages
                 .iter()
-                .map(|message| self.item_record(Some(&turn_id), message)),
+                .map(|message| self.item_record(Some(turn_id), message)),
         );
         records.push(json!({
             "kind": "turn_settled",
@@ -170,6 +185,7 @@ impl SessionStore {
         self.append_records(records)?;
         self.checkpoint_seq = self.next_seq.saturating_sub(1);
         self.turn_count = self.turn_count.saturating_add(1);
+        self.thread_turn_count = self.thread_turn_count.saturating_add(1);
         self.update_summary_and_signals(turn.prompt, turn.steps, turn.error);
         Ok(())
     }
@@ -255,6 +271,7 @@ impl SessionStore {
                 next_seq: 1,
                 checkpoint_seq: 0,
                 turn_count: 0,
+                thread_turn_count: 0,
                 created_at_ms: now,
                 _lock: lock,
             };
@@ -326,6 +343,7 @@ impl SessionStore {
             next_seq: 1,
             checkpoint_seq: 0,
             turn_count: 0,
+            thread_turn_count: 0,
             created_at_ms: now,
             _lock: lock,
         };
@@ -384,6 +402,7 @@ impl SessionStore {
             next_seq: loaded.next_seq,
             checkpoint_seq: loaded.checkpoint_seq,
             turn_count: loaded.turn_count,
+            thread_turn_count: loaded.thread_turn_count,
             created_at_ms: loaded.created_at_ms,
             _lock: lock,
         };
@@ -435,6 +454,7 @@ impl SessionStore {
                 next_seq: 1,
                 checkpoint_seq: 0,
                 turn_count: 0,
+                thread_turn_count: 0,
                 created_at_ms: now,
                 _lock: lock,
             };
@@ -675,6 +695,7 @@ struct LoadedRecords {
     next_seq: u64,
     checkpoint_seq: u64,
     turn_count: usize,
+    thread_turn_count: usize,
     created_at_ms: u64,
     valid_bytes: usize,
 }
@@ -686,6 +707,7 @@ fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecords, String>
     let mut header_seen = false;
     let mut latest_checkpoint = None;
     let mut turn_count = 0usize;
+    let mut thread_turn_counts: HashMap<String, usize> = HashMap::new();
     let mut created_at_ms = 0u64;
     while offset < bytes.len() {
         let remaining = &bytes[offset..];
@@ -730,6 +752,12 @@ fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecords, String>
             }
             Some("turn_started") if header_seen => {
                 turn_count = turn_count.saturating_add(1);
+                let thread_id = record
+                    .get("thread_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "turn_started is missing thread_id".to_string())?;
+                let count = thread_turn_counts.entry(thread_id.to_string()).or_insert(0);
+                *count = (*count).saturating_add(1);
             }
             Some("checkpoint") if header_seen => {
                 let thread_id = record
@@ -755,12 +783,14 @@ fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecords, String>
     }
     let (checkpoint_seq, thread_id, messages) = latest_checkpoint
         .ok_or_else(|| "session has no settled checkpoint to resume".to_string())?;
+    let thread_turn_count = thread_turn_counts.get(&thread_id).copied().unwrap_or(0);
     Ok(LoadedRecords {
         thread_id,
         messages,
         next_seq: expected_seq,
         checkpoint_seq,
         turn_count,
+        thread_turn_count,
         created_at_ms,
         valid_bytes,
     })
