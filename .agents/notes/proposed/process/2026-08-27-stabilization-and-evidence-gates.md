@@ -59,7 +59,7 @@ The later baseline [CI #56](https://github.com/civaapple-alt/mini-agent-harness/
 passed the Ubuntu, macOS, Windows, and Rust 1.88 jobs for `4934ac9`; its only
 quality failure was the line budget (`30,828/30,000`). The current working tree
 extends the boundary into host, app-server, wire-protocol, and ACP crates and
-currently reports `34,377/30,000`. This keeps the evidence gate active: local
+reported `34,377/30,000` at that earlier review point. This keeps the evidence gate active: local
 tests and cross-target checks do not waive the size gate or substitute for CI
 on the candidate revision.
 
@@ -68,6 +68,13 @@ validation, and the four release-packager unit tests. Linux target library
 compilation succeeds through temporary Zig wrappers, but cross-target test
 binary linking cannot find the Linux system libraries on this Windows host; a
 native Linux runner remains required for runtime evidence.
+
+Current evidence update (2026-08-29, `e317b14`): the complete workspace
+`cargo test --workspace --all-targets -- --test-threads=1` run passed, as did
+workspace Clippy with `-D warnings`. The line report is now runtime
+`14,384/20,000` and all Rust source `36,858/30,000`; the latter remains an
+open gate. The current tree is committed and clean, but candidate CI and
+native macOS/Linux runtime evidence are still absent.
 
 ## Proposal
 

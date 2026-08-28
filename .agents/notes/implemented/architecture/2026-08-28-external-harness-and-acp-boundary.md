@@ -35,7 +35,7 @@ implement ACP-only filesystem, terminal, batching, or authentication surfaces.
 
 ## Verification evidence
 
-On 2026-08-28 in the workspace, the implementation passed:
+Initial verification on 2026-08-28 in the workspace passed:
 
 - `cargo test --workspace --quiet` — all workspace tests passed, including the
   core, host, protocol, app-server, ACP, and CLI integration tests.
@@ -43,7 +43,7 @@ On 2026-08-28 in the workspace, the implementation passed:
 - `cargo +1.88.0 check --workspace --locked` — passed on Windows.
 - `cargo build --workspace --release` — passed on Windows.
 - `cargo package --workspace --locked --no-verify --allow-dirty` — passed on
-  Windows (the worktree is intentionally uncommitted).
+  Windows.
 - `python -m unittest scripts/test_package_release.py` — passed (4 tests).
 - `git diff --check` — passed; only Git's LF/CRLF normalization warnings were
   reported on Windows.
@@ -54,27 +54,33 @@ is a Linux-target compile check, not a native Linux runtime or CI result.
 
 The source-line report separates the provider implementation group from the
 runtime-layer gate. The current breakdown is core 4,058, protocol 699,
-capabilities 13,863, host 4,787, app-server 4,870, acp 922, and CLI 7,689
+capabilities 13,863, host 4,756, app-server 4,871, acp 922, and CLI 7,689
 lines. The runtime gate (`core + protocol + host + app-server`) is
-14,414/20,000; capabilities and ACP remain separately visible and excluded
-from that gate. All Rust source is 36,888/30,000, so the repository-wide line
-budget remains an intentional follow-up gate. The host extraction preserves
-the existing CLI implementation while provider implementations are isolated
-behind the capabilities group. This proposal does not claim that the
-repository-wide line budget has passed; the next cleanup stage must remove
-duplication or split the budgeted change before release.
+14,384/20,000; capabilities and ACP remain separately visible and excluded
+from that gate. All Rust source is 36,858/30,000, so the repository-wide line
+budget remains an intentional follow-up gate. Host no longer re-exports
+capability providers; frontends import them from the dedicated capabilities
+crate. This proposal does not claim that the repository-wide line budget has
+passed; the next cleanup stage must remove duplication or split the budgeted
+change before release.
+
+Follow-up verification on 2026-08-29 at `e317b14` passed
+`cargo test --workspace --all-targets -- --test-threads=1` and
+`cargo clippy --workspace --all-targets --locked -- -D warnings` on Windows.
+The worktree is clean. Native macOS/Linux runtime, candidate CI, and a real
+provider Goal run remain unverified.
 
 These are local Windows results plus a Linux-target compile check. Native
 macOS/Linux runtime, candidate CI, and a real provider run remain release
 verification work; deterministic protocol tests cover the local multi-process
 framing contract.
 
-The latest remote baseline is also recorded separately from this uncommitted
+The latest remote baseline is also recorded separately from this committed
 working tree: [CI #56 for `4934ac9`](https://github.com/civaapple-alt/mini-agent-harness/actions/runs/33144991077)
 passed Minimum Rust 1.88 and the Ubuntu, macOS, and Windows test/build/smoke
 jobs. Its quality job failed only at the existing line-budget gate
 (`30,828/30,000`); formatting and linting passed. This is evidence for the
-baseline revision, not for the current uncommitted architecture changes.
+baseline revision, not for the current architecture revision.
 
 ## Boundary addressed
 

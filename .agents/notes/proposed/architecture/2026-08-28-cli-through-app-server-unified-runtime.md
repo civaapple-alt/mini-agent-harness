@@ -37,6 +37,14 @@ evidence (cross-platform CI and a real provider Goal run). The source tree now
 has one CLI turn owner, and concrete provider implementations are isolated in
 `mini-agent-capabilities` behind Host profile seams.
 
+Follow-up verification on 2026-08-29 at `e317b14` passed
+`cargo test --workspace --all-targets -- --test-threads=1` and
+`cargo clippy --workspace --all-targets --locked -- -D warnings`. This is
+current Windows evidence; it does not close the cross-platform CI or real
+provider gaps. `python scripts/line_budget.py` still reports the real
+workspace overage (`36,858/30,000`) while the runtime gate remains within
+budget.
+
 The runtime simplification follow-up now makes session JSONL the single durable
 record and removes the external trace writer/replay surface. Result handles are
 reloaded from `result_stored` records on resume, and CLI/App Server persistence

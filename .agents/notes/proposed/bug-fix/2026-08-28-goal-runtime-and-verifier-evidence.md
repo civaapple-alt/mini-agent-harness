@@ -4,7 +4,8 @@ Status: proposed
 Date: 2026-08-28
 Reviewed revision: `6f3a90e`
 Review interval: `f85a965..6f3a90e` (6 commits)
-Current evidence tree: `4934ac9` plus uncommitted working-tree changes
+Current evidence tree: `e317b14` (committed Windows verification; cross-platform
+CI and real-provider evidence remain open)
 
 ## Current architecture update (2026-08-28)
 
@@ -42,20 +43,23 @@ evidence below is from the current working tree:
 
 - Baseline `6f3a90e`: `cargo test -p mini-agent-core` passed 29 tests (27 unit
   tests and 2 integration tests); the focused CLI Goal test did not exist.
-- Current working tree: `cargo test --workspace --quiet` passes every package,
-  including 40 core tests, 154 host tests, 20 app-server tests, 4 wire protocol
-  tests, 2 ACP tests, 32 built-CLI interactive tests, and the remaining CLI and
-  protocol suites. `cargo clippy --workspace --all-targets -- -D warnings`
-  also passes.
+- Earlier working tree: `cargo test --workspace --quiet` passed every package,
+  including the then-current core, host, app-server, wire protocol, ACP, and
+  CLI suites. `cargo clippy --workspace --all-targets -- -D warnings` also
+  passed.
+- Current committed tree `e317b14`: `cargo test --workspace --all-targets
+  -- --test-threads=1` passed (ACP 4, App Server 23, wire protocol 4,
+  capabilities 111, CLI 16 unit + 35 interactive + 3 prompt-weight + 3
+  real-LLM example tests, core 40 unit + 2 integration, Host 55, and the
+  remaining protocol suites). Workspace Clippy with `-D warnings` also passed.
 - `cargo +1.88.0 check --workspace --locked` passes on Windows, covering the
   new host, app-server, wire protocol, and ACP crates against the declared
   minimum compiler.
 - `cargo build --workspace --release` passes on Windows. This validates the
   release profile locally, but is not a packaged cross-platform release.
 - `cargo package --workspace --locked --no-verify --allow-dirty` and
-  `python -m unittest scripts/test_package_release.py` pass locally. The
-  package command uses `--allow-dirty` only because this candidate is not yet
-  committed.
+  `python -m unittest scripts/test_package_release.py` passed on the earlier
+  candidate; the current tree is committed and clean.
 - The release binary smoke path (`mini-agent --version`, `status --json`, and
   `demo "make this loud"`) passes locally without making a provider request.
 - Baseline remote [CI #56 for `4934ac9`](https://github.com/civaapple-alt/mini-agent-harness/actions/runs/33144991077)
@@ -63,14 +67,12 @@ evidence below is from the current working tree:
   failed only the line-budget check. That run does not include this working
   tree.
 - Current `python scripts/line_budget.py`: runtime layers (core + protocol +
-  host + app-server) 26,079 / 20,000 lines; all Rust source 34,390 / 30,000
+  host + app-server) 14,384 / 20,000 lines; all Rust source 36,858 / 30,000
   lines, including tests. The ACP edge is reported separately and excluded
-  from the runtime gate. The runtime gate is over budget by 6,079 lines and
-  the repository-wide gate is over budget by 4,390 lines. The diagnostic layer
-  breakdown is core 4,058, protocol 699, host 17,125, app-server 4,197,
-  acp 767, and CLI 7,544 lines. The same report separates production/unit/integration
-  lines as core 1,781/1,928/349, protocol 519/180/0, host 12,373/4,752/0,
-  app-server 3,256/941/0, acp 557/210/0, and CLI 4,602/486/2,456.
+  from the runtime gate. The runtime gate is within budget; the repository-wide
+  gate remains over by 6,858 lines. The diagnostic layer breakdown is core
+  4,058, protocol 699, capabilities 13,863, host 4,756, app-server 4,871,
+  acp 922, and CLI 7,689 lines.
 - Using temporary Zig compiler/linker/archive wrappers on Windows, the Linux
   target `cargo check` passes. A stronger
   `cargo test --workspace --target x86_64-unknown-linux-gnu --no-run` attempt
@@ -85,7 +87,7 @@ The focused integration tests are local mock-provider runs of `/goal` through
 the built CLI. The current tree covers a tool-bearing success, malformed and
 tool-using verifier failures, deterministic timeout, rejection/retry/
 exhaustion, and restart. The full workspace suite passes locally. Remote CI
-for the current uncommitted tree and real-provider Goal behavior remain
+for the current committed tree and real-provider Goal behavior remain
 unverified; no paid provider calls were authorized or made. These results do
 not by themselves establish release readiness.
 
@@ -145,7 +147,7 @@ The working tree now contains the first repair stage and its focused evidence:
 The focused CLI tests now include deterministic timeout, rejected/retry/
 exhausted-retry, and restart cases. Package tests and Clippy pass on Windows;
 the full workspace test also passes. The line-budget gate remains over the
-30,000-line ceiling after the boundary extraction, and the current uncommitted
+30,000-line ceiling after the boundary extraction, and the current committed
 tree has not run in remote CI. Real-provider Goal behavior remains an
 explicitly authorized release smoke test; no paid calls were made here. This
 note stays proposed until the remaining release gates are either passed or
@@ -162,12 +164,12 @@ explicitly narrowed.
 | Full workspace | `cargo test --workspace --quiet` | passed locally on Windows |
 | Minimum compiler | `cargo +1.88.0 check --workspace --locked` | passed locally on Windows |
 | Linux target | `cargo check --workspace --target x86_64-unknown-linux-gnu` with temporary Zig wrappers; test-binary `--no-run` attempt | check passed as cross-compile; test linking lacks Linux system libraries; native runtime pending |
-| macOS/Linux/CI | baseline CI #56 passed all OS jobs, but did not contain this uncommitted tree | candidate evidence pending |
+| macOS/Linux/CI | baseline CI #56 passed all OS jobs, but did not contain this committed tree | candidate evidence pending |
 | Real provider Goal behavior | not run; paid provider calls were not authorized for this verification pass | intentionally pending |
 | Release profile | `cargo build --workspace --release` | passed locally on Windows; packaging and other OS release builds pending |
 | Built binary smoke | `target/release/mini-agent.exe --version`, `status --json`, `demo` | passed locally on Windows without provider I/O |
 | Package/release scripts | `cargo package --workspace --locked --no-verify --allow-dirty`; `python -m unittest scripts/test_package_release.py` | passed locally; clean-tree CI still pending |
-| Repository line budget | `python scripts/line_budget.py`: 34,377/30,000 Rust lines | failed; cleanup or an explicitly approved budget decision is required |
+| Repository line budget | `python scripts/line_budget.py`: 36,858/30,000 Rust lines; runtime 14,384/20,000 | failed; cleanup or an explicitly approved budget decision is required |
 
 ## Confirmed Defects
 
