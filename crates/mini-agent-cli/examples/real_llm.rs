@@ -355,9 +355,6 @@ async fn run() -> Result<(), Box<dyn Error>> {
         .resolve("OPENAI_BASE_URL")
         .map(|value| value.value)
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-    let chat_base_url = environment
-        .resolve("OPENAI_CHAT_BASE_URL")
-        .map(|value| value.value);
     let required_requests = args
         .scenarios
         .iter()
@@ -389,7 +386,6 @@ async fn run() -> Result<(), Box<dyn Error>> {
                 &api_key,
                 &model_name,
                 &base_url,
-                chat_base_url.as_deref(),
                 args.max_output_tokens,
                 Arc::clone(&used),
                 max_requests,
@@ -443,7 +439,6 @@ async fn run_scenario(
     api_key: &str,
     model_name: &str,
     base_url: &str,
-    chat_base_url: Option<&str>,
     max_output_tokens: usize,
     used: Arc<AtomicUsize>,
     max_requests: usize,
@@ -508,7 +503,6 @@ async fn run_scenario(
                 api_key,
                 model_name,
                 base_url,
-                chat_base_url,
                 max_output_tokens,
                 used,
                 max_requests,
@@ -604,7 +598,6 @@ fn model(
         api_key,
         model_name,
         base_url,
-        None,
         max_output_tokens,
         used,
         max_requests,
@@ -617,7 +610,6 @@ fn model_with_images(
     api_key: &str,
     model_name: &str,
     base_url: &str,
-    chat_base_url: Option<&str>,
     max_output_tokens: usize,
     used: Arc<AtomicUsize>,
     max_requests: usize,
@@ -627,7 +619,6 @@ fn model_with_images(
         api_key.to_string(),
         model_name.to_string(),
         base_url.to_string(),
-        chat_base_url.map(str::to_string),
         false,
         images,
     )
@@ -1486,7 +1477,6 @@ async fn run_vision(
     api_key: &str,
     model_name: &str,
     base_url: &str,
-    chat_base_url: Option<&str>,
     max_output_tokens: usize,
     used: Arc<AtomicUsize>,
     max_requests: usize,
@@ -1515,7 +1505,6 @@ async fn run_vision(
         api_key,
         model_name,
         base_url,
-        chat_base_url,
         max_output_tokens,
         used,
         max_requests,

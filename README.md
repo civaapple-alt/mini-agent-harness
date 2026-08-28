@@ -135,7 +135,7 @@ OPENAI_BASE_URL=https://api.deepseek.com
 Use `~/.mini-agent/.env` on macOS/Linux and
 `%USERPROFILE%\.mini-agent\.env` on Windows. Process environment values take
 precedence over a workspace `.env`, which takes precedence over the user file.
-See [configuration](docs/configuration.md) for GLM, mentor, web search, and
+See [configuration](docs/configuration.md) for provider, mentor, web search, and
 extension settings.
 
 ## Common commands

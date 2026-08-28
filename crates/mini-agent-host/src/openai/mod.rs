@@ -1,9 +1,7 @@
-mod chat;
 mod responses;
 
 use crate::image::ImageStore;
 use crate::image::ProjectedImage;
-use crate::image::is_glm_model;
 use crate::image::project_images;
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
@@ -28,7 +26,6 @@ pub struct OpenAiModel {
     api_key: String,
     model: String,
     endpoint: String,
-    chat_endpoint: Option<String>,
     web_search: bool,
     images: ImageStore,
     max_output_tokens: Option<usize>,
@@ -39,7 +36,6 @@ impl OpenAiModel {
         api_key: String,
         model: String,
         base_url: String,
-        chat_base_url: Option<String>,
         web_search: bool,
         images: ImageStore,
     ) -> Result<Self, OpenAiError> {
@@ -49,10 +45,6 @@ impl OpenAiModel {
                 "OPENAI_BASE_URL must not be empty".to_string(),
             ));
         }
-        let chat_endpoint = match chat_base_url {
-            Some(url) => Some(chat_completions_url(&url)?),
-            None => None,
-        };
         let client = Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
@@ -63,7 +55,6 @@ impl OpenAiModel {
             api_key,
             model,
             endpoint: format!("{base_url}/responses"),
-            chat_endpoint,
             web_search,
             images,
             max_output_tokens: None,
@@ -85,40 +76,12 @@ impl Model for OpenAiModel {
         request: ModelRequest<'a>,
         events: &'a mut (dyn ModelEventSink + Send),
     ) -> Result<ModelResponse, Self::Error> {
-        let (_, has_live_image) = project_for_request(&request, &self.images);
-        if is_glm_model(&self.model) && has_live_image {
-            let endpoint = self.chat_endpoint.as_deref().ok_or_else(|| {
-                OpenAiError::Protocol(
-                    "GLM image turns require OPENAI_CHAT_BASE_URL (Chat Completions root, for example https://open.bigmodel.cn/api/coding/paas/v4)".to_string(),
-                )
-            })?;
-            chat::complete(self, endpoint, &request, events).await
-        } else {
-            responses::complete(self, &request, events).await
-        }
+        responses::complete(self, &request, events).await
     }
 }
 
 fn trim_base(url: &str) -> String {
     url.trim().trim_end_matches('/').to_string()
-}
-
-fn chat_completions_url(base_url: &str) -> Result<String, OpenAiError> {
-    let base = trim_base(base_url);
-    if base.is_empty() {
-        return Err(OpenAiError::Protocol(
-            "OPENAI_CHAT_BASE_URL must not be empty".to_string(),
-        ));
-    }
-    if base.to_ascii_lowercase().ends_with("/chat/completions") {
-        Ok(base)
-    } else {
-        Ok(format!("{base}/chat/completions"))
-    }
-}
-
-fn glm_reasoning_effort(model: &str) -> bool {
-    model.to_ascii_lowercase().starts_with("glm-5.3")
 }
 
 fn project_for_request(
@@ -289,29 +252,3 @@ impl fmt::Display for OpenAiError {
 }
 
 impl Error for OpenAiError {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chat_completions_url_appends_path_without_host_rewrite() {
-        assert_eq!(
-            chat_completions_url("https://open.bigmodel.cn/api/coding/paas/v4").unwrap(),
-            "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
-        );
-        assert_eq!(
-            chat_completions_url("https://open.bigmodel.cn/api/coding/paas/v4/chat/completions")
-                .unwrap(),
-            "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
-        );
-        assert_eq!(
-            chat_completions_url("https://api.z.ai/api/paas/v4").unwrap(),
-            "https://api.z.ai/api/paas/v4/chat/completions"
-        );
-        assert_eq!(
-            chat_completions_url("https://open.bigmodel.cn/api/v1").unwrap(),
-            "https://open.bigmodel.cn/api/v1/chat/completions"
-        );
-    }
-}

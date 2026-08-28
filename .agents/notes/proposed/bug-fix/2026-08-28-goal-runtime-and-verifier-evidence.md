@@ -43,7 +43,7 @@ evidence below is from the current working tree:
 - Baseline `6f3a90e`: `cargo test -p mini-agent-core` passed 29 tests (27 unit
   tests and 2 integration tests); the focused CLI Goal test did not exist.
 - Current working tree: `cargo test --workspace --quiet` passes every package,
-  including 40 core tests, 161 host tests, 20 app-server tests, 4 wire protocol
+  including 40 core tests, 154 host tests, 20 app-server tests, 4 wire protocol
   tests, 2 ACP tests, 32 built-CLI interactive tests, and the remaining CLI and
   protocol suites. `cargo clippy --workspace --all-targets -- -D warnings`
   also passes.
@@ -63,14 +63,14 @@ evidence below is from the current working tree:
   failed only the line-budget check. That run does not include this working
   tree.
 - Current `python scripts/line_budget.py`: runtime layers (core + protocol +
-  host + app-server) 26,792 / 20,000 lines; all Rust source 35,116 / 30,000
+  host + app-server) 26,079 / 20,000 lines; all Rust source 34,390 / 30,000
   lines, including tests. The ACP edge is reported separately and excluded
-  from the runtime gate. The runtime gate is over budget by 6,792 lines and
-  the repository-wide gate is over budget by 5,116 lines. The diagnostic layer
-  breakdown is core 4,058, protocol 699, host 17,836, app-server 4,199,
-  acp 767, and CLI 7,557 lines. The same report separates production/unit/integration
-  lines as core 1,781/1,928/349, protocol 519/180/0, host 12,796/5,040/0,
-  app-server 3,274/941/0, acp 557/210/0, and CLI 4,614/486/2,457.
+  from the runtime gate. The runtime gate is over budget by 6,079 lines and
+  the repository-wide gate is over budget by 4,390 lines. The diagnostic layer
+  breakdown is core 4,058, protocol 699, host 17,125, app-server 4,197,
+  acp 767, and CLI 7,544 lines. The same report separates production/unit/integration
+  lines as core 1,781/1,928/349, protocol 519/180/0, host 12,373/4,752/0,
+  app-server 3,256/941/0, acp 557/210/0, and CLI 4,602/486/2,456.
 - Using temporary Zig compiler/linker/archive wrappers on Windows, the Linux
   target `cargo check` passes. A stronger
   `cargo test --workspace --target x86_64-unknown-linux-gnu --no-run` attempt

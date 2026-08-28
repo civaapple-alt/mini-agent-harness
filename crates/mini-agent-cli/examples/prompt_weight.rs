@@ -162,7 +162,6 @@ async fn run_case(
         api_key.to_string(),
         model_name.to_string(),
         base_url.to_string(),
-        None,
         false,
         mini_agent_host::image::ImageStore::memory_only(),
     ) {

@@ -81,7 +81,6 @@ pub async fn run(arguments: String, trace: Option<PathBuf>, json_output: bool) -
         provider.api_key,
         provider.model.clone(),
         provider.base_url,
-        provider.chat_base_url,
         provider.web_search,
         ImageStore::memory_only(),
     ) {
@@ -184,7 +183,6 @@ pub async fn verify_checkpoint(
         provider.api_key,
         provider.model,
         provider.base_url,
-        provider.chat_base_url,
         false,
         ImageStore::memory_only(),
     )

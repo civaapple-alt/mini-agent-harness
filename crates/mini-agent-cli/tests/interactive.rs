@@ -2425,7 +2425,6 @@ fn mini_agent(root: &Path) -> Command {
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
-        .env_remove("OPENAI_CHAT_BASE_URL")
         .env_remove("MENTOR_OPENAI_MODEL")
         .env_remove("MENTOR_OPENAI_API_KEY")
         .env_remove("MENTOR_OPENAI_BASE_URL");

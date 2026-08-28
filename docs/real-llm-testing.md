@@ -77,11 +77,9 @@ still contain sensitive text.
 The runner reads OPENAI_BASE_URL and OPENAI_MODEL using the same Responses
 adapter as the CLI. Mentor and Goal use MENTOR_OPENAI_MODEL, with
 MENTOR_OPENAI_API_KEY and MENTOR_OPENAI_BASE_URL optional fallbacks to the
-primary provider settings. It also reads OPENAI_CHAT_BASE_URL for GLM image
-turns. It disables built-in web search so the scenario budget covers only the
-requested model calls. Use a provider/model that accepts the Responses API and
-its output-token parameter; GLM vision additionally needs a Chat Completions
-root.
+primary provider settings. It disables built-in web search so the scenario
+budget covers only the requested model calls. Use a provider/model that accepts
+the Responses API and its output-token parameter.
 
 On macOS and Linux, use `python3` when a local Python command is needed; on
 Windows, use `python`. The runner probes `python3` first and then `python` for
@@ -113,7 +111,7 @@ constant. The existing prompt_weight example is a separate paid experiment and
 normally issues 12 requests per repetition; use it only when that experiment
 is explicitly intended.
 
-Persistent CLI sessions and provider-specific GLM image routing remain covered
-by separate paths inside this runner. Add one scenario at a time with an
+Persistent CLI sessions and provider-specific image handling remain covered by
+separate paths inside this runner. Add one scenario at a time with an
 explicit request budget and a deterministic verifier; do not make real calls a
 default release or CI gate.

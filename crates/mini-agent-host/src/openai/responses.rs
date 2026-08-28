@@ -1,7 +1,6 @@
 use super::Accumulator;
 use super::OpenAiError;
 use super::drain_sse;
-use super::glm_reasoning_effort;
 use super::max_event_bytes;
 use super::post_json;
 use super::project_for_request;
@@ -112,9 +111,6 @@ fn request_body_with_limit(
         "store": false,
         "stream": true
     });
-    if glm_reasoning_effort(&model) {
-        body["reasoning"] = json!({ "effort": "max" });
-    }
     if let Some(max_output_tokens) = max_output_tokens {
         body["max_output_tokens"] = json!(max_output_tokens);
     }
@@ -495,43 +491,6 @@ mod tests {
         );
         assert_eq!(compacted["model"], "deepseek-v4-flash");
         assert_eq!(compacted["input"][2]["output"], envelope);
-    }
-
-    #[test]
-    fn glm_text_turns_stay_on_responses() {
-        let images = crate::image::ImageStore::memory_only();
-        let tools = vec![ToolSpec {
-            name: "read_image".to_string(),
-            description: "Read an image".to_string(),
-            parameters: json!({"type": "object"}),
-        }];
-        let config = HarnessConfig::default();
-        let text_only = request_body(
-            "glm-5.3",
-            &ModelRequest {
-                system_prompt: &config.system_prompt,
-                messages: &[Message::User {
-                    text: "hello".to_string(),
-                }],
-                tools: &tools,
-                max_response_bytes: config.max_model_response_bytes,
-            },
-            false,
-            &images,
-        );
-        assert_eq!(text_only["model"], "glm-5.3");
-        assert_eq!(text_only["reasoning"]["effort"], "max");
-        assert!(text_only.get("messages").is_none());
-        assert_eq!(text_only["input"][0]["role"], "user");
-        assert!(
-            text_only
-                .get("tools")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|tool| tool["type"] != "web_search")
-        );
     }
 
     #[test]

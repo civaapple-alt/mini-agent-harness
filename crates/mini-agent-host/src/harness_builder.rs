@@ -80,7 +80,6 @@ pub fn prepare_openai_harness(
         provider.api_key,
         provider.model,
         provider.base_url,
-        provider.chat_base_url,
         provider.web_search,
         images.clone(),
     ) {

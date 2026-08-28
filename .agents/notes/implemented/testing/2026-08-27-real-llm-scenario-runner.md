@@ -29,8 +29,8 @@ bounded wall-clock timeout. Results are emitted as JSONL without the API key.
 This runner tests the real provider adapter plus the portable core harness. It
 does not pretend to prove general model quality. Mentor and Goal use production
 state/verdict code; MCP uses the production loader with a local stdio fixture.
-Persistent CLI sessions and provider-specific GLM image routing remain
-scenario-specific and budgeted.
+Persistent CLI sessions and provider image projection remain scenario-specific
+and budgeted; every provider request uses the single Responses protocol.
 
 Real calls are never made by cargo test, CI, or the normal release workflow.
 The prompt-weight experiment remains separate because it intentionally uses a

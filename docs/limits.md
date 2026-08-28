@@ -50,7 +50,7 @@ Only the older prefix is sent to the same model with the unchanged system
 prompt and an empty tool catalog (so compact cannot call tools or attach
 images), followed by one appended compaction user message. If that compaction
 request would exceed 1 MiB, the oldest prefix messages are dropped until it
-fits. The 1 MiB JSON ceiling does not count host-projected image bytes; GLM
+fits. The 1 MiB JSON ceiling does not count host-projected image bytes; image
 data URLs are a host wire payload, not core history. The returned summary must be non-empty, contain no tool
 calls, reduce context size, and fit the existing response and request ceilings.
 If it does not, the harness drops oldest prefix messages until the request is

@@ -1,6 +1,7 @@
 # DeepSeek and GLM Coding Plan provider seams
 
 Status: implemented
+Archived: 2026-08-28
 
 ## Context
 

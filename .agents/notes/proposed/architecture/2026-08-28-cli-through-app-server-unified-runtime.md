@@ -28,6 +28,9 @@ The first migration slice is complete:
   command serialization to that module.
 - The local host runtime reuses the protocol `TurnReadResult` directly instead
   of maintaining a second settled-result struct, reducing boundary duplication.
+- Provider execution now has one wire adapter, `openai/responses.rs`, and one
+  portable `ModelResponse`; the GLM-5.3-Flash Chat Completions adapter,
+  model-name branch, and `OPENAI_CHAT_BASE_URL` configuration were removed.
 
 The proposal remains open pending line-budget cleanup and external evidence
 (cross-platform CI and a real provider Goal run). The source tree now has one
@@ -48,7 +51,7 @@ cargo run -p mini-agent-cli -- demo "hello app server"     PASS (offline App Ser
 cargo run -p mini-agent-cli -- --help                     PASS
 python -m unittest scripts/test_line_budget.py            PASS (3 tests)
 cargo package --workspace --locked --no-verify --allow-dirty PASS (yanked chacha20 warning)
-python scripts/line_budget.py                              FAIL (runtime 26792/20000)
+python scripts/line_budget.py                              FAIL (runtime 26079/20000)
 ```
 
 Follow-up verification after the worker extraction (2026-08-28):
@@ -69,7 +72,7 @@ cargo run -p mini-agent-cli -- demo "hello app server"     PASS
 cargo run -p mini-agent-cli -- --help                     PASS
 cargo package --workspace --locked --no-verify --allow-dirty PASS (yanked chacha20 warning)
 python -m unittest scripts/test_package_release.py       PASS (4 tests)
-python scripts/line_budget.py                            FAIL (runtime 26792/20000)
+python scripts/line_budget.py                            FAIL (runtime 26079/20000)
 ```
 
 Verification boundaries:
@@ -286,7 +289,7 @@ turns:
 
 At the proposal baseline, the runtime included 2,893 app-server lines while
 the CLI did not use that service. After this migration, the duplicate CLI turn
-owner is gone, but the runtime report is still 26,792/20,000 lines because the
+owner is gone, but the runtime report is still 26,079/20,000 lines because the
 App Server now also owns the Mentor review adapter and the local runtime/thread
 update operations. This proposal should next reduce or split existing Host/App
 Server responsibilities
@@ -302,6 +305,6 @@ both paths in place, the proposal has failed even if all tests pass.
 | Session, Goal/Plan, MCP, restart behavior | Met by current local CLI integration coverage. |
 | App Server and ACP transport mapping | Met locally: Local-vs-JSON-RPC and ACP-vs-App-Server complete event trace fixtures pass; settled result checks also pass through the existing protocol/CLI tests. |
 | Workspace and lint checks | Met locally: workspace tests and Clippy pass. |
-| Runtime/workspace line budget | Open: `26792/20000` runtime and `35116/30000` all Rust source. |
+| Runtime/workspace line budget | Open: `26079/20000` runtime and `34390/30000` all Rust source. |
 | macOS/Linux/CI evidence | Open; not available from this local run. |
 | Real provider Goal behavior | Open; requires provider credentials and an explicitly authorized run. |

@@ -12,8 +12,37 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   no default CI or release-network calls.
 - Opt-in, budgeted real-provider scenario checks for mentor-derived insights,
   Goal verification/milestone advancement, and production MCP stdio tool calls.
-- Explicit provider output-token caps for controlled integration checks across
-  Responses and Chat Completions adapters.
+- Explicit provider output-token caps for controlled integration checks through
+  the single Responses adapter.
+
+### Changed
+
+- CLI `ask`, one-shot `auto`, interactive REPL, `demo`, `mentor`, and Goal
+  verifier turns now use the local App Server boundary and its ordered event
+  stream. The App Server also exposes the same runtime through typed local and
+  JSON-RPC clients, with ACP mapping on top.
+- Core execution contracts are separated from the protocol crate. Session,
+  context, turn lifecycle, cancellation, and queued input are owned by the
+  execution core, while wire payloads remain in protocol.
+- Host responsibilities are separated from App Server transport and worker
+  orchestration. Runtime configuration, provider setup, tools, workspace
+  policy, persistence, Goal state, and Plan state remain in the Host layer.
+- Provider execution now uses one Responses protocol adapter. The former GLM
+  Chat Completions adapter, model-specific routing, and `OPENAI_CHAT_BASE_URL`
+  setting were removed.
+- Source line budgets now report core, protocol, host, app-server, ACP, and CLI
+  separately, including production, unit-test, and integration-test lines.
+
+### Fixed
+
+- Interactive run control now distinguishes immediate `/steer` input from
+  queued follow-up input and preserves the shared worker checkpoint boundary.
+- REPL managed processes, restart/resume flows, and settled App Server results
+  now use the same session and event lifecycle as headless turns.
+- Goal verifier failures, retries, rejection, exhaustion, timeout, and
+  checkpoint restart paths now have deterministic integration coverage.
+- Web fetch results can be continued in bounded pages instead of exceeding the
+  tool response limit.
 
 ## [0.3.0] - 2026-08-27
 

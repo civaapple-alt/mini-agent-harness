@@ -139,7 +139,6 @@ If a proposed approach is rejected during review:
 | 2026-08-26 | [Fail-Closed Approval](implemented/feature/2026-08-26-fail-closed-approval-and-tool-orchestration.md) | Permission matrix, interactive TTY approval, and path containment |
 | 2026-08-26 | [Autonomous Goal Mode](implemented/feature/2026-08-26-autonomous-goal-mode.md) | Long-running goal execution with convergence gates and loop detection |
 | 2026-08-26 | [MCP Circuit Breaker](implemented/feature/2026-08-26-mcp-circuit-breaker.md) | Circuit breaking and graceful degradation for failing remote HTTP MCP servers |
-| 2026-08-27 | [DeepSeek and GLM Provider Seams](implemented/feature/2026-08-27-deepseek-and-glm-provider-seams.md) | Responses adapter: built-in web_search, Files `file_id` vs GLM inline vision, Coding Plan endpoints |
 
 #### Simplification (`implemented/simplification/`)
 | Date | Title | Focus |
@@ -179,3 +178,8 @@ If a proposed approach is rejected during review:
 | 2026-08-24 | [Tool-Output Retention](archived/experiments/2026-08-24-tool-output-retention.md) | Head-plus-tail truncation preserves both orientation and final verdict |
 | 2026-08-24 | [Effect Recovery Boundary](archived/experiments/2026-08-24-effect-recovery.md) | Replay safety simulation across non-idempotent crash boundaries |
 | 2026-08-24 | [Prompt Weight Protocol](archived/experiments/2026-08-24-prompt-weight.md) | Benchmark protocol comparing minimal vs expanded operational system prompts |
+
+#### Features (`archived/feature/`)
+| Date | Title | Focus |
+|---|---|---|
+| 2026-08-27 | [DeepSeek and GLM Provider Seams](archived/feature/2026-08-27-deepseek-and-glm-provider-seams.md) | Historical provider seam record superseded by the single Responses protocol |
