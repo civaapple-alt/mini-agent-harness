@@ -6,6 +6,26 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const GOAL_SCHEMA_VERSION: u32 = 1;
 pub const MAX_GOAL_PLAN_BYTES: usize = 32 * 1024;
+pub const DEFAULT_GOAL_MAX_LOOPS: usize = 20;
+pub const DEFAULT_GOAL_MILESTONE_STEPS: usize = 50;
+pub const DEFAULT_GOAL_MILESTONE_TIMEOUT_SECS: u64 = 600;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GoalLimits {
+    pub max_loops: usize,
+    pub milestone_step_budget: usize,
+    pub milestone_timeout_secs: u64,
+}
+
+impl Default for GoalLimits {
+    fn default() -> Self {
+        Self {
+            max_loops: DEFAULT_GOAL_MAX_LOOPS,
+            milestone_step_budget: DEFAULT_GOAL_MILESTONE_STEPS,
+            milestone_timeout_secs: DEFAULT_GOAL_MILESTONE_TIMEOUT_SECS,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -264,6 +284,21 @@ pub fn init_goal_workspace(
     objective: &str,
     max_loops: usize,
 ) -> io::Result<GoalState> {
+    init_goal_workspace_with_limits(
+        session_dir,
+        objective,
+        GoalLimits {
+            max_loops,
+            ..GoalLimits::default()
+        },
+    )
+}
+
+pub fn init_goal_workspace_with_limits(
+    session_dir: &Path,
+    objective: &str,
+    limits: GoalLimits,
+) -> io::Result<GoalState> {
     let goal_dir = session_dir.join("goal");
     fs::create_dir_all(&goal_dir)?;
 
@@ -275,9 +310,13 @@ pub fn init_goal_workspace(
         current_milestone: 1,
         total_milestones: 3,
         loop_count: 0,
-        max_loops: if max_loops == 0 { 20 } else { max_loops },
-        milestone_step_budget: 50,
-        milestone_timeout_secs: 600,
+        max_loops: if limits.max_loops == 0 {
+            DEFAULT_GOAL_MAX_LOOPS
+        } else {
+            limits.max_loops
+        },
+        milestone_step_budget: limits.milestone_step_budget,
+        milestone_timeout_secs: limits.milestone_timeout_secs,
         verifier_model: std::env::var("MENTOR_OPENAI_MODEL").ok(),
         last_verifier_score: None,
         updated_at_ms: current_time_ms(),
@@ -699,6 +738,25 @@ summary: All tests pass and architecture is clean.
         )
         .unwrap();
         assert_eq!(unchanged, converged);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejected_verdict_exhausts_retry_budget_without_advancing() {
+        let dir = test_dir();
+        init_goal_workspace(&dir, "Exhaust", 1).unwrap();
+        let failed = advance_goal_milestone(
+            &dir,
+            Some(VerifierVerdict {
+                outcome: VerdictOutcome::Rejected,
+                score: Some(10),
+                summary: "retry exhausted".to_string(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(failed.status, GoalStatus::Failed);
+        assert_eq!(failed.current_milestone, 1);
+        assert_eq!(failed.loop_count, 1);
         fs::remove_dir_all(dir).unwrap();
     }
 }

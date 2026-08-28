@@ -406,7 +406,7 @@ fn discover_explicit_skills(
     }
 }
 
-pub(crate) fn find_named_skill_dirs(
+pub fn find_named_skill_dirs(
     collection_root: &Path,
     names: Vec<String>,
     diagnostics: &mut Vec<String>,
@@ -586,7 +586,7 @@ fn skill_search_children(root: &Path, diagnostics: &mut Vec<String>) -> Vec<Path
     children
 }
 
-pub(crate) fn resolve_local_directory(
+pub fn resolve_local_directory(
     workspace: &Path,
     configured: Option<&str>,
     default: PathBuf,
@@ -617,7 +617,7 @@ pub(crate) fn resolve_local_directory(
     }
 }
 
-pub(crate) fn record_extra_root(workspace: &Path, root: &Path, extra_roots: &mut Vec<PathBuf>) {
+pub fn record_extra_root(workspace: &Path, root: &Path, extra_roots: &mut Vec<PathBuf>) {
     if !root.starts_with(workspace) && !extra_roots.iter().any(|existing| existing == root) {
         extra_roots.push(root.to_path_buf());
     }
@@ -757,7 +757,7 @@ fn contained_directory(path: &Path, boundary: &Path) -> Result<PathBuf, String> 
     }
 }
 
-pub(crate) fn safe_component(value: &str) -> bool {
+pub fn safe_component(value: &str) -> bool {
     !value.is_empty()
         && value != "."
         && value != ".."

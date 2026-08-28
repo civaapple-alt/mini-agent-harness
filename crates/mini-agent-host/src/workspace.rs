@@ -74,7 +74,7 @@ impl ApprovalController {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn with_callback(
+    pub fn with_callback(
         mode: ApprovalMode,
         callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,
     ) -> Self {
@@ -85,7 +85,7 @@ impl ApprovalController {
         )
     }
 
-    pub(crate) fn with_policy_and_callback(
+    pub fn with_policy_and_callback(
         mode: ApprovalMode,
         policy: SecurityPolicy,
         callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,
@@ -142,7 +142,7 @@ impl ApprovalController {
         self.session_dir.lock().unwrap().clone()
     }
 
-    pub(crate) fn ensure_plan_mode_unlocked(&self) -> Result<(), ToolError> {
+    pub fn ensure_plan_mode_unlocked(&self) -> Result<(), ToolError> {
         match self.living_plan() {
             Some(living) => Err(ToolError(format!(
                 "workspace mutations locked in Plan Mode; living plan is {}",
@@ -157,7 +157,7 @@ impl ApprovalController {
         &self.store
     }
 
-    pub(crate) fn approve(&self, action: &str) -> Result<(), ToolError> {
+    pub fn approve(&self, action: &str) -> Result<(), ToolError> {
         match self.policy.evaluate(action) {
             SecurityDecision::Deny => {
                 return Err(ToolError(format!("forbidden by security policy: {action}")));
@@ -241,15 +241,15 @@ pub fn workspace_tools_with_read_roots(
     Ok(tools)
 }
 
-pub(crate) struct Workspace {
-    pub(crate) root: PathBuf,
-    pub(crate) extra_read_roots: Vec<PathBuf>,
-    pub(crate) approval: ApprovalController,
-    pub(crate) sandbox: SandboxKind,
+pub struct Workspace {
+    pub root: PathBuf,
+    pub extra_read_roots: Vec<PathBuf>,
+    pub approval: ApprovalController,
+    pub sandbox: SandboxKind,
 }
 
 impl Workspace {
-    pub(crate) fn with_read_roots(
+    pub fn with_read_roots(
         root: PathBuf,
         approval: ApprovalController,
         extra_read_roots: Vec<PathBuf>,
@@ -271,7 +271,7 @@ impl Workspace {
         })
     }
 
-    pub(crate) fn read_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
+    pub fn read_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
         let candidate = self.candidate(value)?;
         let resolved = candidate
             .canonicalize()
@@ -282,7 +282,7 @@ impl Workspace {
         self.ensure_readable(resolved)
     }
 
-    pub(crate) fn local_file_path(
+    pub fn local_file_path(
         &self,
         value: &Value,
         outside_action: &str,
@@ -442,7 +442,7 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn approve(&self, action: &str) -> Result<(), ToolError> {
+    pub fn approve(&self, action: &str) -> Result<(), ToolError> {
         self.approval.approve(action)
     }
 }
@@ -718,7 +718,7 @@ fn windows_utf8_shell_script(command: &str) -> String {
     format!("{preamble}{command}")
 }
 
-pub(crate) fn shell_command(command: &str) -> Command {
+pub fn shell_command(command: &str) -> Command {
     #[cfg(windows)]
     {
         let wrapped = windows_utf8_shell_script(command);
@@ -742,17 +742,17 @@ pub(crate) fn shell_command(command: &str) -> Command {
     }
 }
 
-pub(crate) struct CommandOutput {
-    pub(crate) text: String,
-    pub(crate) raw_stdout: String,
-    pub(crate) raw_stderr: String,
-    pub(crate) timed_out: bool,
-    pub(crate) exit_code: Option<i32>,
-    pub(crate) source_bytes: usize,
-    pub(crate) source_truncated: bool,
+pub struct CommandOutput {
+    pub text: String,
+    pub raw_stdout: String,
+    pub raw_stderr: String,
+    pub timed_out: bool,
+    pub exit_code: Option<i32>,
+    pub source_bytes: usize,
+    pub source_truncated: bool,
 }
 
-pub(crate) fn run_sandboxed_command(
+pub fn run_sandboxed_command(
     mut cmd: Command,
     root: &Path,
     sandbox_kind: SandboxKind,
@@ -945,7 +945,7 @@ fn file_tool_spec(name: &str, description: &str, content: bool) -> ToolSpec {
     }
 }
 
-pub(crate) fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, ToolError> {
+pub fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, ToolError> {
     arguments
         .get(name)
         .and_then(Value::as_str)

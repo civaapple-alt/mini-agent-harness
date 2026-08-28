@@ -1,30 +1,6 @@
 mod args;
 mod ask;
-mod config;
-mod env_file;
-mod goal;
-mod harness_builder;
-mod image;
-mod marketplaces;
-mod mcp;
-mod mentor;
-mod observer;
-mod openai;
-mod persona;
-mod processes;
-mod project_context;
 mod repl;
-mod result_store;
-mod sandbox;
-mod security;
-mod session;
-mod skills;
-mod subagent;
-mod tool_outcome;
-mod trace;
-mod web;
-mod workspace;
-mod world;
 
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
@@ -51,18 +27,15 @@ use args::Command;
 use args::HelpTopic;
 use args::help_text;
 use args::parse_args;
-use config::RuntimeConfig;
-pub(crate) use harness_builder::HarnessBuild;
-pub(crate) use harness_builder::harness_config;
-pub(crate) use harness_builder::harness_config_auto;
-pub(crate) use harness_builder::prepare_openai_harness;
-pub(crate) use harness_builder::print_auto_warning;
-use observer::RunObserver;
-use sandbox::SandboxKind;
-use security::SecurityPreset;
-use session::SessionRequest;
-use workspace::ApprovalController;
-use workspace::ApprovalMode;
+use host::ApprovalController;
+use host::ApprovalMode;
+use host::RunObserver;
+use host::RuntimeConfig;
+use host::SandboxKind;
+use host::SecurityPreset;
+use host::SessionRequest;
+use host::SessionStore;
+use mini_agent_host as host;
 
 pub(crate) fn version_line() -> String {
     format!("mini-agent {} ({})", env!("CARGO_PKG_VERSION"), git_sha())
@@ -192,12 +165,14 @@ async fn main() -> ExitCode {
             .await
         }
         Command::Sessions => run_sessions(),
-        Command::Mentor => mentor::run(invocation.prompt, invocation.trace, invocation.json).await,
+        Command::Mentor => {
+            host::mentor::run(invocation.prompt, invocation.trace, invocation.json).await
+        }
         Command::TraceReplay => {
-            trace::replay(std::path::Path::new(&invocation.prompt), invocation.json)
+            host::trace::replay(std::path::Path::new(&invocation.prompt), invocation.json)
         }
         Command::TraceSummary => {
-            trace::summary(std::path::Path::new(&invocation.prompt), invocation.json)
+            host::trace::summary(std::path::Path::new(&invocation.prompt), invocation.json)
         }
     }
 }
@@ -264,7 +239,7 @@ fn run_sessions() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match session::list(&workspace) {
+    match host::session::list(&workspace) {
         Ok(sessions) if sessions.is_empty() => {
             println!("no durable sessions");
             ExitCode::SUCCESS
@@ -300,7 +275,7 @@ async fn run_auto(
     web_search_override: Option<bool>,
     session_request: SessionRequest,
 ) -> ExitCode {
-    print_auto_warning();
+    host::print_auto_warning();
     let approval = ApprovalController::with_preset(ApprovalMode::Automatic, preset);
     let mut runtime = match RuntimeConfig::load() {
         Ok(runtime) => runtime,
@@ -312,12 +287,14 @@ async fn run_auto(
     if let Some(enabled) = web_search_override {
         runtime = runtime.with_web_search(enabled);
     }
-    let prepared = match prepare_openai_harness(
+    let prepared = match host::RuntimeBuilder::new(
         &runtime,
         approval.clone(),
-        harness_config_auto(true, runtime.copilot_max_steps()),
+        host::harness_config_auto(true, runtime.copilot_max_steps()),
         sandbox,
-    ) {
+    )
+    .build()
+    {
         Ok(build) => build,
         Err(error) => {
             eprintln!("error: {error}");
@@ -329,7 +306,7 @@ async fn run_auto(
 
     let mut opened_session = match session_request {
         SessionRequest::Disabled => None,
-        other => match session::SessionStore::open(&runtime.workspace(), other) {
+        other => match SessionStore::open(&runtime.workspace(), other) {
             Ok(opened) => {
                 approval.bind_session_file(opened.store.path());
                 images.bind_session_file(opened.store.path());
@@ -364,10 +341,10 @@ async fn run_auto(
     match result {
         Ok(outcome) if outcome.stop_reason != StopReason::StepLimit => {
             if let Some(ref mut session) = opened_session {
-                let _ = session.store.record_turn(session::TurnCommit {
+                let _ = session.store.record_turn(host::session::TurnCommit {
                     started_at_ms,
                     prompt: &prompt,
-                    status: session::TurnStatus::Completed,
+                    status: host::session::TurnStatus::Completed,
                     steps: outcome.steps,
                     error: None,
                     messages: harness.messages(),
@@ -386,10 +363,10 @@ async fn run_auto(
                     "stopped after {} model steps without completing",
                     outcome.steps
                 );
-                let _ = session.store.record_turn(session::TurnCommit {
+                let _ = session.store.record_turn(host::session::TurnCommit {
                     started_at_ms,
                     prompt: &prompt,
-                    status: session::TurnStatus::StepLimit,
+                    status: host::session::TurnStatus::StepLimit,
                     steps: outcome.steps,
                     error: Some(&error),
                     messages: harness.messages(),
@@ -402,10 +379,10 @@ async fn run_auto(
             eprintln!("error: {error}");
             if let Some(ref mut session) = opened_session {
                 let err_str = error.to_string();
-                let _ = session.store.record_turn(session::TurnCommit {
+                let _ = session.store.record_turn(host::session::TurnCommit {
                     started_at_ms,
                     prompt: &prompt,
-                    status: session::TurnStatus::Failed,
+                    status: host::session::TurnStatus::Failed,
                     steps: 1,
                     error: Some(&err_str),
                     messages: harness.messages(),

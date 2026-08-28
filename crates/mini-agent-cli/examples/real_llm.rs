@@ -1,68 +1,3 @@
-#[allow(dead_code)]
-#[path = "../src/env_file.rs"]
-mod env_file;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/goal.rs"]
-mod goal;
-#[allow(dead_code)]
-#[path = "../src/image.rs"]
-mod image;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/marketplaces.rs"]
-mod marketplaces;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/mcp.rs"]
-mod mcp;
-#[path = "../src/openai/mod.rs"]
-mod openai;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/persona.rs"]
-mod persona;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/processes.rs"]
-mod processes;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/result_store.rs"]
-mod result_store;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/sandbox.rs"]
-mod sandbox;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/security.rs"]
-mod security;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/session.rs"]
-mod session;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/skills.rs"]
-mod skills;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/subagent.rs"]
-mod subagent;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/web.rs"]
-mod web;
-#[cfg(not(test))]
-#[allow(dead_code, unused_imports)]
-#[path = "../src/workspace.rs"]
-mod workspace;
-
-use env_file::Environment;
-use image::DeepSeekFiles;
-use image::FileUploader;
-use image::ImageStore;
 use mini_agent_core::ContextLimitBehavior;
 use mini_agent_core::Event;
 use mini_agent_core::Harness;
@@ -80,8 +15,12 @@ use mini_agent_core::ToolCall;
 use mini_agent_core::ToolError;
 use mini_agent_core::ToolRegistry;
 use mini_agent_core::ToolSpec;
-use openai::OpenAiError;
-use openai::OpenAiModel;
+use mini_agent_host::env_file::Environment;
+use mini_agent_host::image::DeepSeekFiles;
+use mini_agent_host::image::FileUploader;
+use mini_agent_host::image::ImageStore;
+use mini_agent_host::openai::OpenAiError;
+use mini_agent_host::openai::OpenAiModel;
 use serde_json::Value;
 use serde_json::json;
 #[cfg(not(test))]
@@ -374,7 +313,7 @@ impl Tool for ReadImageFixture {
             .images
             .get(&self.id)
             .ok_or_else(|| ToolError("image fixture is no longer available".to_string()))?;
-        Ok(image::format_envelope(&stored))
+        Ok(mini_agent_host::image::format_envelope(&stored))
     }
 }
 
@@ -878,7 +817,7 @@ async fn run_persistence(
         Ok(workspace) => workspace,
         Err(error) => return error_record("persistence", error.to_string()),
     };
-    let session_root = match session::session_directory(&workspace) {
+    let session_root = match mini_agent_host::session::session_directory(&workspace) {
         Ok(path) => path,
         Err(error) => return error_record("persistence", error),
     };
@@ -891,9 +830,9 @@ async fn run_persistence(
     let cleanup = || {
         let _ = fs::remove_dir_all(&session_path);
     };
-    let mut opened = match session::SessionStore::open(
+    let mut opened = match mini_agent_host::session::SessionStore::open(
         &workspace,
-        session::SessionRequest::Named(session_id.clone()),
+        mini_agent_host::session::SessionRequest::Named(session_id.clone()),
     ) {
         Ok(opened) => opened,
         Err(error) => return error_record("persistence", error),
@@ -926,24 +865,27 @@ async fn run_persistence(
         cleanup();
         return record;
     }
-    if let Err(error) = opened.store.record_turn(session::TurnCommit {
-        started_at_ms: timestamp as u64,
-        prompt: first_prompt,
-        status: session::TurnStatus::Completed,
-        steps: first.steps,
-        error: None,
-        messages: harness.messages(),
-        checkpoint: harness.messages(),
-    }) {
+    if let Err(error) = opened
+        .store
+        .record_turn(mini_agent_host::session::TurnCommit {
+            started_at_ms: timestamp as u64,
+            prompt: first_prompt,
+            status: mini_agent_host::session::TurnStatus::Completed,
+            steps: first.steps,
+            error: None,
+            messages: harness.messages(),
+            checkpoint: harness.messages(),
+        })
+    {
         drop(opened);
         cleanup();
         return error_record("persistence", error);
     }
     drop(opened);
 
-    let mut resumed = match session::SessionStore::open(
+    let mut resumed = match mini_agent_host::session::SessionStore::open(
         &workspace,
-        session::SessionRequest::Resume(session_id.clone()),
+        mini_agent_host::session::SessionRequest::Resume(session_id.clone()),
     ) {
         Ok(opened) => opened,
         Err(error) => {
@@ -1051,7 +993,7 @@ async fn run_mentor(
         .unwrap_or_default()
         .as_millis();
     let session_id = format!("real-mentor-{timestamp}-{}", used.load(Ordering::SeqCst));
-    let session_root = match session::session_directory(&workspace) {
+    let session_root = match mini_agent_host::session::session_directory(&workspace) {
         Ok(path) => path,
         Err(error) => return error_record("mentor", error),
     };
@@ -1059,9 +1001,9 @@ async fn run_mentor(
     let cleanup = || {
         let _ = fs::remove_dir_all(&session_path);
     };
-    let mut opened = match session::SessionStore::open(
+    let mut opened = match mini_agent_host::session::SessionStore::open(
         &workspace,
-        session::SessionRequest::Named(session_id.clone()),
+        mini_agent_host::session::SessionRequest::Named(session_id.clone()),
     ) {
         Ok(opened) => opened,
         Err(error) => return error_record("mentor", error),
@@ -1076,24 +1018,27 @@ async fn run_mentor(
             tool_calls: Vec::new(),
         },
     ];
-    if let Err(error) = opened.store.record_turn(session::TurnCommit {
-        started_at_ms: timestamp as u64,
-        prompt: "Inspect the release checklist and report the result.",
-        status: session::TurnStatus::Completed,
-        steps: 1,
-        error: None,
-        messages: &source_messages,
-        checkpoint: &source_messages,
-    }) {
+    if let Err(error) = opened
+        .store
+        .record_turn(mini_agent_host::session::TurnCommit {
+            started_at_ms: timestamp as u64,
+            prompt: "Inspect the release checklist and report the result.",
+            status: mini_agent_host::session::TurnStatus::Completed,
+            steps: 1,
+            error: None,
+            messages: &source_messages,
+            checkpoint: &source_messages,
+        })
+    {
         drop(opened);
         cleanup();
         return error_record("mentor", error);
     }
     drop(opened);
 
-    let mut resumed = match session::SessionStore::open(
+    let mut resumed = match mini_agent_host::session::SessionStore::open(
         &workspace,
-        session::SessionRequest::Resume(session_id.clone()),
+        mini_agent_host::session::SessionRequest::Resume(session_id.clone()),
     ) {
         Ok(opened) => opened,
         Err(error) => {
@@ -1152,7 +1097,7 @@ async fn run_mentor(
     let marker_found = final_text.contains("MENTOR-LLM-OK");
     let derived_recorded = resumed
         .store
-        .record_derived(session::DerivedItem {
+        .record_derived(mini_agent_host::session::DerivedItem {
             item_kind: "mentor_insight",
             provider: "openai_responses",
             model: &mentor_model,
@@ -1216,15 +1161,18 @@ async fn run_goal(
     let cleanup = || {
         let _ = fs::remove_dir_all(&goal_root);
     };
-    let initial_state =
-        match goal::init_goal_workspace(&goal_root, "Verify the release checklist.", 2) {
-            Ok(state) => state,
-            Err(error) => {
-                cleanup();
-                return error_record("goal", error.to_string());
-            }
-        };
-    let criteria = match goal::goal_verification_criteria(&goal_root) {
+    let initial_state = match mini_agent_host::goal::init_goal_workspace(
+        &goal_root,
+        "Verify the release checklist.",
+        2,
+    ) {
+        Ok(state) => state,
+        Err(error) => {
+            cleanup();
+            return error_record("goal", error.to_string());
+        }
+    };
+    let criteria = match mini_agent_host::goal::goal_verification_criteria(&goal_root) {
         Ok(criteria) => criteria,
         Err(error) => {
             cleanup();
@@ -1284,12 +1232,13 @@ async fn run_goal(
             return record;
         }
     };
-    let verdict = goal::parse_verifier_verdict(&outcome.final_text);
+    let verdict = mini_agent_host::goal::parse_verifier_verdict(&outcome.final_text);
     let verdict_recorded =
-        goal::record_verifier_verdict(&goal_root, 1, &outcome.final_text).is_ok();
-    let advanced_state = goal::advance_goal_milestone(&goal_root, Some(verdict.clone())).ok();
+        mini_agent_host::goal::record_verifier_verdict(&goal_root, 1, &outcome.final_text).is_ok();
+    let advanced_state =
+        mini_agent_host::goal::advance_goal_milestone(&goal_root, Some(verdict.clone())).ok();
     let passed = outcome.stop_reason == StopReason::Completed
-        && verdict.outcome == goal::VerdictOutcome::Approved
+        && verdict.outcome == mini_agent_host::goal::VerdictOutcome::Approved
         && verdict.score == Some(100)
         && verdict.summary.contains("GOAL-LLM-OK")
         && verdict_recorded
@@ -1426,23 +1375,25 @@ async fn run_mcp(
             return error_record("mcp", error.to_string());
         }
     };
-    let mcp_config = skills::McpServerConfig {
+    let mcp_config = mini_agent_host::skills::McpServerConfig {
         plugin_name: "real_llm.fixture".to_string(),
         server_name: "release".to_string(),
         workspace_root: canonical_root.clone(),
         plugin_root: canonical_root.clone(),
         plugin_data: canonical_root.join(".agents/plugin-data/real_llm.fixture"),
         connect_timeout: Duration::from_secs(20),
-        transport: skills::McpTransportConfig::Stdio {
+        transport: mini_agent_host::skills::McpTransportConfig::Stdio {
             command,
             args: vec![script.to_string_lossy().into_owned()],
             env: BTreeMap::new(),
             cwd: None,
         },
     };
-    let mut loaded = mcp::load(
+    let mut loaded = mini_agent_host::mcp::load(
         &[mcp_config],
-        workspace::ApprovalController::new(workspace::ApprovalMode::Automatic),
+        mini_agent_host::workspace::ApprovalController::new(
+            mini_agent_host::workspace::ApprovalMode::Automatic,
+        ),
     );
     if !loaded.diagnostics.is_empty() || loaded.tools.len() != 1 || loaded.loaded_servers.len() != 1
     {
@@ -1540,7 +1491,7 @@ async fn run_vision(
     used: Arc<AtomicUsize>,
     max_requests: usize,
 ) -> Value {
-    let uses_files = image::uses_deepseek_files(base_url);
+    let uses_files = mini_agent_host::image::uses_deepseek_files(base_url);
     let images = if uses_files {
         ImageStore::with_uploader(Arc::new(BudgetedUploader {
             inner: DeepSeekFiles::new(api_key.to_string(), base_url),

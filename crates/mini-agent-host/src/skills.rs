@@ -157,6 +157,10 @@ impl Discovery {
         self.skills.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.skills.is_empty()
+    }
+
     pub fn skill_count(&self) -> usize {
         self.skills
             .iter()

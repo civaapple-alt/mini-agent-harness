@@ -64,6 +64,7 @@ pub struct TurnResult {
 pub struct ThreadCheckpoint {
     pub thread_id: ThreadId,
     pub session: crate::SessionState,
+    pub status: ThreadStatus,
     pub next_turn_number: u64,
     pub last_turn_id: Option<TurnId>,
     pub next_event_sequence: u64,
@@ -135,6 +136,7 @@ impl<M: Model> Thread<M> {
         Ok(ThreadCheckpoint {
             thread_id: self.id.clone(),
             session: self.harness.session_state().clone(),
+            status: self.status,
             next_turn_number: self.next_turn_number,
             last_turn_id: self.last_turn_id.clone(),
             next_event_sequence: self.next_event_sequence,
@@ -154,7 +156,7 @@ impl<M: Model> Thread<M> {
             .restore_session(checkpoint.session)
             .map_err(|error| ThreadError::Harness(HarnessError::Limit(error)))?;
         self.id = checkpoint.thread_id;
-        self.status = ThreadStatus::Idle;
+        self.status = checkpoint.status;
         self.next_turn_number = checkpoint.next_turn_number.max(1);
         self.last_turn_id = checkpoint.last_turn_id;
         self.next_event_sequence = checkpoint.next_event_sequence.max(1);

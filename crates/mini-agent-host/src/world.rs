@@ -16,7 +16,7 @@ const COMMANDS: &[&str] = &[
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct WorldState {
+pub struct WorldState {
     workspace: PathBuf,
     os: &'static str,
     arch: &'static str,
@@ -31,7 +31,7 @@ pub(crate) struct WorldState {
 }
 
 impl WorldState {
-    pub(crate) fn detect(
+    pub fn detect(
         workspace: &Path,
         approval: ApprovalMode,
         copilot: bool,
@@ -64,7 +64,7 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn with_execution(
+    pub fn with_execution(
         &self,
         approval: ApprovalMode,
         copilot: bool,
@@ -77,23 +77,23 @@ impl WorldState {
         state
     }
 
-    pub(crate) fn approval(&self) -> ApprovalMode {
+    pub fn approval(&self) -> ApprovalMode {
         self.approval
     }
 
-    pub(crate) fn copilot(&self) -> bool {
+    pub fn copilot(&self) -> bool {
         self.copilot
     }
 
-    pub(crate) fn sandbox(&self) -> SandboxKind {
+    pub fn sandbox(&self) -> SandboxKind {
         self.sandbox
     }
 
-    pub(crate) fn workspace(&self) -> &Path {
+    pub fn workspace(&self) -> &Path {
         &self.workspace
     }
 
-    pub(crate) fn model_context(&self) -> Result<String, String> {
+    pub fn model_context(&self) -> Result<String, String> {
         let mut context = String::from("<world_state>");
         context.push_str("<environment os=\"");
         push_xml_escaped(&mut context, self.os);
@@ -141,7 +141,7 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn status_json(&self) -> Value {
+    pub fn status_json(&self) -> Value {
         json!({
             "os": self.os,
             "arch": self.arch,
@@ -157,7 +157,7 @@ impl WorldState {
         })
     }
 
-    pub(crate) fn status_lines(&self) -> Vec<String> {
+    pub fn status_lines(&self) -> Vec<String> {
         vec![
             format!("world_os: {} {}", self.os, self.arch),
             format!("world_shell: {}", self.shell),
@@ -179,7 +179,7 @@ impl WorldState {
         ]
     }
 
-    pub(crate) fn summary(&self) -> String {
+    pub fn summary(&self) -> String {
         format!(
             "{} {} | {} | {} | approval {} | {} project kind(s) | {}/{} commands available",
             self.os,

@@ -3,7 +3,7 @@ use super::new_id;
 use super::timestamp_ms;
 use serde_json::json;
 
-pub(crate) struct DerivedItem<'a> {
+pub struct DerivedItem<'a> {
     pub item_kind: &'a str,
     pub provider: &'a str,
     pub model: &'a str,
@@ -14,11 +14,11 @@ pub(crate) struct DerivedItem<'a> {
 }
 
 impl SessionStore {
-    pub(crate) fn checkpoint_seq(&self) -> u64 {
+    pub fn checkpoint_seq(&self) -> u64 {
         self.checkpoint_seq
     }
 
-    pub(crate) fn record_derived(&mut self, item: DerivedItem<'_>) -> Result<(), String> {
+    pub fn record_derived(&mut self, item: DerivedItem<'_>) -> Result<(), String> {
         self.append_records(vec![json!({
             "kind": "derived_item",
             "item_id": new_id("i"),

@@ -33,7 +33,7 @@ struct Request {
     criteria: Option<String>,
 }
 
-pub(crate) async fn run(arguments: String, trace: Option<PathBuf>, json_output: bool) -> ExitCode {
+pub async fn run(arguments: String, trace: Option<PathBuf>, json_output: bool) -> ExitCode {
     let request = match parse_request(&arguments) {
         Ok(request) => request,
         Err(error) => return preflight_error(json_output, &error),
@@ -155,7 +155,7 @@ pub(crate) async fn run(arguments: String, trace: Option<PathBuf>, json_output: 
     ExitCode::SUCCESS
 }
 
-pub(crate) async fn verify_checkpoint(
+pub async fn verify_checkpoint(
     runtime_config: &RuntimeConfig,
     messages: &[Message],
     criteria: &str,

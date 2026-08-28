@@ -55,6 +55,20 @@ Windows lane is healthy, and the reverse also applies.
 
 The inspected GitHub Actions run [CI #51](https://github.com/civaapple-alt/mini-agent-harness/actions/runs/33062182849), for `f85a965`, failed its quality and Rust 1.88 gates while all three OS test jobs passed. Quality reported Windows-only helper dead-code and non-Windows unused-variable warnings; the current working-tree changes close those warnings. The MSRV job reported three Rust 1.88 errors from `if let` match guards in `repl.rs` and `web.rs`; the current working-tree changes replace them with stable control flow. This run predates the current working-tree changes and is not evidence that the candidate revision passes.
 
+The later baseline [CI #56](https://github.com/civaapple-alt/mini-agent-harness/actions/runs/33144991077)
+passed the Ubuntu, macOS, Windows, and Rust 1.88 jobs for `4934ac9`; its only
+quality failure was the line budget (`30,828/30,000`). The current working tree
+extends the boundary into host, app-server, wire-protocol, and ACP crates and
+currently reports `34,377/30,000`. This keeps the evidence gate active: local
+tests and cross-target checks do not waive the size gate or substitute for CI
+on the candidate revision.
+
+The current Windows pass also includes the release profile, dirty-tree package
+validation, and the four release-packager unit tests. Linux target library
+compilation succeeds through temporary Zig wrappers, but cross-target test
+binary linking cannot find the Linux system libraries on this Windows host; a
+native Linux runner remains required for runtime evidence.
+
 ## Proposal
 
 Use the next development iteration for stabilization. Exit by evidence, not by

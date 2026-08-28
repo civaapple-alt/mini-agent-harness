@@ -63,4 +63,11 @@ impl SessionState {
     pub fn context_revision(&self) -> u64 {
         self.context_revision
     }
+
+    /// Restores the host-visible revision associated with a serialized
+    /// checkpoint after its messages have been validated.
+    pub fn with_context_revision(mut self, revision: u64) -> Self {
+        self.context_revision = revision;
+        self
+    }
 }

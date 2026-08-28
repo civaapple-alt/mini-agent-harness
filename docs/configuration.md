@@ -22,6 +22,9 @@ non-secret source of each value.
 | `MENTOR_OPENAI_API_KEY` | no | Mentor credential override; otherwise inherits `OPENAI_API_KEY` |
 | `MENTOR_OPENAI_BASE_URL` | no | Mentor API root override; otherwise inherits `OPENAI_BASE_URL` |
 | `MINI_AGENT_MAX_STEPS` | no | Copilot/auto model-step cap; `0` means unlimited (the default) |
+| `MINI_AGENT_GOAL_MAX_LOOPS` | no | Maximum Goal milestone attempts; defaults to `20` |
+| `MINI_AGENT_GOAL_STEP_BUDGET` | no | Maximum model steps per Goal milestone; defaults to `50` |
+| `MINI_AGENT_GOAL_TIMEOUT_SECS` | no | Wall-clock timeout for one Goal milestone; defaults to `600` seconds |
 
 `read_image` bytes stay in the session `attachments/` directory (not `session.jsonl`). Resume reloads
 them; fork copies them. Compaction does not attach images.
@@ -97,6 +100,11 @@ Mini-Agent decouples task execution workflows from approval policies:
 
 - **Plan Mode (`/plan` or `/plan <prompt>`)**: Locks codebase mutations to read-only while permitting edits exclusively to the session living plan (`~/.mini-agent/sessions/<workspace>/<id>/plan.md`). Relative path `plan.md` maps to that file. Tracks planning state in `plan_mode.json`.
 - **Autonomous Goal Mode (`/goal <objective>`)**: Materializes a dedicated `goal/` workspace containing `state.json` (milestone progress, loop counts, verifier scores) and `plan.md` (acceptance criteria). Integrates with independent mentor verifiers (`goal/verifier_verdict.md`) to provide blind validation gates before advancing milestones.
+
+Goal limits can be shortened in a workspace `.env` for deterministic local
+fixtures. A timeout stops the current milestone cooperatively, persists a
+failed Goal state, and leaves the REPL available for another command; it does
+not forcibly interrupt synchronous tool effects.
 - **Built-in Foundations & Personas**: Supports 3 core agent roles (`explore`, `plan`, `general`) and 7 specialized personas (`reviewer`, `implementer`, `security-auditor`, `test-writer`, `researcher`, `design-doc-writer`, `design-doc-reviewer`) with dual-mode file contracts (`review_file`, `summary_file`).
 
 ## Mentor insight and verification

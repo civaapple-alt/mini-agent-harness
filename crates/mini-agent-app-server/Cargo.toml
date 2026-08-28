@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "A thin in-process control-plane adapter for mini-agent Threads"
+description = "A service boundary and JSON-RPC transport for mini-agent Threads"
 readme.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -13,8 +13,12 @@ categories.workspace = true
 
 [dependencies]
 mini-agent-core = { version = "0.3.0", path = "../mini-agent-core" }
+mini-agent-app-server-protocol = { version = "0.3.0", path = "../mini-agent-app-server-protocol" }
+mini-agent-host = { version = "0.3.0", path = "../mini-agent-host" }
 mini-agent-protocol = { version = "0.3.0", path = "../mini-agent-protocol" }
-tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-std", "io-util"] }
 
 [dev-dependencies]
 serde_json.workspace = true

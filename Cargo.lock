@@ -785,17 +785,61 @@ dependencies = [
 ]
 
 [[package]]
-name = "mini-agent-app-server"
+name = "mini-agent-acp"
 version = "0.3.0"
 dependencies = [
+ "mini-agent-app-server",
+ "mini-agent-app-server-protocol",
  "mini-agent-core",
- "mini-agent-protocol",
+ "serde",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
+name = "mini-agent-app-server"
+version = "0.3.0"
+dependencies = [
+ "mini-agent-app-server-protocol",
+ "mini-agent-core",
+ "mini-agent-host",
+ "mini-agent-protocol",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "mini-agent-app-server-protocol"
+version = "0.3.0"
+dependencies = [
+ "mini-agent-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mini-agent-cli"
+version = "0.3.0"
+dependencies = [
+ "mini-agent-core",
+ "mini-agent-host",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "mini-agent-core"
+version = "0.3.0"
+dependencies = [
+ "mini-agent-protocol",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "mini-agent-host"
 version = "0.3.0"
 dependencies = [
  "eventsource-stream",
@@ -809,16 +853,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "yaml_serde",
-]
-
-[[package]]
-name = "mini-agent-core"
-version = "0.3.0"
-dependencies = [
- "mini-agent-protocol",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

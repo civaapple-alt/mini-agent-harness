@@ -37,16 +37,42 @@ limits, failures, and observation events.
   messages, events, stop reasons, and limits.
 - `mini-agent-core` implements the execution kernel: context preparation,
   model/tool steps, compaction, hard limits, and cooperative run control.
-- `mini-agent-app-server` provides a thin in-process control-plane facade over
-  a core `Thread`, including typed turn commands and ordered event broadcast.
-  It does not implement a second agent loop or own provider, tool, or storage
-  policy.
-- `mini-agent-cli` provides the executable host: provider adapters, workspace
-  tools, permissions, sessions, REPL, Goal/Plan workflows, and terminal output.
+- `mini-agent-host` is the reusable application host: provider adapters,
+  workspace tools, permissions, MCP and skills, sessions, Goal/Plan workflows,
+  and world state. `RuntimeBuilder` composes these capabilities into a
+  provider-backed `HostRuntime`.
+- `mini-agent-app-server` is the service boundary over a core `Thread`. Its
+  typed facade and versioned `mini-agent-app-server-protocol` support
+  initialization, thread lifecycle, turn commands, steering, interruption,
+  settled results, approval requests, and ordered event notifications.
+  `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess
+  clients.
+- `mini-agent-acp` is an experimental edge adapter that maps ACP-style
+  `session/new`, `session/prompt`, and `session/cancel` messages to the
+  app-server. It does not modify the core execution contracts or claim full
+  ACP conformance yet.
+- `mini-agent-cli` is the frontend: REPL input, headless commands, output
+  rendering, and local session interaction. It depends on the host instead of
+  owning provider and tool assembly.
 
-The dependency direction is `mini-agent-core → mini-agent-protocol`.
-`mini-agent-app-server` depends on both and may be used by a CLI or another
-host; the protocol, kernel, and adapter do not depend on the CLI.
+The conceptual runtime direction is:
+
+```text
+CLI client
+    ↓
+App Server service boundary
+    ↓
+Host / Workflows application host
+    ↓
+Core / Protocol execution foundation
+```
+
+The crate dependency direction keeps the foundation independent:
+`mini-agent-core → mini-agent-protocol`; `mini-agent-host` builds on core and
+protocol; the app-server service depends on core, protocol, and the app-server
+wire DTOs; the CLI depends on host and the foundation. A local CLI path may
+invoke host/core directly for efficiency, while external clients use the
+app-server boundary and observe the same Thread/Turn event semantics.
 
 ## Install
 
@@ -178,6 +204,8 @@ nested-agent behavior are not emulated. See the
 - [Security policy](SECURITY.md) — reporting security problems.
 - [Privacy](docs/privacy.md) — local data and provider requests.
 - [Real LLM checks](docs/real-llm-testing.md) — opt-in, budgeted provider scenarios.
+- [App Server](docs/app-server.md) — versioned JSON-RPC methods and stdio usage.
+- [ACP boundary](docs/acp.md) — experimental session mapping and support scope.
 - [Release process](docs/releasing.md) — how to prepare and publish a release.
 - [Changelog](CHANGELOG.md) — version history.
 - [Agent Notes](.agents/notes/README.md) — architecture decisions and

@@ -1,12 +1,3 @@
-#[path = "../src/env_file.rs"]
-mod env_file;
-#[allow(dead_code)]
-#[path = "../src/image.rs"]
-mod image;
-#[path = "../src/openai/mod.rs"]
-mod openai;
-
-use env_file::Environment;
 use mini_agent_core::Event;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
@@ -16,7 +7,8 @@ use mini_agent_core::Tool;
 use mini_agent_core::ToolError;
 use mini_agent_core::ToolRegistry;
 use mini_agent_core::ToolSpec;
-use openai::OpenAiModel;
+use mini_agent_host::env_file::Environment;
+use mini_agent_host::openai::OpenAiModel;
 use serde_json::Value;
 use serde_json::json;
 use std::env;
@@ -172,7 +164,7 @@ async fn run_case(
         base_url.to_string(),
         None,
         false,
-        image::ImageStore::memory_only(),
+        mini_agent_host::image::ImageStore::memory_only(),
     ) {
         Ok(model) => model,
         Err(error) => return error_record(repetition, task, treatment, error.to_string()),

@@ -1,20 +1,3 @@
-use crate::config::RuntimeConfig;
-use crate::harness_config_auto;
-use crate::mcp;
-use crate::mentor;
-use crate::observer::RunObserver;
-use crate::print_auto_warning;
-use crate::session;
-use crate::session::OpenedSession;
-use crate::session::SessionRequest;
-use crate::session::SessionStore;
-use crate::session::TurnCommit;
-use crate::session::TurnStatus;
-use crate::skills;
-use crate::tool_outcome::classify_tools;
-use crate::workspace::ApprovalController;
-use crate::workspace::ApprovalMode;
-use crate::world::WorldState;
 use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
 use mini_agent_core::EventEnvelope;
 use mini_agent_core::EventSink;
@@ -30,6 +13,24 @@ use mini_agent_core::ThreadId;
 use mini_agent_core::ToolError;
 use mini_agent_core::TurnInput;
 use mini_agent_core::TurnInputMode;
+use mini_agent_host::RuntimeBuilder;
+use mini_agent_host::config::RuntimeConfig;
+use mini_agent_host::harness_config_auto;
+use mini_agent_host::mcp;
+use mini_agent_host::mentor;
+use mini_agent_host::observer::RunObserver;
+use mini_agent_host::print_auto_warning;
+use mini_agent_host::session;
+use mini_agent_host::session::OpenedSession;
+use mini_agent_host::session::SessionRequest;
+use mini_agent_host::session::SessionStore;
+use mini_agent_host::session::TurnCommit;
+use mini_agent_host::session::TurnStatus;
+use mini_agent_host::skills;
+use mini_agent_host::tool_outcome::classify_tools;
+use mini_agent_host::workspace::ApprovalController;
+use mini_agent_host::workspace::ApprovalMode;
+use mini_agent_host::world::WorldState;
 use std::collections::VecDeque;
 use std::io;
 use std::io::IsTerminal;
@@ -94,8 +95,8 @@ pub async fn run(
     initial_approval: ApprovalMode,
     copilot: bool,
     session_request: SessionRequest,
-    preset: crate::security::SecurityPreset,
-    sandbox_kind: crate::sandbox::SandboxKind,
+    preset: mini_agent_host::security::SecurityPreset,
+    sandbox_kind: mini_agent_host::sandbox::SandboxKind,
     web_search_override: Option<bool>,
 ) -> ExitCode {
     let (event_tx, event_rx) = mpsc::sync_channel(EVENT_BUFFER);
@@ -103,7 +104,7 @@ pub async fn run(
     let interactive_terminal = io::stdin().is_terminal();
     let approval = ApprovalController::with_policy_and_callback(
         initial_approval,
-        crate::security::SecurityPolicy::for_preset(preset),
+        mini_agent_host::security::SecurityPolicy::for_preset(preset),
         move |action| {
             if interactive_terminal {
                 request_approval(&approval_events, action)
@@ -262,12 +263,12 @@ pub async fn run(
                             rest.is_empty() || rest.starts_with(char::is_whitespace)
                         }) =>
                     {
-                        let action = match crate::goal::parse_plan_slash(command) {
+                        let action = match mini_agent_host::goal::parse_plan_slash(command) {
                             Some(action) => action,
                             None => unreachable!("plan command matched its parser guard"),
                         };
                         match action {
-                            crate::goal::PlanSlash::Disable => queue_work(
+                            mini_agent_host::goal::PlanSlash::Disable => queue_work(
                                 &worker_tx,
                                 WorkerCommand::SetPlanMode {
                                     active: false,
@@ -275,7 +276,7 @@ pub async fn run(
                                 },
                                 &mut pending_work,
                             ),
-                            crate::goal::PlanSlash::Enable { prompt } => queue_work(
+                            mini_agent_host::goal::PlanSlash::Enable { prompt } => queue_work(
                                 &worker_tx,
                                 WorkerCommand::SetPlanMode {
                                     active: true,
@@ -400,8 +401,8 @@ fn spawn_worker(
     copilot: bool,
     approval: ApprovalController,
     session_request: SessionRequest,
-    preset: crate::security::SecurityPreset,
-    sandbox_kind: crate::sandbox::SandboxKind,
+    preset: mini_agent_host::security::SecurityPreset,
+    sandbox_kind: mini_agent_host::sandbox::SandboxKind,
     web_search_override: Option<bool>,
     commands: mpsc::Receiver<WorkerCommand>,
     events: mpsc::SyncSender<ReplEvent>,
@@ -415,12 +416,13 @@ fn spawn_worker(
                 }
                 let web_search_enabled = runtime.web_search();
                 let auto_max_steps = runtime.copilot_max_steps();
-                crate::prepare_openai_harness(
+                RuntimeBuilder::new(
                     &runtime,
                     approval.clone(),
                     harness_config_auto(copilot, auto_max_steps),
                     sandbox_kind,
                 )
+                .build()
                 .map(|build| (build, auto_max_steps, web_search_enabled, runtime))
             }) {
                 Ok(loaded) => loaded,
@@ -430,7 +432,7 @@ fn spawn_worker(
                     return;
                 }
             };
-        let crate::HarnessBuild {
+        let mini_agent_host::HarnessBuild {
             harness,
             images,
             stable_system_prompt,
@@ -488,10 +490,10 @@ fn spawn_worker(
                     }
                 }
                 if let Some(session_dir) = opened.store.path().parent()
-                    && let Ok(Some(state)) = crate::goal::load_goal_state(session_dir)
-                    && state.status == crate::goal::GoalStatus::Running
+                    && let Ok(Some(state)) = mini_agent_host::goal::load_goal_state(session_dir)
+                    && state.status == mini_agent_host::goal::GoalStatus::Running
                 {
-                    let _ = crate::goal::pause_goal(session_dir);
+                    let _ = mini_agent_host::goal::pause_goal(session_dir);
                     let _ = events.send(ReplEvent::Warning(
                         "goal> paused on restart; reissue /goal to continue".to_string(),
                     ));
@@ -545,7 +547,7 @@ fn spawn_worker(
                     WorkerCommand::Prompt(prompt) => {
                         run_control.clear_steer();
                         let prompt = if approval.living_plan().is_some() {
-                            crate::goal::planning_turn_prompt(&prompt)
+                            mini_agent_host::goal::planning_turn_prompt(&prompt)
                         } else {
                             prompt
                         };
@@ -555,7 +557,9 @@ fn spawn_worker(
                         let goal_timeout = approval.goal_dir().and_then(|goal_dir| {
                             goal_dir
                                 .parent()
-                                .and_then(|dir| crate::goal::load_goal_state(dir).ok().flatten())
+                                .and_then(|dir| {
+                                    mini_agent_host::goal::load_goal_state(dir).ok().flatten()
+                                })
                                 .map(|state| Duration::from_secs(state.milestone_timeout_secs))
                         });
                         let result = if let Some(timeout) = goal_timeout {
@@ -644,7 +648,7 @@ fn spawn_worker(
                                         .goal_dir()
                                         .and_then(|goal_dir| goal_dir.parent().map(PathBuf::from))
                                         .unwrap_or_else(|| world.workspace().to_path_buf());
-                                    let _ = crate::goal::pause_goal(&session_dir);
+                                    let _ = mini_agent_host::goal::pause_goal(&session_dir);
                                     approval.set_goal_dir(None);
                                     goal_objective = None;
                                     let _ = events.send(ReplEvent::Notice(
@@ -687,7 +691,9 @@ fn spawn_worker(
                                     break;
                                 };
                                 let criteria =
-                                    match crate::goal::goal_verification_criteria(&session_dir) {
+                                    match mini_agent_host::goal::goal_verification_criteria(
+                                        &session_dir,
+                                    ) {
                                         Ok(criteria) => criteria,
                                         Err(error) => {
                                             let _ = events.send(ReplEvent::Warning(format!(
@@ -720,7 +726,7 @@ fn spawn_worker(
                                             break;
                                         }
                                     };
-                                if let Err(error) = crate::goal::record_verifier_verdict(
+                                if let Err(error) = mini_agent_host::goal::record_verifier_verdict(
                                     &session_dir,
                                     checkpoint_seq,
                                     &verifier_output,
@@ -735,7 +741,8 @@ fn spawn_worker(
                                     );
                                     break;
                                 }
-                                if verdict.outcome == crate::goal::VerdictOutcome::Invalid {
+                                if verdict.outcome == mini_agent_host::goal::VerdictOutcome::Invalid
+                                {
                                     let _ = events.send(ReplEvent::Warning(
                                         "goal> verifier returned an invalid verdict; goal failed"
                                             .to_string(),
@@ -747,7 +754,7 @@ fn spawn_worker(
                                     );
                                     break;
                                 }
-                                let next = match crate::goal::advance_goal_milestone(
+                                let next = match mini_agent_host::goal::advance_goal_milestone(
                                     &session_dir,
                                     Some(verdict),
                                 ) {
@@ -768,19 +775,20 @@ fn spawn_worker(
                                     "goal> verifier: {:?} (milestone {}/{})",
                                     next.status, next.current_milestone, next.total_milestones
                                 )));
-                                if next.status == crate::goal::GoalStatus::Converged
-                                    || next.status == crate::goal::GoalStatus::Failed
+                                if next.status == mini_agent_host::goal::GoalStatus::Converged
+                                    || next.status == mini_agent_host::goal::GoalStatus::Failed
                                 {
                                     approval.set_goal_dir(None);
                                     goal_objective = None;
                                     break;
                                 }
                                 let objective = goal_objective.clone().unwrap_or(prompt.clone());
-                                command = WorkerCommand::Prompt(crate::goal::goal_turn_prompt(
-                                    &objective,
-                                    next.current_milestone,
-                                    next.total_milestones,
-                                ));
+                                command =
+                                    WorkerCommand::Prompt(mini_agent_host::goal::goal_turn_prompt(
+                                        &objective,
+                                        next.current_milestone,
+                                        next.total_milestones,
+                                    ));
                                 continue;
                             }
                             Err(error) => {
@@ -990,7 +998,7 @@ fn spawn_worker(
                                 .parent()
                                 .map(PathBuf::from)
                                 .unwrap_or_else(|| world.workspace().to_path_buf());
-                            let _ = crate::goal::pause_goal(&session_dir);
+                            let _ = mini_agent_host::goal::pause_goal(&session_dir);
                             approval.set_goal_dir(None);
                             goal_objective = None;
                         }
@@ -1036,7 +1044,7 @@ fn spawn_worker(
                             .and_then(|opened| opened.store.path().parent())
                             .unwrap_or(world.workspace());
                         if active {
-                            match crate::goal::init_plan_mode_with_prompt(
+                            match mini_agent_host::goal::init_plan_mode_with_prompt(
                                 session_dir,
                                 prompt.as_deref(),
                             ) {
@@ -1046,7 +1054,9 @@ fn spawn_worker(
                                     approval.set_living_plan(Some(plan_file.clone()));
                                     let mut config = harness_config_auto(copilot, auto_max_steps);
                                     config.system_prompt =
-                                        crate::goal::with_plan_mode_overlay(&stable_system_prompt);
+                                        mini_agent_host::goal::with_plan_mode_overlay(
+                                            &stable_system_prompt,
+                                        );
                                     harness.replace_config(config);
                                     let _ = harness.append_context(format!(
                                     "[Plan Mode active: living plan at {}. Plan only — research and update plan.md. Do not produce the final deliverable. Relative path plan.md maps to that file. Workspace modifications are locked.]",
@@ -1070,7 +1080,7 @@ fn spawn_worker(
                             }
                         } else {
                             approval.set_living_plan(None);
-                            let _ = crate::goal::disable_plan_mode(session_dir);
+                            let _ = mini_agent_host::goal::disable_plan_mode(session_dir);
                             let mut config = harness_config_auto(copilot, auto_max_steps);
                             config.system_prompt.clone_from(&stable_system_prompt);
                             harness.replace_config(config);
@@ -1097,13 +1107,17 @@ fn spawn_worker(
                             .as_ref()
                             .and_then(|opened| opened.store.path().parent())
                             .unwrap_or(world.workspace());
-                        match crate::goal::init_goal_workspace(session_dir, &objective, 20) {
+                        match mini_agent_host::goal::init_goal_workspace_with_limits(
+                            session_dir,
+                            &objective,
+                            runtime_config.goal_limits(),
+                        ) {
                             Ok(state) => {
                                 goal_objective = Some(objective.clone());
                                 approval.set_living_plan(None);
                                 let goal_dir = session_dir.join("goal");
                                 approval.set_goal_dir(Some(goal_dir.clone()));
-                                let _ = crate::goal::disable_plan_mode(session_dir);
+                                let _ = mini_agent_host::goal::disable_plan_mode(session_dir);
                                 copilot = true;
                                 approval.set_mode(ApprovalMode::Automatic);
                                 let mut config = harness_config_auto(true, auto_max_steps);
@@ -1124,11 +1138,12 @@ fn spawn_worker(
                                 "goal mode on [goal_id: {}]: executing milestone {}/{} (auto-approve, copilot on)",
                                 state.goal_id, state.current_milestone, state.total_milestones
                             )));
-                                command = WorkerCommand::Prompt(crate::goal::goal_turn_prompt(
-                                    &objective,
-                                    state.current_milestone,
-                                    state.total_milestones,
-                                ));
+                                command =
+                                    WorkerCommand::Prompt(mini_agent_host::goal::goal_turn_prompt(
+                                        &objective,
+                                        state.current_milestone,
+                                        state.total_milestones,
+                                    ));
                                 continue;
                             }
                             Err(e) => {
@@ -1150,7 +1165,7 @@ fn spawn_worker(
 
 fn persist_latest_context(
     durable: &mut Option<OpenedSession>,
-    harness: &mini_agent_core::Harness<crate::openai::OpenAiModel>,
+    harness: &mini_agent_core::Harness<mini_agent_host::openai::OpenAiModel>,
     events: &mpsc::SyncSender<ReplEvent>,
 ) {
     let context = harness
@@ -1181,7 +1196,7 @@ fn fail_active_goal(
 ) {
     if let Some(goal_dir) = approval.goal_dir() {
         let session_dir = goal_dir.parent().unwrap_or(fallback_session_dir);
-        let _ = crate::goal::fail_goal(session_dir);
+        let _ = mini_agent_host::goal::fail_goal(session_dir);
         approval.set_goal_dir(None);
         *goal_objective = None;
     }
@@ -1189,7 +1204,7 @@ fn fail_active_goal(
 
 fn report_run_error(
     events: &mpsc::SyncSender<ReplEvent>,
-    error: &HarnessError<crate::openai::OpenAiError>,
+    error: &HarnessError<mini_agent_host::openai::OpenAiError>,
 ) {
     let _ = events.send(ReplEvent::Warning(format!("error: {error}")));
     if matches!(error, HarnessError::Limit(limit) if limit.kind == LimitKind::ContextBytes) {

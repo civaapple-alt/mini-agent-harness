@@ -12,6 +12,7 @@ use std::io::SeekFrom;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
@@ -19,7 +20,7 @@ use std::time::UNIX_EPOCH;
 
 #[path = "session_derived.rs"]
 mod derived;
-pub(crate) use derived::DerivedItem;
+pub use derived::DerivedItem;
 
 const SCHEMA_VERSION: u64 = 1;
 const MAX_SESSION_BYTES: u64 = 32 * 1024 * 1024;
@@ -28,12 +29,12 @@ const MAX_SESSIONS: usize = 128;
 const MAX_WORKSPACE_KEY: usize = 240;
 const SESSION_FILE_NAME: &str = "session.jsonl";
 const SESSION_LOCK_NAME: &str = "session";
-pub(crate) const SUMMARY_FILE_NAME: &str = "summary.json";
-pub(crate) const SIGNALS_FILE_NAME: &str = "signals.json";
-pub(crate) const PROMPT_CONTEXT_FILE_NAME: &str = "prompt_context.json";
+pub const SUMMARY_FILE_NAME: &str = "summary.json";
+pub const SIGNALS_FILE_NAME: &str = "signals.json";
+pub const PROMPT_CONTEXT_FILE_NAME: &str = "prompt_context.json";
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) enum SessionRequest {
+pub enum SessionRequest {
     Disabled,
     New,
     Named(String),
@@ -41,13 +42,13 @@ pub(crate) enum SessionRequest {
     Fork(String),
 }
 
-pub(crate) struct OpenedSession {
+pub struct OpenedSession {
     pub store: SessionStore,
     pub state: SessionState,
     pub resumed: bool,
 }
 
-pub(crate) struct SessionStore {
+pub struct SessionStore {
     session_id: String,
     thread_id: String,
     session_dir: PathBuf,
@@ -63,7 +64,7 @@ pub(crate) struct SessionStore {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum TurnStatus {
+pub enum TurnStatus {
     Completed,
     StepLimit,
     Steered,
@@ -71,7 +72,7 @@ pub(crate) enum TurnStatus {
     Failed,
 }
 
-pub(crate) struct TurnCommit<'a> {
+pub struct TurnCommit<'a> {
     pub started_at_ms: u64,
     pub prompt: &'a str,
     pub status: TurnStatus,
@@ -81,7 +82,7 @@ pub(crate) struct TurnCommit<'a> {
     pub checkpoint: &'a [Message],
 }
 
-pub(crate) struct SessionSummary {
+pub struct SessionSummary {
     pub id: String,
     pub bytes: u64,
 }
@@ -95,7 +96,7 @@ impl Drop for SessionLock {
 }
 
 impl SessionStore {
-    pub(crate) fn open(workspace: &Path, request: SessionRequest) -> Result<OpenedSession, String> {
+    pub fn open(workspace: &Path, request: SessionRequest) -> Result<OpenedSession, String> {
         match request {
             SessionRequest::Disabled => Err("session persistence is disabled".to_string()),
             SessionRequest::New => Self::create(workspace),
@@ -105,28 +106,28 @@ impl SessionStore {
         }
     }
 
-    pub(crate) fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
-    pub(crate) fn thread_id(&self) -> &str {
+    pub fn thread_id(&self) -> &str {
         &self.thread_id
     }
 
-    pub(crate) fn thread_turn_count(&self) -> usize {
+    pub fn thread_turn_count(&self) -> usize {
         self.thread_turn_count
     }
 
-    pub(crate) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
     #[cfg(test)]
-    pub(crate) fn session_dir(&self) -> &Path {
+    pub fn session_dir(&self) -> &Path {
         &self.session_dir
     }
 
-    pub(crate) fn start_thread(&mut self) -> Result<(), String> {
+    pub fn start_thread(&mut self) -> Result<(), String> {
         let thread_id = new_id("t");
         self.append_records(vec![json!({
             "kind": "thread_started",
@@ -138,7 +139,7 @@ impl SessionStore {
         Ok(())
     }
 
-    pub(crate) fn record_context(
+    pub fn record_context(
         &mut self,
         context: &Message,
         checkpoint: &[Message],
@@ -151,12 +152,12 @@ impl SessionStore {
         Ok(())
     }
 
-    pub(crate) fn record_turn(&mut self, turn: TurnCommit<'_>) -> Result<(), String> {
+    pub fn record_turn(&mut self, turn: TurnCommit<'_>) -> Result<(), String> {
         let turn_id = new_id("turn");
         self.record_turn_with_id(&turn_id, turn)
     }
 
-    pub(crate) fn record_turn_with_id(
+    pub fn record_turn_with_id(
         &mut self,
         turn_id: &str,
         turn: TurnCommit<'_>,
@@ -597,7 +598,7 @@ fn write_prompt_context(session_dir: &Path, workspace: &Path, session_id: &str) 
     let _ = write_json_atomic(&session_dir.join(PROMPT_CONTEXT_FILE_NAME), &value);
 }
 
-pub(crate) fn list(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
+pub fn list(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
     let mut sessions_map = std::collections::HashMap::new();
 
     if let Ok(directory) = session_directory(workspace)
@@ -802,17 +803,24 @@ fn acquire_lock(directory: &Path, session_id: &str) -> Result<SessionLock, Strin
     fs::create_dir_all(directory)
         .map_err(|error| format!("cannot create session directory: {error}"))?;
     let path = directory.join(format!("{session_id}.lock"));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::AlreadyExists {
-                format!("session {session_id} is locked by another process or a stale lock")
-            } else {
-                format!("cannot lock session {session_id}: {error}")
-            }
-        })?;
+    let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(file) => file,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::AlreadyExists && reclaim_stale_lock(&path) =>
+        {
+            OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .map_err(|error| format!("cannot lock session {session_id}: {error}"))?
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(format!(
+                "session {session_id} is locked by another process or a stale lock"
+            ));
+        }
+        Err(error) => return Err(format!("cannot lock session {session_id}: {error}")),
+    };
     writeln!(
         file,
         "pid={} timestamp_ms={}",
@@ -822,6 +830,42 @@ fn acquire_lock(directory: &Path, session_id: &str) -> Result<SessionLock, Strin
     .and_then(|()| file.sync_data())
     .map_err(|error| format!("cannot write session lock: {error}"))?;
     Ok(SessionLock(path))
+}
+
+fn reclaim_stale_lock(path: &Path) -> bool {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Some(pid) = contents
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("pid=")?.parse::<u32>().ok())
+    else {
+        return false;
+    };
+    if process_exists(pid) {
+        return false;
+    }
+    let stale_path = path.with_extension(format!("stale-{}", timestamp_ms()));
+    fs::rename(path, &stale_path)
+        .and_then(|()| fs::remove_file(stale_path))
+        .is_ok()
+}
+
+fn process_exists(pid: u32) -> bool {
+    let pid = pid.to_string();
+    if cfg!(windows) {
+        Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).contains(&pid))
+            .unwrap_or(true)
+    } else {
+        Command::new("kill")
+            .args(["-0", &pid])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(true)
+    }
 }
 
 fn copy_attachments(src: &Path, dst: &Path) {
@@ -844,7 +888,7 @@ fn copy_attachments(src: &Path, dst: &Path) {
     }
 }
 
-pub(crate) fn session_directory(workspace: &Path) -> Result<PathBuf, String> {
+pub fn session_directory(workspace: &Path) -> Result<PathBuf, String> {
     let home = mini_agent_home()
         .ok_or_else(|| "cannot resolve home directory for ~/.mini-agent/sessions".to_string())?;
     let workspace = workspace
@@ -857,7 +901,7 @@ pub(crate) fn session_directory(workspace: &Path) -> Result<PathBuf, String> {
     Ok(home.join("sessions").join(key))
 }
 
-pub(crate) fn resolve_session_file(
+pub fn resolve_session_file(
     workspace: &Path,
     session_id: &str,
 ) -> Result<(PathBuf, PathBuf), String> {
@@ -948,7 +992,7 @@ fn new_id(prefix: &str) -> String {
     )
 }
 
-pub(crate) fn timestamp_ms() -> u64 {
+pub fn timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -957,7 +1001,7 @@ pub(crate) fn timestamp_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
-pub(crate) fn try_load_session_events(
+pub fn try_load_session_events(
     lines: &[String],
 ) -> Result<Option<Vec<mini_agent_core::Event>>, String> {
     use mini_agent_core::Event;

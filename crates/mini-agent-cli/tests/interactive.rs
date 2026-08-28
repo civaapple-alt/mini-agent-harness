@@ -962,6 +962,115 @@ fn goal_mode_runs_a_tool_turn_and_verifies_the_settled_history() {
 }
 
 #[test]
+fn goal_mode_retries_rejected_milestones_and_exhausts_budget() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        for request_index in 0..6 {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            requests_tx.send(read_request_body(&mut stream)).unwrap();
+            if request_index % 2 == 0 {
+                write_sse_response(&mut stream, "milestone evidence");
+            } else if request_index == 5 {
+                write_sse_response(
+                    &mut stream,
+                    "verdict: rejected\nscore: 20\nsummary: retry budget exhausted",
+                );
+            } else if request_index == 1 {
+                write_sse_response(
+                    &mut stream,
+                    "verdict: rejected\nscore: 30\nsummary: add missing evidence",
+                );
+            } else {
+                write_sse_response(
+                    &mut stream,
+                    "verdict: approved\nscore: 90\nsummary: retry accepted",
+                );
+            }
+        }
+    });
+
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://{address}/v1\nMENTOR_OPENAI_MODEL=mentor-model\nMINI_AGENT_GOAL_MAX_LOOPS=2\n"
+        ),
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .args(["--persist"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"/goal retry fixture\n/exit\n")
+        .unwrap();
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    server.join().unwrap();
+
+    assert!(status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(
+        stdout.contains("goal> verifier: Running (milestone 1/3)"),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("goal> verifier: Failed (milestone 2/3)"),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    let requests = (0..6)
+        .map(|_| serde_json::from_slice::<Value>(&requests_rx.recv().unwrap()).unwrap())
+        .collect::<Vec<_>>();
+    for index in [1, 3, 5] {
+        assert_eq!(requests[index]["model"], "mentor-model");
+        assert_eq!(requests[index]["tools"], json!([]));
+    }
+    assert!(
+        requests[2]["input"]
+            .to_string()
+            .contains("previous verifier rejected")
+    );
+
+    let session_id = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("session> new "))
+        .and_then(|line| line.split_once(" |"))
+        .map(|(id, _)| id)
+        .unwrap();
+    let session_file = find_session_file(&root, session_id);
+    let goal_dir = session_file.parent().unwrap().join("goal");
+    let state: Value =
+        serde_json::from_slice(&fs::read(goal_dir.join("state.json")).unwrap()).unwrap();
+    assert_eq!(state["status"], "failed");
+    assert_eq!(state["current_milestone"], 2);
+    assert_eq!(state["loop_count"], 3);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn goal_mode_fails_on_malformed_verifier_output() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
@@ -1117,6 +1226,139 @@ fn goal_mode_blocks_verifier_tool_requests() {
     .unwrap();
     assert_eq!(state["status"], "failed");
     assert_eq!(state["current_milestone"], 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn goal_mode_timeout_is_deterministic_and_keeps_repl_alive() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let _ = read_request_body(&mut stream);
+        thread::sleep(Duration::from_millis(1_500));
+    });
+
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://{address}/v1\nMENTOR_OPENAI_MODEL=mentor-model\nMINI_AGENT_GOAL_TIMEOUT_SECS=1\n"
+        ),
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .args(["--persist"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"/goal timeout fixture\n/exit\n")
+        .unwrap();
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    server.join().unwrap();
+
+    assert!(status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(
+        stderr.contains("goal> milestone timed out after 1 seconds"),
+        "{stderr}"
+    );
+    assert!(stdout.contains("mini-agent"), "{stdout}");
+    let session_id = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("session> new "))
+        .and_then(|line| line.split_once(" |"))
+        .map(|(id, _)| id)
+        .unwrap();
+    let session_file = find_session_file(&root, session_id);
+    let state: Value = serde_json::from_slice(
+        &fs::read(session_file.parent().unwrap().join("goal/state.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state["status"], "failed");
+    assert_eq!(state["current_milestone"], 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn running_goal_is_paused_when_a_session_restarts() {
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://127.0.0.1:9/v1\nMENTOR_OPENAI_MODEL=mentor-model\n",
+    )
+    .unwrap();
+    let mut first = mini_agent(&root)
+        .args(["--persist"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    first
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"/goal restart fixture\n")
+        .unwrap();
+
+    let (session_file, session_id) = wait_for_goal_state(&root);
+    let _ = first.kill();
+    let _ = first.wait();
+
+    let mut resumed = mini_agent(&root)
+        .args(["resume", &session_id])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    resumed.stdin.take().unwrap().write_all(b"/exit\n").unwrap();
+    let status = wait_for_child(&mut resumed);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    resumed
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    resumed
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+
+    assert!(status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(stderr.contains("goal> paused on restart"), "{stderr}");
+    let state: Value = serde_json::from_slice(
+        &fs::read(session_file.parent().unwrap().join("goal/state.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state["status"], "user_paused");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -2148,6 +2390,30 @@ fn find_session_file(root: &Path, session_id: &str) -> PathBuf {
         "session {session_id} was not stored under {}",
         sessions.display()
     );
+}
+
+fn wait_for_goal_state(root: &Path) -> (PathBuf, String) {
+    let started = Instant::now();
+    loop {
+        let sessions = root.join(".mini-agent").join("sessions");
+        if let Ok(projects) = fs::read_dir(&sessions) {
+            for project in projects.flatten() {
+                if let Ok(session_dirs) = fs::read_dir(project.path()) {
+                    for session in session_dirs.flatten() {
+                        let state = session.path().join("goal/state.json");
+                        if state.is_file() {
+                            let id = session.file_name().to_string_lossy().into_owned();
+                            return (session.path().join("session.jsonl"), id);
+                        }
+                    }
+                }
+            }
+        }
+        if started.elapsed() > Duration::from_secs(5) {
+            panic!("goal state was not created under {}", sessions.display());
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn mini_agent(root: &Path) -> Command {

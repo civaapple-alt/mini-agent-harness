@@ -1,19 +1,19 @@
-use crate::config::RuntimeConfig;
-use crate::harness_config;
-use crate::observer::RunObserver;
-use crate::observer::ScriptFormat;
-use crate::observer::print_final_answer;
-use crate::prepare_openai_harness;
-use crate::print_auto_warning;
-use crate::sandbox::SandboxKind;
-use crate::security::SecurityPreset;
-use crate::session::SessionRequest;
-use crate::session::SessionStore;
-use crate::session::TurnCommit;
-use crate::session::TurnStatus;
-use crate::workspace::ApprovalController;
-use crate::workspace::ApprovalMode;
 use mini_agent_core::StopReason;
+use mini_agent_host::RuntimeBuilder;
+use mini_agent_host::config::RuntimeConfig;
+use mini_agent_host::harness_config;
+use mini_agent_host::observer::RunObserver;
+use mini_agent_host::observer::ScriptFormat;
+use mini_agent_host::observer::print_final_answer;
+use mini_agent_host::print_auto_warning;
+use mini_agent_host::sandbox::SandboxKind;
+use mini_agent_host::security::SecurityPreset;
+use mini_agent_host::session::SessionRequest;
+use mini_agent_host::session::SessionStore;
+use mini_agent_host::session::TurnCommit;
+use mini_agent_host::session::TurnStatus;
+use mini_agent_host::workspace::ApprovalController;
+use mini_agent_host::workspace::ApprovalMode;
 use serde_json::json;
 use std::io;
 use std::io::IsTerminal;
@@ -56,14 +56,14 @@ pub async fn run(
     };
     let approval = ApprovalController::with_preset(mode, preset);
     let config = match max_steps {
-        Some(steps) => crate::harness_config_auto(true, steps),
+        Some(steps) => mini_agent_host::harness_config_auto(true, steps),
         None => harness_config(false),
     };
-    let prepared = match prepare_openai_harness(&runtime_config, approval.clone(), config, sandbox)
-    {
-        Ok(build) => build,
-        Err(error) => return preflight_error(json_output, &error),
-    };
+    let prepared =
+        match RuntimeBuilder::new(&runtime_config, approval.clone(), config, sandbox).build() {
+            Ok(build) => build,
+            Err(error) => return preflight_error(json_output, &error),
+        };
     let mut harness = prepared.harness;
     let images = prepared.images;
 

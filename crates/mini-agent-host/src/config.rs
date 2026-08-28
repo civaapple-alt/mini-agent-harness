@@ -1,6 +1,7 @@
 use crate::env_file::Environment;
 use crate::env_file::ResolvedValue;
 use crate::env_file::ValueSource;
+use crate::goal::GoalLimits;
 use crate::project_context;
 use crate::session;
 use crate::skills;
@@ -25,6 +26,7 @@ pub struct RuntimeConfig {
     mentor_model: Option<ResolvedValue>,
     mentor_base_url: Option<ResolvedSetting>,
     max_agent_steps: Option<usize>,
+    goal_limits: GoalLimits,
     web_search: bool,
 }
 
@@ -87,6 +89,26 @@ impl RuntimeConfig {
             Some(value) => Some(parse_max_agent_steps(&value.value)?),
             None => None,
         };
+        let goal_limits = GoalLimits {
+            max_loops: resolve_positive_usize(
+                "MINI_AGENT_GOAL_MAX_LOOPS",
+                &workspace_env,
+                &user_env,
+                GoalLimits::default().max_loops,
+            )?,
+            milestone_step_budget: resolve_positive_usize(
+                "MINI_AGENT_GOAL_STEP_BUDGET",
+                &workspace_env,
+                &user_env,
+                GoalLimits::default().milestone_step_budget,
+            )?,
+            milestone_timeout_secs: resolve_positive_u64(
+                "MINI_AGENT_GOAL_TIMEOUT_SECS",
+                &workspace_env,
+                &user_env,
+                GoalLimits::default().milestone_timeout_secs,
+            )?,
+        };
         let web_search = match resolve_value("MINI_AGENT_WEB_SEARCH", &workspace_env, &user_env)
             .or_else(|| resolve_value("OPENAI_WEB_SEARCH", &workspace_env, &user_env))
         {
@@ -103,6 +125,7 @@ impl RuntimeConfig {
             mentor_model,
             mentor_base_url,
             max_agent_steps,
+            goal_limits,
             web_search,
         })
     }
@@ -147,6 +170,10 @@ impl RuntimeConfig {
 
     pub fn copilot_max_steps(&self) -> usize {
         self.max_agent_steps.unwrap_or(0)
+    }
+
+    pub fn goal_limits(&self) -> GoalLimits {
+        self.goal_limits
     }
 
     pub fn web_search(&self) -> bool {
@@ -602,6 +629,40 @@ fn parse_max_agent_steps(value: &str) -> Result<usize, String> {
     })
 }
 
+fn resolve_positive_usize(
+    name: &str,
+    workspace: &Environment,
+    user: &Environment,
+    default: usize,
+) -> Result<usize, String> {
+    match resolve_value(name, workspace, user) {
+        Some(value) => value
+            .value
+            .parse::<usize>()
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| format!("{name} must be a positive integer")),
+        None => Ok(default),
+    }
+}
+
+fn resolve_positive_u64(
+    name: &str,
+    workspace: &Environment,
+    user: &Environment,
+    default: u64,
+) -> Result<u64, String> {
+    match resolve_value(name, workspace, user) {
+        Some(value) => value
+            .value
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| format!("{name} must be a positive integer")),
+        None => Ok(default),
+    }
+}
+
 fn parse_bool_setting(name: &str, value: &str) -> Result<bool, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "true" | "1" | "yes" | "on" | "enable" | "enabled" => Ok(true),
@@ -791,6 +852,36 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.contains("MINI_AGENT_MAX_STEPS"));
+    }
+
+    #[test]
+    fn goal_limits_read_workspace_env() {
+        let workspace = unique_dir("goal-limits");
+        fs::write(
+            workspace.join(".env"),
+            "MINI_AGENT_GOAL_MAX_LOOPS=2\nMINI_AGENT_GOAL_STEP_BUDGET=7\nMINI_AGENT_GOAL_TIMEOUT_SECS=3\n",
+        )
+        .unwrap();
+        let config = RuntimeConfig::load_from(workspace, None).unwrap();
+        assert_eq!(
+            config.goal_limits(),
+            GoalLimits {
+                max_loops: 2,
+                milestone_step_budget: 7,
+                milestone_timeout_secs: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn goal_limits_reject_zero_values() {
+        let workspace = unique_dir("goal-limits-invalid");
+        fs::write(workspace.join(".env"), "MINI_AGENT_GOAL_TIMEOUT_SECS=0\n").unwrap();
+        let error = match RuntimeConfig::load_from(workspace, None) {
+            Ok(_) => panic!("expected zero timeout to be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.contains("MINI_AGENT_GOAL_TIMEOUT_SECS"));
     }
 
     fn unique_dir(label: &str) -> PathBuf {

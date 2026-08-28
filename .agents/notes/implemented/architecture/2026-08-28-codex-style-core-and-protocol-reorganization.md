@@ -4,24 +4,23 @@ Status: implemented
 
 ## Decision
 
-The harness uses a core execution kernel, a transport-neutral protocol crate,
-optional control-plane adapters, and host adapters:
+The harness uses four conceptual layers while keeping the crate graph shallow:
 
 ```text
-future wire transport
-        |
-mini-agent-app-server (optional control plane)
-        |                         \
-mini-agent-core (execution) ----> mini-agent-protocol (contracts)
-        ^
-        |
-host adapters (providers, tools, storage, policy, UI)
+CLI client
+    ↓
+mini-agent-app-server (service boundary and wire dispatch)
+    ↓
+mini-agent-host + workflows (application host)
+    ↓
+mini-agent-core + mini-agent-protocol (execution foundation)
 ```
 
 `mini-agent-core` owns the semantic runtime state and execution loop. It is
 usable directly by a host or through `mini-agent-app-server`. The protocol
 crate owns the shared model, tool, message, turn, event, stop, limit, and
-structured outcome contracts. Neither crate depends on the CLI.
+structured outcome contracts. `mini-agent-host` owns provider and product
+composition. Neither foundation crate depends on the CLI.
 
 ### Core ownership
 
@@ -56,21 +55,24 @@ Legacy payload-only event and session records remain readable because the new
 status fields are optional. The protocol does not contain JSON-RPC method
 names, provider clients, storage formats, or policy implementations.
 
-### Control-plane adapter
+### Service boundary
 
-`mini-agent-app-server` is a thin in-process adapter around one core `Thread`.
-It serializes start/cancel commands, routes running `Steer` and `FollowUp`
-inputs through `RunControl`, and broadcasts `EventEnvelope` values. It owns no
-second model loop, context builder, tool router, or security policy. A future
-wire transport can map this surface to JSON-RPC or ACP without changing core.
+`mini-agent-app-server` is an in-process service around one core `Thread`. It
+serializes commands, routes running `Steer` and `FollowUp` inputs through
+`RunControl`, and broadcasts `EventEnvelope` values. The separate
+`mini-agent-app-server-protocol` crate defines versioned JSON-RPC envelopes,
+initialization, thread/turn methods, and event notifications. `serve_stdio`
+provides newline-delimited JSON framing for subprocess clients. The service
+owns no second model loop, context builder, tool router, or security policy.
 
 ### Host policy boundary
 
-The CLI assembles provider and concrete tool implementations, approval and
-Plan Mode policy, sandbox/process containment, MCP lifecycle, session JSONL,
-trace persistence, and terminal rendering. A host-only outcome adapter maps
-legacy policy errors into structured statuses while preserving existing user
-visible content and fail-closed behavior.
+`mini-agent-host` assembles provider and concrete tool implementations,
+approval and Plan Mode policy, sandbox/process containment, MCP lifecycle,
+session JSONL, trace persistence, and world context through `RuntimeBuilder`.
+The CLI owns only frontend input, output, and command routing. A host-only
+outcome adapter maps legacy policy errors into structured statuses while
+preserving existing user visible content and fail-closed behavior.
 
 ## Consequences
 
@@ -83,7 +85,8 @@ visible content and fail-closed behavior.
 - `ToolRegistry` remains as a compatibility alias for `ToolRouter`.
 - The CLI outcome classifier is transitional: host tools should eventually
   return typed policy errors directly instead of relying on legacy error text.
-- A versioned external transport is intentionally not part of this decision.
+- The app-server wire surface is versioned separately from the kernel; ACP
+  remains an adapter concern and is not a dependency of core.
 
 ## Verification
 
@@ -96,11 +99,13 @@ The current workspace verifies the boundary with:
   cancellation, structured tool status, checkpoints, and turn identity;
 - protocol tests for typed control DTOs, legacy event/session decoding, and
   structured outcome serialization;
-- app-server tests for lifecycle events, queued/steered/cancelled turns, and
-  starting from a restored checkpoint without replaying the first turn;
+- app-server tests for lifecycle events, queued/steered/cancelled turns,
+  restored checkpoints, JSON-RPC initialization, and event projection;
+- app-server-protocol tests for JSON-RPC framing DTOs, camelCase payloads, and
+  event identity/sequence preservation;
 - CLI tests for approval/sandbox behavior, session restart, trace replay,
   provider projection, and host outcome classification.
 
-The architecture note is implemented. Remaining work is additive: replace the
-CLI compatibility classifier with typed policy errors in individual host tools,
-then design a deliberately versioned JSON-RPC/ACP transport.
+The architecture note is implemented. Remaining additive work is multi-thread
+service management, approval request messages, and an ACP mapping adapter after
+the app-server semantics stabilize.

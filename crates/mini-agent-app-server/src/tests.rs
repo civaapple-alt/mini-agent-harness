@@ -1,5 +1,6 @@
 use super::AppServer;
 use super::AppServerError;
+use super::ApprovalBroker;
 use mini_agent_core::Event;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
@@ -257,4 +258,112 @@ async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
         }
     }
     assert_eq!(turn_ids, [Some(mini_agent_core::TurnId::new("turn-2"))]);
+}
+
+#[tokio::test]
+async fn routes_multiple_preconfigured_threads_by_identity() {
+    let first = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let second = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let server = AppServer::with_threads(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        vec![
+            Thread::new(ThreadId::new("placeholder"), first),
+            Thread::new(ThreadId::new("thread-2"), second),
+        ],
+    );
+    assert_eq!(
+        server.thread_ids(),
+        vec![ThreadId::new("thread-1"), ThreadId::new("thread-2")]
+    );
+    let mut events = server.subscribe();
+    let submission = server
+        .turn_start_for(
+            ThreadId::new("thread-2"),
+            TurnStart::new(TurnInput::new(TurnInputMode::Start, "second")),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        submission,
+        TurnSubmission::Started {
+            turn_id: mini_agent_core::TurnId::new("turn-1")
+        }
+    );
+    for _ in 0..6 {
+        assert_eq!(
+            events.recv().await.unwrap().thread_id,
+            ThreadId::new("thread-2")
+        );
+    }
+    assert_eq!(
+        server
+            .thread_read_for(ThreadId::new("thread-2"))
+            .await
+            .unwrap()
+            .thread_id,
+        ThreadId::new("thread-2")
+    );
+}
+
+#[tokio::test]
+async fn approval_broker_round_trips_a_synchronous_host_callback() {
+    let broker = ApprovalBroker::new();
+    let requester = broker.clone();
+    let task = tokio::task::spawn_blocking(move || requester.request("shell command `pwd`"));
+    let request = broker.next_request().await;
+    assert_eq!(request.action, "shell command `pwd`");
+    broker.respond(&request.request_id, true).unwrap();
+    assert!(task.await.unwrap().unwrap());
+}
+
+#[tokio::test]
+async fn factory_supports_dynamic_start_fork_and_resume() {
+    let initial = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let server = AppServer::with_thread_factory(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        vec![Thread::new(ThreadId::new("placeholder"), initial)],
+        |id| {
+            Ok(Thread::new(
+                id,
+                Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default()),
+            ))
+        },
+    );
+    assert_eq!(
+        server
+            .thread_start(ThreadId::new("thread-2"))
+            .await
+            .unwrap(),
+        ThreadId::new("thread-2")
+    );
+    let mut events = server.subscribe();
+    server
+        .turn_start_for(
+            ThreadId::new("thread-1"),
+            TurnStart::new(TurnInput::new(TurnInputMode::Start, "seed")),
+        )
+        .await
+        .unwrap();
+    for _ in 0..6 {
+        let _ = events.recv().await.unwrap();
+    }
+    assert_eq!(
+        server
+            .thread_fork(ThreadId::new("thread-1"), ThreadId::new("thread-3"))
+            .await
+            .unwrap(),
+        ThreadId::new("thread-3")
+    );
+    let checkpoint = server
+        .thread_read_for(ThreadId::new("thread-3"))
+        .await
+        .unwrap();
+    assert_eq!(
+        server
+            .thread_resume(ThreadId::new("thread-3"), checkpoint)
+            .await
+            .unwrap(),
+        ThreadId::new("thread-3")
+    );
+    assert!(server.has_thread(&ThreadId::new("thread-3")));
 }

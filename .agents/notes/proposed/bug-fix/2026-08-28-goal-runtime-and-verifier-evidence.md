@@ -4,6 +4,7 @@ Status: proposed
 Date: 2026-08-28
 Reviewed revision: `6f3a90e`
 Review interval: `f85a965..6f3a90e` (6 commits)
+Current evidence tree: `4934ac9` plus uncommitted working-tree changes
 
 ## Context
 
@@ -32,23 +33,66 @@ evidence below is from the current working tree:
 
 - Baseline `6f3a90e`: `cargo test -p mini-agent-core` passed 29 tests (27 unit
   tests and 2 integration tests); the focused CLI Goal test did not exist.
-- Repair stage working tree: `cargo test -p mini-agent-core` passes 30 tests
-  (28 unit tests and 2 integration tests), `cargo test -p mini-agent-cli`
-  passes 171 unit tests and 27 interactive integration tests, and
-  `cargo clippy -p mini-agent-cli --all-targets -- -D warnings` passes.
-- Current `python scripts/line_budget.py`: core 2,842 / 20,000 lines; all Rust
-  source 27,700 / 30,000 lines, including tests. Only 2,300 workspace lines
-  remain.
+- Current working tree: `cargo test --workspace --quiet` passes every package,
+  including 40 core tests, 18 host tests, 15 app-server tests, 4 wire protocol
+  tests, 1 ACP test, 32 built-CLI interactive tests, and the remaining CLI and
+  protocol suites. `cargo clippy --workspace --all-targets -- -D warnings`
+  also passes.
+- `cargo +1.88.0 check --workspace --locked` passes on Windows, covering the
+  new host, app-server, wire protocol, and ACP crates against the declared
+  minimum compiler.
+- `cargo build --workspace --release` passes on Windows. This validates the
+  release profile locally, but is not a packaged cross-platform release.
+- `cargo package --workspace --locked --no-verify --allow-dirty` and
+  `python -m unittest scripts/test_package_release.py` pass locally. The
+  package command uses `--allow-dirty` only because this candidate is not yet
+  committed.
+- The release binary smoke path (`mini-agent --version`, `status --json`, and
+  `demo "make this loud"`) passes locally without making a provider request.
+- Baseline remote [CI #56 for `4934ac9`](https://github.com/civaapple-alt/mini-agent-harness/actions/runs/33144991077)
+  passed the Ubuntu, macOS, Windows, and Rust 1.88 jobs; its quality job
+  failed only the line-budget check. That run does not include this working
+  tree.
+- Current `python scripts/line_budget.py`: core 4,058 / 20,000 lines; all Rust
+  source 34,377 / 30,000 lines, including tests. The repository-wide gate is
+  over budget by 4,377 lines.
+- Using temporary Zig compiler/linker/archive wrappers on Windows, the Linux
+  target `cargo check` passes. A stronger
+  `cargo test --workspace --target x86_64-unknown-linux-gnu --no-run` attempt
+  reaches test-binary linking but cannot resolve Linux system libraries
+  (`util`, `rt`, `dl`, `pthread`, and `c`) from this Windows-only toolchain.
+  It is recorded as blocked cross-target linking, not as a test pass. Native
+  Linux runtime and CI remain authoritative for that lane.
 - A standalone reproduction using the local Tokio and core build artifacts
   confirmed both errors below without making model requests.
 
-The current focused integration tests are local mock-provider runs of `/goal`
-through the built CLI. They now cover a tool-bearing successful run, malformed
-verdict failure, and a verifier tool-call attempt. The full workspace suite,
-current remote CI, other operating systems, timeout-failure and retry-exhaustion
-paths, restart behavior, and real-provider Goal behavior were not verified. No
-paid provider calls were made. These results do not by themselves establish
-release readiness.
+The focused integration tests are local mock-provider runs of `/goal` through
+the built CLI. The current tree covers a tool-bearing success, malformed and
+tool-using verifier failures, deterministic timeout, rejection/retry/
+exhaustion, and restart. The full workspace suite passes locally. Remote CI
+for the current uncommitted tree and real-provider Goal behavior remain
+unverified; no paid provider calls were authorized or made. These results do
+not by themselves establish release readiness.
+
+## Placement in the four-layer architecture
+
+The Goal repair remains a host workflow and does not move orchestration into
+the execution kernel:
+
+```text
+CLI client
+    ↓
+App Server service boundary
+    ↓
+Host / Workflows application host  ← Goal, Mentor, persistence, provider setup
+    ↓
+Core / Protocol execution foundation ← Thread, Harness, limits, turns, events
+```
+
+The CLI owns REPL input and worker scheduling. The app-server boundary can
+project the same settled Thread/Turn evidence, while `mini-agent-host` owns
+Goal state, verifier configuration, and durable session files. Core receives
+only bounded history and remains unaware of Goal or provider credentials.
 
 ## Implementation Update
 
@@ -75,11 +119,39 @@ The working tree now contains the first repair stage and its focused evidence:
   marked `user_paused`, requiring an explicit new `/goal` command.
 - `advance_goal_milestone` is idempotent for terminal Goal states, so a late
   result cannot mutate a converged or failed state.
+- Goal limits are resolved from the host `.env` (`MINI_AGENT_GOAL_MAX_LOOPS`,
+  `MINI_AGENT_GOAL_STEP_BUDGET`, and `MINI_AGENT_GOAL_TIMEOUT_SECS`) so timeout
+  and retry exhaustion can be exercised with bounded fixtures.
+- Session resume reclaims a lock only when the PID recorded in the lock file is
+  no longer alive, using an atomic rename before removal to avoid deleting a
+  newly acquired lock.
 
-The focused CLI tests, package tests, Clippy, formatting, line-budget, and diff
-checks pass on Windows. Full workspace, cross-platform, timeout-failure,
-rejection/retry, restart integration, and real-provider cases remain acceptance
-work; this note stays proposed until those gates are complete.
+The focused CLI tests now include deterministic timeout, rejected/retry/
+exhausted-retry, and restart cases. Package tests and Clippy pass on Windows;
+the full workspace test also passes. The line-budget gate remains over the
+30,000-line ceiling after the boundary extraction, and the current uncommitted
+tree has not run in remote CI. Real-provider Goal behavior remains an
+explicitly authorized release smoke test; no paid calls were made here. This
+note stays proposed until the remaining release gates are either passed or
+explicitly narrowed.
+
+### Current acceptance matrix
+
+| Requirement | Evidence in the current tree | Result |
+| --- | --- | --- |
+| Timeout branch | `goal_mode_timeout_is_deterministic_and_keeps_repl_alive` with `MINI_AGENT_GOAL_TIMEOUT_SECS=1` and a stalled local provider | passed |
+| Rejected, retry, exhausted retry | `goal_mode_retries_rejected_milestones_and_exhausts_budget` with a two-attempt budget | passed |
+| Restart behavior | `running_goal_is_paused_when_a_session_restarts`, including stale lock reclamation | passed |
+| Verifier history/tool denial | successful, malformed, and tool-call verifier fixtures plus host admission tests | passed |
+| Full workspace | `cargo test --workspace --quiet` | passed locally on Windows |
+| Minimum compiler | `cargo +1.88.0 check --workspace --locked` | passed locally on Windows |
+| Linux target | `cargo check --workspace --target x86_64-unknown-linux-gnu` with temporary Zig wrappers; test-binary `--no-run` attempt | check passed as cross-compile; test linking lacks Linux system libraries; native runtime pending |
+| macOS/Linux/CI | baseline CI #56 passed all OS jobs, but did not contain this uncommitted tree | candidate evidence pending |
+| Real provider Goal behavior | not run; paid provider calls were not authorized for this verification pass | intentionally pending |
+| Release profile | `cargo build --workspace --release` | passed locally on Windows; packaging and other OS release builds pending |
+| Built binary smoke | `target/release/mini-agent.exe --version`, `status --json`, `demo` | passed locally on Windows without provider I/O |
+| Package/release scripts | `cargo package --workspace --locked --no-verify --allow-dirty`; `python -m unittest scripts/test_package_release.py` | passed locally; clean-tree CI still pending |
+| Repository line budget | `python scripts/line_budget.py`: 34,377/30,000 Rust lines | failed; cleanup or an explicitly approved budget decision is required |
 
 ## Confirmed Defects
 

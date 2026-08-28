@@ -1,22 +1,25 @@
 [package]
-name = "mini-agent-cli"
+name = "mini-agent-host"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description.workspace = true
+description = "Reusable provider, tool, policy, extension, persistence, and workflow host for mini-agent"
 readme.workspace = true
 repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-[[bin]]
-name = "mini-agent"
-path = "src/main.rs"
-
 [dependencies]
+eventsource-stream.workspace = true
+futures-util.workspace = true
+htmd = "0.5"
+http.workspace = true
 mini-agent-core = { version = "0.3.0", path = "../mini-agent-core" }
-mini-agent-host = { version = "0.3.0", path = "../mini-agent-host" }
+reqwest.workspace = true
+rmcp.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+yaml_serde.workspace = true

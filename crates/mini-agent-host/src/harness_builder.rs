@@ -15,19 +15,59 @@ use crate::workspace::ApprovalController;
 use crate::workspace::workspace_tools_with_read_roots;
 use crate::world::WorldState;
 
-pub(crate) const AUTO_MAX_STEPS: usize = 0;
+pub const AUTO_MAX_STEPS: usize = 0;
 
-pub(crate) struct HarnessBuild {
-    pub(crate) harness: Harness<OpenAiModel>,
-    pub(crate) images: ImageStore,
-    pub(crate) stable_system_prompt: String,
-    pub(crate) world: WorldState,
-    pub(crate) enabled_mcp_servers: Vec<String>,
-    pub(crate) mcp_tool_count: usize,
-    pub(crate) retry_mcp_servers: Vec<skills::McpServerConfig>,
+pub struct HarnessBuild {
+    pub harness: Harness<OpenAiModel>,
+    pub images: ImageStore,
+    pub stable_system_prompt: String,
+    pub world: WorldState,
+    pub enabled_mcp_servers: Vec<String>,
+    pub mcp_tool_count: usize,
+    pub retry_mcp_servers: Vec<skills::McpServerConfig>,
 }
 
-pub(crate) fn prepare_openai_harness(
+/// The fully assembled application-host runtime handed to a frontend or
+/// service boundary. It owns the concrete provider-backed Harness together
+/// with host state needed by persistence, extensions, and workflow adapters.
+pub type HostRuntime = HarnessBuild;
+
+/// Composes provider, tools, policy, extensions, and world context outside the
+/// CLI. Frontends should depend on this builder instead of importing concrete
+/// host modules to assemble a Harness themselves.
+pub struct RuntimeBuilder<'a> {
+    runtime_config: &'a RuntimeConfig,
+    approval: ApprovalController,
+    config: HarnessConfig,
+    sandbox: SandboxKind,
+}
+
+impl<'a> RuntimeBuilder<'a> {
+    pub fn new(
+        runtime_config: &'a RuntimeConfig,
+        approval: ApprovalController,
+        config: HarnessConfig,
+        sandbox: SandboxKind,
+    ) -> Self {
+        Self {
+            runtime_config,
+            approval,
+            config,
+            sandbox,
+        }
+    }
+
+    pub fn build(&self) -> Result<HostRuntime, String> {
+        prepare_openai_harness(
+            self.runtime_config,
+            self.approval.clone(),
+            self.config.clone(),
+            self.sandbox,
+        )
+    }
+}
+
+pub fn prepare_openai_harness(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
     mut config: HarnessConfig,
@@ -107,11 +147,11 @@ pub(crate) fn prepare_openai_harness(
 }
 
 #[allow(dead_code)]
-pub(crate) fn harness_config(copilot: bool) -> HarnessConfig {
+pub fn harness_config(copilot: bool) -> HarnessConfig {
     harness_config_auto(copilot, AUTO_MAX_STEPS)
 }
 
-pub(crate) fn harness_config_auto(copilot: bool, auto_max_steps: usize) -> HarnessConfig {
+pub fn harness_config_auto(copilot: bool, auto_max_steps: usize) -> HarnessConfig {
     if copilot {
         HarnessConfig {
             max_steps: if auto_max_steps == 0 {
@@ -127,7 +167,7 @@ pub(crate) fn harness_config_auto(copilot: bool, auto_max_steps: usize) -> Harne
     }
 }
 
-pub(crate) fn print_auto_warning() {
+pub fn print_auto_warning() {
     eprintln!(
         "warning: auto mode runs workspace writes, MCP servers, and unsandboxed shell commands without approval"
     );

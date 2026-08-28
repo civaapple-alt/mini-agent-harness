@@ -5,7 +5,7 @@ use mini_agent_core::ToolSpec;
 use serde_json::Value;
 
 /// Wraps host tools with the policy-aware outcome projection used by core.
-pub(crate) fn classify_tools(tools: Vec<Box<dyn Tool>>) -> Vec<Box<dyn Tool>> {
+pub fn classify_tools(tools: Vec<Box<dyn Tool>>) -> Vec<Box<dyn Tool>> {
     tools
         .into_iter()
         .map(|tool| Box::new(ClassifiedTool(tool)) as Box<dyn Tool>)
