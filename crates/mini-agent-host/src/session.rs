@@ -13,6 +13,8 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
@@ -24,7 +26,7 @@ pub use derived::DerivedItem;
 
 const SCHEMA_VERSION: u64 = 1;
 const MAX_SESSION_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_RECORD_BYTES: usize = 512 * 1024;
+pub(crate) const MAX_RECORD_BYTES: usize = 512 * 1024;
 const MAX_SESSIONS: usize = 128;
 const MAX_WORKSPACE_KEY: usize = 240;
 const SESSION_FILE_NAME: &str = "session.jsonl";
@@ -60,6 +62,7 @@ pub struct SessionStore {
     turn_count: usize,
     thread_turn_count: usize,
     created_at_ms: u64,
+    pub(crate) append_lock: Arc<Mutex<()>>,
     _lock: SessionLock,
 }
 
@@ -120,6 +123,13 @@ impl SessionStore {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub fn result_store(&self) -> crate::result_store::ResultStore {
+        crate::result_store::ResultStore::for_session(
+            self.path.clone(),
+            Arc::clone(&self.append_lock),
+        )
     }
 
     #[cfg(test)]
@@ -275,6 +285,7 @@ impl SessionStore {
                 turn_count: 0,
                 thread_turn_count: 0,
                 created_at_ms: now,
+                append_lock: Arc::new(Mutex::new(())),
                 _lock: lock,
             };
             store.append_records(vec![
@@ -347,6 +358,7 @@ impl SessionStore {
             turn_count: 0,
             thread_turn_count: 0,
             created_at_ms: now,
+            append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
         };
         store.append_records(vec![
@@ -406,6 +418,7 @@ impl SessionStore {
             turn_count: loaded.turn_count,
             thread_turn_count: loaded.thread_turn_count,
             created_at_ms: loaded.created_at_ms,
+            append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
         };
         Ok(OpenedSession {
@@ -458,6 +471,7 @@ impl SessionStore {
                 turn_count: 0,
                 thread_turn_count: 0,
                 created_at_ms: now,
+                append_lock: Arc::new(Mutex::new(())),
                 _lock: lock,
             };
             store.append_records(vec![
@@ -517,6 +531,9 @@ impl SessionStore {
     }
 
     fn append_records(&mut self, mut records: Vec<Value>) -> Result<(), String> {
+        let append_lock = Arc::clone(&self.append_lock);
+        let _append_guard = append_lock.lock().unwrap();
+        self.refresh_append_position()?;
         let mut encoded = Vec::new();
         let mut next_seq = self.next_seq;
         for record in &mut records {
@@ -546,6 +563,21 @@ impl SessionStore {
             .map_err(|error| format!("cannot persist session: {error}"))?;
         self.bytes = next_bytes;
         self.next_seq = next_seq;
+        Ok(())
+    }
+
+    fn refresh_append_position(&mut self) -> Result<(), String> {
+        let bytes = fs::read(&self.path)
+            .map_err(|error| format!("cannot read session append position: {error}"))?;
+        self.bytes = bytes.len() as u64;
+        self.next_seq = bytes
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
+            .filter_map(|record| record.get("seq").and_then(Value::as_u64))
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
         Ok(())
     }
 }

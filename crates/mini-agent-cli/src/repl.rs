@@ -81,7 +81,6 @@ impl EventSink for ChannelObserver {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
-    trace: Option<PathBuf>,
     initial_approval: ApprovalMode,
     copilot: bool,
     session_request: SessionRequest,
@@ -105,13 +104,7 @@ pub async fn run(
             }
         },
     );
-    let mut observer = match RunObserver::new(trace) {
-        Ok(observer) => observer,
-        Err(error) => {
-            eprintln!("error: cannot create trace: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let mut observer = RunObserver::new();
     let workspace = std::env::current_dir().ok();
     let startup_extensions = workspace
         .as_ref()
@@ -796,7 +789,7 @@ fn spawn_worker(
                                 opened.store.path().display()
                             )
                         } else {
-                            "ephemeral (in-memory)".to_string()
+                            "unavailable".to_string()
                         };
                         let workspace_str = world.workspace().display().to_string();
 
@@ -940,8 +933,7 @@ fn spawn_worker(
                         }
                         None => {
                             let _ = events.send(ReplEvent::Notice(
-                                "session> in-memory; restart with --persist to make it durable"
-                                    .to_string(),
+                                "session> no durable session is attached".to_string(),
                             ));
                         }
                     },
@@ -1070,8 +1062,7 @@ fn spawn_worker(
                     WorkerCommand::StartGoal(objective) => {
                         if runtime.session().is_none() {
                             let _ = events.send(ReplEvent::Warning(
-                                "goal> requires a durable session; restart without --ephemeral"
-                                    .to_string(),
+                                "goal> requires a durable session".to_string(),
                             ));
                             break;
                         }

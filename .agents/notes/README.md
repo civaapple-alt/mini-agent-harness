@@ -109,8 +109,8 @@ If a proposed approach is rejected during review:
 | 2026-08-28 | [External Harness and ACP Boundary](implemented/architecture/2026-08-28-external-harness-and-acp-boundary.md) | Four-layer CLI → App Server → Host/Workflows → Core/Protocol boundary with JSON-RPC, stdio, approvals, lifecycle, and experimental ACP mapping |
 | 2026-08-24 | [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md) | Strict boundary between pure microkernel core and host CLI adapters |
 | 2026-08-24 | [Hard Limits System](implemented/architecture/2026-08-24-hard-limits-system.md) | Hard bounds on context, responses, step count, and UTF-8 head/tail truncation |
-| 2026-08-26 | [Event-Driven Reactive Loop](implemented/architecture/2026-08-26-event-driven-reactive-loop.md) | Passive immutable observers driving live client UI and rollout audit traces |
-| 2026-08-26 | [Event Stream Rollout Replay](implemented/architecture/2026-08-26-event-stream-rollout-replay.md) | Deterministic offline replay, playback, and inspection of JSONL traces |
+| 2026-08-26 | [Event-Driven Reactive Loop](implemented/architecture/2026-08-26-event-driven-reactive-loop.md) | Passive immutable observers driving live client UI and session-backed durable history |
+| 2026-08-28 | [Session as the Single Durable Runtime Store](implemented/architecture/2026-08-28-session-single-source-of-truth.md) | Session JSONL owns settled history and result handles; live events remain in-process |
 | 2026-08-26 | [Session Branching Lanes](implemented/architecture/2026-08-26-session-branching-lanes.md) | Multi-branch tree conversations and speculative exploration lanes |
 | 2026-08-26 | [Local Sandbox Adapter](implemented/architecture/2026-08-26-local-sandbox-adapter.md) | Approval rules, path checks, Docker execution, and native process-tree cleanup |
 | 2026-08-27 | [Model Context Boundaries & CLI Decoupling](implemented/architecture/2026-08-27-model-context-boundaries-and-cli-decoupling.md) | Model item ceilings, atomic turn trimming, CLI decoupling, and session continuity |
@@ -154,6 +154,7 @@ If a proposed approach is rejected during review:
 |---|---|---|
 | 2026-08-24 | [Generic Persistence in Core](rejected/architecture/2026-08-24-generic-persistence-in-core.md) | Cannot settle non-idempotent external effects; persistence belongs at edge |
 | 2026-08-27 | [Subagent Task Scheduling & Delegation](rejected/architecture/2026-08-27-subagent-task-scheduling-and-delegation.md) | In-process multi-tenant scheduler adds unnecessary core complexity; replaced by Subprocess CLI execution and session-backed multi-turn architecture |
+| 2026-08-26 | [Event Stream Rollout Replay](rejected/architecture/2026-08-26-event-stream-rollout-replay.md) | Detailed external trace replay was prompt-weight-specific; session JSONL is the mainline durable record |
 
 #### Features & Extensions (`rejected/feature/`)
 | Date | Title | Rationale |

@@ -6,7 +6,7 @@ defaults are part of the harness rather than terminal flags.
 | Boundary | Default | Behavior at limit |
 | --- | ---: | --- |
 | one host context item | 8 KiB | reject before retaining the item |
-| user input | 32 KiB | reject before retaining or tracing the text |
+| user input | 32 KiB | reject before retaining or emitting the text |
 | model response | 64 KiB | reject before retaining text or tool calls |
 | tool calls in one model step | 8 | reject the whole proposal before effects |
 | one tool result | 16 KiB | retain UTF-8-safe head and tail |
@@ -22,8 +22,8 @@ token counts remain available separately in model-response events.
 
 Reasoning and assistant text deltas share the model-response ceiling. They stop
 reaching observers once the combined response crosses it, and the completed
-response is then rejected. The two streams remain distinct in trace events and
-terminal output. Settled reasoning is replayed as a Responses API reasoning
+response is then rejected. The two streams remain distinct in the live event
+stream and terminal output. Settled reasoning is replayed as a Responses API reasoning
 item before the same assistant turn's text and tool calls. Tool output is
 different: it comes from an already-performed external effect, so the harness
 retains a bounded result and marks `truncated` explicitly instead of discarding
@@ -54,8 +54,8 @@ fits. The 1 MiB JSON ceiling does not count host-projected image bytes; image
 data URLs are a host wire payload, not core history. The returned summary must be non-empty, contain no tool
 calls, reduce context size, and fit the existing response and request ceilings.
 If it does not, the harness drops oldest prefix messages until the request is
-under the compact threshold, instead of aborting the run. Compaction has its
-own trace events and does not consume an agent step. A pathological single step
+under the compact threshold, instead of aborting the run. Compaction emits live
+lifecycle events and does not consume an agent step. A pathological single step
 can still exceed the hard context ceiling and fail rather than sending an
 oversized request.
 
@@ -82,7 +82,7 @@ Host tools add their own effect-side bounds before results reach core:
 | shell runtime | 120 seconds |
 | captured foreground stdout and stderr | 8 MiB combined |
 | inline foreground result threshold | 16 KiB |
-| stored result | 8 MiB each, 8 entries, 16 MiB total |
+| stored result | 8 MiB in memory; session-backed records retain at most 64 KiB each, 8 entries, 16 MiB total |
 | `read_tool_result` response | 16 KiB |
 | managed processes | 8 |
 | managed-process log | 256 KiB per stream |
@@ -131,10 +131,10 @@ deadline to the complete streaming request. It enforces the harness response
 byte limit while accumulating text and tool calls, before returning them to
 core, and retains at most 4 KiB from an HTTP error body.
 
-Durable sessions are append-only. Interactive and one-shot `ask` sessions
-require `--persist` (or resume/fork); `auto` sessions use persistence by
-default, and `--ephemeral` disables it. They are stored per workspace
-under `~/.mini-agent/sessions/`, not in the project tree. Resume validates strictly
+Durable sessions are append-only. Interactive, one-shot `ask`, and `auto`
+sessions are stored per workspace under `~/.mini-agent/sessions/`, not in the
+project tree. The session log contains turns, context items, and stored tool
+results. Resume validates strictly
 increasing sequence numbers and restores only the newest complete checkpoint.
 An incomplete final JSONL line is treated as a torn write and truncated before
 new records are appended. One lock file prevents concurrent writers; a stale

@@ -37,6 +37,12 @@ The proposal remains open pending line-budget cleanup and external evidence
 CLI turn owner, but the App Server layer grew during migration and the existing
 runtime gate is still exceeded.
 
+The runtime simplification follow-up now makes session JSONL the single durable
+record and removes the external trace writer/replay surface. Result handles are
+reloaded from `result_stored` records on resume, and CLI/App Server persistence
+is always on. This reduces the measured runtime to 25,639 lines; the 20,000-line
+gate remains open and is not hidden by changing the budget.
+
 Evidence from this slice:
 
 ```text
@@ -177,7 +183,7 @@ turns:
 
 - help and version;
 - status and doctor configuration inspection;
-- trace replay and summary;
+- session listing and diagnostics (no external trace replay command);
 - provider-free demo may use a deterministic app-server backend, but must not
   call `Harness::run` directly from the CLI.
 

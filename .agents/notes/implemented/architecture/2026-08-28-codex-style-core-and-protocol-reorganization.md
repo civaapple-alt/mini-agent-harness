@@ -69,7 +69,7 @@ owns no second model loop, context builder, tool router, or security policy.
 
 `mini-agent-host` assembles provider and concrete tool implementations,
 approval and Plan Mode policy, sandbox/process containment, MCP lifecycle,
-session JSONL, trace persistence, and world context through `RuntimeBuilder`.
+session JSONL, result handles, and world context through `RuntimeBuilder`.
 The CLI owns only frontend input, output, and command routing. A host-only
 outcome adapter maps legacy policy errors into structured statuses while
 preserving existing user visible content and fail-closed behavior.
@@ -78,8 +78,8 @@ preserving existing user visible content and fail-closed behavior.
 
 - CLI session storage remains an adapter over core values rather than a second
   conversation state machine.
-- Live UI, trace persistence, replay, and future notifications consume one
-  ordered core event stream.
+- Live UI and future notifications consume one ordered core event stream; settled
+  history and result handles use the session JSONL record.
 - Tool routing and tool policy can evolve independently; approval and sandbox
   decisions cannot silently move into the kernel.
 - `ToolRegistry` remains as a compatibility alias for `ToolRouter`.
@@ -103,7 +103,7 @@ The current workspace verifies the boundary with:
   restored checkpoints, JSON-RPC initialization, and event projection;
 - app-server-protocol tests for JSON-RPC framing DTOs, camelCase payloads, and
   event identity/sequence preservation;
-- CLI tests for approval/sandbox behavior, session restart, trace replay,
+- CLI tests for approval/sandbox behavior and session restart,
   provider projection, and host outcome classification.
 
 The architecture note is implemented. Remaining additive work is multi-thread

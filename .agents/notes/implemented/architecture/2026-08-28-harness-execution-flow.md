@@ -12,9 +12,7 @@ created, controlled, observed, and persisted.
 
 ### One-shot CLI
 
-`mini-agent ask <prompt>` and `mini-agent auto <prompt>` construct a host
-`Harness<OpenAiModel>` and call `Harness::run`. They use a raw `Observer`,
-persist a settled session record at the edge, and exit after the run. They do
+`mini-agent ask <prompt>` and `mini-agent auto <prompt>` construct the local App Server runtime, which owns the host `Harness<OpenAiModel>`. They persist a settled session record and exit after the run. They do
 not create a `Thread`, so they do not emit Thread-level lifecycle envelopes or
 provide a live input channel for steering.
 
@@ -111,7 +109,7 @@ active turn and is started only after settlement.
 
 The kernel emits `Event` values. `Thread` adds `thread_id`, `turn_id`, and a
 monotonic `sequence` through `EventEnvelope`. CLI observers use this stream for
-terminal rendering and trace persistence; app-server broadcasts it to
+terminal rendering; the session store appends settled records and app-server broadcasts it to
 subscribers.
 
 Successful stop reasons are `Completed`, `StepLimit`, `Steered`, and
@@ -120,9 +118,7 @@ and settle the Thread as `Failed`.
 
 `SessionState` and `Context` are owned by core and remain storage-neutral. A
 `ThreadCheckpoint` contains only settled core values and can be restored after
-a restart; it never replays an uncertain external tool effect. JSONL session
-files, trace files, approval state, sandbox/process state, and terminal UI
-remain CLI responsibilities.
+a restart; it never replays an uncertain external tool effect. JSONL session files, approval state, sandbox/process state, and terminal UI remain host or edge responsibilities.
 
 ## Source references
 

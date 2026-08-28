@@ -32,6 +32,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   setting were removed.
 - Source line budgets now report core, protocol, host, app-server, ACP, and CLI
   separately, including production, unit-test, and integration-test lines.
+- Session `session.jsonl` is now the single durable runtime record: result
+  handles append to it and reload on resume, while the external trace file,
+  `--trace`, and trace replay/summary commands are retired. Interactive, ask,
+  and auto sessions are always persistent.
 
 ### Fixed
 

@@ -4,7 +4,6 @@ mod repl;
 
 use serde_json::json;
 use std::env;
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use args::Command;
@@ -38,13 +37,8 @@ async fn main() -> ExitCode {
     };
     match invocation.command {
         Command::Interactive => {
-            let request = if invocation.persist && !invocation.ephemeral {
-                SessionRequest::New
-            } else {
-                SessionRequest::Disabled
-            };
+            let request = SessionRequest::New;
             repl::run(
-                invocation.trace,
                 ApprovalMode::Automatic,
                 false,
                 request,
@@ -54,16 +48,14 @@ async fn main() -> ExitCode {
             )
             .await
         }
-        Command::Demo => run_demo(invocation.prompt, invocation.trace).await,
+        Command::Demo => run_demo(invocation.prompt).await,
         Command::Run | Command::Ask => {
             let request = match invocation.session_id {
                 Some(id) => SessionRequest::Named(id),
-                None if invocation.persist && !invocation.ephemeral => SessionRequest::New,
-                None => SessionRequest::Disabled,
+                None => SessionRequest::New,
             };
             ask::run(
                 invocation.prompt,
-                invocation.trace,
                 invocation.json,
                 invocation.automatic,
                 invocation.security_preset,
@@ -75,15 +67,12 @@ async fn main() -> ExitCode {
             .await
         }
         Command::Auto if invocation.prompt.is_empty() => {
-            let request = if invocation.ephemeral {
-                SessionRequest::Disabled
-            } else if let Some(session_id) = invocation.session_id {
+            let request = if let Some(session_id) = invocation.session_id {
                 SessionRequest::Resume(session_id)
             } else {
                 SessionRequest::New
             };
             repl::run(
-                invocation.trace,
                 ApprovalMode::Automatic,
                 true,
                 request,
@@ -94,16 +83,13 @@ async fn main() -> ExitCode {
             .await
         }
         Command::Auto => {
-            let request = if invocation.ephemeral {
-                SessionRequest::Disabled
-            } else if let Some(session_id) = invocation.session_id {
+            let request = if let Some(session_id) = invocation.session_id {
                 SessionRequest::Resume(session_id)
             } else {
                 SessionRequest::New
             };
             run_auto(
                 invocation.prompt,
-                invocation.trace,
                 invocation.security_preset,
                 invocation.sandbox_kind,
                 invocation.web_search,
@@ -123,7 +109,6 @@ async fn main() -> ExitCode {
         Command::Doctor => run_doctor(invocation.json),
         Command::Resume => {
             repl::run(
-                invocation.trace,
                 ApprovalMode::Automatic,
                 false,
                 SessionRequest::Resume(invocation.prompt),
@@ -135,7 +120,6 @@ async fn main() -> ExitCode {
         }
         Command::Fork => {
             repl::run(
-                invocation.trace,
                 ApprovalMode::Automatic,
                 false,
                 SessionRequest::Fork(invocation.prompt),
@@ -147,14 +131,7 @@ async fn main() -> ExitCode {
         }
         Command::Sessions => run_sessions(),
         Command::Mentor => {
-            mini_agent_app_server::mentor::run(invocation.prompt, invocation.trace, invocation.json)
-                .await
-        }
-        Command::TraceReplay => {
-            host::trace::replay(std::path::Path::new(&invocation.prompt), invocation.json)
-        }
-        Command::TraceSummary => {
-            host::trace::summary(std::path::Path::new(&invocation.prompt), invocation.json)
+            mini_agent_app_server::mentor::run(invocation.prompt, invocation.json).await
         }
     }
 }
@@ -239,8 +216,8 @@ fn run_sessions() -> ExitCode {
     }
 }
 
-async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
-    match mini_agent_app_server::demo::run(prompt, trace).await {
+async fn run_demo(prompt: String) -> ExitCode {
+    match mini_agent_app_server::demo::run(prompt).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error}");
@@ -251,7 +228,6 @@ async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
 
 async fn run_auto(
     prompt: String,
-    trace: Option<PathBuf>,
     preset: SecurityPreset,
     sandbox: SandboxKind,
     web_search_override: Option<bool>,
@@ -259,7 +235,6 @@ async fn run_auto(
 ) -> ExitCode {
     crate::ask::run(
         prompt,
-        trace,
         false,
         true,
         preset,

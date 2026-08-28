@@ -45,11 +45,6 @@ a preview and a process-local handle; the model can call `read_tool_result` to
 inspect a byte range or literal match. Use managed-process tools for servers and
 watchers instead of a foreground shell command.
 
-## A trace path already exists
-
-Trace creation refuses to overwrite files. Choose a new path or explicitly
-move the existing trace first.
-
 ## A durable session is locked
 
 Only one process may write a session. Exit the other process before resuming.

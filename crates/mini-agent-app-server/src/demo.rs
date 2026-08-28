@@ -27,9 +27,8 @@ use mini_agent_host::RunObserver;
 use serde_json::Value;
 use serde_json::json;
 use std::convert::Infallible;
-use std::path::PathBuf;
 
-pub async fn run(prompt: String, trace: Option<PathBuf>) -> Result<(), String> {
+pub async fn run(prompt: String) -> Result<(), String> {
     let thread_id = ThreadId::new("demo");
     let thread = Thread::new(
         thread_id.clone(),
@@ -45,8 +44,7 @@ pub async fn run(prompt: String, trace: Option<PathBuf>) -> Result<(), String> {
         .initialize("mini-agent-demo", env!("CARGO_PKG_VERSION"))
         .await
         .map_err(|error| format!("cannot initialize app server: {}", error.message))?;
-    let mut observer =
-        RunObserver::new(trace).map_err(|error| format!("cannot create trace: {error}"))?;
+    let mut observer = RunObserver::new();
     let turn_id = match client
         .start_turn(thread_id, TurnInput::new(TurnInputMode::Start, prompt))
         .await

@@ -64,18 +64,17 @@ environment values or command output.
 
 ## Durable sessions
 
-Interactive and one-shot `ask` sessions are in-memory by default. Use
-`--persist` to save a session; use `--ephemeral` (or `--no-persist`) to make
-the choice explicit. `auto` sessions persist by default and accept
-`--ephemeral`. List known IDs with `mini-agent sessions`, and restore one with
+Interactive, one-shot `ask`, and `auto` sessions always persist; there is no
+persistence opt-out setting. List known IDs
+with `mini-agent sessions`, and restore one with
 `mini-agent resume SESSION_ID`.
 Settled records live under `~/.mini-agent/sessions/<workspace>/<session-id>/`,
-where `<workspace>` is the percent-encoded absolute project path. No provider
-setting enables persistence implicitly.
+where `<workspace>` is the percent-encoded absolute project path.
 
 Each modular session directory contains fast O(1) metadata index `summary.json`,
 runtime telemetry `signals.json`, frozen environment snapshot `prompt_context.json`,
-and the append-only `session.jsonl` log.
+and the append-only `session.jsonl` log. Large tool results are recorded as
+`result_stored` entries in that same log so handles survive resume.
 
 ## Plan Mode and Autonomous Goal Workspaces
 
@@ -100,7 +99,7 @@ mini-agent mentor insight SESSION_ID
 mini-agent mentor verify SESSION_ID -- "the requested tests passed and the diff is clean"
 ```
 
-Both commands accept `--json` and `--trace PATH`. The mentor inherits the
+Both commands accept `--json`. The mentor inherits the
 primary credential and endpoint unless the mentor-specific overrides are set.
 It has a separate system role, exactly one model step, and an empty tool
 catalog. Its output is appended as a derived item linked to the immutable source

@@ -208,13 +208,30 @@ pub fn workspace_tools_with_read_roots(
     sandbox: SandboxKind,
     images: crate::image::ImageStore,
 ) -> Result<Vec<Box<dyn Tool>>, ToolError> {
+    workspace_tools_with_read_roots_and_results(
+        root,
+        approval,
+        extra_read_roots,
+        sandbox,
+        images,
+        ResultStore::default(),
+    )
+}
+
+pub fn workspace_tools_with_read_roots_and_results(
+    root: PathBuf,
+    approval: ApprovalController,
+    extra_read_roots: Vec<PathBuf>,
+    sandbox: SandboxKind,
+    images: crate::image::ImageStore,
+    results: ResultStore,
+) -> Result<Vec<Box<dyn Tool>>, ToolError> {
     let workspace = Arc::new(Workspace::with_read_roots(
         root,
         approval,
         extra_read_roots,
         sandbox,
     )?);
-    let results = ResultStore::default();
     let processes = ProcessManager::new(
         workspace.root.clone(),
         workspace.approval.clone(),
@@ -668,7 +685,7 @@ impl Tool for Shell {
         }
         let stored = self
             .1
-            .store(output.text, output.source_bytes, output.source_truncated);
+            .store(output.text, output.source_bytes, output.source_truncated)?;
         Ok(format!(
             "<tool_result_preview handle=\"{}\" stored_bytes=\"{}\" source_bytes=\"{}\" source_truncated=\"{}\">\n{}\n</tool_result_preview>\nUse read_tool_result with this handle to inspect a byte range or literal query.",
             stored.handle,

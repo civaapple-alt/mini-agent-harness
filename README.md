@@ -17,7 +17,7 @@ the [MIT License](LICENSE).
 - A credential-free deterministic `demo` for checking the complete loop.
 - Bounded workspace file tools, shell commands, web fetches, images, and MCP.
 - Explicit Plan Mode and autonomous Goal Mode.
-- Durable sessions with resume, fork, trace replay, and trace metrics.
+- Durable sessions with resume, fork, live events, and result continuation.
 - Independent, tool-free mentor insight and verification.
 - Native process handling on macOS, Linux, and Windows, with optional Docker
   isolation.
@@ -148,8 +148,6 @@ mini-agent auto "inspect the repo and run the tests"
 mini-agent sessions
 mini-agent resume SESSION_ID
 mini-agent fork SESSION_ID
-mini-agent trace replay trace.jsonl
-mini-agent trace summary trace.jsonl --json
 mini-agent mentor insight SESSION_ID
 mini-agent mentor verify SESSION_ID -- "tests pass and the diff is clean"
 ```
@@ -157,10 +155,8 @@ mini-agent mentor verify SESSION_ID -- "tests pass and the diff is clean"
 Use `--` before a prompt that begins with `-`. Run `mini-agent help` or
 `mini-agent help <command>` for the complete command reference.
 
-Interactive sessions are memory-only by default. Use `--persist` to save
-settled checkpoints under `~/.mini-agent/sessions/`; `--ephemeral` (or
-`--no-persist`) explicitly keeps a session in memory. `auto` sessions persist
-by default and accept `--ephemeral`. Running processes, queued input, and
+Interactive, one-shot, and auto sessions always append their settled history and
+stored result handles to `~/.mini-agent/sessions/`. Running processes, queued input, and
 other live effects are not resumed.
 
 ## Safety and boundaries

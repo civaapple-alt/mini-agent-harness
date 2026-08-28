@@ -256,7 +256,7 @@ impl RuntimeConfig {
             "mcp_stdio_servers": extensions.stdio_mcp_server_count(),
             "mcp_http_servers": extensions.http_mcp_server_count(),
             "telemetry": false,
-            "session_persistence": false,
+            "session_persistence": true,
             "session_persistence_available": true,
             "session_directory": session::session_directory(&self.workspace)
                 .ok()
@@ -313,7 +313,7 @@ impl RuntimeConfig {
             format!("mcp_stdio_servers: {}", extensions.stdio_mcp_server_count()),
             format!("mcp_http_servers: {}", extensions.http_mcp_server_count()),
             "telemetry: disabled".to_string(),
-            "session_persistence: opt_in (--persist or resume)".to_string(),
+            "session_persistence: always-on".to_string(),
             format!(
                 "session_directory: {}",
                 session::session_directory(&self.workspace).map_or_else(

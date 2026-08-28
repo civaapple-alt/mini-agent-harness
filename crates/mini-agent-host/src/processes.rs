@@ -202,7 +202,7 @@ impl ProcessManager {
         let stored =
             self.0
                 .results
-                .store(output, source_bytes, stdout_truncated || stderr_truncated);
+                .store(output, source_bytes, stdout_truncated || stderr_truncated)?;
         Ok(format!(
             "process_id={id}\nstatus={}\n<tool_result_preview handle=\"{}\" stored_bytes=\"{}\" source_bytes=\"{}\" source_truncated=\"{}\">\n{}\n</tool_result_preview>\nUse read_tool_result to inspect more output.",
             job.exit.as_deref().unwrap_or("running"),

@@ -8,11 +8,12 @@ use crate::image::ImageStore;
 use crate::mcp;
 use crate::openai::OpenAiModel;
 use crate::project_context;
+use crate::result_store::ResultStore;
 use crate::sandbox::SandboxKind;
 use crate::skills;
 use crate::tool_outcome::classify_tools;
 use crate::workspace::ApprovalController;
-use crate::workspace::workspace_tools_with_read_roots;
+use crate::workspace::workspace_tools_with_read_roots_and_results;
 use crate::world::WorldState;
 
 pub const AUTO_MAX_STEPS: usize = 0;
@@ -65,13 +66,39 @@ impl<'a> RuntimeBuilder<'a> {
             self.sandbox,
         )
     }
+
+    pub fn build_with_result_store(&self, results: ResultStore) -> Result<HostRuntime, String> {
+        prepare_openai_harness_with_result_store(
+            self.runtime_config,
+            self.approval.clone(),
+            self.config.clone(),
+            self.sandbox,
+            results,
+        )
+    }
 }
 
 pub fn prepare_openai_harness(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
+    config: HarnessConfig,
+    sandbox: SandboxKind,
+) -> Result<HarnessBuild, String> {
+    prepare_openai_harness_with_result_store(
+        runtime_config,
+        approval,
+        config,
+        sandbox,
+        ResultStore::default(),
+    )
+}
+
+pub fn prepare_openai_harness_with_result_store(
+    runtime_config: &RuntimeConfig,
+    approval: ApprovalController,
     mut config: HarnessConfig,
     sandbox: SandboxKind,
+    results: ResultStore,
 ) -> Result<HarnessBuild, String> {
     let provider = runtime_config.provider_settings()?;
     let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
@@ -97,12 +124,13 @@ pub fn prepare_openai_harness(
         eprintln!("warning: {diagnostic}");
     }
     config.system_prompt = skill_discovery.augment_system_prompt(&config.system_prompt)?;
-    let mut tools = match workspace_tools_with_read_roots(
+    let mut tools = match workspace_tools_with_read_roots_and_results(
         workspace.clone(),
         approval.clone(),
         skill_discovery.extra_read_roots().to_vec(),
         sandbox,
         images.clone(),
+        results,
     ) {
         Ok(tools) => tools,
         Err(error) => return Err(error.to_string()),

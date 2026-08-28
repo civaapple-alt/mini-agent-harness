@@ -8,16 +8,15 @@ Interactive coding agent sessions require crash resilience and resumption withou
 
 ## Decision
 
-The CLI provides host-level session persistence via `--persist`, `sessions`,
-and `resume SESSION_ID`. Interactive and one-shot `ask` sessions are
-process-local unless `--persist` is supplied; `auto` sessions persist by
-default and accept `--ephemeral`.
+The CLI provides host-level session persistence via `sessions` and
+`resume SESSION_ID`. Interactive, one-shot `ask`, and `auto` sessions always
+persist settled records; there is no persistence opt-out flag.
 
 1. **Storage Layout & Concurrency**:
    - Sessions are stored under `~/.mini-agent/sessions/<workspace>/<session-id>/session.jsonl`.
    - File-based mutex locking (`SessionLock`) prevents concurrent writes to the same session directory.
 2. **Append-Only Event Records**:
-   - All session headers, threads, turns, checkpoints, and derived mentor items are written as distinct JSONL records with strict sequence numbers (`seq`).
+   - All session headers, threads, turns, checkpoints, derived mentor items, and stored result handles are written as distinct JSONL records with strict sequence numbers (`seq`).
 3. **Settled Checkpoint Rule**:
    - Checkpoints are committed only after a turn fully settles (`TurnStatus::Completed` or `TurnStatus::StepLimit`).
    - Resumption always restores from the latest valid checkpoint record.

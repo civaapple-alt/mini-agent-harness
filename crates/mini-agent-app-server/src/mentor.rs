@@ -26,7 +26,6 @@ use mini_agent_host::session::DerivedItem;
 use mini_agent_host::session::SessionRequest;
 use mini_agent_host::session::SessionStore;
 use serde_json::json;
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 const MAX_CRITERIA_BYTES: usize = 32 * 1024;
@@ -52,7 +51,7 @@ impl EventSink for DiscardEvents {
     fn emit(&mut self, _event: EventEnvelope) {}
 }
 
-pub async fn run(arguments: String, trace: Option<PathBuf>, json_output: bool) -> ExitCode {
+pub async fn run(arguments: String, json_output: bool) -> ExitCode {
     let request = match parse_request(&arguments) {
         Ok(request) => request,
         Err(error) => return preflight_error(json_output, &error),
@@ -111,12 +110,7 @@ pub async fn run(arguments: String, trace: Option<PathBuf>, json_output: bool) -
     } else {
         ScriptFormat::Text
     };
-    let mut observer = match RunObserver::for_script(trace, format) {
-        Ok(observer) => observer,
-        Err(error) => {
-            return preflight_error(json_output, &format!("cannot create trace: {error}"));
-        }
-    };
+    let mut observer = RunObserver::for_script(format);
     let prompt = request.analysis_prompt();
     let outcome = match run_harness_turn(harness, prompt, &mut observer).await {
         Ok(outcome) if outcome.stop_reason == Some(StopReason::Completed) => outcome,

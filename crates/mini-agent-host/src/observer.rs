@@ -3,15 +3,11 @@ use mini_agent_core::EventEnvelope;
 use mini_agent_core::EventSink;
 use mini_agent_core::Observer;
 use mini_agent_core::ToolCall;
-use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
-use std::fs::OpenOptions;
 use std::io;
-use std::io::BufWriter;
 use std::io::IsTerminal;
 use std::io::Write;
-use std::path::PathBuf;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum StreamLane {
@@ -32,8 +28,6 @@ struct TerminalObserver {
 
 pub struct RunObserver {
     terminal: TerminalObserver,
-    trace: Option<BufWriter<std::fs::File>>,
-    trace_error: Option<String>,
     stats: RunStats,
 }
 
@@ -77,10 +71,15 @@ struct RunStats {
     tool_calls: Vec<Value>,
 }
 
+impl Default for RunObserver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RunObserver {
-    pub fn new(trace: Option<PathBuf>) -> io::Result<Self> {
+    pub fn new() -> Self {
         Self::with_terminal(
-            trace,
             OutputTarget::Stdout,
             AssistantDisplay::Stream {
                 target: OutputTarget::Stdout,
@@ -89,30 +88,16 @@ impl RunObserver {
         )
     }
 
-    pub fn for_script(trace: Option<PathBuf>, format: ScriptFormat) -> io::Result<Self> {
+    pub fn for_script(format: ScriptFormat) -> Self {
         let terminal = io::stdout().is_terminal();
         Self::with_terminal(
-            trace,
             OutputTarget::Stderr,
             script_assistant_display(format, terminal, OutputTarget::Stdout.color_enabled()),
         )
     }
 
-    fn with_terminal(
-        trace: Option<PathBuf>,
-        target: OutputTarget,
-        assistant: AssistantDisplay,
-    ) -> io::Result<Self> {
-        let trace = trace
-            .map(|path| {
-                OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(path)
-                    .map(BufWriter::new)
-            })
-            .transpose()?;
-        Ok(Self {
+    fn with_terminal(target: OutputTarget, assistant: AssistantDisplay) -> Self {
+        Self {
             terminal: TerminalObserver {
                 lane: StreamLane::None,
                 lane_target: target,
@@ -121,17 +106,12 @@ impl RunObserver {
                 assistant,
                 color: target.color_enabled(),
             },
-            trace,
-            trace_error: None,
             stats: RunStats::default(),
-        })
+        }
     }
 
     pub fn finish(&mut self) {
         self.terminal.end_stream();
-        if let Some(error) = self.trace_error.take() {
-            eprintln!("warning: trace stopped: {error}");
-        }
     }
 
     pub fn stats_json(&self) -> Value {
@@ -166,18 +146,18 @@ pub fn print_final_answer(text: &str) {
 
 impl Observer for RunObserver {
     fn observe(&mut self, event: &Event) {
-        self.observe_with_record(event, event);
+        self.observe_event(event);
     }
 }
 
 impl EventSink for RunObserver {
     fn emit(&mut self, event: EventEnvelope) {
-        self.observe_with_record(&event.event, &event);
+        self.observe_event(&event.event);
     }
 }
 
 impl RunObserver {
-    fn observe_with_record<T: Serialize>(&mut self, event: &Event, record: &T) {
+    fn observe_event(&mut self, event: &Event) {
         self.terminal.observe(event);
         match event {
             Event::ModelResponded { usage, .. } => {
@@ -210,16 +190,6 @@ impl RunObserver {
             | Event::ContextCompactionFinished { .. }
             | Event::RunFinished { .. }
             | Event::RunFailed { .. } => {}
-        }
-        if self.trace_error.is_some() {
-            return;
-        }
-        if let Some(trace) = &mut self.trace
-            && let Err(error) = serde_json::to_writer(&mut *trace, record)
-                .and_then(|()| writeln!(trace).map_err(serde_json::Error::io))
-                .and_then(|()| trace.flush().map_err(serde_json::Error::io))
-        {
-            self.trace_error = Some(error.to_string());
         }
     }
 }

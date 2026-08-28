@@ -233,7 +233,7 @@ Keep ownership in the existing CLI worker and construct/await the timer inside
 `model_runtime.block_on(async { ... })`. Do not add a runtime abstraction or
 move Goal orchestration into core.
 
-Add a regression through the built CLI with `--persist`, a local mock primary
+Add a regression through the built CLI with its always-on session persistence, a local mock primary
 provider, a local mock verifier, and the actual `/goal <objective>` input.
 It must reach the first provider request without panic. Exercise a stalled
 asynchronous provider response with a bounded fixture to verify the timeout

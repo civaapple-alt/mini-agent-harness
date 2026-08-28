@@ -1,6 +1,6 @@
 # Deterministic Rollout Event Trace Replay and Offline Evaluator
 
-Status: implemented
+Status: rejected — Detailed external trace replay was prompt-weight-specific; session.jsonl is the mainline durable record.
 
 ## Context
 

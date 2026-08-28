@@ -79,14 +79,8 @@ where
     }
 
     pub async fn start_thread(&mut self) -> Result<ThreadStartResult, JsonRpcError> {
-        self.call(
-            METHOD_THREAD_START,
-            ThreadStartParams {
-                thread_id: None,
-                ephemeral: false,
-            },
-        )
-        .await
+        self.call(METHOD_THREAD_START, ThreadStartParams { thread_id: None })
+            .await
     }
 
     pub async fn list_threads(&mut self) -> Result<ThreadListResult, JsonRpcError> {

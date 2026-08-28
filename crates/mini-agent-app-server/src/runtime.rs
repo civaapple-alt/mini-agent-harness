@@ -91,6 +91,19 @@ impl AppServerRuntime {
     ) -> Result<Self, String> {
         let workspace = runtime_config.workspace();
         let model_name = runtime_config.model().unwrap_or_default().to_string();
+        let session = match session_request {
+            SessionRequest::Disabled => None,
+            other => {
+                let opened = SessionStore::open(&workspace, other)
+                    .map_err(|error| format!("cannot open session: {error}"))?;
+                approval.bind_session_file(opened.store.path());
+                Some(opened)
+            }
+        };
+        let results = session
+            .as_ref()
+            .map(|opened| opened.store.result_store())
+            .unwrap_or_default();
         let mini_agent_host::HarnessBuild {
             harness,
             images,
@@ -99,23 +112,17 @@ impl AppServerRuntime {
             enabled_mcp_servers,
             mcp_tool_count,
             retry_mcp_servers,
-        } = RuntimeBuilder::new(&runtime_config, approval.clone(), config, sandbox).build()?;
+        } = RuntimeBuilder::new(&runtime_config, approval.clone(), config, sandbox)
+            .build_with_result_store(results)?;
         let mut harness = harness;
-        let session = match session_request {
-            SessionRequest::Disabled => None,
-            other => {
-                let opened = SessionStore::open(&workspace, other)
-                    .map_err(|error| format!("cannot open session: {error}"))?;
-                approval.bind_session_file(opened.store.path());
-                images.bind_session_file(opened.store.path());
-                if opened.resumed {
-                    harness
-                        .restore_session(opened.state.clone())
-                        .map_err(|error| format!("cannot restore session: {error}"))?;
-                }
-                Some(opened)
+        if let Some(opened) = &session {
+            images.bind_session_file(opened.store.path());
+            if opened.resumed {
+                harness
+                    .restore_session(opened.state.clone())
+                    .map_err(|error| format!("cannot restore session: {error}"))?;
             }
-        };
+        }
         let thread_id = session
             .as_ref()
             .map(|opened| ThreadId::new(opened.store.thread_id().to_string()))

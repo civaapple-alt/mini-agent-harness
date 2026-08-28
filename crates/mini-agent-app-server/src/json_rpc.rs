@@ -927,7 +927,6 @@ mod tests {
                 METHOD_THREAD_START,
                 serde_json::json!(ThreadStartParams {
                     thread_id: Some(ThreadId::new("thread-2")),
-                    ephemeral: false,
                 }),
             ))
             .await

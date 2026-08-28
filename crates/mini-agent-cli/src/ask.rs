@@ -14,7 +14,6 @@ use serde_json::json;
 use std::io;
 use std::io::IsTerminal;
 use std::io::Read;
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 const MAX_STDIN_PROMPT_BYTES: usize = 32 * 1024;
@@ -22,7 +21,6 @@ const MAX_STDIN_PROMPT_BYTES: usize = 32 * 1024;
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     prompt: String,
-    trace: Option<PathBuf>,
     json_output: bool,
     automatic: bool,
     preset: SecurityPreset,
@@ -66,21 +64,15 @@ pub async fn run(
             Err(error) => return preflight_error(json_output, &error),
         };
 
-    let observer_result = if automatic && !json_output {
-        RunObserver::new(trace)
+    let mut observer = if automatic && !json_output {
+        RunObserver::new()
     } else {
         let format = if json_output {
             ScriptFormat::Json
         } else {
             ScriptFormat::Text
         };
-        RunObserver::for_script(trace, format)
-    };
-    let mut observer = match observer_result {
-        Ok(observer) => observer,
-        Err(error) => {
-            return preflight_error(json_output, &format!("cannot create trace: {error}"));
-        }
+        RunObserver::for_script(format)
     };
 
     let started_at_ms = std::time::SystemTime::now()

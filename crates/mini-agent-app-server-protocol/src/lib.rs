@@ -203,8 +203,6 @@ pub struct InitializeResult {
 pub struct ThreadStartParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<ThreadId>,
-    #[serde(default)]
-    pub ephemeral: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -314,6 +314,8 @@ fn subcommand_help_succeeds_without_configuration() {
     assert!(stdout.contains("mini-agent ask"));
     assert!(stdout.contains("--auto-approve"));
     assert!(stdout.contains("32 KiB"));
+    assert!(!stdout.contains("--persist"));
+    assert!(!stdout.contains("--trace"));
 }
 
 #[test]
@@ -386,7 +388,7 @@ fn first_use_status_reports_non_secret_snapshot() {
     assert!(plain_out.contains("web_search: enabled"), "{plain_out}");
     assert!(plain_out.contains("command_sandbox: native"), "{plain_out}");
     assert!(
-        plain_out.contains("session_persistence: opt_in"),
+        plain_out.contains("session_persistence: always-on"),
         "{plain_out}"
     );
     assert!(
@@ -402,7 +404,7 @@ fn first_use_status_reports_non_secret_snapshot() {
     assert_eq!(body["credential"], "missing");
     assert_eq!(body["web_search"], true);
     assert_eq!(body["command_sandbox"], true);
-    assert_eq!(body["session_persistence"], false);
+    assert_eq!(body["session_persistence"], true);
     assert_eq!(body["world"]["command_sandbox"], "native");
     assert!(body["model"].is_null());
     assert_eq!(body["telemetry"], false);
@@ -664,7 +666,7 @@ fn durable_session_resumes_settled_history_after_restart() {
         String::from_utf8(output.stdout).unwrap()
     };
 
-    let first_stdout = run(&["--persist"], b"first question\n/exit\n");
+    let first_stdout = run(&[], b"first question\n/exit\n");
     let session_id = first_stdout
         .lines()
         .find_map(|line| line.strip_prefix("session> new "))
@@ -740,7 +742,7 @@ fn mentor_reviews_a_settled_checkpoint_without_polluting_primary_history() {
         output
     };
 
-    let first = command(&["--persist"], Some(b"first question\n/exit\n"));
+    let first = command(&[], Some(b"first question\n/exit\n"));
     let first_stdout = String::from_utf8(first.stdout).unwrap();
     let session_id = first_stdout
         .lines()
@@ -885,7 +887,6 @@ fn goal_mode_runs_a_tool_turn_and_verifies_the_settled_history() {
     )
     .unwrap();
     let mut child = mini_agent(&root)
-        .args(["--persist"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1003,7 +1004,6 @@ fn goal_mode_retries_rejected_milestones_and_exhausts_budget() {
     )
     .unwrap();
     let mut child = mini_agent(&root)
-        .args(["--persist"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1095,7 +1095,6 @@ fn goal_mode_fails_on_malformed_verifier_output() {
     )
     .unwrap();
     let mut child = mini_agent(&root)
-        .args(["--persist"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1181,7 +1180,6 @@ fn goal_mode_blocks_verifier_tool_requests() {
     )
     .unwrap();
     let mut child = mini_agent(&root)
-        .args(["--persist"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1251,7 +1249,6 @@ fn goal_mode_timeout_is_deterministic_and_keeps_repl_alive() {
     )
     .unwrap();
     let mut child = mini_agent(&root)
-        .args(["--persist"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1311,7 +1308,6 @@ fn running_goal_is_paused_when_a_session_restarts() {
     )
     .unwrap();
     let mut first = mini_agent(&root)
-        .args(["--persist"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

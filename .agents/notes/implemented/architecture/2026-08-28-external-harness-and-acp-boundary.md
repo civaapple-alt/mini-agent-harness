@@ -202,7 +202,7 @@ the same service without changing core behavior.
 - MCP and skills/marketplace extensions;
 - approval, security policy, and sandbox implementations;
 - workspace/world context;
-- session and trace persistence;
+- session and result persistence;
 - Goal/Plan/Mentor/Persona services.
 
 The builder may keep local secrets and filesystem paths. Those values must be

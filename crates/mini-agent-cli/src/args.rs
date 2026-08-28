@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use mini_agent_host::sandbox::SandboxKind;
 use mini_agent_host::security::SecurityPreset;
 
@@ -20,17 +18,15 @@ QUICK START:
 COMMANDS:
     resume, fork, sessions              Durable session management
     status, doctor                      Configuration and prerequisite checks
-    mentor, trace                       Review and replay settled runs
+    mentor                              Review settled runs
     demo                                Deterministic offline run
 
 COMMON OPTIONS:
     --security-preset PRESET            default | turbomode | full-machine
     --sandbox KIND                      native | docker
     --web-search / --no-web-search      Built-in web search toggle
-    --persist / --ephemeral             Save or discard session checkpoints
     --auto-approve, -y                  Allow sensitive tools in non-TTY ask
     --json                              Machine-readable output
-    --trace PATH                        JSONL observation trace
 
 CONFIG:
     OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL
@@ -46,10 +42,10 @@ Use `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.";
 pub const INTERACTIVE_HELP: &str = "mini-agent interactive
 
 USAGE:
-    mini-agent [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH]
+    mini-agent [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search]
 
 Starts the interactive REPL. Tools run without per-step approval; shell is protected by the sandbox.
-Interactive and one-shot ask sessions are in-memory by default; use `--persist` to save settled checkpoints under ~/.mini-agent/sessions. Auto sessions persist by default; use `--ephemeral` for temporary in-memory sessions.
+Interactive, one-shot ask, and auto sessions persist settled checkpoints under ~/.mini-agent/sessions.
 Use `/auto` to enter copilot mode; `/auto off` restores per-action prompts.
 Use `/plan` or `/plan <prompt>` to enter Plan Mode (locks codebase mutations, drafts the session living plan); `/plan off` exits.
 Use `/goal <objective>` to start Autonomous Goal Mode and immediately execute the first milestone.
@@ -59,20 +55,19 @@ OPTIONS:
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
-    --ephemeral, --no-persist    Run in-memory without persisting session to disk
-    --trace PATH                 Write JSONL observation events to file";
+";
 
 pub const RESUME_HELP: &str = "mini-agent resume
 
 USAGE:
-    mini-agent resume SESSION_ID [--trace PATH]
+    mini-agent resume SESSION_ID
 
 Resumes the latest settled checkpoint of a durable session for this workspace.";
 
 pub const FORK_HELP: &str = "mini-agent fork
 
 USAGE:
-    mini-agent fork SESSION_ID [--trace PATH]
+    mini-agent fork SESSION_ID
 
 Forks a new independent session from the latest settled checkpoint of an existing session.";
 
@@ -86,8 +81,8 @@ Lists bounded durable sessions for the current workspace under ~/.mini-agent/ses
 pub const MENTOR_HELP: &str = "mini-agent mentor
 
 USAGE:
-    mini-agent mentor insight SESSION_ID [--json] [--trace PATH]
-    mini-agent mentor verify SESSION_ID [--json] [--trace PATH] [--] <CRITERIA>
+    mini-agent mentor insight SESSION_ID [--json]
+    mini-agent mentor verify SESSION_ID [--json] [--] <CRITERIA>
 
 Runs a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.
 
@@ -99,7 +94,7 @@ CONFIGURATION:
 pub const ASK_HELP: &str = "mini-agent ask
 
 USAGE:
-    mini-agent ask [--auto-approve|-y] [--max-steps N] [--json] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]
+    mini-agent ask [--auto-approve|-y] [--max-steps N] [--json] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
 
 Runs one script-facing turn (8 steps by default, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.
 On a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).
@@ -113,19 +108,19 @@ OPTIONS:
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
     --json                       Emit a machine-readable final result
-    --trace PATH                 Write JSONL observation events";
+";
 
 pub const RUN_HELP: &str = "mini-agent run
 
 USAGE:
-    mini-agent run [--auto-approve|-y] [--json] [--trace PATH] [--] <PROMPT>
+    mini-agent run [--auto-approve|-y] [--json] [--] <PROMPT>
 
 Alias of `ask`. Prefer `ask` in scripts and docs.";
 
 pub const AUTO_HELP: &str = "mini-agent auto
 
 USAGE:
-    mini-agent auto [--ephemeral] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--trace PATH] [--] [PROMPT]
+    mini-agent auto [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
 
 Unattended copilot: runs continuous model/tool cycles without per-step approval, unlimited steps (unless capped by MINI_AGENT_MAX_STEPS), and automatic context compaction that preserves recent tool work.
 With a prompt, runs one autonomous copilot turn to completion.
@@ -136,23 +131,14 @@ OPTIONS:
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
-    --ephemeral, --no-persist    Run in-memory without persisting session to disk
-    --trace PATH                 Write JSONL observation events";
+";
 
 pub const DEMO_HELP: &str = "mini-agent demo
 
 USAGE:
-    mini-agent demo [--trace PATH] [--] <PROMPT>
+    mini-agent demo [--] <PROMPT>
 
 Runs the deterministic local demo without provider credentials.";
-
-pub const TRACE_HELP: &str = "mini-agent trace
-
-USAGE:
-    mini-agent trace replay PATH [--json]
-    mini-agent trace summary PATH [--json]
-
-Replays and analyzes deterministic JSONL observation traces offline without contacting model providers.";
 
 pub const STATUS_HELP: &str = "mini-agent status
 
@@ -185,8 +171,6 @@ pub enum Command {
     Fork,
     Sessions,
     Mentor,
-    TraceReplay,
-    TraceSummary,
     Status,
     Doctor,
     Help,
@@ -197,12 +181,9 @@ pub enum Command {
 pub struct Invocation {
     pub command: Command,
     pub prompt: String,
-    pub trace: Option<PathBuf>,
     pub json: bool,
     pub automatic: bool,
     #[allow(dead_code)]
-    pub persist: bool,
-    pub ephemeral: bool,
     pub session_id: Option<String>,
     pub security_preset: SecurityPreset,
     pub sandbox_kind: SandboxKind,
@@ -223,7 +204,6 @@ pub enum HelpTopic {
     Sessions,
     Mentor,
     Demo,
-    Trace,
     Status,
     Doctor,
     Version,
@@ -257,16 +237,6 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         Some("demo") => {
             args.next();
             Command::Demo
-        }
-        Some("trace") => {
-            args.next();
-            match args.next().as_deref() {
-                Some("replay") => Command::TraceReplay,
-                Some("summary") => Command::TraceSummary,
-                Some("--help" | "-h") => return Ok(help_invocation(HelpTopic::Trace)),
-                Some(other) => return Err(format!("unknown trace subcommand: {other}")),
-                None => return Ok(help_invocation(HelpTopic::Trace)),
-            }
         }
         Some("run") => {
             args.next();
@@ -327,11 +297,8 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         return Ok(Invocation {
             command,
             prompt: String::new(),
-            trace: None,
             json: false,
             automatic: false,
-            persist: false,
-            ephemeral: false,
             session_id: None,
             security_preset: SecurityPreset::Default,
             sandbox_kind: SandboxKind::Native,
@@ -343,11 +310,8 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
 
     let mut args = remaining.into_iter();
     let mut prompt = Vec::new();
-    let mut trace = None;
     let mut json = false;
     let mut automatic = false;
-    let mut persist = false;
-    let mut ephemeral = false;
     let mut session_id = None;
     let mut security_preset = SecurityPreset::Default;
     let mut sandbox_kind = SandboxKind::Native;
@@ -357,14 +321,6 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     while let Some(argument) = args.next() {
         if options && argument == "--" {
             options = false;
-        } else if options && argument == "--trace" {
-            if trace.is_some() {
-                return Err("--trace may be provided only once".to_string());
-            }
-            trace = Some(PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "--trace requires a path".to_string())?,
-            ));
         } else if options && argument == "--json" {
             if json {
                 return Err("--json may be provided only once".to_string());
@@ -388,16 +344,6 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 args.next()
                     .ok_or_else(|| format!("{argument} requires a session ID"))?,
             );
-        } else if options && argument == "--persist" {
-            if persist {
-                return Err("--persist may be provided only once".to_string());
-            }
-            persist = true;
-        } else if options && (argument == "--ephemeral" || argument == "--no-persist") {
-            if ephemeral {
-                return Err(format!("{argument} may be provided only once"));
-            }
-            ephemeral = true;
         } else if options && argument == "--security-preset" {
             let value = args
                 .next()
@@ -471,61 +417,16 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             None => return Ok(help_invocation(HelpTopic::Mentor)),
         }
     }
-    if matches!(command, Command::TraceReplay | Command::TraceSummary) && prompt.len() != 1 {
-        return Err("trace subcommand requires exactly one PATH".to_string());
-    }
     if json
         && !matches!(
             command,
-            Command::Ask
-                | Command::Run
-                | Command::Mentor
-                | Command::Status
-                | Command::Doctor
-                | Command::TraceReplay
-                | Command::TraceSummary
+            Command::Ask | Command::Run | Command::Mentor | Command::Status | Command::Doctor
         )
     {
-        return Err(
-            "--json is supported only by ask, mentor, status, doctor, and trace".to_string(),
-        );
+        return Err("--json is supported only by ask, mentor, status, and doctor".to_string());
     }
     if automatic && !matches!(command, Command::Ask | Command::Run) {
         return Err("--auto-approve is supported only by ask".to_string());
-    }
-    if trace.is_some()
-        && matches!(
-            command,
-            Command::Status | Command::Doctor | Command::Sessions
-        )
-    {
-        return Err("--trace is not supported by status, doctor, or sessions".to_string());
-    }
-    if trace.is_some() && matches!(command, Command::TraceReplay | Command::TraceSummary) {
-        return Err("--trace is not supported by trace subcommands".to_string());
-    }
-    if persist && ephemeral {
-        return Err("--persist and --ephemeral cannot be combined".to_string());
-    }
-    if persist
-        && !(command == Command::Interactive
-            || command == Command::Ask
-            || command == Command::Run
-            || command == Command::Auto)
-    {
-        return Err(
-            "--persist is supported only by interactive, auto, and ask sessions".to_string(),
-        );
-    }
-    if ephemeral
-        && !(command == Command::Interactive
-            || command == Command::Ask
-            || command == Command::Run
-            || command == Command::Auto)
-    {
-        return Err(
-            "--ephemeral is supported only by interactive, auto, and ask sessions".to_string(),
-        );
     }
     if session_id.is_some()
         && !matches!(
@@ -541,11 +442,8 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     Ok(Invocation {
         command,
         prompt: prompt.join(" "),
-        trace,
         json,
         automatic,
-        persist,
-        ephemeral,
         session_id,
         security_preset,
         sandbox_kind,
@@ -559,11 +457,8 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
     Invocation {
         command: Command::Help,
         prompt: String::new(),
-        trace: None,
         json: false,
         automatic: false,
-        persist: false,
-        ephemeral: false,
         session_id: None,
         security_preset: SecurityPreset::Default,
         sandbox_kind: SandboxKind::Native,
@@ -584,7 +479,6 @@ fn help_topic(name: &str) -> Result<HelpTopic, String> {
         "sessions" => Ok(HelpTopic::Sessions),
         "mentor" => Ok(HelpTopic::Mentor),
         "demo" => Ok(HelpTopic::Demo),
-        "trace" => Ok(HelpTopic::Trace),
         "status" => Ok(HelpTopic::Status),
         "doctor" => Ok(HelpTopic::Doctor),
         "version" => Ok(HelpTopic::Version),
@@ -603,7 +497,6 @@ fn help_topic_for(command: Command) -> HelpTopic {
         Command::Sessions => HelpTopic::Sessions,
         Command::Mentor => HelpTopic::Mentor,
         Command::Demo => HelpTopic::Demo,
-        Command::TraceReplay | Command::TraceSummary => HelpTopic::Trace,
         Command::Status => HelpTopic::Status,
         Command::Doctor => HelpTopic::Doctor,
         Command::Version => HelpTopic::Version,
@@ -623,7 +516,6 @@ pub fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::Sessions => SESSIONS_HELP,
         HelpTopic::Mentor => MENTOR_HELP,
         HelpTopic::Demo => DEMO_HELP,
-        HelpTopic::Trace => TRACE_HELP,
         HelpTopic::Status => STATUS_HELP,
         HelpTopic::Doctor => DOCTOR_HELP,
         HelpTopic::Version => VERSION_HELP,
@@ -640,7 +532,6 @@ mod tests {
 
         assert_eq!(invocation.command, Command::Interactive);
         assert_eq!(invocation.prompt, "");
-        assert_eq!(invocation.trace, None);
         assert!(!invocation.json);
         assert!(!invocation.automatic);
         assert_eq!(invocation.security_preset, SecurityPreset::Default);
@@ -660,7 +551,6 @@ mod tests {
 
         assert_eq!(invocation.command, Command::Ask);
         assert_eq!(invocation.prompt, "explain the code");
-        assert_eq!(invocation.trace, None);
         assert!(!invocation.json);
         assert!(!invocation.automatic);
     }
@@ -685,19 +575,6 @@ mod tests {
 
         assert_eq!(invocation.command, Command::Ask);
         assert_eq!(invocation.prompt, "-v --json");
-        assert_eq!(invocation.trace, None);
-        assert!(!invocation.json);
-        assert!(!invocation.automatic);
-    }
-
-    #[test]
-    fn accepts_interactive_trace() {
-        let invocation =
-            parse_args(vec!["--trace".to_string(), "trace.jsonl".to_string()]).unwrap();
-
-        assert_eq!(invocation.command, Command::Interactive);
-        assert_eq!(invocation.prompt, "");
-        assert_eq!(invocation.trace, Some(PathBuf::from("trace.jsonl")));
         assert!(!invocation.json);
         assert!(!invocation.automatic);
     }
@@ -707,26 +584,16 @@ mod tests {
         let sessions = parse_args(vec!["sessions".to_string()]).unwrap();
         assert_eq!(sessions.command, Command::Sessions);
 
-        let resume = parse_args(vec![
-            "resume".to_string(),
-            "s-12345678".to_string(),
-            "--trace".to_string(),
-            "resume.jsonl".to_string(),
-        ])
-        .unwrap();
+        let resume = parse_args(vec!["resume".to_string(), "s-12345678".to_string()]).unwrap();
         assert_eq!(resume.command, Command::Resume);
         assert_eq!(resume.prompt, "s-12345678");
-        assert_eq!(resume.trace, Some(PathBuf::from("resume.jsonl")));
 
         let auto_repl = parse_args(vec!["auto".to_string()]).unwrap();
         assert_eq!(auto_repl.command, Command::Auto);
-        assert!(!auto_repl.persist);
-        assert!(!auto_repl.ephemeral);
-
-        let auto_ephemeral =
-            parse_args(vec!["auto".to_string(), "--ephemeral".to_string()]).unwrap();
-        assert_eq!(auto_ephemeral.command, Command::Auto);
-        assert!(auto_ephemeral.ephemeral);
+        assert_eq!(
+            parse_args(vec!["auto".to_string(), "--ephemeral".to_string()]).unwrap_err(),
+            "unknown option: --ephemeral"
+        );
 
         assert_eq!(
             parse_args(vec!["resume".to_string()]).unwrap_err(),
@@ -745,14 +612,11 @@ mod tests {
             "insight".to_string(),
             "s-12345678".to_string(),
             "--json".to_string(),
-            "--trace".to_string(),
-            "mentor.jsonl".to_string(),
         ])
         .unwrap();
         assert_eq!(insight.command, Command::Mentor);
         assert_eq!(insight.prompt, "insight s-12345678");
         assert!(insight.json);
-        assert_eq!(insight.trace, Some(PathBuf::from("mentor.jsonl")));
 
         let verify = parse_args(vec![
             "mentor".to_string(),
@@ -790,8 +654,6 @@ mod tests {
     fn parses_script_ask_options() {
         let invocation = parse_args(vec![
             "ask".to_string(),
-            "--trace".to_string(),
-            "trace.jsonl".to_string(),
             "--json".to_string(),
             "--auto-approve".to_string(),
             "explain".to_string(),
@@ -802,7 +664,6 @@ mod tests {
 
         assert_eq!(invocation.command, Command::Ask);
         assert_eq!(invocation.prompt, "explain the code");
-        assert_eq!(invocation.trace, Some(PathBuf::from("trace.jsonl")));
         assert!(invocation.json);
         assert!(invocation.automatic);
         assert_eq!(invocation.max_steps, None);
@@ -830,10 +691,6 @@ mod tests {
         let ask_flag = parse_args(vec!["ask".to_string(), "--help".to_string()]).unwrap();
         assert_eq!(ask_flag.command, Command::Help);
         assert_eq!(ask_flag.help_topic, HelpTopic::Ask);
-
-        let trace_flag = parse_args(vec!["trace".to_string(), "--help".to_string()]).unwrap();
-        assert_eq!(trace_flag.command, Command::Help);
-        assert_eq!(trace_flag.help_topic, HelpTopic::Trace);
     }
 
     #[test]
@@ -875,34 +732,6 @@ mod tests {
 
         assert_eq!(invocation.command, Command::Auto);
         assert_eq!(invocation.prompt, "");
-    }
-
-    #[test]
-    fn parses_trace_commands() {
-        let replay = parse_args(vec![
-            "trace".to_string(),
-            "replay".to_string(),
-            "trace.jsonl".to_string(),
-        ])
-        .unwrap();
-        assert_eq!(replay.command, Command::TraceReplay);
-        assert_eq!(replay.prompt, "trace.jsonl");
-
-        let summary = parse_args(vec![
-            "trace".to_string(),
-            "summary".to_string(),
-            "trace.jsonl".to_string(),
-            "--json".to_string(),
-        ])
-        .unwrap();
-        assert_eq!(summary.command, Command::TraceSummary);
-        assert_eq!(summary.prompt, "trace.jsonl");
-        assert!(summary.json);
-
-        assert_eq!(
-            parse_args(vec!["trace".to_string(), "unknown".to_string()]).unwrap_err(),
-            "unknown trace subcommand: unknown"
-        );
     }
 
     #[test]
@@ -975,19 +804,19 @@ mod tests {
             parse_args(vec![
                 "status".to_string(),
                 "--trace".to_string(),
-                "trace.jsonl".to_string()
+                "trace.jsonl".to_string(),
             ])
             .unwrap_err(),
-            "--trace is not supported by status, doctor, or sessions"
+            "unknown option: --trace"
         );
         assert_eq!(
             parse_args(vec![
                 "doctor".to_string(),
                 "--trace".to_string(),
-                "trace.jsonl".to_string()
+                "trace.jsonl".to_string(),
             ])
             .unwrap_err(),
-            "--trace is not supported by status, doctor, or sessions"
+            "unknown option: --trace"
         );
         assert_eq!(
             parse_args(vec![
@@ -996,7 +825,7 @@ mod tests {
                 "prompt".to_string()
             ])
             .unwrap_err(),
-            "--json is supported only by ask, mentor, status, doctor, and trace"
+            "--json is supported only by ask, mentor, status, and doctor"
         );
         let auto_inv = parse_args(vec![
             "ask".to_string(),

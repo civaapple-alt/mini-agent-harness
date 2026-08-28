@@ -6,7 +6,7 @@ Status: implemented
 
 During review of v0.2.0 change size, model-context integrity, and backward compatibility, several critical architectural seams and edge cases were identified:
 1. `crates/mini-agent-cli/src/main.rs` had grown into a monolithic entry point (>1,400 lines) coupling CLI argument parsing, help constants, harness construction, and dispatch.
-2. `crates/mini-agent-cli/src/trace.rs` directly deserialized `session.jsonl` schema records, coupling trace analysis to internal session storage details.
+2. The former external trace path coupled CLI analysis to internal session storage details; the mainline now keeps settled history and result handles in `session.jsonl`.
 3. Relaxed response limits (384 KiB) and oversized `AGENTS.md` (64 KiB) permitted individual model items to exceed the 10K-token item ceiling.
 4. History restoration (`restore_history`) checked only `Message::Context`, allowing oversized assistant or tool items to bypass validation upon resume.
 5. Byte-wise message trimming dropped `Assistant` messages without dropping matching `Tool` outputs, producing orphan `function_call_output` messages that violate provider schemas.
@@ -52,9 +52,8 @@ We instituted strict architectural boundaries and refactored core harness algori
 
 ### 6. Persistence & Step Limit Semantics
 - Interactive and one-shot `ask` sessions default to process-local memory;
-  `--persist` opts in to creating durable session files under
-  `~/.mini-agent/sessions/`. `auto` sessions persist by default;
-  `--ephemeral` opts out.
+  Interactive, `ask`, and `auto` sessions always create durable files under
+  `~/.mini-agent/sessions/`; persistence is not configurable at the CLI edge.
 - `max_steps = 0` produces an immediate step limit halt; unconstrained runs pass `usize::MAX`.
 - `OPENAI_BASE_URL` with custom non-official endpoints defaults `web_search` to false unless explicitly enabled.
 

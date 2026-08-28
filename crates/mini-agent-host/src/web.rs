@@ -84,7 +84,7 @@ impl Tool for WebFetch {
         if rendered.len() <= INLINE_FETCH_OUTPUT_BYTES {
             return Ok(rendered);
         }
-        let stored = self.results.store(rendered, page.body.len(), false);
+        let stored = self.results.store(rendered, page.body.len(), false)?;
         let continuation = if stored.source_truncated {
             "The fetched page exceeded the session cache limit and the cached text is truncated. Use read_tool_result with the handle and a byte range or query to inspect the retained content."
         } else {

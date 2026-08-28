@@ -14,7 +14,7 @@ compatibility format when resuming or listing old sessions.
 The current session directory contains these files when the corresponding
 behavior is used:
 
-    session.jsonl          append-only turn/checkpoint records
+    session.jsonl          append-only turn/checkpoint/result records
     summary.json           bounded discovery metadata
     signals.json           bounded step/tool counters
     prompt_context.json    OS, workspace, and AGENTS.md snapshot
@@ -31,9 +31,8 @@ workspace-derived paths are validated before access.
 
 ## Persistence defaults
 
-Interactive and one-shot ask sessions are memory-only unless --persist is
-provided. auto sessions persist by default; --ephemeral disables that
-behavior. Subagent spawn_agent uses persistence by default so
+Interactive, one-shot ask, and auto sessions always persist settled records;
+there is no persistence opt-out. Subagent spawn_agent uses persistence by default so
 send_subagent_message can resume a settled child session.
 
 ## Parent/child records

@@ -1,7 +1,4 @@
 use super::*;
-use std::fs;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 #[test]
 fn colors_only_the_terminal_tag() {
@@ -61,33 +58,6 @@ fn redirected_and_json_ask_hold_the_final_answer() {
         script_assistant_display(ScriptFormat::Json, true, true),
         AssistantDisplay::Hidden
     ));
-}
-
-#[test]
-fn event_sink_persists_envelope_and_loader_keeps_payload_compatibility() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("mini-agent-envelope-trace-{nonce}.jsonl"));
-    let event = Event::RunStarted {
-        prompt: "enveloped trace".to_string(),
-    };
-    let envelope = EventEnvelope::new(
-        mini_agent_core::ThreadId::new("thread-1"),
-        Some(mini_agent_core::TurnId::new("turn-1")),
-        7,
-        event.clone(),
-    );
-    let mut observer = RunObserver::for_script(Some(path.clone()), ScriptFormat::Json).unwrap();
-    observer.emit(envelope.clone());
-    observer.finish();
-
-    let persisted: EventEnvelope =
-        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(persisted, envelope);
-    assert_eq!(crate::trace::load_events(&path).unwrap(), vec![event]);
-    fs::remove_file(path).unwrap();
 }
 
 #[test]
