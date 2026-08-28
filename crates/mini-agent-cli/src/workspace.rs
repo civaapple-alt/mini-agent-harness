@@ -227,9 +227,12 @@ pub fn workspace_tools_with_read_roots(
         Box::new(EditFile(Arc::clone(&workspace))),
         Box::new(WriteFile(Arc::clone(&workspace))),
         Box::new(Shell(Arc::clone(&workspace), results.clone())),
-        Box::new(ReadToolResult(results)),
+        Box::new(ReadToolResult(results.clone())),
     ];
-    tools.extend(crate::web::web_tools(Arc::clone(&workspace)));
+    tools.extend(crate::web::web_tools(
+        Arc::clone(&workspace),
+        results.clone(),
+    ));
     tools.push(Box::new(ReadImage {
         workspace: Arc::clone(&workspace),
         store: images,

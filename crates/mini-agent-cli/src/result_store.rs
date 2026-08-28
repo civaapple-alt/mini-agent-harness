@@ -46,6 +46,7 @@ impl ResultStore {
         source_bytes: usize,
         source_truncated: bool,
     ) -> StoredResult {
+        let source_truncated = source_truncated || content.len() > MAX_RESULT_BYTES;
         let content = retain_head_and_tail(content, MAX_RESULT_BYTES);
         let preview = retain_head_and_tail(content.clone(), PREVIEW_BYTES);
         let mut state = self.0.lock().unwrap();
@@ -245,5 +246,17 @@ mod tests {
             store.store(format!("entry {index}"), 7, false);
         }
         assert!(store.read(&first.handle, 1, 5, None).is_err());
+    }
+
+    #[test]
+    fn oversized_results_report_cache_truncation() {
+        let store = ResultStore::default();
+        let result = store.store(
+            "x".repeat(MAX_RESULT_BYTES + 1),
+            MAX_RESULT_BYTES + 1,
+            false,
+        );
+        assert!(result.source_truncated);
+        assert_eq!(result.stored_bytes, MAX_RESULT_BYTES);
     }
 }
