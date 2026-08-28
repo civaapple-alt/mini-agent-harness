@@ -1,4 +1,5 @@
 use mini_agent_app_server::AppServerRuntime;
+use mini_agent_host::RuntimeProfile;
 use mini_agent_host::config::RuntimeConfig;
 use mini_agent_host::harness_config;
 use mini_agent_host::observer::RunObserver;
@@ -23,6 +24,7 @@ pub async fn run(
     prompt: String,
     json_output: bool,
     automatic: bool,
+    no_tools: bool,
     preset: SecurityPreset,
     sandbox: SandboxKind,
     web_search_override: Option<bool>,
@@ -56,13 +58,33 @@ pub async fn run(
         (false, Some(steps)) => mini_agent_host::harness_config_auto(true, steps),
         (false, None) => harness_config(false),
     };
-    let mut runtime =
-        match AppServerRuntime::start(runtime_config, approval, config, sandbox, session_request)
-            .await
-        {
-            Ok(runtime) => runtime,
+    let profile = if automatic {
+        RuntimeProfile::auto_default()
+    } else {
+        RuntimeProfile::ask_default()
+    };
+    let mut profile =
+        match mini_agent_host::load_workspace_profile(&runtime_config.workspace(), profile) {
+            Ok(profile) => profile,
             Err(error) => return preflight_error(json_output, &error),
         };
+    if no_tools {
+        profile = profile.without_tools();
+    }
+    let profile = profile.with_sandbox(sandbox).with_security(preset);
+    let mut runtime = match AppServerRuntime::start_with_profile(
+        runtime_config,
+        approval,
+        config,
+        sandbox,
+        session_request,
+        profile,
+    )
+    .await
+    {
+        Ok(runtime) => runtime,
+        Err(error) => return preflight_error(json_output, &error),
+    };
 
     let mut observer = if automatic && !json_output {
         RunObserver::new()
@@ -101,7 +123,8 @@ pub async fn run(
                         "steps": outcome.steps,
                         "session_id": runtime.session().map(|s| s.store.session_id()),
                         "usage": observer.stats_json(),
-                        "tool_calls": observer.tool_calls_json()
+                        "tool_calls": observer.tool_calls_json(),
+                        "capabilities": runtime.capability_manifest()
                     })
                 );
             } else if !observer.assistant_displayed() {
@@ -130,7 +153,8 @@ pub async fn run(
                         "session_id": runtime.session().map(|s| s.store.session_id()),
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json(),
-                        "error": error
+                        "error": error,
+                        "capabilities": runtime.capability_manifest()
                     })
                 );
             }
@@ -150,7 +174,8 @@ pub async fn run(
                         "session_id": runtime.session().map(|s| s.store.session_id()),
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json(),
-                        "error": error.to_string()
+                        "error": error.to_string(),
+                        "capabilities": runtime.capability_manifest()
                     })
                 );
             }

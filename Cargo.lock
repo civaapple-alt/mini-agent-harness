@@ -791,6 +791,7 @@ dependencies = [
  "mini-agent-app-server",
  "mini-agent-app-server-protocol",
  "mini-agent-core",
+ "mini-agent-host",
  "serde",
  "serde_json",
  "tokio",

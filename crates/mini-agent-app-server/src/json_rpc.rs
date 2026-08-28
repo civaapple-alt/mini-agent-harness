@@ -6,6 +6,8 @@ use super::ApprovalBroker;
 use super::ApprovalRequest;
 use mini_agent_app_server_protocol::ApprovalRequestNotification;
 use mini_agent_app_server_protocol::ApprovalRespondParams;
+use mini_agent_app_server_protocol::CapabilityManifest;
+use mini_agent_app_server_protocol::DisabledCapability;
 use mini_agent_app_server_protocol::InitializeParams;
 use mini_agent_app_server_protocol::InitializeResult;
 use mini_agent_app_server_protocol::JsonRpcError;
@@ -66,6 +68,7 @@ pub struct AppServerConnection<M> {
     initialized: bool,
     approval: ApprovalBroker,
     approval_enabled: bool,
+    capability_manifest: CapabilityManifest,
 }
 
 impl<M> AppServerConnection<M>
@@ -73,24 +76,46 @@ where
     M: Model + Send + 'static,
 {
     pub fn new(server: AppServer<M>) -> Self {
-        let events = server.subscribe();
-        Self {
-            server,
-            events,
-            initialized: false,
-            approval: ApprovalBroker::new(),
-            approval_enabled: false,
-        }
+        Self::with_capability_manifest(server, default_capability_manifest())
     }
 
     pub fn with_approval_broker(server: AppServer<M>, approval: ApprovalBroker) -> Self {
+        Self::with_approval_broker_and_capability_manifest(
+            server,
+            approval,
+            default_capability_manifest(),
+        )
+    }
+
+    pub fn with_capability_manifest(
+        server: AppServer<M>,
+        capability_manifest: CapabilityManifest,
+    ) -> Self {
+        Self::with_state(server, ApprovalBroker::new(), false, capability_manifest)
+    }
+
+    pub fn with_approval_broker_and_capability_manifest(
+        server: AppServer<M>,
+        approval: ApprovalBroker,
+        capability_manifest: CapabilityManifest,
+    ) -> Self {
+        Self::with_state(server, approval, true, capability_manifest)
+    }
+
+    fn with_state(
+        server: AppServer<M>,
+        approval: ApprovalBroker,
+        approval_enabled: bool,
+        capability_manifest: CapabilityManifest,
+    ) -> Self {
         let events = server.subscribe();
         Self {
             server,
             events,
             initialized: false,
             approval,
-            approval_enabled: true,
+            approval_enabled,
+            capability_manifest,
         }
     }
 
@@ -195,6 +220,17 @@ where
                 )),
             );
         }
+        if let Some(requested_profile) = params.profile.as_deref()
+            && requested_profile != self.capability_manifest.profile
+        {
+            return response_error(
+                request.id,
+                JsonRpcError::invalid_params(format!(
+                    "profile `{requested_profile}` is unavailable; active profile is `{}`",
+                    self.capability_manifest.profile
+                )),
+            );
+        }
         let result = InitializeResult {
             protocol_version: PROTOCOL_VERSION,
             server_name: "mini-agent-app-server".to_string(),
@@ -210,6 +246,8 @@ where
                 thread_list: true,
                 approval_requests: self.approval_enabled,
             },
+            profile: self.capability_manifest.profile.clone(),
+            capability_manifest: self.capability_manifest.clone(),
         };
         self.initialized = true;
         response_value(request.id, result)
@@ -462,13 +500,43 @@ where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    serve_stdio_with_approval(server, ApprovalBroker::new(), reader, writer).await
+    serve_stdio_with_approval_and_manifest(
+        server,
+        ApprovalBroker::new(),
+        default_capability_manifest(),
+        reader,
+        writer,
+    )
+    .await
 }
 
 /// Serves stdio while forwarding host approval callbacks to the client.
 pub async fn serve_stdio_with_approval<M, R, W>(
     server: AppServer<M>,
     approval: ApprovalBroker,
+    reader: R,
+    writer: W,
+) -> Result<(), std::io::Error>
+where
+    M: Model + Send + 'static,
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    serve_stdio_with_approval_and_manifest(
+        server,
+        approval,
+        default_capability_manifest(),
+        reader,
+        writer,
+    )
+    .await
+}
+
+/// Serves stdio with a host-resolved capability manifest.
+pub async fn serve_stdio_with_approval_and_manifest<M, R, W>(
+    server: AppServer<M>,
+    approval: ApprovalBroker,
+    capability_manifest: CapabilityManifest,
     mut reader: R,
     mut writer: W,
 ) -> Result<(), std::io::Error>
@@ -477,8 +545,11 @@ where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut connection =
-        AppServerConnection::with_approval_broker(server.clone(), approval.clone());
+    let mut connection = AppServerConnection::with_approval_broker_and_capability_manifest(
+        server.clone(),
+        approval.clone(),
+        capability_manifest,
+    );
     let mut events = server.subscribe();
     let mut line = String::new();
     loop {
@@ -532,6 +603,36 @@ async fn next_event_notification(
         METHOD_TURN_EVENT,
         Some(params),
     ))
+}
+
+fn default_capability_manifest() -> CapabilityManifest {
+    CapabilityManifest {
+        profile: "unknown".to_string(),
+        enabled: Vec::new(),
+        disabled: vec![DisabledCapability {
+            name: "host-profile".to_string(),
+            reason: "no host runtime manifest was supplied".to_string(),
+        }],
+        extension_depth: "unknown".to_string(),
+        selected_extensions: Vec::new(),
+        prompt_sources: Vec::new(),
+        rule_sources: Vec::new(),
+        rule_source_status: Vec::new(),
+        prompt_source_fingerprints: Vec::new(),
+        rule_source_fingerprints: Vec::new(),
+        prompt_rule_precedence: Vec::new(),
+        rule_resolution: "unknown".to_string(),
+        rule_conflicts: Vec::new(),
+        rule_policy: mini_agent_app_server_protocol::RulePolicy {
+            workspace_write: false,
+            shell_execution: false,
+            process_execution: false,
+            workflow_scope: "unknown".to_string(),
+        },
+        context_limits: Default::default(),
+        sandbox: "unknown".to_string(),
+        security: "unknown".to_string(),
+    }
 }
 
 async fn write_json_line<W: AsyncWrite + Unpin, T: serde::Serialize>(
@@ -622,11 +723,28 @@ mod tests {
                     client_name: "test".to_string(),
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
+                    profile: None,
                 }),
             ))
             .await
             .unwrap();
         assert!(response.error.is_none());
+        assert_eq!(response.result.as_ref().unwrap()["profile"], "unknown");
+        assert_eq!(
+            response.result.as_ref().unwrap()["capabilityManifest"]["profile"],
+            "unknown"
+        );
+        assert_eq!(
+            response.result.as_ref().unwrap()["capabilityManifest"]["rulePolicy"]["workspaceWrite"],
+            false
+        );
+        assert_eq!(
+            response.result.as_ref().unwrap()["capabilityManifest"]["ruleSourceStatus"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
         assert!(connection.initialized());
 
         let response = connection
@@ -645,6 +763,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_an_unavailable_requested_profile() {
+        let mut connection = connection();
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                1,
+                METHOD_INITIALIZE,
+                serde_json::json!(InitializeParams {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test".to_string(),
+                    client_version: "0".to_string(),
+                    capabilities: ClientCapabilities::default(),
+                    profile: Some("acp".to_string()),
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.error.unwrap().code, -32602);
+        assert!(!connection.initialized());
+    }
+
+    #[tokio::test]
     async fn projects_core_events_as_notifications() {
         let mut connection = connection();
         let _ = connection
@@ -656,6 +796,7 @@ mod tests {
                     client_name: "test".to_string(),
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
+                    profile: None,
                 }),
             ))
             .await;
@@ -691,6 +832,7 @@ mod tests {
                 client_name: "jsonl-test".to_string(),
                 client_version: "0".to_string(),
                 capabilities: ClientCapabilities::default(),
+                profile: None,
             }),
         );
         input
@@ -769,6 +911,7 @@ mod tests {
                     client_name: "json-rpc-trace".to_string(),
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
+                    profile: None,
                 })
                 .unwrap(),
             ))
@@ -815,6 +958,7 @@ mod tests {
                     client_name: "checkpoint-test".to_string(),
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
+                    profile: None,
                 }),
             ))
             .await;
@@ -874,6 +1018,7 @@ mod tests {
                     client_name: "approval-test".to_string(),
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
+                    profile: None,
                 }),
             ))
             .await;
@@ -918,6 +1063,7 @@ mod tests {
                     client_name: "lifecycle-test".to_string(),
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
+                    profile: None,
                 }),
             ))
             .await;
@@ -967,6 +1113,7 @@ mod tests {
                     client_name: "notification-test".to_string(),
                     client_version: "0".to_string(),
                     capabilities: ClientCapabilities::default(),
+                    profile: None,
                 }),
             ))
             .await;

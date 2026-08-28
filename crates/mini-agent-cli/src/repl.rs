@@ -9,6 +9,8 @@ use mini_agent_core::RunControl;
 use mini_agent_core::ToolError;
 use mini_agent_core::TurnInput;
 use mini_agent_core::TurnInputMode;
+use mini_agent_host::RuntimeProfile;
+use mini_agent_host::WorkflowScope;
 use mini_agent_host::config::RuntimeConfig;
 use mini_agent_host::harness_config_auto;
 use mini_agent_host::mcp;
@@ -83,6 +85,7 @@ impl EventSink for ChannelObserver {
 pub async fn run(
     initial_approval: ApprovalMode,
     copilot: bool,
+    no_tools: bool,
     session_request: SessionRequest,
     preset: mini_agent_host::security::SecurityPreset,
     sandbox_kind: mini_agent_host::sandbox::SandboxKind,
@@ -108,6 +111,7 @@ pub async fn run(
     let workspace = std::env::current_dir().ok();
     let startup_extensions = workspace
         .as_ref()
+        .filter(|_| !no_tools)
         .map(|workspace| skills::discover(workspace));
     let startup_world = workspace
         .as_ref()
@@ -117,6 +121,7 @@ pub async fn run(
     let run_control = RunControl::new();
     let worker = spawn_worker(
         copilot,
+        no_tools,
         approval,
         session_request,
         preset,
@@ -133,6 +138,46 @@ pub async fn run(
     if copilot {
         println!("auto mode on");
     }
+    let startup_profile = if copilot {
+        RuntimeProfile::auto_default()
+    } else {
+        RuntimeProfile::interactive_default()
+    };
+    let startup_profile = match workspace.as_ref().map(|workspace| {
+        mini_agent_host::load_workspace_profile(workspace, startup_profile.clone())
+    }) {
+        Some(Ok(profile)) => profile,
+        Some(Err(error)) => {
+            eprintln!("profile> {error}");
+            startup_profile
+        }
+        None => startup_profile,
+    };
+    let startup_profile = if no_tools {
+        startup_profile.without_tools()
+    } else {
+        startup_profile
+    };
+    let startup_profile = startup_profile
+        .with_sandbox(sandbox_kind)
+        .with_security(preset);
+    let manifest = startup_profile.manifest();
+    let disabled = manifest
+        .disabled
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    println!(
+        "capabilities> profile={} enabled={}{}",
+        manifest.profile,
+        manifest.enabled.join(","),
+        if disabled.is_empty() {
+            String::new()
+        } else {
+            format!(" disabled={disabled}")
+        }
+    );
     if let Some(discovery) = startup_extensions {
         print_extension_summary(&discovery);
     }
@@ -382,6 +427,7 @@ pub async fn run(
 #[allow(clippy::too_many_arguments)]
 fn spawn_worker(
     copilot: bool,
+    no_tools: bool,
     approval: ApprovalController,
     session_request: SessionRequest,
     preset: mini_agent_host::security::SecurityPreset,
@@ -419,21 +465,42 @@ fn spawn_worker(
                 return;
             }
         };
-        let mut runtime = match model_runtime.block_on(AppServerRuntime::start_with_control(
-            runtime_config.clone(),
-            approval.clone(),
-            harness_config_auto(copilot, auto_max_steps),
-            sandbox_kind,
-            session_request,
-            std::sync::Arc::new(run_control.clone()),
-        )) {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = events.send(ReplEvent::InitializationFailed(error));
-                let _ = events.send(ReplEvent::Exited);
-                return;
-            }
+        let profile = if copilot {
+            RuntimeProfile::auto_default()
+        } else {
+            RuntimeProfile::interactive_default()
         };
+        let mut profile =
+            match mini_agent_host::load_workspace_profile(&runtime_config.workspace(), profile) {
+                Ok(profile) => profile,
+                Err(error) => {
+                    let _ = events.send(ReplEvent::InitializationFailed(error));
+                    let _ = events.send(ReplEvent::Exited);
+                    return;
+                }
+            };
+        if no_tools {
+            profile = profile.without_tools();
+        }
+        let profile = profile.with_sandbox(sandbox_kind).with_security(preset);
+        let workflow_scope = profile.workflows;
+        let mut runtime =
+            match model_runtime.block_on(AppServerRuntime::start_with_control_and_profile(
+                runtime_config.clone(),
+                approval.clone(),
+                harness_config_auto(copilot, auto_max_steps),
+                sandbox_kind,
+                session_request,
+                std::sync::Arc::new(run_control.clone()),
+                profile,
+            )) {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    let _ = events.send(ReplEvent::InitializationFailed(error));
+                    let _ = events.send(ReplEvent::Exited);
+                    return;
+                }
+            };
         let mut copilot = copilot;
         let mut goal_objective: Option<String> = None;
         let mut world = runtime.world().clone();
@@ -816,6 +883,19 @@ fn spawn_worker(
                         let _ = events.send(ReplEvent::Notice(format!(
                             "status> copilot mode:     {copilot_str}"
                         )));
+                        let manifest = runtime.capability_manifest();
+                        let disabled = manifest
+                            .disabled
+                            .iter()
+                            .map(|(name, _)| name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let _ = events.send(ReplEvent::Notice(format!(
+                            "status> capabilities:      profile={} enabled={} disabled={}",
+                            manifest.profile,
+                            manifest.enabled.join(","),
+                            disabled
+                        )));
                         let _ = events.send(ReplEvent::Notice(format!(
                             "status> session:          {session_str}"
                         )));
@@ -998,7 +1078,18 @@ fn spawn_worker(
                             ));
                         }
                     }
-                    WorkerCommand::SetPlanMode { active, prompt } => {
+                    WorkerCommand::SetPlanMode { active, ref prompt } => {
+                        if active
+                            && !matches!(
+                                workflow_scope,
+                                WorkflowScope::Plan | WorkflowScope::PlanAndGoal
+                            )
+                        {
+                            let _ = events.send(ReplEvent::Warning(
+                                "plan> disabled by the active runtime profile".to_string(),
+                            ));
+                            continue;
+                        }
                         let session_dir = runtime
                             .session()
                             .as_ref()
@@ -1035,7 +1126,7 @@ fn spawn_worker(
                                     "plan mode on: workspace modifications locked. Living plan at {}",
                                     plan_file.display()
                                 )));
-                                    if let Some(prompt) = prompt {
+                                    if let Some(prompt) = prompt.clone() {
                                         command = WorkerCommand::Prompt(prompt);
                                         continue;
                                     }
@@ -1059,7 +1150,16 @@ fn spawn_worker(
                             ));
                         }
                     }
-                    WorkerCommand::StartGoal(objective) => {
+                    WorkerCommand::StartGoal(ref objective) => {
+                        if !matches!(
+                            workflow_scope,
+                            WorkflowScope::Goal | WorkflowScope::PlanAndGoal
+                        ) {
+                            let _ = events.send(ReplEvent::Warning(
+                                "goal> disabled by the active runtime profile".to_string(),
+                            ));
+                            continue;
+                        }
                         if runtime.session().is_none() {
                             let _ = events.send(ReplEvent::Warning(
                                 "goal> requires a durable session".to_string(),
@@ -1079,7 +1179,7 @@ fn spawn_worker(
                             .unwrap_or(world.workspace());
                         match mini_agent_host::goal::init_goal_workspace_with_limits(
                             session_dir,
-                            &objective,
+                            objective,
                             runtime_config.goal_limits(),
                         ) {
                             Ok(state) => {
@@ -1118,7 +1218,7 @@ fn spawn_worker(
                             )));
                                 command =
                                     WorkerCommand::Prompt(mini_agent_host::goal::goal_turn_prompt(
-                                        &objective,
+                                        objective,
                                         state.current_milestone,
                                         state.total_milestones,
                                     ));

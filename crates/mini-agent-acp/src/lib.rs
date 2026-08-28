@@ -6,6 +6,7 @@
 //! or dependencies to `mini-agent-core`.
 
 use mini_agent_app_server::AppServerConnection;
+use mini_agent_app_server::AppServerRuntime;
 use mini_agent_app_server_protocol::InitializeParams;
 use mini_agent_app_server_protocol::JsonRpcError;
 use mini_agent_app_server_protocol::JsonRpcRequest;
@@ -27,6 +28,8 @@ use mini_agent_core::TurnId;
 use mini_agent_core::TurnInput;
 use mini_agent_core::TurnInputMode;
 use mini_agent_core::TurnSubmission;
+use mini_agent_host::OpenAiModel;
+use mini_agent_host::RuntimeProfile;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -49,6 +52,8 @@ pub struct AcpInitializeParams {
     pub client_capabilities: Value,
     #[serde(default)]
     pub client_info: Option<AcpClientInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -149,6 +154,7 @@ pub struct SessionCancelParams {
 /// An ACP-like session bridge over the app-server service.
 pub struct AcpBridge<M> {
     app: AppServerConnection<M>,
+    profile: RuntimeProfile,
     session_id: Option<ThreadId>,
     active_turn: Option<TurnId>,
     pending: VecDeque<JsonRpcRequest>,
@@ -160,8 +166,18 @@ where
     M: Model + Send + 'static,
 {
     pub fn new(app: AppServerConnection<M>) -> Self {
+        Self::with_profile(app, RuntimeProfile::acp_default())
+    }
+
+    /// Creates an ACP bridge with an explicit host capability profile.
+    ///
+    /// ACP clients receive the selected profile and its bounded capability
+    /// manifest during `initialize`; the bridge itself remains transport-only
+    /// and does not compose tools or models.
+    pub fn with_profile(app: AppServerConnection<M>, profile: RuntimeProfile) -> Self {
         Self {
             app,
+            profile,
             session_id: None,
             active_turn: None,
             pending: VecDeque::new(),
@@ -227,6 +243,17 @@ where
                 )),
             ));
         }
+        if let Some(requested_profile) = params.profile.as_deref()
+            && requested_profile != self.profile.name
+        {
+            return Some(JsonRpcResponse::error(
+                request.id,
+                JsonRpcError::invalid_params(format!(
+                    "profile `{requested_profile}` is unavailable; active profile is `{}`",
+                    self.profile.name
+                )),
+            ));
+        }
         let app_params = InitializeParams {
             protocol_version: PROTOCOL_VERSION,
             client_name: params
@@ -240,6 +267,7 @@ where
                 .map(|info| info.version.clone())
                 .unwrap_or_else(|| "unknown".to_string()),
             capabilities: Default::default(),
+            profile: None,
         };
         let app_request = JsonRpcRequest::request(
             request.id.clone().unwrap_or(Value::Null),
@@ -258,6 +286,15 @@ where
         if let Some(error) = app_response.error {
             return Some(JsonRpcResponse::error(request.id, error));
         }
+        let capability_manifest = app_response
+            .result
+            .as_ref()
+            .filter(|result| result["profile"] == self.profile.name)
+            .map(|result| result["capabilityManifest"].clone())
+            .unwrap_or_else(|| {
+                serde_json::to_value(self.profile.manifest())
+                    .expect("ACP capability manifest is serializable")
+            });
         self.initialized = true;
         let result = AcpInitializeResult {
             protocol_version: ACP_PROTOCOL_VERSION,
@@ -267,7 +304,11 @@ where
             },
             agent_capabilities: AcpAgentCapabilities {
                 load_session: false,
-                prompt_capabilities: serde_json::json!({ "text": true }),
+                prompt_capabilities: serde_json::json!({
+                    "text": true,
+                    "profile": self.profile.name.clone(),
+                    "capabilities": capability_manifest
+                }),
             },
         };
         Some(JsonRpcResponse::result(
@@ -533,6 +574,15 @@ where
     }
 }
 
+impl AcpBridge<OpenAiModel> {
+    /// Adapts a host-built App Server runtime to ACP without creating a
+    /// second harness or turn loop. Callers should build the runtime with
+    /// `RuntimeProfile::acp_default()` or another allowlisted profile first.
+    pub fn from_runtime(runtime: AppServerRuntime) -> Self {
+        Self::new(runtime.into_connection())
+    }
+}
+
 fn decode_optional_params<T>(request: &JsonRpcRequest) -> Result<T, JsonRpcError>
 where
     T: for<'de> Deserialize<'de> + Default,
@@ -617,11 +667,16 @@ mod tests {
                     protocol_version: ACP_PROTOCOL_VERSION,
                     client_capabilities: Value::Null,
                     client_info: None,
+                    profile: None,
                 }),
             ))
             .await
             .unwrap();
         assert!(initialize.error.is_none());
+        assert_eq!(
+            initialize.result.unwrap()["agentCapabilities"]["promptCapabilities"]["profile"],
+            "acp"
+        );
         let session = bridge
             .handle_request(JsonRpcRequest::request(
                 2,
@@ -675,6 +730,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_an_unavailable_requested_profile() {
+        let mut bridge = bridge();
+        let response = bridge
+            .handle_request(JsonRpcRequest::request(
+                1,
+                METHOD_INITIALIZE,
+                serde_json::json!(AcpInitializeParams {
+                    protocol_version: ACP_PROTOCOL_VERSION,
+                    client_capabilities: Value::Null,
+                    client_info: None,
+                    profile: Some("acp-minimal".to_string()),
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.error.unwrap().code, -32602);
+    }
+
+    #[tokio::test]
     async fn maps_the_complete_acp_event_trace_from_the_app_server() {
         let mut bridge = bridge();
         let initialize = bridge
@@ -685,6 +760,7 @@ mod tests {
                     protocol_version: ACP_PROTOCOL_VERSION,
                     client_capabilities: Value::Null,
                     client_info: None,
+                    profile: None,
                 }),
             ))
             .await
@@ -738,6 +814,7 @@ mod tests {
                 client_name: "trace-test".to_string(),
                 client_version: "0".to_string(),
                 capabilities: Default::default(),
+                profile: None,
             }),
         ))
         .await;

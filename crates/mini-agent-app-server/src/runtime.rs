@@ -9,6 +9,12 @@ use crate::AppServer;
 use crate::AppServerConnection;
 use crate::LocalAppServerClient;
 use crate::ThreadUpdate;
+use mini_agent_app_server_protocol::CapabilityManifest as ProtocolCapabilityManifest;
+use mini_agent_app_server_protocol::ContextLimits as ProtocolContextLimits;
+use mini_agent_app_server_protocol::DisabledCapability;
+use mini_agent_app_server_protocol::RulePolicy as ProtocolRulePolicy;
+use mini_agent_app_server_protocol::RuleSourceStatus as ProtocolRuleSourceStatus;
+use mini_agent_app_server_protocol::SourceFingerprint as ProtocolSourceFingerprint;
 use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_core::Event;
 use mini_agent_core::EventSink;
@@ -21,11 +27,13 @@ use mini_agent_core::TurnInput;
 use mini_agent_core::TurnInputMode;
 use mini_agent_core::TurnStatus;
 use mini_agent_host::ApprovalController;
+use mini_agent_host::CapabilityManifest;
+use mini_agent_host::HostRuntimeFactory;
 use mini_agent_host::ImageStore;
 use mini_agent_host::OpenAiModel;
 use mini_agent_host::OpenedSession;
-use mini_agent_host::RuntimeBuilder;
 use mini_agent_host::RuntimeConfig;
+use mini_agent_host::RuntimeProfile;
 use mini_agent_host::SandboxKind;
 use mini_agent_host::SessionRequest;
 use mini_agent_host::SessionStore;
@@ -57,6 +65,7 @@ pub struct AppServerRuntime {
     enabled_mcp_servers: Vec<String>,
     mcp_tool_count: usize,
     retry_mcp_servers: Vec<mini_agent_host::skills::McpServerConfig>,
+    capability_manifest: CapabilityManifest,
 }
 
 impl AppServerRuntime {
@@ -69,13 +78,14 @@ impl AppServerRuntime {
         sandbox: SandboxKind,
         session_request: SessionRequest,
     ) -> Result<Self, String> {
-        Self::start_with_control(
+        Self::start_with_control_and_profile(
             runtime_config,
             approval,
             config,
             sandbox,
             session_request,
             std::sync::Arc::new(RunControl::new()),
+            RuntimeProfile::default(),
         )
         .await
     }
@@ -88,6 +98,47 @@ impl AppServerRuntime {
         sandbox: SandboxKind,
         session_request: SessionRequest,
         control: std::sync::Arc<RunControl>,
+    ) -> Result<Self, String> {
+        Self::start_with_control_and_profile(
+            runtime_config,
+            approval,
+            config,
+            sandbox,
+            session_request,
+            control,
+            RuntimeProfile::default(),
+        )
+        .await
+    }
+
+    pub async fn start_with_profile(
+        runtime_config: RuntimeConfig,
+        approval: ApprovalController,
+        config: HarnessConfig,
+        sandbox: SandboxKind,
+        session_request: SessionRequest,
+        profile: RuntimeProfile,
+    ) -> Result<Self, String> {
+        Self::start_with_control_and_profile(
+            runtime_config,
+            approval,
+            config,
+            sandbox,
+            session_request,
+            std::sync::Arc::new(RunControl::new()),
+            profile,
+        )
+        .await
+    }
+
+    pub async fn start_with_control_and_profile(
+        runtime_config: RuntimeConfig,
+        approval: ApprovalController,
+        config: HarnessConfig,
+        sandbox: SandboxKind,
+        session_request: SessionRequest,
+        control: std::sync::Arc<RunControl>,
+        profile: RuntimeProfile,
     ) -> Result<Self, String> {
         let workspace = runtime_config.workspace();
         let model_name = runtime_config.model().unwrap_or_default().to_string();
@@ -112,8 +163,9 @@ impl AppServerRuntime {
             enabled_mcp_servers,
             mcp_tool_count,
             retry_mcp_servers,
-        } = RuntimeBuilder::new(&runtime_config, approval.clone(), config, sandbox)
-            .build_with_result_store(results)?;
+            capability_manifest,
+        } = HostRuntimeFactory::new(&runtime_config, approval.clone(), config, sandbox)
+            .build(profile, results)?;
         let mut harness = harness;
         if let Some(opened) = &session {
             images.bind_session_file(opened.store.path());
@@ -136,10 +188,17 @@ impl AppServerRuntime {
             thread,
             control.clone(),
         );
-        let connection = AppServerConnection::new(server.clone());
+        let connection = AppServerConnection::with_capability_manifest(
+            server.clone(),
+            capability_manifest_to_protocol(&capability_manifest),
+        );
         let mut client = LocalAppServerClient::new(connection);
         client
-            .initialize("mini-agent-cli", env!("CARGO_PKG_VERSION"))
+            .initialize_with_profile(
+                "mini-agent-cli",
+                env!("CARGO_PKG_VERSION"),
+                Some(capability_manifest.profile.clone()),
+            )
             .await
             .map_err(|error| format!("cannot initialize app server: {}", error.message))?;
         Ok(Self {
@@ -155,11 +214,27 @@ impl AppServerRuntime {
             enabled_mcp_servers,
             mcp_tool_count,
             retry_mcp_servers,
+            capability_manifest,
         })
     }
 
     pub fn client_mut(&mut self) -> &mut LocalAppServerClient<OpenAiModel> {
         &mut self.client
+    }
+
+    /// Transfers the host-built service into an external protocol adapter.
+    ///
+    /// The local client and host bookkeeping are dropped; the App Server
+    /// remains the single owner of the Thread execution loop.
+    pub fn into_server(self) -> AppServer<OpenAiModel> {
+        self.server
+    }
+
+    /// Transfers the host-built service and its capability manifest into a
+    /// protocol connection for an external adapter such as ACP.
+    pub fn into_connection(self) -> AppServerConnection<OpenAiModel> {
+        let manifest = capability_manifest_to_protocol(&self.capability_manifest);
+        AppServerConnection::with_capability_manifest(self.server, manifest)
     }
 
     pub fn images(&self) -> &ImageStore {
@@ -196,6 +271,10 @@ impl AppServerRuntime {
 
     pub fn mcp_tool_count(&self) -> usize {
         self.mcp_tool_count
+    }
+
+    pub fn capability_manifest(&self) -> &CapabilityManifest {
+        &self.capability_manifest
     }
 
     pub fn retry_mcp_servers(&self) -> &[mini_agent_host::skills::McpServerConfig] {
@@ -443,5 +522,82 @@ impl AppServerRuntime {
             )?;
         }
         Ok(())
+    }
+}
+
+pub fn capability_manifest_to_protocol(
+    manifest: &mini_agent_host::CapabilityManifest,
+) -> ProtocolCapabilityManifest {
+    ProtocolCapabilityManifest {
+        profile: manifest.profile.clone(),
+        enabled: manifest.enabled.clone(),
+        disabled: manifest
+            .disabled
+            .iter()
+            .map(|(name, reason)| DisabledCapability {
+                name: name.clone(),
+                reason: reason.clone(),
+            })
+            .collect(),
+        extension_depth: serde_json::to_value(manifest.extension_depth)
+            .expect("extension depth is serializable")
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string(),
+        selected_extensions: manifest.selected_extensions.clone(),
+        prompt_sources: manifest.prompt_sources.clone(),
+        rule_sources: manifest.rule_sources.clone(),
+        rule_source_status: manifest
+            .rule_source_status
+            .iter()
+            .map(|status| ProtocolRuleSourceStatus {
+                source: status.source.clone(),
+                state: serde_json::to_value(status.state)
+                    .expect("rule source state is serializable")
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_string(),
+                reason: status.reason.clone(),
+            })
+            .collect(),
+        prompt_source_fingerprints: manifest
+            .prompt_source_fingerprints
+            .iter()
+            .map(|source| ProtocolSourceFingerprint {
+                source: source.source.clone(),
+                fingerprint: source.fingerprint.clone(),
+            })
+            .collect(),
+        rule_source_fingerprints: manifest
+            .rule_source_fingerprints
+            .iter()
+            .map(|source| ProtocolSourceFingerprint {
+                source: source.source.clone(),
+                fingerprint: source.fingerprint.clone(),
+            })
+            .collect(),
+        prompt_rule_precedence: manifest.prompt_rule_precedence.clone(),
+        rule_resolution: manifest.rule_resolution.clone(),
+        rule_conflicts: manifest.rule_conflicts.clone(),
+        rule_policy: ProtocolRulePolicy {
+            workspace_write: manifest.rule_policy.workspace_write,
+            shell_execution: manifest.rule_policy.shell_execution,
+            process_execution: manifest.rule_policy.process_execution,
+            workflow_scope: serde_json::to_value(manifest.rule_policy.workflow_scope)
+                .expect("workflow scope is serializable")
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string(),
+        },
+        context_limits: ProtocolContextLimits {
+            max_context_bytes: manifest.context_limits.max_context_bytes,
+            max_context_item_bytes: manifest.context_limits.max_context_item_bytes,
+            max_user_input_bytes: manifest.context_limits.max_user_input_bytes,
+            max_model_response_bytes: manifest.context_limits.max_model_response_bytes,
+            max_tool_output_bytes: manifest.context_limits.max_tool_output_bytes,
+            max_tool_calls_per_step: manifest.context_limits.max_tool_calls_per_step,
+        },
+        sandbox: manifest.sandbox.clone(),
+        security: manifest.security.clone(),
     }
 }

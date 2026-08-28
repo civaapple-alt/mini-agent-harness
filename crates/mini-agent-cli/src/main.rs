@@ -12,9 +12,11 @@ use args::help_text;
 use args::parse_args;
 use host::ApprovalMode;
 use host::RuntimeConfig;
+use host::RuntimeProfile;
 use host::SandboxKind;
 use host::SecurityPreset;
 use host::SessionRequest;
+use host::load_workspace_profile;
 use mini_agent_host as host;
 
 pub(crate) fn version_line() -> String {
@@ -41,6 +43,7 @@ async fn main() -> ExitCode {
             repl::run(
                 ApprovalMode::Automatic,
                 false,
+                invocation.no_tools,
                 request,
                 invocation.security_preset,
                 invocation.sandbox_kind,
@@ -58,6 +61,7 @@ async fn main() -> ExitCode {
                 invocation.prompt,
                 invocation.json,
                 invocation.automatic,
+                invocation.no_tools,
                 invocation.security_preset,
                 invocation.sandbox_kind,
                 invocation.web_search,
@@ -75,6 +79,7 @@ async fn main() -> ExitCode {
             repl::run(
                 ApprovalMode::Automatic,
                 true,
+                invocation.no_tools,
                 request,
                 invocation.security_preset,
                 invocation.sandbox_kind,
@@ -94,6 +99,7 @@ async fn main() -> ExitCode {
                 invocation.sandbox_kind,
                 invocation.web_search,
                 request,
+                invocation.no_tools,
             )
             .await
         }
@@ -111,6 +117,7 @@ async fn main() -> ExitCode {
             repl::run(
                 ApprovalMode::Automatic,
                 false,
+                invocation.no_tools,
                 SessionRequest::Resume(invocation.prompt),
                 invocation.security_preset,
                 invocation.sandbox_kind,
@@ -122,6 +129,7 @@ async fn main() -> ExitCode {
             repl::run(
                 ApprovalMode::Automatic,
                 false,
+                invocation.no_tools,
                 SessionRequest::Fork(invocation.prompt),
                 invocation.security_preset,
                 invocation.sandbox_kind,
@@ -147,16 +155,35 @@ fn run_status(json: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let profile =
+        match load_workspace_profile(&config.workspace(), RuntimeProfile::interactive_default()) {
+            Ok(profile) => profile,
+            Err(error) => {
+                eprintln!("error: {error}");
+                if json {
+                    println!("{}", json!({"error": error}));
+                }
+                return ExitCode::from(2);
+            }
+        };
+    let manifest = profile.manifest_with_config(&host::harness_config(false));
     if json {
+        let mut status = config.status_json();
+        status["capabilities"] =
+            serde_json::to_value(&manifest).expect("capability manifest must be serializable");
         println!(
             "{}",
-            serde_json::to_string_pretty(&config.status_json())
-                .expect("status must be serializable")
+            serde_json::to_string_pretty(&status).expect("status must be serializable")
         );
     } else {
         for line in config.status_lines() {
             println!("{line}");
         }
+        println!(
+            "capabilities: profile={} enabled={}",
+            manifest.profile,
+            manifest.enabled.join(",")
+        );
     }
     ExitCode::SUCCESS
 }
@@ -232,11 +259,13 @@ async fn run_auto(
     sandbox: SandboxKind,
     web_search_override: Option<bool>,
     session_request: SessionRequest,
+    no_tools: bool,
 ) -> ExitCode {
     crate::ask::run(
         prompt,
         false,
         true,
+        no_tools,
         preset,
         sandbox,
         web_search_override,

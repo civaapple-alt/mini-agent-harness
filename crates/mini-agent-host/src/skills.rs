@@ -4,6 +4,7 @@ use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::io::Read;
@@ -232,10 +233,79 @@ impl Discovery {
         &self.diagnostics
     }
 
+    /// Retains only explicitly named extension entries.
+    ///
+    /// Selection is applied after bounded discovery and before prompt/tool
+    /// assembly, so omitted MCP servers are never started. Missing names are
+    /// reported as bounded diagnostics for the caller.
+    pub fn retain_selected(&mut self, names: &[String]) {
+        let requested: BTreeSet<&str> = names.iter().map(String::as_str).collect();
+        let mut matched = BTreeSet::<String>::new();
+        self.skills.retain(|skill| {
+            if requested.contains(skill.name.as_str()) {
+                matched.insert(skill.name.clone());
+                true
+            } else {
+                false
+            }
+        });
+        self.plugins.retain(|name| {
+            if requested.contains(name.as_str()) {
+                matched.insert(name.clone());
+                true
+            } else {
+                false
+            }
+        });
+        self.mcp_servers.retain(|server| {
+            let label = format!("{}/{}", server.plugin_name, server.server_name);
+            if requested.contains(label.as_str()) || requested.contains(server.server_name.as_str())
+            {
+                matched.insert(if requested.contains(label.as_str()) {
+                    label
+                } else {
+                    server.server_name.clone()
+                });
+                true
+            } else {
+                false
+            }
+        });
+        for name in requested {
+            if matched.contains(name) {
+                continue;
+            }
+            self.diagnostics
+                .push(format!("selected extension {name:?} was not found"));
+        }
+    }
+
+    pub fn prompt_fingerprint(&self) -> Result<Option<String>, String> {
+        if self.skills.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(crate::profile::stable_fingerprint(
+            self.metadata_catalog()?.as_bytes(),
+        )))
+    }
+
     pub fn augment_system_prompt(&self, base: &str) -> Result<String, String> {
         if self.skills.is_empty() {
             return Ok(base.to_string());
         }
+        let catalog = self.metadata_catalog()?;
+        Ok(format!(
+            "{base}\n\nAvailable project extensions (metadata only):\n\
+             When a task matches an entry, read its listed instruction file \
+             with read_file before proceeding. Resolve relative references from that file's directory. \
+             A plugin-agent entry supplies compatible task instructions; it does not create a subagent.\n\
+             <available_extensions>\n{}{}</available_extensions>",
+            catalog,
+            if catalog.ends_with('\n') { "" } else { "\n" }
+        ))
+    }
+
+    fn metadata_catalog(&self) -> Result<String, String> {
         let mut catalog = String::new();
         for skill in &self.skills {
             let record = json!({
@@ -250,15 +320,7 @@ impl Discovery {
             );
             catalog.push('\n');
         }
-        Ok(format!(
-            "{base}\n\nAvailable project extensions (metadata only):\n\
-             When a task matches an entry, read its listed instruction file \
-             with read_file before proceeding. Resolve relative references from that file's directory. \
-             A plugin-agent entry supplies compatible task instructions; it does not create a subagent.\n\
-             <available_extensions>\n{}{}</available_extensions>",
-            catalog,
-            if catalog.ends_with('\n') { "" } else { "\n" }
-        ))
+        Ok(catalog)
     }
 }
 

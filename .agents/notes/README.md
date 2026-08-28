@@ -83,6 +83,7 @@ If a proposed approach is rejected during review:
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Make App Server the single CLI, JSON-RPC, and ACP execution base and remove parallel turn orchestration |
+| 2026-08-28 | [Host Capability Profiles and Runtime Seams](proposed/architecture/2026-08-28-host-capability-profiles-and-runtime-seams.md) | Let REPL, ACP, and headless callers assemble explicit capability profiles, prompt/rule sources, and observable `--no-tools` scope |
 
 #### Bug Fixes (`proposed/bug-fix/`)
 

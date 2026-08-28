@@ -7,6 +7,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Added
 
+- Runtime capability profiles for interactive, ask, auto, and ACP frontends,
+  with bounded prompt/rule source manifests and explicit `--no-tools` scope.
+- Optional bounded `.agents/profile.json` overrides for local CLI and App
+  Server profile selection, including allowlisted extension names.
 - Opt-in, budgeted real-provider scenario checks for text, tools, conversation
   history, persistence, vision, and context compaction, with JSONL evidence and
   no default CI or release-network calls.
@@ -36,6 +40,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   handles append to it and reload on resume, while the external trace file,
   `--trace`, and trace replay/summary commands are retired. Interactive, ask,
   and auto sessions are always persistent.
+- RuntimeBuilder and AppServerRuntime now accept a profile seam; ACP initialize
+  reports its default profile and capability manifest while compatibility
+  startup paths retain their existing defaults.
 
 ### Fixed
 

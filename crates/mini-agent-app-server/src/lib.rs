@@ -132,6 +132,8 @@ pub use client::LocalAppServerClient;
 pub use json_rpc::AppServerConnection;
 pub use json_rpc::serve_stdio;
 pub use json_rpc::serve_stdio_with_approval;
+pub use json_rpc::serve_stdio_with_approval_and_manifest;
+pub use runtime::capability_manifest_to_protocol;
 pub use runtime::{AppServerRuntime, RuntimeTurnBatch, RuntimeTurnResult};
 
 mod worker;

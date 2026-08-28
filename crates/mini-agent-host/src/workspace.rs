@@ -55,6 +55,7 @@ pub struct ApprovalController {
     store: ApprovalStore,
     callback: Arc<ApprovalCallback>,
     living_plan: Arc<Mutex<Option<PathBuf>>>,
+    read_only_agent: Arc<AtomicBool>,
     goal_dir: Arc<Mutex<Option<PathBuf>>>,
     session_dir: Arc<Mutex<Option<PathBuf>>>,
 }
@@ -96,6 +97,7 @@ impl ApprovalController {
             store: ApprovalStore::new(),
             callback: Arc::new(callback),
             living_plan: Arc::new(Mutex::new(None)),
+            read_only_agent: Arc::new(AtomicBool::new(false)),
             goal_dir: Arc::new(Mutex::new(None)),
             session_dir: Arc::new(Mutex::new(None)),
         }
@@ -126,6 +128,14 @@ impl ApprovalController {
         self.living_plan.lock().unwrap().clone()
     }
 
+    pub fn set_read_only_agent(&self, read_only: bool) {
+        self.read_only_agent.store(read_only, Ordering::Release);
+    }
+
+    pub fn read_only_agent(&self) -> bool {
+        self.read_only_agent.load(Ordering::Acquire)
+    }
+
     pub fn set_goal_dir(&self, path: Option<PathBuf>) {
         *self.goal_dir.lock().unwrap() = path.map(|path| crate::goal::normalize_path(&path));
     }
@@ -143,6 +153,11 @@ impl ApprovalController {
     }
 
     pub fn ensure_plan_mode_unlocked(&self) -> Result<(), ToolError> {
+        if self.read_only_agent() {
+            return Err(ToolError(
+                "workspace mutations disabled by the active agent profile".to_string(),
+            ));
+        }
         match self.living_plan() {
             Some(living) => Err(ToolError(format!(
                 "workspace mutations locked in Plan Mode; living plan is {}",
@@ -1279,6 +1294,28 @@ mod tests {
         );
 
         fs::remove_dir_all(session).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn read_only_agent_rule_locks_workspace_mutations() {
+        let root = test_root();
+        let approval = ApprovalController::new(ApprovalMode::Automatic);
+        approval.set_read_only_agent(true);
+        let workspace = Arc::new(
+            Workspace::with_read_roots(root.clone(), approval, Vec::new(), SandboxKind::Native)
+                .unwrap(),
+        );
+        let write = WriteFile(Arc::clone(&workspace));
+
+        let error = write
+            .execute(&json!({"path": "note.txt", "content": "blocked"}))
+            .unwrap_err();
+
+        assert_eq!(
+            error.0,
+            "workspace mutations disabled by the active agent profile"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

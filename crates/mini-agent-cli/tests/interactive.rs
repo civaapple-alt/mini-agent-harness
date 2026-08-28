@@ -116,6 +116,136 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
 }
 
 #[test]
+fn ask_no_tools_uses_model_only_scope_without_extension_tools() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (request_tx, request_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        request_tx.send(read_request_body(&mut stream)).unwrap();
+        write_reasoning_sse_response(&mut stream, "checking", "model only");
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(root.join(".agents/skills/should-not-load")).unwrap();
+    fs::write(
+        root.join(".agents/skills/should-not-load/SKILL.md"),
+        "---\nname: should-not-load\ndescription: must not be loaded\n---\n",
+    )
+    .unwrap();
+
+    let output = mini_agent(&root)
+        .args(["ask", "--json", "--no-tools", "explain the scope"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    let request: Value = serde_json::from_slice(&request_rx.recv().unwrap()).unwrap();
+    let body = String::from_utf8(output.stdout).unwrap();
+    let response: Value = serde_json::from_str(body.trim()).unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    assert_eq!(request["tools"].as_array().unwrap().len(), 0);
+    assert!(
+        !request["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("should-not-load")
+    );
+    assert_eq!(response["capabilities"]["profile"], "ask-no-tools");
+    assert!(
+        response["capabilities"]["disabled"]
+            .to_string()
+            .contains("tools")
+    );
+}
+
+#[test]
+fn ask_applies_workspace_profile_file_before_running_a_turn() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (request_tx, request_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        request_tx.send(read_request_body(&mut stream)).unwrap();
+        write_reasoning_sse_response(&mut stream, "checking", "profile answer");
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/profile.json"),
+        r#"{"name":"repo-review","tools":"none","extensionDepth":"none","agent":"plan","persona":"reviewer","workflows":"disabled"}"#,
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .args(["ask", "--json", "review the repository"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(status.success(), "stderr: {stderr}");
+    let output: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(output["output"], "profile answer");
+    assert_eq!(output["capabilities"]["profile"], "repo-review");
+    assert!(
+        output["capabilities"]["disabled"]
+            .to_string()
+            .contains("no-tools")
+    );
+    let request: Value = serde_json::from_slice(&request_rx.recv().unwrap()).unwrap();
+    assert_eq!(request["tools"].as_array().unwrap().len(), 0);
+    assert!(
+        request["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("read-only software architect")
+    );
+}
+
+#[test]
 fn ask_prints_the_final_answer_once() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
@@ -176,6 +306,48 @@ fn status_json_remains_structured_when_env_file_is_invalid() {
             .unwrap()
             .contains("invalid .env line")
     );
+}
+
+#[test]
+fn status_json_uses_workspace_profile_and_hides_prompt_text() {
+    let root = test_root();
+    fs::create_dir_all(root.join(".agents")).unwrap();
+    fs::write(
+        root.join(".agents/profile.json"),
+        r#"{
+            "name": "status-review",
+            "tools": "none",
+            "promptSources": {"project": false, "extensions": false, "workflows": false},
+            "ruleSources": {"project": false, "extensions": false, "workflows": false}
+        }"#,
+    )
+    .unwrap();
+    fs::write(root.join("AGENTS.md"), "secret project instruction").unwrap();
+    let output = mini_agent(&root)
+        .args(["status", "--json"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .output()
+        .unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(output.status.success());
+    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(body["capabilities"]["profile"], "status-review");
+    assert_eq!(body["capabilities"]["promptSources"], json!(["builtin"]));
+    assert_eq!(
+        body["capabilities"]["promptSourceFingerprints"][0]["source"],
+        "builtin"
+    );
+    assert_eq!(
+        body["capabilities"]["promptSourceFingerprints"][0]["fingerprint"]
+            .as_str()
+            .unwrap()
+            .len(),
+        16
+    );
+    assert!(!body.to_string().contains("secret project instruction"));
 }
 
 #[test]

@@ -24,6 +24,71 @@ non-secret source of each value.
 | `MINI_AGENT_GOAL_MAX_LOOPS` | no | Maximum Goal milestone attempts; defaults to `20` |
 | `MINI_AGENT_GOAL_STEP_BUDGET` | no | Maximum model steps per Goal milestone; defaults to `50` |
 | `MINI_AGENT_GOAL_TIMEOUT_SECS` | no | Wall-clock timeout for one Goal milestone; defaults to `600` seconds |
+| `MINI_AGENT_PROFILE` | standalone App Server only | Startup profile name: `interactive`, `ask`, `auto`, `acp`, `acp-minimal`, or `demo` |
+
+## Runtime profiles and prompt/rule sources
+
+Each frontend selects a bounded host profile before the App Server starts:
+`interactive`, `ask`, `auto`, or `acp`. The profile chooses the model/tool
+scope, extension load depth, foundational agent, persona, and Goal/Plan
+workflow policy, plus sandbox and security selections. The regular `general` agent still has explicit prompt and
+rule configuration. Its stable context is assembled from the built-in prompt,
+project `AGENTS.md`, selected extension instructions, and workflow riders in
+that order; safety and host policy rules retain higher precedence.
+
+For `general`, the built-in prompt is the regular-agent base contract, while
+`promptSources` and `ruleSources` independently control the project,
+extension, and workflow inputs. Output behavior and context limits remain
+typed runtime policy, rather than arbitrary prompt text. Foundational
+`explore` and `plan` agents add their own bounded contract and read-only rule;
+personas add an overlay to either contract. Profile files and App Server
+requests currently select the bounded source switches; typed presets for the
+regular-agent base prompt, output contract, and context policy are reserved for
+the next profile stage. Neither interface can carry arbitrary prompt bodies,
+commands, paths, or credentials.
+
+Use `--no-tools` with `interactive`, `ask`, `run`, or `auto` to resolve the
+same profile into a model-only runtime. Tool and extension construction is
+skipped, while sessions, App Server turns, events, and persistence remain the
+same. Startup output and `status --json` expose the bounded capability
+manifest, including enabled/disabled groups and prompt/rule source names.
+The host keeps prompt admission and rule admission as separate profile
+settings. Their source names are visible independently in the manifest, along
+with the effective typed policy for workspace writes, shell/process execution,
+and workflow scope. The manifest also lists each rule source in precedence
+order as active, shadowed, or disabled with a bounded reason. Explore and Plan
+profiles enforce read-only workspace rules at the host boundary. The built-in
+prompt and core safety rules are always retained.
+Loaded prompt and rule sources may expose a deterministic 16-character
+fingerprint in structured status for comparison; the source text itself is
+never returned.
+The manifest also reports the fixed prompt/rule precedence, the current rule
+resolver phase, and the effective bounded context limits; it never includes
+prompt bodies or secrets.
+
+An optional `.agents/profile.json` can override bounded profile selections for
+the local CLI and standalone App Server. It accepts `tools`, `extensionDepth`,
+`selectedExtensions`, `agent`, `persona`, `workflows`, `promptSources`,
+`ruleSources`, `sandbox`, and `security`; unknown fields, oversized files,
+unsafe names, credentials, commands, paths, and arbitrary prompt text are
+rejected. Explicit command-line deny flags such as `--no-tools` are applied
+after the file.
+
+```json
+{
+  "name": "repo-review",
+  "tools": "all",
+  "extensionDepth": "enabled",
+  "selectedExtensions": ["review"],
+  "agent": "general",
+  "persona": "reviewer",
+  "workflows": "plan",
+  "promptSources": {"project": true, "extensions": true, "workflows": true},
+  "ruleSources": {"project": true, "extensions": true, "workflows": true},
+  "sandbox": "native",
+  "security": "default"
+}
+```
 
 `read_image` bytes stay in the session `attachments/` directory (not `session.jsonl`). Resume reloads
 them; fork copies them. Compaction does not attach images.

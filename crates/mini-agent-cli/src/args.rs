@@ -25,6 +25,7 @@ COMMON OPTIONS:
     --security-preset PRESET            default | turbomode | full-machine
     --sandbox KIND                      native | docker
     --web-search / --no-web-search      Built-in web search toggle
+    --no-tools                          Model-only runtime; disable all tools and extensions
     --auto-approve, -y                  Allow sensitive tools in non-TTY ask
     --json                              Machine-readable output
 
@@ -42,7 +43,7 @@ Use `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.";
 pub const INTERACTIVE_HELP: &str = "mini-agent interactive
 
 USAGE:
-    mini-agent [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search]
+    mini-agent [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--no-tools]
 
 Starts the interactive REPL. Tools run without per-step approval; shell is protected by the sandbox.
 Interactive, one-shot ask, and auto sessions persist settled checkpoints under ~/.mini-agent/sessions.
@@ -55,6 +56,7 @@ OPTIONS:
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
+    --no-tools                   Disable workspace, shell, web, image, process, subagent, and MCP tools
 ";
 
 pub const RESUME_HELP: &str = "mini-agent resume
@@ -94,7 +96,7 @@ CONFIGURATION:
 pub const ASK_HELP: &str = "mini-agent ask
 
 USAGE:
-    mini-agent ask [--auto-approve|-y] [--max-steps N] [--json] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
+    mini-agent ask [--auto-approve|-y] [--max-steps N] [--json] [--no-tools] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
 
 Runs one script-facing turn (8 steps by default, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.
 On a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).
@@ -107,20 +109,24 @@ OPTIONS:
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
+    --no-tools                   Disable all host tools and extension loading
     --json                       Emit a machine-readable final result
 ";
 
 pub const RUN_HELP: &str = "mini-agent run
 
 USAGE:
-    mini-agent run [--auto-approve|-y] [--json] [--] <PROMPT>
+    mini-agent run [--auto-approve|-y] [--json] [--no-tools] [--] <PROMPT>
 
-Alias of `ask`. Prefer `ask` in scripts and docs.";
+Alias of `ask`. Prefer `ask` in scripts and docs.
+
+OPTIONS:
+    --no-tools                   Disable all host tools and extension loading";
 
 pub const AUTO_HELP: &str = "mini-agent auto
 
 USAGE:
-    mini-agent auto [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
+    mini-agent auto [--security-preset PRESET] [--sandbox KIND] [--no-tools] [--web-search|--no-web-search] [--] [PROMPT]
 
 Unattended copilot: runs continuous model/tool cycles without per-step approval, unlimited steps (unless capped by MINI_AGENT_MAX_STEPS), and automatic context compaction that preserves recent tool work.
 With a prompt, runs one autonomous copilot turn to completion.
@@ -131,6 +137,7 @@ OPTIONS:
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
+    --no-tools                   Disable all host tools and extension loading
 ";
 
 pub const DEMO_HELP: &str = "mini-agent demo
@@ -183,6 +190,7 @@ pub struct Invocation {
     pub prompt: String,
     pub json: bool,
     pub automatic: bool,
+    pub no_tools: bool,
     #[allow(dead_code)]
     pub session_id: Option<String>,
     pub security_preset: SecurityPreset,
@@ -299,6 +307,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             prompt: String::new(),
             json: false,
             automatic: false,
+            no_tools: false,
             session_id: None,
             security_preset: SecurityPreset::Default,
             sandbox_kind: SandboxKind::Native,
@@ -312,6 +321,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut prompt = Vec::new();
     let mut json = false;
     let mut automatic = false;
+    let mut no_tools = false;
     let mut session_id = None;
     let mut security_preset = SecurityPreset::Default;
     let mut sandbox_kind = SandboxKind::Native;
@@ -336,6 +346,11 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 return Err(format!("{argument} may be provided only once"));
             }
             automatic = true;
+        } else if options && argument == "--no-tools" {
+            if no_tools {
+                return Err("--no-tools may be provided only once".to_string());
+            }
+            no_tools = true;
         } else if options && (argument == "--session" || argument == "--session-id") {
             if session_id.is_some() {
                 return Err(format!("{argument} may be provided only once"));
@@ -439,11 +454,20 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if max_steps.is_some() && !matches!(command, Command::Ask | Command::Run) {
         return Err("--max-steps is supported only by ask".to_string());
     }
+    if no_tools
+        && !matches!(
+            command,
+            Command::Interactive | Command::Ask | Command::Run | Command::Auto
+        )
+    {
+        return Err("--no-tools is supported only by interactive, ask, run, and auto".to_string());
+    }
     Ok(Invocation {
         command,
         prompt: prompt.join(" "),
         json,
         automatic,
+        no_tools,
         session_id,
         security_preset,
         sandbox_kind,
@@ -459,6 +483,7 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         prompt: String::new(),
         json: false,
         automatic: false,
+        no_tools: false,
         session_id: None,
         security_preset: SecurityPreset::Default,
         sandbox_kind: SandboxKind::Native,
@@ -666,7 +691,16 @@ mod tests {
         assert_eq!(invocation.prompt, "explain the code");
         assert!(invocation.json);
         assert!(invocation.automatic);
+        assert!(!invocation.no_tools);
         assert_eq!(invocation.max_steps, None);
+
+        let restricted = parse_args(vec![
+            "ask".to_string(),
+            "--no-tools".to_string(),
+            "explain".to_string(),
+        ])
+        .unwrap();
+        assert!(restricted.no_tools);
 
         let stepped = parse_args(vec![
             "ask".to_string(),

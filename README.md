@@ -39,8 +39,9 @@ limits, failures, and observation events.
   model/tool steps, compaction, hard limits, and cooperative run control.
 - `mini-agent-host` is the reusable application host: provider adapters,
   workspace tools, permissions, MCP and skills, sessions, Goal/Plan workflows,
-  and world state. `RuntimeBuilder` composes these capabilities into a
-  provider-backed `HostRuntime`.
+  and world state. `HostRuntimeFactory` resolves a bounded `RuntimeProfile`
+  and composes these capabilities into a provider-backed `HostRuntime`;
+  `RuntimeBuilder` remains a compatibility API.
 - `mini-agent-app-server` is the service boundary over a core `Thread`. Its
   host-backed `AppServerRuntime`, typed facade, and versioned
   `mini-agent-app-server-protocol` support initialization, thread lifecycle,

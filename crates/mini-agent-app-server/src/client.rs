@@ -66,6 +66,16 @@ where
         client_name: impl Into<String>,
         client_version: impl Into<String>,
     ) -> Result<InitializeResult, JsonRpcError> {
+        self.initialize_with_profile(client_name, client_version, None)
+            .await
+    }
+
+    pub async fn initialize_with_profile(
+        &mut self,
+        client_name: impl Into<String>,
+        client_version: impl Into<String>,
+        profile: Option<String>,
+    ) -> Result<InitializeResult, JsonRpcError> {
         self.call(
             METHOD_INITIALIZE,
             InitializeParams {
@@ -73,6 +83,7 @@ where
                 client_name: client_name.into(),
                 client_version: client_version.into(),
                 capabilities: ClientCapabilities::default(),
+                profile,
             },
         )
         .await

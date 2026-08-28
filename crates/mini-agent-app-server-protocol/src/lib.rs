@@ -164,6 +164,8 @@ pub struct InitializeParams {
     pub client_version: String,
     #[serde(default)]
     pub capabilities: ClientCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -196,6 +198,73 @@ pub struct InitializeResult {
     pub server_name: String,
     pub server_version: String,
     pub capabilities: ServerCapabilities,
+    pub profile: String,
+    pub capability_manifest: CapabilityManifest,
+}
+
+/// Bounded, secret-free capability metadata advertised at service startup.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityManifest {
+    pub profile: String,
+    pub enabled: Vec<String>,
+    pub disabled: Vec<DisabledCapability>,
+    pub extension_depth: String,
+    pub selected_extensions: Vec<String>,
+    pub prompt_sources: Vec<String>,
+    pub rule_sources: Vec<String>,
+    pub rule_source_status: Vec<RuleSourceStatus>,
+    pub prompt_source_fingerprints: Vec<SourceFingerprint>,
+    pub rule_source_fingerprints: Vec<SourceFingerprint>,
+    pub prompt_rule_precedence: Vec<String>,
+    pub rule_resolution: String,
+    pub rule_conflicts: Vec<String>,
+    pub rule_policy: RulePolicy,
+    pub context_limits: ContextLimits,
+    pub sandbox: String,
+    pub security: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextLimits {
+    pub max_context_bytes: usize,
+    pub max_context_item_bytes: usize,
+    pub max_user_input_bytes: usize,
+    pub max_model_response_bytes: usize,
+    pub max_tool_output_bytes: usize,
+    pub max_tool_calls_per_step: usize,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RulePolicy {
+    pub workspace_write: bool,
+    pub shell_execution: bool,
+    pub process_execution: bool,
+    pub workflow_scope: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleSourceStatus {
+    pub source: String,
+    pub state: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceFingerprint {
+    pub source: String,
+    pub fingerprint: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisabledCapability {
+    pub name: String,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -400,6 +469,7 @@ mod tests {
             client_name: "test".to_string(),
             client_version: "0".to_string(),
             capabilities: ClientCapabilities::default(),
+            profile: None,
         })
         .unwrap();
         assert!(value.get("protocolVersion").is_some());

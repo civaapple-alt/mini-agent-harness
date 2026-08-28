@@ -31,6 +31,46 @@ fn discovers_project_and_plugin_skills_with_progressive_disclosure() {
     assert!(prompt.contains(".agents/plugins/deploy/skills/deploy/SKILL.md"));
     assert!(prompt.contains("Review Rust changes"));
     assert!(!prompt.contains("MUST LOAD ON DEMAND"));
+    let fingerprint = discovery.prompt_fingerprint().unwrap().unwrap();
+    assert_eq!(fingerprint.len(), 16);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn selected_extensions_retain_only_named_entries() {
+    let root = test_root();
+    write_skill(
+        &root.join(".agents/skills/keep"),
+        "keep",
+        "Keep this extension.",
+        "KEEP BODY",
+    );
+    write_skill(
+        &root.join(".agents/skills/drop"),
+        "drop",
+        "Drop this extension.",
+        "DROP BODY",
+    );
+
+    let mut discovery = discover(&root);
+    discovery.retain_selected(&["keep".to_string()]);
+    assert_eq!(discovery.skill_names(), ["keep"]);
+    assert!(discovery.diagnostics().is_empty());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn selected_extensions_report_missing_names() {
+    let root = test_root();
+    let mut discovery = discover(&root);
+    discovery.retain_selected(&["missing".to_string()]);
+    assert!(
+        discovery
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.contains("selected extension \"missing\" was not found"))
+    );
     fs::remove_dir_all(root).unwrap();
 }
 

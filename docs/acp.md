@@ -7,7 +7,10 @@ ACP also uses JSON-RPC, but its baseline session vocabulary (`session/new`,
 mini-agent app-server methods.
 
 The adapter translates those session requests to the existing app-server
-connection. Core remains unaware of ACP. The current mapping supports text
+connection. Core remains unaware of ACP. A host caller should construct the
+runtime through `HostRuntimeFactory` with `RuntimeProfile::acp_default()` and
+then use `AcpBridge::from_runtime`; this preserves one App Server Thread and
+one event loop. The current mapping supports text
 prompt blocks, one in-memory session per bridge, cancellation, and progress
 updates carrying the underlying ordered core event. Session resume/fork,
 permission requests, filesystem/terminal capability calls, batching, and
@@ -15,5 +18,6 @@ conformance certification are not implemented and are not advertised as
 supported capabilities.
 
 Use `AcpBridge` when embedding the service and keep the existing stdio JSON-RPC
-transport for app-server clients. A dedicated ACP transport can be added at
-the edge after session lifecycle and approval semantics are stable.
+transport for app-server clients. ACP initialize accepts an optional profile
+name and rejects names that do not match the allowlisted runtime profile; the
+bridge returns the active profile and capability manifest to the client.
