@@ -4,13 +4,13 @@
 //! factory remains the only place that turns the selection into concrete
 //! provider, tool, extension, policy, and session-bound artifacts.
 
-use crate::ApprovalController;
 use crate::HostRuntime;
 use crate::RuntimeBuilder;
 use crate::RuntimeConfig;
 use crate::RuntimeProfile;
-use crate::SandboxKind;
 use mini_agent_capabilities::result_store::ResultStore;
+use mini_agent_capabilities::sandbox::SandboxKind;
+use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_core::HarnessConfig;
 
 /// Builds a concrete host runtime for an App Server service boundary.

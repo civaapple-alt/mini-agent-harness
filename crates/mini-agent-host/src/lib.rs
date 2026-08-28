@@ -16,24 +16,6 @@ pub mod runtime_factory;
 pub mod tool_outcome;
 pub mod world;
 
-/// Concrete model and image providers live in `mini-agent-capabilities`.
-/// These re-exports preserve the current Host API while callers migrate to
-/// profile-selected provider construction.
-pub use mini_agent_capabilities::image;
-pub use mini_agent_capabilities::marketplaces;
-pub use mini_agent_capabilities::mcp;
-pub use mini_agent_capabilities::openai;
-pub use mini_agent_capabilities::persona;
-pub use mini_agent_capabilities::processes;
-pub use mini_agent_capabilities::result_store;
-pub use mini_agent_capabilities::sandbox;
-pub use mini_agent_capabilities::security;
-pub use mini_agent_capabilities::session;
-pub use mini_agent_capabilities::skills;
-pub use mini_agent_capabilities::subagent;
-pub use mini_agent_capabilities::web;
-pub use mini_agent_capabilities::workspace;
-
 /// Build metadata used by host diagnostics and persisted status output.
 pub fn git_sha() -> &'static str {
     option_env!("GIT_SHA").unwrap_or("unknown")
@@ -49,9 +31,6 @@ pub use harness_builder::prepare_openai_harness;
 pub use harness_builder::prepare_openai_harness_with_profile;
 pub use harness_builder::prepare_openai_harness_with_profile_and_result_store;
 pub use harness_builder::print_auto_warning;
-pub use mini_agent_capabilities::ImageStore;
-pub use mini_agent_capabilities::OpenAiError;
-pub use mini_agent_capabilities::OpenAiModel;
 pub use observer::RunObserver;
 pub use profile::AgentKind;
 pub use profile::CapabilityManifest;
@@ -72,14 +51,4 @@ pub use profile::ToolScope;
 pub use profile::WorkflowScope;
 pub use profile::load_workspace_profile;
 pub use runtime_factory::HostRuntimeFactory;
-pub use sandbox::SandboxKind;
-pub use security::SecurityPreset;
-pub use session::OpenedSession;
-pub use session::SessionRequest;
-pub use session::SessionStore;
-pub use session::TurnCommit;
-pub use session::TurnStatus;
-pub use workspace::ApprovalController;
-pub use workspace::ApprovalMode;
-pub use workspace::workspace_tools_with_read_roots_and_results;
 pub use world::WorldState;

@@ -89,12 +89,12 @@ serially.
 The Stage 2 migration established a real provider boundary: the new
 `mini-agent-capabilities` crate now owns the image, OpenAI-compatible model,
 sandbox, security, marketplace, workspace, process, web, subagent, session,
-Result Store, skills, and MCP implementations. Host keeps compatibility
-re-exports for existing callers, but `RuntimeBuilder` now selects model, tool,
-extension discovery, and MCP loading through the capabilities registry. The
-resolved profile carries an allowlisted `modelProvider` identifier. Host no
-longer owns concrete Harness hands and feet; it retains profile resolution,
-context/workflow composition, and application-level binding.
+Result Store, skills, and MCP implementations. Host now selects model, tool,
+extension discovery, and MCP loading through the capabilities registry without
+re-exporting those provider modules. The resolved profile carries allowlisted
+provider identifiers. Host no longer owns concrete Harness hands and feet; it
+retains profile resolution, context/workflow composition, and application-level
+binding.
 
 Provider selection now crosses the same bounded seam. The capabilities registry
 publishes stable IDs for model, tool, extension, and policy providers; the
@@ -464,9 +464,9 @@ with a visible capability-scope diagnostic.
   focused provider modules; concrete model, image, sandbox, security, and
   marketplace implementations belong in `mini-agent-capabilities`, while Host
   retains profile resolution and runtime orchestration.
-- Expose narrow provider descriptors/factories and keep compatibility exports
-  only during migration; Host must not become the permanent owner of concrete
-  capability implementations.
+- Expose narrow provider descriptors/factories; remove the temporary Host
+  compatibility exports once all workspace consumers use capabilities
+  directly.
 - Make each seam return bounded diagnostics and selected capability metadata.
 - Keep prompt assembly in one `ContextSeam`; add snapshots for agent/persona/
   workflow combinations and disabled-workflow errors.

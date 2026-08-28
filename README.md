@@ -37,11 +37,13 @@ limits, failures, and observation events.
   messages, events, stop reasons, and limits.
 - `mini-agent-core` implements the execution kernel: context preparation,
   model/tool steps, compaction, hard limits, and cooperative run control.
-- `mini-agent-host` is the reusable application host: provider adapters,
-  workspace tools, permissions, MCP and skills, sessions, Goal/Plan workflows,
-  and world state. `HostRuntimeFactory` resolves a bounded `RuntimeProfile`
-  and composes these capabilities into a provider-backed `HostRuntime`;
-  `RuntimeBuilder` remains a compatibility API.
+- `mini-agent-capabilities` owns concrete provider implementations: model and
+  image adapters, workspace/process/web tools, permissions, MCP and skills,
+  sessions, and Result Store. `mini-agent-host` is the reusable application
+  host for profile resolution, context/workflow composition, and runtime
+  assembly; `HostRuntimeFactory` composes selected capabilities into a
+  provider-backed `HostRuntime`, while `RuntimeBuilder` remains a compatibility
+  API.
 - `mini-agent-app-server` is the service boundary over a core `Thread`. Its
   host-backed `AppServerRuntime`, typed facade, and versioned
   `mini-agent-app-server-protocol` support initialization, thread lifecycle,

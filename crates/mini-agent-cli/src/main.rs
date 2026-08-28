@@ -10,13 +10,13 @@ use args::Command;
 use args::HelpTopic;
 use args::help_text;
 use args::parse_args;
-use host::ApprovalMode;
 use host::RuntimeConfig;
 use host::RuntimeProfile;
-use host::SandboxKind;
-use host::SecurityPreset;
-use host::SessionRequest;
 use host::load_workspace_profile;
+use mini_agent_capabilities::sandbox::SandboxKind;
+use mini_agent_capabilities::security::SecurityPreset;
+use mini_agent_capabilities::session::SessionRequest;
+use mini_agent_capabilities::workspace::ApprovalMode;
 use mini_agent_host as host;
 
 pub(crate) fn version_line() -> String {
@@ -225,7 +225,7 @@ fn run_sessions() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match host::session::list(&workspace) {
+    match mini_agent_capabilities::session::list(&workspace) {
         Ok(sessions) if sessions.is_empty() => {
             println!("no durable sessions");
             ExitCode::SUCCESS
