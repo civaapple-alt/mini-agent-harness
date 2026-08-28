@@ -1053,6 +1053,7 @@ pub(crate) fn try_load_session_events(
                             name,
                             content,
                             is_error,
+                            outcome,
                         } => {
                             events.push(Event::ToolStarted {
                                 call: ToolCall {
@@ -1067,7 +1068,7 @@ pub(crate) fn try_load_session_events(
                                 content,
                                 is_error,
                                 truncated: false,
-                                outcome: None,
+                                outcome,
                             });
                         }
                         _ => {}
@@ -1141,6 +1142,7 @@ pub(crate) fn try_load_session_events(
                                     name,
                                     content,
                                     is_error,
+                                    outcome,
                                 } => {
                                     events.push(Event::ToolFinished {
                                         call_id,
@@ -1148,7 +1150,7 @@ pub(crate) fn try_load_session_events(
                                         content,
                                         is_error,
                                         truncated: false,
-                                        outcome: None,
+                                        outcome,
                                     });
                                 }
                                 _ => {}

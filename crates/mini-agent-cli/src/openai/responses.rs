@@ -348,6 +348,7 @@ mod tests {
                     name: "lookup".to_string(),
                     content: "found".to_string(),
                     is_error: false,
+                    outcome: None,
                 },
             ],
             vec![ToolSpec {
@@ -454,6 +455,7 @@ mod tests {
                 name: "read_image".to_string(),
                 content: envelope.to_string(),
                 is_error: false,
+                outcome: None,
             },
         ];
         let tools = vec![ToolSpec {

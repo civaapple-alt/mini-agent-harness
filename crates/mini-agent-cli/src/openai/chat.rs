@@ -358,6 +358,7 @@ mod tests {
                 name: "read_image".to_string(),
                 content: envelope.clone(),
                 is_error: false,
+                outcome: None,
             },
         ];
         let tools = vec![ToolSpec {

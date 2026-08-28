@@ -332,6 +332,9 @@ The following pieces are implemented in the current workspace:
   `ToolExecutionStatus`; `ToolFinished` carries an optional status so new
   traces distinguish approval, deferral, and retryable outcomes while old
   payload-only traces remain readable;
+- `Message::Tool` now carries the same optional outcome status, so restored
+  core context preserves the policy classification while OpenAI and legacy
+  session projections continue to use the bounded content/error fields;
 - `mini-agent-core` now exposes `ToolRouter` with `ToolRegistry` as a
   compatibility alias. The router owns capability lookup, while a host tool
   may override `Tool::execute_outcome` to report policy-aware results;
@@ -352,9 +355,9 @@ The following pieces are implemented in the current workspace:
 
 The proposal remains `proposed`: the in-process adapter and its lifecycle,
 steer, follow-up, cancellation, and restored-checkpoint coverage are present,
-and the first structured tool outcome contract is now in place. Host policy
-implementations, persisted history status, and a versioned external transport
-remain future work. The trace loader remains
+and structured tool outcome status now survives both events and checkpoints.
+Host policy implementations and a versioned external transport remain future
+work. The trace loader remains
 backward-compatible with payload-only JSONL. The current `StopAtCheckpoint`
 CLI behavior remains compatible; `ContinueSameTurn` and enveloped events are
 covered at the core boundary for the next host migration.

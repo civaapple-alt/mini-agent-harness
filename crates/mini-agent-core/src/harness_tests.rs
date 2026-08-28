@@ -166,6 +166,7 @@ async fn runs_model_tool_model_path() {
             name: "uppercase".to_string(),
             content: "QUIET".to_string(),
             is_error: false,
+            outcome: Some(ToolExecutionStatus::Completed),
         }
     );
     assert_eq!(
@@ -326,6 +327,7 @@ async fn returns_unknown_tool_failure_to_model() {
             name: "missing".to_string(),
             content: "unknown tool: missing".to_string(),
             is_error: true,
+            outcome: Some(ToolExecutionStatus::Failed),
         }
     );
 }
@@ -632,6 +634,7 @@ fn restores_only_history_that_fits_the_current_harness() {
             name: "uppercase".to_string(),
             content: "x".repeat(HarnessConfig::default().max_tool_output_bytes + 1),
             is_error: false,
+            outcome: None,
         }])
         .unwrap_err();
     assert_eq!(tool_err.kind, LimitKind::ToolOutputBytes);
@@ -683,6 +686,7 @@ fn verifier_can_restore_tool_history_before_disabling_new_tool_calls() {
             name: "lookup".to_string(),
             content: "release is ready".to_string(),
             is_error: false,
+            outcome: None,
         },
     ];
     let mut harness = Harness::new(
@@ -1024,6 +1028,7 @@ fn split_prefix_tail_drops_older_group_when_tail_exceeds_cap() {
                 name: "t".to_string(),
                 content: "x".repeat(size),
                 is_error: false,
+                outcome: None,
             },
         ]
     };
@@ -1069,6 +1074,7 @@ fn split_prefix_tail_keeps_a_single_oversize_group() {
             name: "t".to_string(),
             content: "x".repeat(200 * 1024),
             is_error: false,
+            outcome: None,
         },
     ];
     let mut messages = vec![Message::User {
@@ -1488,6 +1494,7 @@ fn turn_atomic_trimming_drops_assistant_and_tool_groups_together() {
             name: "test_tool".to_string(),
             content: "x".repeat(300),
             is_error: false,
+            outcome: None,
         },
         Message::User {
             text: "second question".to_string(),

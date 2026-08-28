@@ -1,3 +1,4 @@
+use crate::ToolExecutionStatus;
 use crate::ToolSpec;
 use serde::Deserialize;
 use serde::Serialize;
@@ -24,6 +25,9 @@ pub enum Message {
         name: String,
         content: String,
         is_error: bool,
+        /// Structured policy/execution status; omitted by legacy sessions.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outcome: Option<ToolExecutionStatus>,
     },
 }
 
@@ -79,3 +83,7 @@ pub trait Model {
         events: &'a mut (dyn ModelEventSink + Send),
     ) -> impl Future<Output = Result<ModelResponse, Self::Error>> + Send + 'a;
 }
+
+#[cfg(test)]
+#[path = "model_tests.rs"]
+mod tests;

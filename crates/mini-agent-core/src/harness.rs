@@ -517,6 +517,7 @@ impl<M: Model> Harness<M> {
                     name: call.name.clone(),
                     content: content.clone(),
                     is_error,
+                    outcome: Some(outcome.status),
                 });
                 current_executed_batch.push((call.name, call.arguments, content));
             }
