@@ -464,6 +464,45 @@ fn restores_only_history_that_fits_the_current_harness() {
     assert_eq!(assistant_err.kind, LimitKind::ModelResponseBytes);
 }
 
+#[test]
+fn verifier_can_restore_tool_history_before_disabling_new_tool_calls() {
+    let history = vec![
+        Message::User {
+            text: "inspect the release".to_string(),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "call-1".to_string(),
+                name: "lookup".to_string(),
+                arguments: json!({"key": "release"}),
+            }],
+        },
+        Message::Tool {
+            call_id: "call-1".to_string(),
+            name: "lookup".to_string(),
+            content: "release is ready".to_string(),
+            is_error: false,
+        },
+    ];
+    let mut harness = Harness::new(
+        ScriptedModel {
+            responses: VecDeque::new(),
+        },
+        ToolRegistry::default(),
+        HarnessConfig::default(),
+    );
+
+    harness.restore_history(history.clone()).unwrap();
+    harness.replace_config(HarnessConfig {
+        max_tool_calls_per_step: 0,
+        ..HarnessConfig::default()
+    });
+
+    assert_eq!(harness.messages(), history);
+}
+
 #[tokio::test]
 async fn compacts_context_and_continues_the_tool_loop() {
     let long_tool_value = "x".repeat(300);

@@ -1,6 +1,7 @@
 use serde_json::Value;
 use serde_json::json;
 use std::fs;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpListener;
@@ -826,6 +827,131 @@ fn mentor_reviews_a_settled_checkpoint_without_polluting_primary_history() {
         !resumed_request["input"]
             .to_string()
             .contains("verification result")
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn goal_mode_runs_a_tool_turn_and_verifies_the_settled_history() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    listener.set_nonblocking(true).unwrap();
+    let server = thread::spawn(move || {
+        for request_index in 0..7 {
+            let started = Instant::now();
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(connection) => break connection,
+                    Err(error)
+                        if (error.kind() == ErrorKind::WouldBlock
+                            || error.raw_os_error() == Some(10035))
+                            && started.elapsed() < Duration::from_secs(10) =>
+                    {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => {
+                        panic!("goal fixture did not receive request {request_index}: {error}")
+                    }
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            requests_tx.send(read_request_body(&mut stream)).unwrap();
+            match request_index {
+                0 => write_tool_sse_response(&mut stream, "echo goal-evidence"),
+                1 | 3 | 5 => write_sse_response(&mut stream, "milestone settled"),
+                2 | 4 | 6 => write_sse_response(
+                    &mut stream,
+                    "verdict: approved\nscore: 100\nsummary: fixture accepted",
+                ),
+                _ => unreachable!(),
+            }
+        }
+    });
+
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://{address}/v1\nMENTOR_OPENAI_MODEL=mentor-model\n"
+        ),
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .args(["--persist"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"/goal Verify the release\n/exit\n")
+        .unwrap();
+    let status = wait_for_child(&mut child);
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_end(&mut stdout_bytes)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_end(&mut stderr_bytes)
+        .unwrap();
+    server.join().unwrap();
+
+    let stdout = String::from_utf8(stdout_bytes).unwrap();
+    let stderr = String::from_utf8(stderr_bytes).unwrap();
+    assert!(status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(!stderr.contains("there is no reactor running"), "{stderr}");
+    assert!(stdout.contains("goal> verifier: Converged"), "{stdout}");
+
+    let requests = (0..7)
+        .map(|_| serde_json::from_slice::<Value>(&requests_rx.recv().unwrap()).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(requests[0]["model"], "primary-model");
+    assert!(requests[1]["input"].to_string().contains("goal-evidence"));
+    for request in [2, 4, 6] {
+        assert_eq!(requests[request]["model"], "mentor-model");
+        assert_eq!(requests[request]["tools"], json!([]));
+        assert!(
+            requests[request]["input"]
+                .to_string()
+                .contains("goal-evidence")
+        );
+    }
+
+    let session_id = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("session> new "))
+        .and_then(|line| line.split_once(" |"))
+        .map(|(id, _)| id)
+        .unwrap();
+    let session_file = find_session_file(&root, session_id);
+    let state: Value = serde_json::from_slice(
+        &fs::read(session_file.parent().unwrap().join("goal/state.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state["status"], "converged");
+    assert_eq!(state["current_milestone"], 3);
+    assert!(
+        fs::read_to_string(
+            session_file
+                .parent()
+                .unwrap()
+                .join("goal/verifier_verdict.md")
+        )
+        .unwrap()
+        .contains("source_checkpoint_seq:")
     );
     fs::remove_dir_all(root).unwrap();
 }

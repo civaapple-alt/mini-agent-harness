@@ -475,10 +475,13 @@ fn spawn_worker(
                                 .map(|state| Duration::from_secs(state.milestone_timeout_secs))
                         });
                         let result = if let Some(timeout) = goal_timeout {
-                            match model_runtime.block_on(tokio::time::timeout(
-                                timeout,
-                                harness.run(prompt.clone(), &mut observer),
-                            )) {
+                            match model_runtime.block_on(async {
+                                tokio::time::timeout(
+                                    timeout,
+                                    harness.run(prompt.clone(), &mut observer),
+                                )
+                                .await
+                            }) {
                                 Ok(result) => result,
                                 Err(_) => {
                                     let _ = events.send(ReplEvent::Warning(format!(

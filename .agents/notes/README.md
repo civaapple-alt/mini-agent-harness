@@ -78,6 +78,12 @@ If a proposed approach is rejected during review:
 
 ### Proposed Notes Under Review (`proposed/`)
 
+#### Bug Fixes (`proposed/bug-fix/`)
+
+| Date | Title | Focus |
+|---|---|---|
+| 2026-08-28 | [Goal Mode Runtime Repair and End-to-End Evidence](proposed/bug-fix/2026-08-28-goal-runtime-and-verifier-evidence.md) | Repair worker timer construction and verifier history admission; gate Goal readiness on the actual CLI workflow |
+
 #### Development Process (`proposed/process/`)
 
 | Date | Title | Focus |

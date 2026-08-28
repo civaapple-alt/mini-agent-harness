@@ -76,13 +76,18 @@ pub(crate) async fn run(arguments: String, trace: Option<PathBuf>, json_output: 
         context_limit_behavior: ContextLimitBehavior::Reject,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::new(Vec::new()), config);
+    let mut harness = Harness::new(
+        model,
+        ToolRegistry::new(Vec::new()),
+        HarnessConfig::default(),
+    );
     if let Err(error) = harness.restore_history(std::mem::take(&mut opened.messages)) {
         return preflight_error(
             json_output,
             &format!("cannot restore mentor source: {error}"),
         );
     }
+    harness.replace_config(config);
     let format = if json_output {
         ScriptFormat::Json
     } else {
@@ -172,10 +177,15 @@ pub(crate) async fn verify_checkpoint(
         context_limit_behavior: ContextLimitBehavior::Reject,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::new(Vec::new()), config);
+    let mut harness = Harness::new(
+        model,
+        ToolRegistry::new(Vec::new()),
+        HarnessConfig::default(),
+    );
     harness
         .restore_history(messages.to_vec())
         .map_err(|error| format!("cannot restore goal verifier source: {error}"))?;
+    harness.replace_config(config);
     let prompt = format!(
         "Verify the settled goal milestone against the following acceptance plan.\n\n{criteria}"
     );
