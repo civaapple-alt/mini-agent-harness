@@ -46,6 +46,7 @@ pub enum VerdictOutcome {
     Approved,
     Rejected,
     NeedsClarification,
+    Invalid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -372,8 +373,10 @@ pub fn parse_verifier_verdict(content: &str) -> VerifierVerdict {
         || lower.contains("verdict: clarification")
     {
         VerdictOutcome::NeedsClarification
-    } else {
+    } else if lower.contains("verdict: rejected") || lower.contains("verdict: reject") {
         VerdictOutcome::Rejected
+    } else {
+        VerdictOutcome::Invalid
     };
 
     let score = content
@@ -412,6 +415,10 @@ pub fn advance_goal_milestone(
     let state_file = goal_dir.join("state.json");
     let mut state = load_goal_state(session_dir)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "goal state not found"))?;
+
+    if state.status != GoalStatus::Running {
+        return Ok(state);
+    }
 
     state.loop_count += 1;
     if let Some(ref v) = verdict {
@@ -645,5 +652,53 @@ summary: All tests pass and architecture is clean.
         let vf = parse_verifier_verdict(text_fail);
         assert_eq!(vf.outcome, VerdictOutcome::Rejected);
         assert_eq!(vf.score, Some(40));
+
+        let invalid = parse_verifier_verdict("The evidence is incomplete.");
+        assert_eq!(invalid.outcome, VerdictOutcome::Invalid);
+    }
+
+    #[test]
+    fn terminal_goal_state_does_not_advance_again() {
+        let dir = test_dir();
+        init_goal_workspace(&dir, "Finish", 5).unwrap();
+        advance_goal_milestone(
+            &dir,
+            Some(VerifierVerdict {
+                outcome: VerdictOutcome::Approved,
+                score: Some(100),
+                summary: "first".to_string(),
+            }),
+        )
+        .unwrap();
+        advance_goal_milestone(
+            &dir,
+            Some(VerifierVerdict {
+                outcome: VerdictOutcome::Approved,
+                score: Some(100),
+                summary: "second".to_string(),
+            }),
+        )
+        .unwrap();
+        let converged = advance_goal_milestone(
+            &dir,
+            Some(VerifierVerdict {
+                outcome: VerdictOutcome::Approved,
+                score: Some(100),
+                summary: "final".to_string(),
+            }),
+        )
+        .unwrap();
+
+        let unchanged = advance_goal_milestone(
+            &dir,
+            Some(VerifierVerdict {
+                outcome: VerdictOutcome::Rejected,
+                score: Some(0),
+                summary: "late result".to_string(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(unchanged, converged);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

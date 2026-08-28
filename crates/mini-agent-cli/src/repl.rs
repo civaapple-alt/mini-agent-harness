@@ -24,7 +24,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::io::IsTerminal;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::mpsc;
 use std::thread;
@@ -414,6 +414,15 @@ fn spawn_worker(
                         return;
                     }
                 }
+                if let Some(session_dir) = opened.store.path().parent()
+                    && let Ok(Some(state)) = crate::goal::load_goal_state(session_dir)
+                    && state.status == crate::goal::GoalStatus::Running
+                {
+                    let _ = crate::goal::pause_goal(session_dir);
+                    let _ = events.send(ReplEvent::Warning(
+                        "goal> paused on restart; reissue /goal to continue".to_string(),
+                    ));
+                }
             }
             let label = if opened.resumed { "resumed" } else { "new" };
             let _ = events.send(ReplEvent::Notice(format!(
@@ -488,15 +497,11 @@ fn spawn_worker(
                                         "goal> milestone timed out after {} seconds",
                                         timeout.as_secs()
                                     )));
-                                    if let Some(goal_dir) = approval.goal_dir() {
-                                        let session_dir = goal_dir
-                                            .parent()
-                                            .map(PathBuf::from)
-                                            .unwrap_or_else(|| world.workspace().to_path_buf());
-                                        let _ = crate::goal::fail_goal(&session_dir);
-                                        approval.set_goal_dir(None);
-                                        goal_objective = None;
-                                    }
+                                    fail_active_goal(
+                                        &approval,
+                                        &mut goal_objective,
+                                        world.workspace(),
+                                    );
                                     break;
                                 }
                             }
@@ -536,15 +541,7 @@ fn spawn_worker(
                                     "warning: stopped after {} model steps",
                                     outcome.steps
                                 )));
-                                if let Some(goal_dir) = approval.goal_dir() {
-                                    let session_dir = goal_dir
-                                        .parent()
-                                        .map(PathBuf::from)
-                                        .unwrap_or_else(|| world.workspace().to_path_buf());
-                                    let _ = crate::goal::fail_goal(&session_dir);
-                                    approval.set_goal_dir(None);
-                                    goal_objective = None;
-                                }
+                                fail_active_goal(&approval, &mut goal_objective, world.workspace());
                             }
                             Ok(_outcome) => {
                                 let Some(goal_dir) = approval.goal_dir() else {
@@ -561,8 +558,11 @@ fn spawn_worker(
                                         "goal> cannot verify without a settled durable checkpoint"
                                             .to_string(),
                                     ));
-                                    approval.set_goal_dir(None);
-                                    goal_objective = None;
+                                    fail_active_goal(
+                                        &approval,
+                                        &mut goal_objective,
+                                        world.workspace(),
+                                    );
                                     break;
                                 };
                                 let criteria =
@@ -572,6 +572,11 @@ fn spawn_worker(
                                             let _ = events.send(ReplEvent::Warning(format!(
                                                 "goal> verifier unavailable: {error}"
                                             )));
+                                            fail_active_goal(
+                                                &approval,
+                                                &mut goal_objective,
+                                                world.workspace(),
+                                            );
                                             break;
                                         }
                                     };
@@ -586,6 +591,11 @@ fn spawn_worker(
                                             let _ = events.send(ReplEvent::Warning(format!(
                                                 "goal> verifier failed: {error}"
                                             )));
+                                            fail_active_goal(
+                                                &approval,
+                                                &mut goal_objective,
+                                                world.workspace(),
+                                            );
                                             break;
                                         }
                                     };
@@ -597,6 +607,23 @@ fn spawn_worker(
                                     let _ = events.send(ReplEvent::Warning(format!(
                                         "goal> cannot persist verifier verdict: {error}"
                                     )));
+                                    fail_active_goal(
+                                        &approval,
+                                        &mut goal_objective,
+                                        world.workspace(),
+                                    );
+                                    break;
+                                }
+                                if verdict.outcome == crate::goal::VerdictOutcome::Invalid {
+                                    let _ = events.send(ReplEvent::Warning(
+                                        "goal> verifier returned an invalid verdict; goal failed"
+                                            .to_string(),
+                                    ));
+                                    fail_active_goal(
+                                        &approval,
+                                        &mut goal_objective,
+                                        world.workspace(),
+                                    );
                                     break;
                                 }
                                 let next = match crate::goal::advance_goal_milestone(
@@ -608,6 +635,11 @@ fn spawn_worker(
                                         let _ = events.send(ReplEvent::Warning(format!(
                                             "goal> cannot advance milestone: {error}"
                                         )));
+                                        fail_active_goal(
+                                            &approval,
+                                            &mut goal_objective,
+                                            world.workspace(),
+                                        );
                                         break;
                                     }
                                 };
@@ -632,15 +664,7 @@ fn spawn_worker(
                             }
                             Err(error) => {
                                 report_run_error(&events, &error);
-                                if let Some(goal_dir) = approval.goal_dir() {
-                                    let session_dir = goal_dir
-                                        .parent()
-                                        .map(PathBuf::from)
-                                        .unwrap_or_else(|| world.workspace().to_path_buf());
-                                    let _ = crate::goal::fail_goal(&session_dir);
-                                    approval.set_goal_dir(None);
-                                    goal_objective = None;
-                                }
+                                fail_active_goal(&approval, &mut goal_objective, world.workspace());
                             }
                         }
                     }
@@ -1020,6 +1044,19 @@ fn persist_latest_context(
             "warning: session persistence stopped: {error}"
         )));
         *durable = None;
+    }
+}
+
+fn fail_active_goal(
+    approval: &ApprovalController,
+    goal_objective: &mut Option<String>,
+    fallback_session_dir: &Path,
+) {
+    if let Some(goal_dir) = approval.goal_dir() {
+        let session_dir = goal_dir.parent().unwrap_or(fallback_session_dir);
+        let _ = crate::goal::fail_goal(session_dir);
+        approval.set_goal_dir(None);
+        *goal_objective = None;
     }
 }
 

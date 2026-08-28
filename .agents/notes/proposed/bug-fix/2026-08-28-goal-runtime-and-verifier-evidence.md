@@ -32,20 +32,23 @@ evidence below is from the current working tree:
 
 - Baseline `6f3a90e`: `cargo test -p mini-agent-core` passed 29 tests (27 unit
   tests and 2 integration tests); the focused CLI Goal test did not exist.
-- Current working tree: `cargo test -p mini-agent-core` passes 30 tests (28 unit
-  tests and 2 integration tests), `cargo test -p mini-agent-cli --bin
-  mini-agent` passes 170 unit tests, and the full `interactive` integration
-  target passes 25 tests.
-- Current `python scripts/line_budget.py`: core 2,842 / 20,000 lines; workspace
-  27,448 / 30,000 lines, including tests. Only 2,552 workspace lines remain.
+- Repair stage working tree: `cargo test -p mini-agent-core` passes 30 tests
+  (28 unit tests and 2 integration tests), `cargo test -p mini-agent-cli`
+  passes 171 unit tests and 27 interactive integration tests, and
+  `cargo clippy -p mini-agent-cli --all-targets -- -D warnings` passes.
+- Current `python scripts/line_budget.py`: core 2,842 / 20,000 lines; all Rust
+  source 27,700 / 30,000 lines, including tests. Only 2,300 workspace lines
+  remain.
 - A standalone reproduction using the local Tokio and core build artifacts
   confirmed both errors below without making model requests.
 
-The current focused integration test is a successful local mock-provider run of
-`/goal` through the built CLI. The full workspace suite, current remote CI,
-other operating systems, timeout-failure and malformed-verdict paths, and
-real-provider Goal behavior were not verified. No paid provider calls were
-made. These results do not by themselves establish release readiness.
+The current focused integration tests are local mock-provider runs of `/goal`
+through the built CLI. They now cover a tool-bearing successful run, malformed
+verdict failure, and a verifier tool-call attempt. The full workspace suite,
+current remote CI, other operating systems, timeout-failure and retry-exhaustion
+paths, restart behavior, and real-provider Goal behavior were not verified. No
+paid provider calls were made. These results do not by themselves establish
+release readiness.
 
 ## Implementation Update
 
@@ -63,10 +66,20 @@ The working tree now contains the first repair stage and its focused evidence:
   built CLI against a local primary/verifier fixture. It executes a shell tool,
   verifies the resulting history three times, checks empty verifier tools and
   evidence binding, and observes `goal/state.json` reaching `converged`.
+- Malformed verifier output is classified as `Invalid`, persisted as a derived
+  verdict artifact, and fails the Goal without advancing its milestone.
+- Verifier tool-call attempts fail the Goal before any tool executes; the
+  verifier request still carries an empty tool list.
+- Verifier and execution failures now consistently persist `failed` state and
+  clear the active Goal. A resumed session with a leftover Running Goal is
+  marked `user_paused`, requiring an explicit new `/goal` command.
+- `advance_goal_milestone` is idempotent for terminal Goal states, so a late
+  result cannot mutate a converged or failed state.
 
-The focused CLI test passes on Windows. Full workspace, Clippy, cross-platform,
-timeout-failure, rejection, and malformed-verdict cases remain acceptance work;
-this note stays proposed until those gates are complete.
+The focused CLI tests, package tests, Clippy, formatting, line-budget, and diff
+checks pass on Windows. Full workspace, cross-platform, timeout-failure,
+rejection/retry, restart integration, and real-provider cases remain acceptance
+work; this note stays proposed until those gates are complete.
 
 ## Confirmed Defects
 

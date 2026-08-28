@@ -855,6 +855,7 @@ fn goal_mode_runs_a_tool_turn_and_verifies_the_settled_history() {
                     }
                 }
             };
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();
@@ -953,6 +954,165 @@ fn goal_mode_runs_a_tool_turn_and_verifies_the_settled_history() {
         .unwrap()
         .contains("source_checkpoint_seq:")
     );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn goal_mode_fails_on_malformed_verifier_output() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        for reply in ["milestone settled", "evidence was reviewed"] {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            requests_tx.send(read_request_body(&mut stream)).unwrap();
+            write_sse_response(&mut stream, reply);
+        }
+    });
+
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://{address}/v1\nMENTOR_OPENAI_MODEL=mentor-model\n"
+        ),
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .args(["--persist"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"/goal Verify malformed output\n/exit\n")
+        .unwrap();
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    server.join().unwrap();
+
+    assert!(status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(stderr.contains("invalid verdict"), "{stderr}");
+    let requests = (0..2)
+        .map(|_| serde_json::from_slice::<Value>(&requests_rx.recv().unwrap()).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(requests[0]["model"], "primary-model");
+    assert_eq!(requests[1]["model"], "mentor-model");
+    assert_eq!(requests[1]["tools"], json!([]));
+
+    let session_id = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("session> new "))
+        .and_then(|line| line.split_once(" |"))
+        .map(|(id, _)| id)
+        .unwrap();
+    let session_file = find_session_file(&root, session_id);
+    let goal_dir = session_file.parent().unwrap().join("goal");
+    let state: Value =
+        serde_json::from_slice(&fs::read(goal_dir.join("state.json")).unwrap()).unwrap();
+    assert_eq!(state["status"], "failed");
+    assert_eq!(state["current_milestone"], 1);
+    assert!(
+        fs::read_to_string(goal_dir.join("verifier_verdict.md"))
+            .unwrap()
+            .contains("source_checkpoint_seq:")
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn goal_mode_blocks_verifier_tool_requests() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        for (index, response) in [(0, "milestone settled"), (1, "verifier must not run tools")] {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let _ = read_request_body(&mut stream);
+            if index == 0 {
+                write_sse_response(&mut stream, response);
+            } else {
+                write_tool_sse_response(&mut stream, "echo should-not-run");
+            }
+        }
+    });
+
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://{address}/v1\nMENTOR_OPENAI_MODEL=mentor-model\n"
+        ),
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .args(["--persist"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"/goal Block verifier tools\n/exit\n")
+        .unwrap();
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    server.join().unwrap();
+
+    assert!(status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(stderr.contains("goal> verifier failed"), "{stderr}");
+    assert!(!stderr.contains("should-not-run"), "{stderr}");
+    let session_id = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("session> new "))
+        .and_then(|line| line.split_once(" |"))
+        .map(|(id, _)| id)
+        .unwrap();
+    let session_file = find_session_file(&root, session_id);
+    let state: Value = serde_json::from_slice(
+        &fs::read(session_file.parent().unwrap().join("goal/state.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state["status"], "failed");
+    assert_eq!(state["current_milestone"], 1);
     fs::remove_dir_all(root).unwrap();
 }
 
