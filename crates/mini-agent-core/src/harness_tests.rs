@@ -163,6 +163,37 @@ async fn runs_model_tool_model_path() {
 }
 
 #[tokio::test]
+async fn steering_stops_after_a_complete_tool_batch() {
+    let control = RunControl::new();
+    let model = ScriptedModel {
+        responses: VecDeque::from([ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "call-1".to_string(),
+                name: "request_steer".to_string(),
+                arguments: json!({}),
+            }],
+            usage: None,
+        }]),
+    };
+    let tools = ToolRegistry::new(vec![Box::new(RequestSteer(control.clone()))]);
+    let mut harness = Harness::new(model, tools, HarnessConfig::default());
+
+    let outcome = harness
+        .run_with_control("correct me", &mut (), &control)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Steered);
+    assert_eq!(outcome.steps, 1);
+    assert!(matches!(
+        outcome.messages.last(),
+        Some(Message::Tool { .. })
+    ));
+}
+
+#[tokio::test]
 async fn returns_unknown_tool_failure_to_model() {
     let model = ScriptedModel {
         responses: VecDeque::from([
@@ -462,6 +493,23 @@ fn restores_only_history_that_fits_the_current_harness() {
         }])
         .unwrap_err();
     assert_eq!(assistant_err.kind, LimitKind::ModelResponseBytes);
+}
+
+struct RequestSteer(RunControl);
+
+impl Tool for RequestSteer {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "request_steer".to_string(),
+            description: "Request a cooperative turn stop".to_string(),
+            parameters: json!({"type": "object", "additionalProperties": false}),
+        }
+    }
+
+    fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
+        self.0.request_steer();
+        Ok("steer requested".to_string())
+    }
 }
 
 #[test]

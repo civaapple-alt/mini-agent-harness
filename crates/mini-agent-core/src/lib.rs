@@ -12,6 +12,7 @@ pub use harness::HarnessConfig;
 pub use harness::HarnessError;
 pub use harness::LimitExceeded;
 pub use harness::LimitKind;
+pub use harness::RunControl;
 pub use harness::RunOutcome;
 pub use harness::StopReason;
 pub use model::Message;

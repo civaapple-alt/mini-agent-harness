@@ -11,6 +11,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 const TRUNCATION_MARKER: &str = "\n[truncated]";
 const COMPACTION_PREFIX: &str = "[Compacted conversation context]";
@@ -102,6 +105,35 @@ impl fmt::Display for LimitExceeded {
 pub enum StopReason {
     Completed,
     StepLimit,
+    Steered,
+}
+
+/// Cooperative control for a running turn.
+///
+/// A steering request is observed only at safe boundaries between model
+/// steps and after a complete tool batch, so tool side effects are never
+/// interrupted halfway through.
+#[derive(Clone, Default)]
+pub struct RunControl {
+    steer_requested: Arc<AtomicBool>,
+}
+
+impl RunControl {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn request_steer(&self) {
+        self.steer_requested.store(true, Ordering::Release);
+    }
+
+    pub fn clear_steer(&self) {
+        self.steer_requested.store(false, Ordering::Release);
+    }
+
+    fn is_steer_requested(&self) -> bool {
+        self.steer_requested.load(Ordering::Acquire)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -255,6 +287,16 @@ impl<M: Model> Harness<M> {
         prompt: impl Into<String>,
         observer: &mut O,
     ) -> Result<RunOutcome, HarnessError<M::Error>> {
+        self.run_with_control(prompt, observer, &RunControl::new())
+            .await
+    }
+
+    pub async fn run_with_control<O: Observer + Send>(
+        &mut self,
+        prompt: impl Into<String>,
+        observer: &mut O,
+        control: &RunControl,
+    ) -> Result<RunOutcome, HarnessError<M::Error>> {
         let prompt = prompt.into();
         if prompt.len() > self.config.max_user_input_bytes {
             return Err(fail_limit(
@@ -285,6 +327,15 @@ impl<M: Model> Harness<M> {
         let mut last_tool_batch: Option<Vec<(String, serde_json::Value, String)>> = None;
 
         loop {
+            if control.is_steer_requested() {
+                return Ok(finish(
+                    final_text,
+                    self.messages.clone(),
+                    step,
+                    StopReason::Steered,
+                    observer,
+                ));
+            }
             step = step.saturating_add(1);
             if step > self.config.max_steps {
                 return Ok(finish(
@@ -359,6 +410,16 @@ impl<M: Model> Harness<M> {
                 tool_calls: response.tool_calls.clone(),
             });
 
+            if control.is_steer_requested() {
+                return Ok(finish(
+                    final_text,
+                    self.messages.clone(),
+                    step,
+                    StopReason::Steered,
+                    observer,
+                ));
+            }
+
             if response.tool_calls.is_empty() {
                 return Ok(finish(
                     final_text,
@@ -406,6 +467,16 @@ impl<M: Model> Harness<M> {
 
             if consecutive_duplicate_tool_batches >= 2 {
                 let _ = self.append_context(LOOP_WARNING_TEXT);
+            }
+
+            if control.is_steer_requested() {
+                return Ok(finish(
+                    final_text,
+                    self.messages.clone(),
+                    step,
+                    StopReason::Steered,
+                    observer,
+                ));
             }
 
             if let Err(limit) = self.ensure_context_limit(&tool_specs) {

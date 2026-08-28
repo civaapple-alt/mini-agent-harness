@@ -18,6 +18,7 @@ use mini_agent_core::Event;
 use mini_agent_core::HarnessError;
 use mini_agent_core::LimitKind;
 use mini_agent_core::Observer;
+use mini_agent_core::RunControl;
 use mini_agent_core::StopReason;
 use mini_agent_core::ToolError;
 use std::collections::VecDeque;
@@ -26,6 +27,8 @@ use std::io::IsTerminal;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -35,10 +38,33 @@ const MAX_INPUT_BYTES: usize = 32 * 1024;
 const EVENT_BUFFER: usize = 64;
 const MAX_WELCOME_NAMES: usize = 8;
 
+#[derive(Clone, Default)]
+struct SteeringQueue {
+    prompts: Arc<Mutex<VecDeque<String>>>,
+}
+
+impl SteeringQueue {
+    fn request(&self, prompt: String) -> bool {
+        let Ok(mut prompts) = self.prompts.lock() else {
+            return false;
+        };
+        if prompts.len() >= MAX_QUEUED_INPUTS {
+            return false;
+        }
+        prompts.push_back(prompt);
+        true
+    }
+
+    fn take(&self) -> Option<String> {
+        self.prompts.lock().ok()?.pop_front()
+    }
+}
+
 enum ReplEvent {
     Input(Result<Option<String>, String>),
     Observed(Event),
     Ready,
+    WorkStarted,
     WorkFinished,
     Approval {
         action: String,
@@ -120,6 +146,8 @@ pub async fn run(
         .map(|workspace| WorldState::detect(workspace, initial_approval, copilot, sandbox_kind));
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
+    let steering = SteeringQueue::default();
+    let run_control = RunControl::new();
     let worker = spawn_worker(
         copilot,
         approval,
@@ -129,6 +157,8 @@ pub async fn run(
         web_search_override,
         worker_rx,
         event_tx,
+        steering.clone(),
+        run_control.clone(),
     );
 
     println!("{}", crate::version_line());
@@ -148,6 +178,7 @@ pub async fn run(
     let mut pending_work = 0usize;
     let mut pending_approval: VecDeque<mpsc::SyncSender<bool>> = VecDeque::new();
     let mut ready = false;
+    let mut active_turn = false;
     let mut exiting = false;
     let mut initialization_failed = false;
     while let Ok(event) = event_rx.recv() {
@@ -196,6 +227,33 @@ pub async fn run(
                         queue_work(&worker_tx, WorkerCommand::ShowSession, &mut pending_work)
                     }
                     "/mcp" => queue_work(&worker_tx, WorkerCommand::EnableMcp, &mut pending_work),
+                    command
+                        if command.strip_prefix("/steer").is_some_and(|rest| {
+                            rest.is_empty() || rest.starts_with(char::is_whitespace)
+                        }) =>
+                    {
+                        let prompt = command[6..].trim();
+                        if prompt.is_empty() {
+                            eprintln!("usage: /steer <message>");
+                        } else if prompt.len() > MAX_INPUT_BYTES {
+                            eprintln!("input exceeds {MAX_INPUT_BYTES} byte limit");
+                        } else if active_turn {
+                            if steering.request(prompt.to_string()) {
+                                run_control.request_steer();
+                                println!(
+                                    "steer requested; current turn will stop at the next safe checkpoint"
+                                );
+                            } else {
+                                eprintln!("steer queue limit reached: {MAX_QUEUED_INPUTS}");
+                            }
+                        } else {
+                            queue_work(
+                                &worker_tx,
+                                WorkerCommand::Prompt(prompt.to_string()),
+                                &mut pending_work,
+                            );
+                        }
+                    }
                     "/auto" | "/auto on" => queue_work(
                         &worker_tx,
                         WorkerCommand::SetExecution {
@@ -295,9 +353,16 @@ pub async fn run(
                     print_prompt();
                 }
             }
+            ReplEvent::WorkStarted => {
+                active_turn = true;
+            }
             ReplEvent::WorkFinished => {
                 observer.finish();
+                active_turn = false;
                 pending_work = pending_work.saturating_sub(1);
+                if let Some(prompt) = steering.take() {
+                    queue_work(&worker_tx, WorkerCommand::Prompt(prompt), &mut pending_work);
+                }
                 if ready && pending_work == 0 && !exiting {
                     print_prompt();
                 }
@@ -338,6 +403,8 @@ fn spawn_worker(
     web_search_override: Option<bool>,
     commands: mpsc::Receiver<WorkerCommand>,
     events: mpsc::SyncSender<ReplEvent>,
+    steering: SteeringQueue,
+    run_control: RunControl,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let (build, auto_max_steps, web_search_enabled, runtime_config) =
@@ -466,9 +533,11 @@ fn spawn_worker(
             return;
         }
         'work: while let Ok(mut command) = commands.recv() {
+            let _ = events.send(ReplEvent::WorkStarted);
             loop {
                 match command {
                     WorkerCommand::Prompt(prompt) => {
+                        run_control.clear_steer();
                         let prompt = if approval.living_plan().is_some() {
                             crate::goal::planning_turn_prompt(&prompt)
                         } else {
@@ -487,7 +556,11 @@ fn spawn_worker(
                             match model_runtime.block_on(async {
                                 tokio::time::timeout(
                                     timeout,
-                                    harness.run(prompt.clone(), &mut observer),
+                                    harness.run_with_control(
+                                        prompt.clone(),
+                                        &mut observer,
+                                        &run_control,
+                                    ),
                                 )
                                 .await
                             }) {
@@ -506,9 +579,16 @@ fn spawn_worker(
                                 }
                             }
                         } else {
-                            model_runtime.block_on(harness.run(prompt.clone(), &mut observer))
+                            model_runtime.block_on(harness.run_with_control(
+                                prompt.clone(),
+                                &mut observer,
+                                &run_control,
+                            ))
                         };
                         let (status, steps, error) = match &result {
+                            Ok(outcome) if outcome.stop_reason == StopReason::Steered => {
+                                (TurnStatus::Steered, outcome.steps, None)
+                            }
                             Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
                                 (TurnStatus::StepLimit, outcome.steps, None)
                             }
@@ -536,6 +616,30 @@ fn spawn_worker(
                             durable = None;
                         }
                         match result {
+                            Ok(outcome) if outcome.stop_reason == StopReason::Steered => {
+                                let _ = events.send(ReplEvent::Notice(format!(
+                                    "steer> checkpoint saved after {} model step(s); continuing with the new message",
+                                    outcome.steps
+                                )));
+                                if approval.goal_dir().is_some() {
+                                    let session_dir = approval
+                                        .goal_dir()
+                                        .and_then(|goal_dir| goal_dir.parent().map(PathBuf::from))
+                                        .unwrap_or_else(|| world.workspace().to_path_buf());
+                                    let _ = crate::goal::pause_goal(&session_dir);
+                                    approval.set_goal_dir(None);
+                                    goal_objective = None;
+                                    let _ = events.send(ReplEvent::Notice(
+                                        "goal> paused by steer; follow-up runs as a regular turn"
+                                            .to_string(),
+                                    ));
+                                }
+                                if let Some(next) = steering.take() {
+                                    run_control.clear_steer();
+                                    command = WorkerCommand::Prompt(next);
+                                    continue;
+                                }
+                            }
                             Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
                                 let _ = events.send(ReplEvent::Warning(format!(
                                     "warning: stopped after {} model steps",
@@ -666,6 +770,11 @@ fn spawn_worker(
                                 report_run_error(&events, &error);
                                 fail_active_goal(&approval, &mut goal_objective, world.workspace());
                             }
+                        }
+                        if let Some(next) = steering.take() {
+                            run_control.clear_steer();
+                            command = WorkerCommand::Prompt(next);
+                            continue;
                         }
                     }
                     WorkerCommand::ClearHistory => {
@@ -1189,6 +1298,7 @@ fn print_help() {
     println!("/session       Show durable session ID, thread ID, and JSONL persistence path");
     println!("/mcp           Retry connecting configured MCP servers that are currently inactive");
     println!("/queue         Show number of pending operations in input queue");
+    println!("/steer <msg>   Stop the running turn at a safe checkpoint, then run <msg>");
     println!("/new           Clear conversation history and start a fresh context");
     println!("/help          Display this list of interactive slash commands");
     println!("/exit          Finish queued work and quit");

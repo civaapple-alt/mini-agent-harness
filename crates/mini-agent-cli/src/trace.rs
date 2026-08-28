@@ -133,6 +133,7 @@ pub fn compute_summary(path: &Path, events: &[Event]) -> TraceSummary {
                 summary.stop_reason = Some(match stop_reason {
                     StopReason::Completed => "completed".to_string(),
                     StopReason::StepLimit => "step_limit".to_string(),
+                    StopReason::Steered => "steered".to_string(),
                 });
             }
             Event::RunFailed { reason } => {

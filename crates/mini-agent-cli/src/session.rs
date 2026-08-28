@@ -63,6 +63,7 @@ pub(crate) struct SessionStore {
 pub(crate) enum TurnStatus {
     Completed,
     StepLimit,
+    Steered,
     Failed,
 }
 
@@ -531,6 +532,7 @@ impl TurnStatus {
         match self {
             Self::Completed => "completed",
             Self::StepLimit => "step_limit",
+            Self::Steered => "steered",
             Self::Failed => "failed",
         }
     }
@@ -1053,6 +1055,12 @@ pub(crate) fn try_load_session_events(
                     "step_limit" => {
                         events.push(Event::RunFinished {
                             stop_reason: StopReason::StepLimit,
+                            steps,
+                        });
+                    }
+                    "steered" => {
+                        events.push(Event::RunFinished {
+                            stop_reason: StopReason::Steered,
                             steps,
                         });
                     }

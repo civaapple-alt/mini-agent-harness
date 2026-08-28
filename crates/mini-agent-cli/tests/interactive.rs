@@ -1197,6 +1197,101 @@ fn default_repl_executes_shell_without_approval() {
 }
 
 #[test]
+fn steer_interrupts_a_running_turn_at_a_checkpoint() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (first_request_tx, first_request_rx) = mpsc::channel();
+    let (second_request_tx, second_request_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut first_stream, _) = listener.accept().unwrap();
+        first_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        first_request_tx
+            .send(read_request_body(&mut first_stream))
+            .unwrap();
+        release_rx.recv().unwrap();
+        write_sse_response(&mut first_stream, "the first turn drifted");
+
+        let (mut second_stream, _) = listener.accept().unwrap();
+        second_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        second_request_tx
+            .send(read_request_body(&mut second_stream))
+            .unwrap();
+        write_sse_response(&mut second_stream, "corrected answer");
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .arg("auto")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"initial request\n").unwrap();
+    let first_request = first_request_rx
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
+    stdin
+        .write_all(b"/steer focus on the actual bug\n/exit\n")
+        .unwrap();
+    thread::sleep(Duration::from_millis(100));
+    release_tx.send(()).unwrap();
+    drop(stdin);
+
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    let second_request = second_request_rx
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
+    server.join().unwrap();
+
+    assert!(status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(String::from_utf8_lossy(&first_request).contains("initial request"));
+    assert!(String::from_utf8_lossy(&second_request).contains("focus on the actual bug"));
+    assert!(stdout.contains("steer requested"), "{stdout}");
+    assert!(stdout.contains("checkpoint saved"), "{stdout}");
+    assert!(stdout.contains("assistant> corrected answer"), "{stdout}");
+    let session_id = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("session> new "))
+        .and_then(|line| line.split_once(" |"))
+        .map(|(id, _)| id)
+        .unwrap();
+    let session_file = find_session_file(&root, session_id);
+    let session_content = fs::read_to_string(session_file).unwrap();
+    assert!(session_content.contains("\"status\":\"steered\""));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn ask_without_auto_denies_shell_when_stdin_is_not_a_tty() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
