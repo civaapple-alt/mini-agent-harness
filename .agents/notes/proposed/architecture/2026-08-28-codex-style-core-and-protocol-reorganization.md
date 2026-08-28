@@ -273,6 +273,8 @@ Stage 1 has started in the current working tree:
   but hands a `SessionState` value to the harness;
 - `mini-agent-protocol` now names `TurnInputMode` and `TurnInput`, and core
   `RunControl` owns a bounded pending input queue with Steer priority;
+- interactive follow-up text submitted while a Turn is running now enters the
+  same core queue and is dispatched only after the current command settles;
 - existing core and CLI session, compaction, restart, and interactive tests
   pass after the migration.
 

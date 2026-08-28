@@ -308,6 +308,22 @@ pub async fn run(
                             print_prompt();
                         }
                     }
+                    _ if active_turn => {
+                        match run_control
+                            .submit(TurnInput::new(TurnInputMode::FollowUp, input.to_string()))
+                        {
+                            Ok(()) => {
+                                pending_work = pending_work.saturating_add(1);
+                                println!("queued ({pending_work} pending)");
+                            }
+                            Err(InputQueueError::Full { capacity }) => {
+                                eprintln!("input queue limit reached: {capacity}");
+                            }
+                            Err(InputQueueError::UnsupportedMode(_)) => {
+                                eprintln!("cannot queue follow-up input");
+                            }
+                        }
+                    }
                     _ => queue_work(
                         &worker_tx,
                         WorkerCommand::Prompt(input.to_string()),
@@ -341,11 +357,9 @@ pub async fn run(
                 active_turn = false;
                 pending_work = pending_work.saturating_sub(1);
                 if let Some(input) = run_control.take_steer_input() {
-                    queue_work(
-                        &worker_tx,
-                        WorkerCommand::Prompt(input.text),
-                        &mut pending_work,
-                    );
+                    let _ = worker_tx.send(WorkerCommand::Prompt(input.text));
+                } else if let Some(input) = run_control.take_follow_up_input() {
+                    let _ = worker_tx.send(WorkerCommand::Prompt(input.text));
                 }
                 if ready && pending_work == 0 && !exiting {
                     print_prompt();

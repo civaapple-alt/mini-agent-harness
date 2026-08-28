@@ -1292,6 +1292,88 @@ fn steer_interrupts_a_running_turn_at_a_checkpoint() {
 }
 
 #[test]
+fn follow_up_is_queued_until_the_running_turn_finishes() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (first_request_tx, first_request_rx) = mpsc::channel();
+    let (second_request_tx, second_request_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut first_stream, _) = listener.accept().unwrap();
+        first_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        first_request_tx
+            .send(read_request_body(&mut first_stream))
+            .unwrap();
+        release_rx.recv().unwrap();
+        write_sse_response(&mut first_stream, "first answer");
+
+        let (mut second_stream, _) = listener.accept().unwrap();
+        second_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        second_request_tx
+            .send(read_request_body(&mut second_stream))
+            .unwrap();
+        write_sse_response(&mut second_stream, "follow-up answer");
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+    let mut child = mini_agent(&root)
+        .arg("auto")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"initial request\n").unwrap();
+    let first_request = first_request_rx
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
+    stdin.write_all(b"follow-up request\n").unwrap();
+    release_tx.send(()).unwrap();
+    let second_request = second_request_rx
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
+    stdin.write_all(b"/exit\n").unwrap();
+    drop(stdin);
+
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(String::from_utf8_lossy(&first_request).contains("initial request"));
+    assert!(String::from_utf8_lossy(&second_request).contains("follow-up request"));
+    assert!(stdout.contains("follow-up answer"), "{stdout}");
+}
+
+#[test]
 fn ask_without_auto_denies_shell_when_stdin_is_not_a_tty() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
