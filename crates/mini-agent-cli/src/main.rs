@@ -20,6 +20,7 @@ mod security;
 mod session;
 mod skills;
 mod subagent;
+mod tool_outcome;
 mod trace;
 mod web;
 mod workspace;

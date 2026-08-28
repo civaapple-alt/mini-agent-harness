@@ -10,6 +10,7 @@ use crate::openai::OpenAiModel;
 use crate::project_context;
 use crate::sandbox::SandboxKind;
 use crate::skills;
+use crate::tool_outcome::classify_tools;
 use crate::workspace::ApprovalController;
 use crate::workspace::workspace_tools_with_read_roots;
 use crate::world::WorldState;
@@ -80,6 +81,7 @@ pub(crate) fn prepare_openai_harness(
     let enabled_mcp_servers = loaded_servers.iter().cloned().collect();
     let mcp_tool_count = mcp_tools.len();
     tools.extend(mcp_tools);
+    let tools = classify_tools(tools);
     let retry_mcp_servers = configured_mcp_servers
         .into_iter()
         .filter(|server| {

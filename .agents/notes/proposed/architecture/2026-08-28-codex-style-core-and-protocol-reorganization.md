@@ -335,6 +335,10 @@ The following pieces are implemented in the current workspace:
 - `Message::Tool` now carries the same optional outcome status, so restored
   core context preserves the policy classification while OpenAI and legacy
   session projections continue to use the bounded content/error fields;
+- the CLI now wraps assembled workspace and MCP tools in a host-only outcome
+  adapter. Existing approval, Plan Mode, timeout, and circuit-breaker results
+  are classified as `NeedsApproval`, `Deferred`, or `Retryable` while their
+  user-visible error content remains unchanged;
 - `mini-agent-core` now exposes `ToolRouter` with `ToolRegistry` as a
   compatibility alias. The router owns capability lookup, while a host tool
   may override `Tool::execute_outcome` to report policy-aware results;
@@ -356,8 +360,9 @@ The following pieces are implemented in the current workspace:
 The proposal remains `proposed`: the in-process adapter and its lifecycle,
 steer, follow-up, cancellation, and restored-checkpoint coverage are present,
 and structured tool outcome status now survives both events and checkpoints.
-Host policy implementations and a versioned external transport remain future
-work. The trace loader remains
+The CLI adapter currently classifies legacy error text as a compatibility step;
+typed policy errors inside each host tool and a versioned external transport
+remain future work. The trace loader remains
 backward-compatible with payload-only JSONL. The current `StopAtCheckpoint`
 CLI behavior remains compatible; `ContinueSameTurn` and enveloped events are
 covered at the core boundary for the next host migration.

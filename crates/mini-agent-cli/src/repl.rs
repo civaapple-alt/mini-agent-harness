@@ -11,6 +11,7 @@ use crate::session::SessionStore;
 use crate::session::TurnCommit;
 use crate::session::TurnStatus;
 use crate::skills;
+use crate::tool_outcome::classify_tools;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
 use crate::world::WorldState;
@@ -940,7 +941,7 @@ fn spawn_worker(
                             });
                             let enabled = loaded_servers.iter().cloned().collect::<Vec<_>>();
                             let tool_count = tools.len();
-                            harness.extend_tools(tools);
+                            harness.extend_tools(classify_tools(tools));
                             let message = if enabled.is_empty() {
                                 "mcp> inactive — no servers enabled; use /mcp to retry".to_string()
                             } else {
