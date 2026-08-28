@@ -822,6 +822,7 @@ dependencies = [
 name = "mini-agent-cli"
 version = "0.3.0"
 dependencies = [
+ "mini-agent-app-server",
  "mini-agent-core",
  "mini-agent-host",
  "serde_json",

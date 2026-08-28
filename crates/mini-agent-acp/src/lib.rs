@@ -597,6 +597,15 @@ mod tests {
         AcpBridge::new(AppServerConnection::new(server))
     }
 
+    fn app_connection() -> AppServerConnection<DoneModel> {
+        let harness = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+        let server = AppServer::new(
+            ThreadStart::new(ThreadId::new("default")),
+            Thread::new(ThreadId::new("initial"), harness),
+        );
+        AppServerConnection::new(server)
+    }
+
     #[tokio::test]
     async fn maps_initialize_session_and_prompt_without_core_changes() {
         let mut bridge = bridge();
@@ -663,5 +672,96 @@ mod tests {
             .unwrap();
         assert_eq!(prompt.result.unwrap()["stopReason"], "end_turn");
         assert!(bridge.next_notification().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn maps_the_complete_acp_event_trace_from_the_app_server() {
+        let mut bridge = bridge();
+        let initialize = bridge
+            .handle_request(JsonRpcRequest::request(
+                1,
+                METHOD_INITIALIZE,
+                serde_json::json!(AcpInitializeParams {
+                    protocol_version: ACP_PROTOCOL_VERSION,
+                    client_capabilities: Value::Null,
+                    client_info: None,
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(initialize.error.is_none());
+        let session = bridge
+            .handle_request(JsonRpcRequest::request(
+                2,
+                METHOD_SESSION_NEW,
+                serde_json::json!(SessionNewParams::default()),
+            ))
+            .await
+            .unwrap();
+        let session_id = session.result.unwrap()["sessionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let prompt = bridge
+            .handle_request(JsonRpcRequest::request(
+                3,
+                METHOD_SESSION_PROMPT,
+                serde_json::json!(SessionPromptParams {
+                    session_id,
+                    prompt: vec![PromptContent::Text {
+                        text: "hello".to_string()
+                    }],
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(prompt.result.unwrap()["stopReason"], "end_turn");
+
+        let mut acp_events = Vec::new();
+        loop {
+            let notification = bridge.next_notification().await.unwrap();
+            let event = notification.params.unwrap()["update"]["event"].clone();
+            let event: Event = serde_json::from_value(event).unwrap();
+            let finished = matches!(event, Event::TurnFinished { .. });
+            acp_events.push(event);
+            if finished {
+                break;
+            }
+        }
+
+        let mut app = app_connection();
+        app.handle_request(JsonRpcRequest::request(
+            1,
+            METHOD_INITIALIZE,
+            serde_json::json!(InitializeParams {
+                protocol_version: PROTOCOL_VERSION,
+                client_name: "trace-test".to_string(),
+                client_version: "0".to_string(),
+                capabilities: Default::default(),
+            }),
+        ))
+        .await;
+        app.handle_request(JsonRpcRequest::request(
+            2,
+            METHOD_TURN_START,
+            serde_json::json!(TurnStartParams {
+                thread_id: ThreadId::new("default"),
+                input: TurnInput::new(TurnInputMode::Start, "hello"),
+            }),
+        ))
+        .await;
+        let mut app_events = Vec::new();
+        loop {
+            let notification = app.next_notification().await.unwrap();
+            let params = notification.params.unwrap();
+            let event: TurnEventNotification = serde_json::from_value(params).unwrap();
+            let finished = matches!(event.event, Event::TurnFinished { .. });
+            app_events.push(event.event);
+            if finished {
+                break;
+            }
+        }
+
+        assert_eq!(acp_events, app_events);
     }
 }

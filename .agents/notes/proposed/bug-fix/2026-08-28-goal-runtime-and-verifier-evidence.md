@@ -6,6 +6,15 @@ Reviewed revision: `6f3a90e`
 Review interval: `f85a965..6f3a90e` (6 commits)
 Current evidence tree: `4934ac9` plus uncommitted working-tree changes
 
+## Current architecture update (2026-08-28)
+
+The Goal state machine, checkpoint persistence, and provider configuration
+remain Host responsibilities. Mentor and Goal verifier turn orchestration now
+lives in `mini-agent-app-server::mentor` and executes through the App Server
+local client, so the verifier no longer owns a separate direct `Harness::run`
+loop. The acceptance evidence below still applies to the Goal behavior; this
+update only records the execution boundary used by the current worktree.
+
 ## Context
 
 This is a focused follow-up to [Stabilization and Evidence Gates](../process/2026-08-27-stabilization-and-evidence-gates.md).
@@ -34,8 +43,8 @@ evidence below is from the current working tree:
 - Baseline `6f3a90e`: `cargo test -p mini-agent-core` passed 29 tests (27 unit
   tests and 2 integration tests); the focused CLI Goal test did not exist.
 - Current working tree: `cargo test --workspace --quiet` passes every package,
-  including 40 core tests, 18 host tests, 15 app-server tests, 4 wire protocol
-  tests, 1 ACP test, 32 built-CLI interactive tests, and the remaining CLI and
+  including 40 core tests, 161 host tests, 20 app-server tests, 4 wire protocol
+  tests, 2 ACP tests, 32 built-CLI interactive tests, and the remaining CLI and
   protocol suites. `cargo clippy --workspace --all-targets -- -D warnings`
   also passes.
 - `cargo +1.88.0 check --workspace --locked` passes on Windows, covering the
@@ -54,14 +63,14 @@ evidence below is from the current working tree:
   failed only the line-budget check. That run does not include this working
   tree.
 - Current `python scripts/line_budget.py`: runtime layers (core + protocol +
-  host + app-server) 25,863 / 20,000 lines; all Rust source 34,377 / 30,000
+  host + app-server) 26,792 / 20,000 lines; all Rust source 35,116 / 30,000
   lines, including tests. The ACP edge is reported separately and excluded
-  from the runtime gate. The runtime gate is over budget by 5,863 lines and
-  the repository-wide gate is over budget by 4,377 lines. The diagnostic layer
-  breakdown is core 4,058, protocol 699, host 18,213, app-server 2,893,
-  acp 667, and CLI 7,847 lines. The same report separates production/unit/integration
-  lines as core 1,781/1,928/349, protocol 519/180/0, host 13,117/5,096/0,
-  app-server 2,105/788/0, acp 557/110/0, and CLI 4,904/486/2,457.
+  from the runtime gate. The runtime gate is over budget by 6,792 lines and
+  the repository-wide gate is over budget by 5,116 lines. The diagnostic layer
+  breakdown is core 4,058, protocol 699, host 17,836, app-server 4,199,
+  acp 767, and CLI 7,557 lines. The same report separates production/unit/integration
+  lines as core 1,781/1,928/349, protocol 519/180/0, host 12,796/5,040/0,
+  app-server 3,274/941/0, acp 557/210/0, and CLI 4,614/486/2,457.
 - Using temporary Zig compiler/linker/archive wrappers on Windows, the Linux
   target `cargo check` passes. A stronger
   `cargo test --workspace --target x86_64-unknown-linux-gnu --no-run` attempt
@@ -82,15 +91,16 @@ not by themselves establish release readiness.
 
 ## Placement in the four-layer architecture
 
-The Goal repair remains a host workflow and does not move orchestration into
-the execution kernel:
+The Goal state repair remains a Host workflow; its verifier turn is exposed
+through the App Server and does not move orchestration into the execution
+kernel:
 
 ```text
 CLI client
     ↓
-App Server service boundary
+App Server service boundary  ← Mentor/verifier turn orchestration
     ↓
-Host / Workflows application host  ← Goal, Mentor, persistence, provider setup
+Host / Workflows application host  ← Goal, persistence, provider setup
     ↓
 Core / Protocol execution foundation ← Thread, Harness, limits, turns, events
 ```

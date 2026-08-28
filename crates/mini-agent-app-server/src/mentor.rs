@@ -1,17 +1,30 @@
-use crate::config::RuntimeConfig;
-use crate::observer::RunObserver;
-use crate::observer::ScriptFormat;
-use crate::observer::print_final_answer;
-use crate::openai::OpenAiModel;
-use crate::session::DerivedItem;
-use crate::session::SessionRequest;
-use crate::session::SessionStore;
+use crate::AppServer;
+use crate::AppServerConnection;
+use crate::LocalAppServerClient;
+use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_core::ContextLimitBehavior;
+use mini_agent_core::Event;
+use mini_agent_core::EventEnvelope;
+use mini_agent_core::EventSink;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Message;
 use mini_agent_core::StopReason;
+use mini_agent_core::Thread;
+use mini_agent_core::ThreadId;
+use mini_agent_core::ThreadStart;
 use mini_agent_core::ToolRegistry;
+use mini_agent_core::TurnInput;
+use mini_agent_core::TurnInputMode;
+use mini_agent_host::config::RuntimeConfig;
+use mini_agent_host::image::ImageStore;
+use mini_agent_host::observer::RunObserver;
+use mini_agent_host::observer::ScriptFormat;
+use mini_agent_host::observer::print_final_answer;
+use mini_agent_host::openai::OpenAiModel;
+use mini_agent_host::session::DerivedItem;
+use mini_agent_host::session::SessionRequest;
+use mini_agent_host::session::SessionStore;
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -31,6 +44,12 @@ struct Request {
     action: Action,
     session_id: String,
     criteria: Option<String>,
+}
+
+struct DiscardEvents;
+
+impl EventSink for DiscardEvents {
+    fn emit(&mut self, _event: EventEnvelope) {}
 }
 
 pub async fn run(arguments: String, trace: Option<PathBuf>, json_output: bool) -> ExitCode {
@@ -64,7 +83,7 @@ pub async fn run(arguments: String, trace: Option<PathBuf>, json_output: bool) -
         provider.base_url,
         provider.chat_base_url,
         provider.web_search,
-        crate::image::ImageStore::memory_only(),
+        ImageStore::memory_only(),
     ) {
         Ok(model) => model,
         Err(error) => return preflight_error(json_output, &error.to_string()),
@@ -100,8 +119,8 @@ pub async fn run(arguments: String, trace: Option<PathBuf>, json_output: bool) -
         }
     };
     let prompt = request.analysis_prompt();
-    let outcome = match harness.run(prompt, &mut observer).await {
-        Ok(outcome) if outcome.stop_reason == StopReason::Completed => outcome,
+    let outcome = match run_harness_turn(harness, prompt, &mut observer).await {
+        Ok(outcome) if outcome.stop_reason == Some(StopReason::Completed) => outcome,
         Ok(outcome) => {
             observer.finish();
             return run_error(
@@ -127,7 +146,7 @@ pub async fn run(arguments: String, trace: Option<PathBuf>, json_output: bool) -
         source_checkpoint_seq,
         source_fingerprint: &source_fingerprint,
         criteria: request.criteria.as_deref(),
-        output: &outcome.final_text,
+        output: outcome.final_text.as_deref().unwrap_or_default(),
     }) {
         return run_error(json_output, &provider.model, &error, &observer);
     }
@@ -150,7 +169,7 @@ pub async fn run(arguments: String, trace: Option<PathBuf>, json_output: bool) -
             })
         );
     } else if !observer.assistant_displayed() {
-        print_final_answer(&outcome.final_text);
+        print_final_answer(outcome.final_text.as_deref().unwrap_or_default());
     }
     ExitCode::SUCCESS
 }
@@ -159,7 +178,7 @@ pub async fn verify_checkpoint(
     runtime_config: &RuntimeConfig,
     messages: &[Message],
     criteria: &str,
-) -> Result<(String, crate::goal::VerifierVerdict), String> {
+) -> Result<(String, mini_agent_host::goal::VerifierVerdict), String> {
     let provider = runtime_config.mentor_provider_settings()?;
     let model = OpenAiModel::new(
         provider.api_key,
@@ -167,7 +186,7 @@ pub async fn verify_checkpoint(
         provider.base_url,
         provider.chat_base_url,
         false,
-        crate::image::ImageStore::memory_only(),
+        ImageStore::memory_only(),
     )
     .map_err(|error| error.to_string())?;
     let config = HarnessConfig {
@@ -189,18 +208,61 @@ pub async fn verify_checkpoint(
     let prompt = format!(
         "Verify the settled goal milestone against the following acceptance plan.\n\n{criteria}"
     );
-    let outcome = harness
-        .run(prompt, &mut ())
+    let mut sink = DiscardEvents;
+    let outcome = run_harness_turn(harness, prompt, &mut sink)
         .await
         .map_err(|error| format!("goal verifier failed: {error}"))?;
-    if outcome.stop_reason != StopReason::Completed {
+    if outcome.stop_reason != Some(StopReason::Completed) {
         return Err(format!(
             "goal verifier stopped after {} model steps without completing",
             outcome.steps
         ));
     }
-    let verdict = crate::goal::parse_verifier_verdict(&outcome.final_text);
-    Ok((outcome.final_text, verdict))
+    let final_text = outcome.final_text.unwrap_or_default();
+    let verdict = mini_agent_host::goal::parse_verifier_verdict(&final_text);
+    Ok((final_text, verdict))
+}
+
+async fn run_harness_turn<M, S>(
+    harness: Harness<M>,
+    prompt: String,
+    sink: &mut S,
+) -> Result<TurnReadResult, String>
+where
+    M: mini_agent_core::Model + Send + 'static,
+    S: EventSink + Send,
+{
+    let thread_id = ThreadId::new("mentor");
+    let server = AppServer::new(
+        ThreadStart::new(thread_id.clone()),
+        Thread::new(thread_id.clone(), harness),
+    );
+    let mut client = LocalAppServerClient::new(AppServerConnection::new(server));
+    client
+        .initialize("mini-agent-mentor", env!("CARGO_PKG_VERSION"))
+        .await
+        .map_err(|error| error.message)?;
+    let submission = client
+        .start_turn(thread_id, TurnInput::new(TurnInputMode::Start, prompt))
+        .await
+        .map_err(|error| error.message)?;
+    let turn_id = match submission {
+        mini_agent_core::TurnSubmission::Started { turn_id } => turn_id,
+        other => return Err(format!("mentor turn was not started: {other:?}")),
+    };
+    loop {
+        let event = client.next_event().await.map_err(|error| error.message)?;
+        let finished = event.turn_id.as_ref() == Some(&turn_id)
+            && matches!(event.event, Event::TurnFinished { .. });
+        sink.emit(event);
+        if finished {
+            break;
+        }
+    }
+    client
+        .read_turn(turn_id)
+        .await
+        .map_err(|error| error.message)
 }
 
 impl Request {

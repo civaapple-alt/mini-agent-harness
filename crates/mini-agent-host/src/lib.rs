@@ -11,7 +11,6 @@ pub mod harness_builder;
 pub mod image;
 pub mod marketplaces;
 pub mod mcp;
-pub mod mentor;
 pub mod observer;
 pub mod openai;
 pub mod persona;

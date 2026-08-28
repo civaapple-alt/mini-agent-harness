@@ -17,6 +17,7 @@ pub enum ValueSource {
     UserEnv,
 }
 
+#[derive(Clone)]
 pub struct ResolvedValue {
     pub value: String,
     pub source: ValueSource,

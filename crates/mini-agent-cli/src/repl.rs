@@ -1,31 +1,21 @@
+use mini_agent_app_server::AppServerRuntime;
+use mini_agent_app_server::ThreadUpdate;
+use mini_agent_app_server::mentor;
 use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
 use mini_agent_core::EventEnvelope;
 use mini_agent_core::EventSink;
-use mini_agent_core::HarnessError;
 use mini_agent_core::InputQueueError;
-use mini_agent_core::LimitKind;
 use mini_agent_core::RunControl;
-use mini_agent_core::SessionState;
-use mini_agent_core::SteeringMode;
-use mini_agent_core::StopReason;
-use mini_agent_core::Thread;
-use mini_agent_core::ThreadId;
 use mini_agent_core::ToolError;
 use mini_agent_core::TurnInput;
 use mini_agent_core::TurnInputMode;
-use mini_agent_host::RuntimeBuilder;
 use mini_agent_host::config::RuntimeConfig;
 use mini_agent_host::harness_config_auto;
 use mini_agent_host::mcp;
-use mini_agent_host::mentor;
 use mini_agent_host::observer::RunObserver;
 use mini_agent_host::print_auto_warning;
 use mini_agent_host::session;
-use mini_agent_host::session::OpenedSession;
 use mini_agent_host::session::SessionRequest;
-use mini_agent_host::session::SessionStore;
-use mini_agent_host::session::TurnCommit;
-use mini_agent_host::session::TurnStatus;
 use mini_agent_host::skills;
 use mini_agent_host::tool_outcome::classify_tools;
 use mini_agent_host::workspace::ApprovalController;
@@ -409,21 +399,12 @@ fn spawn_worker(
     run_control: RunControl,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let (build, auto_max_steps, web_search_enabled, runtime_config) =
-            match RuntimeConfig::load().and_then(|mut runtime| {
+        let (auto_max_steps, web_search_enabled, runtime_config) =
+            match RuntimeConfig::load().map(|mut runtime| {
                 if let Some(enabled) = web_search_override {
                     runtime = runtime.with_web_search(enabled);
                 }
-                let web_search_enabled = runtime.web_search();
-                let auto_max_steps = runtime.copilot_max_steps();
-                RuntimeBuilder::new(
-                    &runtime,
-                    approval.clone(),
-                    harness_config_auto(copilot, auto_max_steps),
-                    sandbox_kind,
-                )
-                .build()
-                .map(|build| (build, auto_max_steps, web_search_enabled, runtime))
+                (runtime.copilot_max_steps(), runtime.web_search(), runtime)
             }) {
                 Ok(loaded) => loaded,
                 Err(error) => {
@@ -432,62 +413,49 @@ fn spawn_worker(
                     return;
                 }
             };
-        let mini_agent_host::HarnessBuild {
-            harness,
-            images,
-            stable_system_prompt,
-            mut world,
-            enabled_mcp_servers,
-            mcp_tool_count,
-            mut retry_mcp_servers,
-        } = build;
-        let mut harness = Thread::new(ThreadId::new("ephemeral"), harness);
+        let model_runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = events.send(ReplEvent::Warning(format!(
+                    "error: cannot start REPL worker: {error}"
+                )));
+                let _ = events.send(ReplEvent::Exited);
+                return;
+            }
+        };
+        let mut runtime = match model_runtime.block_on(AppServerRuntime::start_with_control(
+            runtime_config.clone(),
+            approval.clone(),
+            harness_config_auto(copilot, auto_max_steps),
+            sandbox_kind,
+            session_request,
+            std::sync::Arc::new(run_control.clone()),
+        )) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = events.send(ReplEvent::InitializationFailed(error));
+                let _ = events.send(ReplEvent::Exited);
+                return;
+            }
+        };
         let mut copilot = copilot;
         let mut goal_objective: Option<String> = None;
-        let mut durable = match session_request {
-            SessionRequest::Disabled => None,
-            request => match SessionStore::open(world.workspace(), request) {
-                Ok(opened) => Some(opened),
-                Err(error) => {
-                    let _ = events.send(ReplEvent::InitializationFailed(error));
-                    let _ = events.send(ReplEvent::Exited);
-                    return;
-                }
-            },
-        };
-        if let Some(opened) = &mut durable {
-            harness.set_id(ThreadId::new(opened.store.thread_id()));
-            harness.set_next_turn_number(opened.store.thread_turn_count() as u64 + 1);
-            approval.bind_session_file(opened.store.path());
-            images.bind_session_file(opened.store.path());
+        let mut world = runtime.world().clone();
+        let stable_system_prompt = runtime.stable_system_prompt().to_string();
+        let enabled_mcp_servers = runtime.enabled_mcp_servers().to_vec();
+        let mcp_tool_count = runtime.mcp_tool_count();
+        let mut retry_mcp_servers = runtime.retry_mcp_servers().to_vec();
+        if let Some(opened) = runtime.session() {
             if opened.resumed {
-                if let Err(error) = harness
-                    .restore_session(std::mem::replace(&mut opened.state, SessionState::new()))
-                {
-                    let _ = events.send(ReplEvent::InitializationFailed(format!(
-                        "cannot restore session history: {error}"
-                    )));
-                    let _ = events.send(ReplEvent::Exited);
-                    return;
-                }
-                let _ = harness.append_context(
-                    "[Session resumed. Note: previously running background processes and result preview handles from prior sessions have expired.]",
-                );
-                match world.model_context() {
-                    Ok(context) => {
-                        if let Err(error) = harness.append_context(context) {
-                            let _ = events.send(ReplEvent::InitializationFailed(format!(
-                                "cannot append current world state: {error}"
-                            )));
-                            let _ = events.send(ReplEvent::Exited);
-                            return;
-                        }
-                    }
-                    Err(error) => {
-                        let _ = events.send(ReplEvent::InitializationFailed(error));
-                        let _ = events.send(ReplEvent::Exited);
-                        return;
-                    }
+                let _ = model_runtime.block_on(runtime.update_thread(ThreadUpdate::AppendContext(
+                    "[Session resumed. Note: previously running background processes and result preview handles from prior sessions have expired.]".to_string(),
+                )));
+                if let Ok(context) = world.model_context() {
+                    let _ = model_runtime
+                        .block_on(runtime.update_thread(ThreadUpdate::AppendContext(context)));
                 }
                 if let Some(session_dir) = opened.store.path().parent()
                     && let Ok(Some(state)) = mini_agent_host::goal::load_goal_state(session_dir)
@@ -506,21 +474,10 @@ fn spawn_worker(
                 opened.store.thread_id(),
                 opened.store.path().display()
             )));
-            persist_latest_context(&mut durable, &harness, &events);
-        }
-        let model_runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = events.send(ReplEvent::Warning(format!(
-                    "error: cannot start REPL worker: {error}"
-                )));
-                let _ = events.send(ReplEvent::Exited);
-                return;
+            if let Ok(checkpoint) = model_runtime.block_on(runtime.read_checkpoint()) {
+                let _ = runtime.record_context(&checkpoint);
             }
-        };
+        }
         if !enabled_mcp_servers.is_empty() {
             let _ = events.send(ReplEvent::Notice(format!(
                 "mcp> enabled — {} ({mcp_tool_count} tool(s))",
@@ -552,7 +509,6 @@ fn spawn_worker(
                             prompt
                         };
                         let started_at_ms = session::timestamp_ms();
-                        let previous_messages = harness.messages().to_vec();
                         let mut observer = ChannelObserver(events.clone());
                         let goal_timeout = approval.goal_dir().and_then(|goal_dir| {
                             goal_dir
@@ -566,12 +522,7 @@ fn spawn_worker(
                             match model_runtime.block_on(async {
                                 tokio::time::timeout(
                                     timeout,
-                                    harness.run_turn_with_events_outcome(
-                                        TurnInput::new(TurnInputMode::Start, prompt.clone()),
-                                        &mut observer,
-                                        &run_control,
-                                        SteeringMode::StopAtCheckpoint,
-                                    ),
+                                    runtime.run_turn_batch(prompt.clone(), &mut observer),
                                 )
                                 .await
                             }) {
@@ -590,55 +541,34 @@ fn spawn_worker(
                                 }
                             }
                         } else {
-                            model_runtime.block_on(harness.run_turn_with_events_outcome(
-                                TurnInput::new(TurnInputMode::Start, prompt.clone()),
-                                &mut observer,
-                                &run_control,
-                                SteeringMode::StopAtCheckpoint,
-                            ))
+                            model_runtime
+                                .block_on(runtime.run_turn_batch(prompt.clone(), &mut observer))
                         };
-                        let (status, steps, error) = match &result {
-                            Ok(outcome) if outcome.stop_reason == StopReason::Steered => {
-                                (TurnStatus::Steered, outcome.steps, None)
+                        let batch = match result {
+                            Ok(batch) => batch,
+                            Err(error) => {
+                                report_run_error(&events, &error);
+                                fail_active_goal(&approval, &mut goal_objective, world.workspace());
+                                break;
                             }
-                            Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
-                                (TurnStatus::StepLimit, outcome.steps, None)
-                            }
-                            Ok(outcome) if outcome.stop_reason == StopReason::Cancelled => {
-                                (TurnStatus::Cancelled, outcome.steps, None)
-                            }
-                            Ok(outcome) => (TurnStatus::Completed, outcome.steps, None),
-                            Err(error) => (TurnStatus::Failed, 0, Some(error.to_string())),
                         };
-                        let turn_messages = harness
-                            .messages()
-                            .strip_prefix(previous_messages.as_slice())
-                            .unwrap_or_else(|| harness.messages());
-                        if let Some(opened) = &mut durable {
-                            let commit = TurnCommit {
-                                started_at_ms,
-                                prompt: &prompt,
-                                status,
-                                steps,
-                                error: error.as_deref(),
-                                messages: turn_messages,
-                                checkpoint: harness.messages(),
-                            };
-                            let result = match harness.last_turn_id() {
-                                Some(turn_id) => {
-                                    opened.store.record_turn_with_id(turn_id.as_str(), commit)
-                                }
-                                None => opened.store.record_turn(commit),
-                            };
-                            if let Err(error) = result {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "warning: session persistence stopped: {error}"
-                                )));
-                                durable = None;
-                            }
+                        if let Err(error) = runtime.record_batch(started_at_ms, &prompt, &batch) {
+                            let _ = events.send(ReplEvent::Warning(format!(
+                                "warning: session persistence stopped: {error}"
+                            )));
                         }
-                        match result {
-                            Ok(outcome) if outcome.stop_reason == StopReason::Steered => {
+                        let Some(outcome) = batch.turns.last() else {
+                            let _ = events.send(ReplEvent::Warning(
+                                "error: app server returned an empty turn batch".to_string(),
+                            ));
+                            break;
+                        };
+                        let steered = batch.turns.iter().any(|turn| {
+                            turn.stop_reason == Some(mini_agent_core::StopReason::Steered)
+                        });
+                        let step_limited = outcome.status == mini_agent_core::TurnStatus::StepLimit;
+                        match (steered, step_limited) {
+                            (true, _) => {
                                 let _ = events.send(ReplEvent::Notice(format!(
                                     "steer> checkpoint saved after {} model step(s); continuing with the new message",
                                     outcome.steps
@@ -656,19 +586,15 @@ fn spawn_worker(
                                             .to_string(),
                                     ));
                                 }
-                                if let Some(next) = run_control.take_steer_input() {
-                                    command = WorkerCommand::Prompt(next.text);
-                                    continue;
-                                }
                             }
-                            Ok(outcome) if outcome.stop_reason == StopReason::StepLimit => {
+                            (_, true) => {
                                 let _ = events.send(ReplEvent::Warning(format!(
                                     "warning: stopped after {} model steps",
                                     outcome.steps
                                 )));
                                 fail_active_goal(&approval, &mut goal_objective, world.workspace());
                             }
-                            Ok(_outcome) => {
+                            _ => {
                                 let Some(goal_dir) = approval.goal_dir() else {
                                     break;
                                 };
@@ -676,8 +602,9 @@ fn spawn_worker(
                                     .parent()
                                     .map(PathBuf::from)
                                     .unwrap_or_else(|| world.workspace().to_path_buf());
-                                let Some(checkpoint_seq) =
-                                    durable.as_ref().map(|opened| opened.store.checkpoint_seq())
+                                let Some(checkpoint_seq) = runtime
+                                    .session()
+                                    .map(|opened| opened.store.checkpoint_seq())
                                 else {
                                     let _ = events.send(ReplEvent::Warning(
                                         "goal> cannot verify without a settled durable checkpoint"
@@ -707,10 +634,25 @@ fn spawn_worker(
                                             break;
                                         }
                                     };
+                                let checkpoint =
+                                    match model_runtime.block_on(runtime.read_checkpoint()) {
+                                        Ok(checkpoint) => checkpoint,
+                                        Err(error) => {
+                                            let _ = events.send(ReplEvent::Warning(format!(
+                                                "goal> checkpoint unavailable: {error}"
+                                            )));
+                                            fail_active_goal(
+                                                &approval,
+                                                &mut goal_objective,
+                                                world.workspace(),
+                                            );
+                                            break;
+                                        }
+                                    };
                                 let (verifier_output, verdict) =
                                     match model_runtime.block_on(mentor::verify_checkpoint(
                                         &runtime_config,
-                                        harness.messages(),
+                                        checkpoint.session.messages(),
                                         &criteria,
                                     )) {
                                         Ok(result) => result,
@@ -791,32 +733,31 @@ fn spawn_worker(
                                     ));
                                 continue;
                             }
-                            Err(error) => {
-                                report_run_error(&events, &error);
-                                fail_active_goal(&approval, &mut goal_objective, world.workspace());
-                            }
-                        }
-                        if let Some(next) = run_control.take_steer_input() {
-                            command = WorkerCommand::Prompt(next.text);
-                            continue;
                         }
                     }
                     WorkerCommand::ClearHistory => {
-                        if let Some(opened) = &mut durable
-                            && let Err(error) = opened.store.start_thread()
+                        if runtime.session().is_some()
+                            && let Err(error) = model_runtime.block_on(runtime.start_new_thread())
                         {
                             let _ = events.send(ReplEvent::Warning(format!(
                                 "warning: session persistence stopped: {error}"
                             )));
-                            durable = None;
-                        } else if let Some(opened) = &durable {
-                            harness.set_id(ThreadId::new(opened.store.thread_id()));
                         }
-                        harness.clear_history();
+                        if let Some(error) = model_runtime
+                            .block_on(runtime.update_thread(ThreadUpdate::ClearHistory))
+                            .err()
+                        {
+                            let _ = events.send(ReplEvent::Warning(format!(
+                                "error: cannot clear conversation: {error}"
+                            )));
+                            continue;
+                        }
                         match world.model_context() {
-                            Ok(context) => match harness.append_context(context) {
+                            Ok(context) => match model_runtime.block_on(
+                                runtime.update_thread(ThreadUpdate::AppendContext(context)),
+                            ) {
                                 Ok(()) => {
-                                    persist_latest_context(&mut durable, &harness, &events);
+                                    persist_latest_context(&mut runtime, &model_runtime, &events);
                                     let _ = events
                                         .send(ReplEvent::Notice("new conversation".to_string()));
                                 }
@@ -847,7 +788,7 @@ fn spawn_worker(
                         } else {
                             "off".to_string()
                         };
-                        let session_str = if let Some(opened) = &durable {
+                        let session_str = if let Some(opened) = runtime.session() {
                             format!(
                                 "{} (thread {}) [durable: {}]",
                                 opened.store.session_id(),
@@ -900,10 +841,16 @@ fn spawn_worker(
                         );
                         if refreshed != world {
                             match refreshed.model_context() {
-                                Ok(context) => match harness.append_context(context) {
+                                Ok(context) => match model_runtime.block_on(
+                                    runtime.update_thread(ThreadUpdate::AppendContext(context)),
+                                ) {
                                     Ok(()) => {
                                         world = refreshed;
-                                        persist_latest_context(&mut durable, &harness, &events);
+                                        persist_latest_context(
+                                            &mut runtime,
+                                            &model_runtime,
+                                            &events,
+                                        );
                                         let _ = events.send(ReplEvent::Notice(
                                             "world> refreshed and appended to context".to_string(),
                                         ));
@@ -949,7 +896,16 @@ fn spawn_worker(
                             });
                             let enabled = loaded_servers.iter().cloned().collect::<Vec<_>>();
                             let tool_count = tools.len();
-                            harness.extend_tools(classify_tools(tools));
+                            if let Err(error) =
+                                model_runtime.block_on(runtime.update_thread(
+                                    ThreadUpdate::ExtendTools(classify_tools(tools)),
+                                ))
+                            {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "mcp> cannot enable tools: {error}"
+                                )));
+                                continue;
+                            }
                             let message = if enabled.is_empty() {
                                 "mcp> inactive — no servers enabled; use /mcp to retry".to_string()
                             } else {
@@ -973,7 +929,7 @@ fn spawn_worker(
                             }
                         }
                     }
-                    WorkerCommand::ShowSession => match &durable {
+                    WorkerCommand::ShowSession => match runtime.session() {
                         Some(opened) => {
                             let _ = events.send(ReplEvent::Notice(format!(
                                 "session> durable {} | thread {} | {}",
@@ -1006,14 +962,26 @@ fn spawn_worker(
                         approval.set_mode(mode);
                         let mut config = harness_config_auto(copilot, auto_max_steps);
                         config.system_prompt.clone_from(&stable_system_prompt);
-                        harness.replace_config(config);
+                        if let Err(error) = model_runtime
+                            .block_on(runtime.update_thread(ThreadUpdate::ReplaceConfig(config)))
+                        {
+                            let _ = events.send(ReplEvent::Warning(format!(
+                                "error: cannot change execution mode: {error}"
+                            )));
+                        }
                         let updated_world = world.with_execution(mode, copilot, sandbox_kind);
                         if updated_world != world {
                             match updated_world.model_context() {
-                                Ok(context) => match harness.append_context(context) {
+                                Ok(context) => match model_runtime.block_on(
+                                    runtime.update_thread(ThreadUpdate::AppendContext(context)),
+                                ) {
                                     Ok(()) => {
                                         world = updated_world;
-                                        persist_latest_context(&mut durable, &harness, &events);
+                                        persist_latest_context(
+                                            &mut runtime,
+                                            &model_runtime,
+                                            &events,
+                                        );
                                     }
                                     Err(error) => {
                                         let _ = events.send(ReplEvent::Warning(format!(
@@ -1039,7 +1007,8 @@ fn spawn_worker(
                         }
                     }
                     WorkerCommand::SetPlanMode { active, prompt } => {
-                        let session_dir = durable
+                        let session_dir = runtime
+                            .session()
                             .as_ref()
                             .and_then(|opened| opened.store.path().parent())
                             .unwrap_or(world.workspace());
@@ -1057,12 +1026,19 @@ fn spawn_worker(
                                         mini_agent_host::goal::with_plan_mode_overlay(
                                             &stable_system_prompt,
                                         );
-                                    harness.replace_config(config);
-                                    let _ = harness.append_context(format!(
-                                    "[Plan Mode active: living plan at {}. Plan only — research and update plan.md. Do not produce the final deliverable. Relative path plan.md maps to that file. Workspace modifications are locked.]",
-                                    plan_file.display()
-                                ));
-                                    persist_latest_context(&mut durable, &harness, &events);
+                                    let _ =
+                                        model_runtime
+                                            .block_on(runtime.update_thread(
+                                                ThreadUpdate::ReplaceConfig(config),
+                                            ));
+                                    let context = format!(
+                                        "[Plan Mode active: living plan at {}. Plan only — research and update plan.md. Do not produce the final deliverable. Relative path plan.md maps to that file. Workspace modifications are locked.]",
+                                        plan_file.display()
+                                    );
+                                    let _ = model_runtime.block_on(
+                                        runtime.update_thread(ThreadUpdate::AppendContext(context)),
+                                    );
+                                    persist_latest_context(&mut runtime, &model_runtime, &events);
                                     let _ = events.send(ReplEvent::Notice(format!(
                                     "plan mode on: workspace modifications locked. Living plan at {}",
                                     plan_file.display()
@@ -1083,14 +1059,16 @@ fn spawn_worker(
                             let _ = mini_agent_host::goal::disable_plan_mode(session_dir);
                             let mut config = harness_config_auto(copilot, auto_max_steps);
                             config.system_prompt.clone_from(&stable_system_prompt);
-                            harness.replace_config(config);
+                            let _ = model_runtime.block_on(
+                                runtime.update_thread(ThreadUpdate::ReplaceConfig(config)),
+                            );
                             let _ = events.send(ReplEvent::Notice(
                                 "plan mode off: resumed standard execution mode".to_string(),
                             ));
                         }
                     }
                     WorkerCommand::StartGoal(objective) => {
-                        if durable.is_none() {
+                        if runtime.session().is_none() {
                             let _ = events.send(ReplEvent::Warning(
                                 "goal> requires a durable session; restart without --ephemeral"
                                     .to_string(),
@@ -1103,7 +1081,8 @@ fn spawn_worker(
                             )));
                             break;
                         }
-                        let session_dir = durable
+                        let session_dir = runtime
+                            .session()
                             .as_ref()
                             .and_then(|opened| opened.store.path().parent())
                             .unwrap_or(world.workspace());
@@ -1127,13 +1106,21 @@ fn spawn_worker(
                                     config.max_steps.min(state.milestone_step_budget)
                                 };
                                 config.system_prompt.clone_from(&stable_system_prompt);
-                                harness.replace_config(config);
+                                let _ = model_runtime.block_on(
+                                    runtime.update_thread(ThreadUpdate::ReplaceConfig(config)),
+                                );
                                 let goal_plan = goal_dir.join("plan.md");
-                                let _ = harness.append_context(format!(
-                                "[Autonomous Goal Mode active: goal_id={}. Execute now. Current milestone {}/{}. Goal plan at {}. Relative path goal/plan.md maps to that file. Workspace mutations are allowed.]",
-                                state.goal_id, state.current_milestone, state.total_milestones, goal_plan.display()
-                            ));
-                                persist_latest_context(&mut durable, &harness, &events);
+                                let context = format!(
+                                    "[Autonomous Goal Mode active: goal_id={}. Execute now. Current milestone {}/{}. Goal plan at {}. Relative path goal/plan.md maps to that file. Workspace mutations are allowed.]",
+                                    state.goal_id,
+                                    state.current_milestone,
+                                    state.total_milestones,
+                                    goal_plan.display()
+                                );
+                                let _ = model_runtime.block_on(
+                                    runtime.update_thread(ThreadUpdate::AppendContext(context)),
+                                );
+                                persist_latest_context(&mut runtime, &model_runtime, &events);
                                 let _ = events.send(ReplEvent::Notice(format!(
                                 "goal mode on [goal_id: {}]: executing milestone {}/{} (auto-approve, copilot on)",
                                 state.goal_id, state.current_milestone, state.total_milestones
@@ -1164,28 +1151,17 @@ fn spawn_worker(
 }
 
 fn persist_latest_context(
-    durable: &mut Option<OpenedSession>,
-    harness: &mini_agent_core::Harness<mini_agent_host::openai::OpenAiModel>,
+    runtime: &mut AppServerRuntime,
+    model_runtime: &tokio::runtime::Runtime,
     events: &mpsc::SyncSender<ReplEvent>,
 ) {
-    let context = harness
-        .messages()
-        .iter()
-        .rev()
-        .find(|message| matches!(message, mini_agent_core::Message::Context { .. }))
-        .cloned();
-    let error = durable.as_mut().and_then(|opened| {
-        let context = context.as_ref()?;
-        opened
-            .store
-            .record_context(context, harness.messages())
-            .err()
-    });
-    if let Some(error) = error {
+    if let Err(error) = model_runtime
+        .block_on(runtime.read_checkpoint())
+        .and_then(|checkpoint| runtime.record_context(&checkpoint))
+    {
         let _ = events.send(ReplEvent::Warning(format!(
             "warning: session persistence stopped: {error}"
         )));
-        *durable = None;
     }
 }
 
@@ -1202,12 +1178,9 @@ fn fail_active_goal(
     }
 }
 
-fn report_run_error(
-    events: &mpsc::SyncSender<ReplEvent>,
-    error: &HarnessError<mini_agent_host::openai::OpenAiError>,
-) {
+fn report_run_error(events: &mpsc::SyncSender<ReplEvent>, error: &str) {
     let _ = events.send(ReplEvent::Warning(format!("error: {error}")));
-    if matches!(error, HarnessError::Limit(limit) if limit.kind == LimitKind::ContextBytes) {
+    if error.contains("context") {
         let _ = events.send(ReplEvent::Warning(
             "hint: use /new to clear this conversation".to_string(),
         ));

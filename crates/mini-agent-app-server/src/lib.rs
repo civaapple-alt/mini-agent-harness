@@ -1,8 +1,6 @@
 use mini_agent_core::EventEnvelope;
-use mini_agent_core::EventSink;
 use mini_agent_core::Model;
 use mini_agent_core::RunControl;
-use mini_agent_core::SteeringMode;
 use mini_agent_core::Thread;
 use mini_agent_core::ThreadCheckpoint;
 use mini_agent_core::ThreadId;
@@ -125,12 +123,19 @@ impl Default for ApprovalBroker {
 }
 
 pub mod client;
+pub mod demo;
 pub mod json_rpc;
+pub mod mentor;
+pub mod runtime;
 
 pub use client::LocalAppServerClient;
 pub use json_rpc::AppServerConnection;
 pub use json_rpc::serve_stdio;
 pub use json_rpc::serve_stdio_with_approval;
+pub use runtime::{AppServerRuntime, RuntimeTurnBatch, RuntimeTurnResult};
+
+mod worker;
+use worker::{Command, worker_loop};
 
 /// A bounded error returned by the in-process control-plane adapter.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -147,6 +152,18 @@ pub enum AppServerError {
     ThreadNotFound(ThreadId),
     ThreadAlreadyExists(ThreadId),
     ThreadFactoryUnavailable,
+}
+
+/// A host-side update applied to a settled Thread by the App Server worker.
+///
+/// These operations are transport-neutral. They let local frontends update
+/// the same Thread that owns turn execution without retaining a second mutable
+/// Harness in the frontend.
+pub enum ThreadUpdate {
+    ClearHistory,
+    AppendContext(String),
+    ReplaceConfig(mini_agent_core::HarnessConfig),
+    ExtendTools(Vec<Box<dyn mini_agent_core::Tool>>),
 }
 
 /// A settled turn record retained by the service for inspection.
@@ -199,6 +216,7 @@ impl std::error::Error for AppServerError {}
 pub struct AppServer<M> {
     commands: mpsc::Sender<Command>,
     events: broadcast::Sender<EventEnvelope>,
+    control: Arc<RunControl>,
     thread_id: ThreadId,
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
     factory: Option<Arc<dyn ThreadFactory<M>>>,
@@ -210,6 +228,7 @@ impl<M> Clone for AppServer<M> {
         Self {
             commands: self.commands.clone(),
             events: self.events.clone(),
+            control: self.control.clone(),
             thread_id: self.thread_id.clone(),
             thread_ids: self.thread_ids.clone(),
             factory: self.factory.clone(),
@@ -227,9 +246,21 @@ where
     /// The caller must construct the adapter inside an active Tokio runtime.
     /// The worker owns the Thread exclusively, so every command is serialized
     /// before it reaches the core execution kernel.
-    pub fn new(start: ThreadStart, mut thread: Thread<M>) -> Self {
+    pub fn new(start: ThreadStart, thread: Thread<M>) -> Self {
+        Self::new_with_control(start, thread, Arc::new(RunControl::new()))
+    }
+
+    /// Starts an in-process worker using caller-owned cooperative control.
+    ///
+    /// Local frontends can share this control with their input loop while the
+    /// App Server remains the owner of turn execution and queue draining.
+    pub fn new_with_control(
+        start: ThreadStart,
+        mut thread: Thread<M>,
+        control: Arc<RunControl>,
+    ) -> Self {
         thread.set_id(start.thread_id.clone());
-        Self::with_threads(start, vec![thread])
+        Self::with_threads_and_control(start, vec![thread], None, control)
     }
 
     /// Starts a service over several preconfigured Threads.
@@ -238,26 +269,41 @@ where
     /// additional threads retain their identities. Turns are serialized by
     /// the service worker, while lifecycle and checkpoint operations remain
     /// addressed by thread identity.
-    pub fn with_threads(start: ThreadStart, mut threads: Vec<Thread<M>>) -> Self {
+    pub fn with_threads(start: ThreadStart, threads: Vec<Thread<M>>) -> Self {
+        Self::with_threads_and_control(start, threads, None, Arc::new(RunControl::new()))
+    }
+
+    fn with_threads_and_control(
+        start: ThreadStart,
+        mut threads: Vec<Thread<M>>,
+        factory: Option<Arc<dyn ThreadFactory<M>>>,
+        control: Arc<RunControl>,
+    ) -> Self {
         assert!(
             !threads.is_empty(),
             "app-server requires at least one thread"
         );
         threads[0].set_id(start.thread_id.clone());
-        Self::with_threads_and_factory(start, threads, None)
+        Self::with_threads_and_factory(start, threads, factory, control)
     }
 
     pub fn with_thread_factory<F>(start: ThreadStart, threads: Vec<Thread<M>>, factory: F) -> Self
     where
         F: ThreadFactory<M>,
     {
-        Self::with_threads_and_factory(start, threads, Some(Arc::new(factory)))
+        Self::with_threads_and_factory(
+            start,
+            threads,
+            Some(Arc::new(factory)),
+            Arc::new(RunControl::new()),
+        )
     }
 
     fn with_threads_and_factory(
         start: ThreadStart,
         mut threads: Vec<Thread<M>>,
         factory: Option<Arc<dyn ThreadFactory<M>>>,
+        control: Arc<RunControl>,
     ) -> Self {
         assert!(
             !threads.is_empty(),
@@ -284,10 +330,12 @@ where
             events.clone(),
             thread_ids.clone(),
             factory.clone(),
+            control.clone(),
         ));
         Self {
             commands,
             events,
+            control,
             thread_id: start.thread_id,
             thread_ids,
             factory,
@@ -327,6 +375,48 @@ where
         let (reply, response) = oneshot::channel();
         self.commands
             .send(Command::ReadThread { thread_id, reply })
+            .await
+            .map_err(|_| AppServerError::Disconnected)?;
+        response.await.map_err(|_| AppServerError::Disconnected)?
+    }
+
+    /// Applies a host-side update after all earlier commands for this thread.
+    pub async fn thread_update(&self, update: ThreadUpdate) -> Result<(), AppServerError> {
+        self.thread_update_for(self.thread_id.clone(), update).await
+    }
+
+    pub async fn thread_update_for(
+        &self,
+        thread_id: ThreadId,
+        update: ThreadUpdate,
+    ) -> Result<(), AppServerError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(Command::UpdateThread {
+                thread_id,
+                update,
+                reply,
+            })
+            .await
+            .map_err(|_| AppServerError::Disconnected)?;
+        response.await.map_err(|_| AppServerError::Disconnected)?
+    }
+
+    /// Reassigns a settled thread identity while keeping its service worker.
+    pub async fn thread_reset(
+        &self,
+        thread_id: ThreadId,
+        new_thread_id: ThreadId,
+        next_turn_number: u64,
+    ) -> Result<ThreadId, AppServerError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(Command::ResetThread {
+                thread_id,
+                new_thread_id,
+                next_turn_number,
+                reply,
+            })
             .await
             .map_err(|_| AppServerError::Disconnected)?;
         response.await.map_err(|_| AppServerError::Disconnected)?
@@ -484,393 +574,5 @@ where
             .await
             .map_err(|_| AppServerError::Disconnected)?;
         response.await.map_err(|_| AppServerError::Disconnected)?
-    }
-}
-
-enum Command {
-    Start {
-        thread_id: ThreadId,
-        request: TurnStart,
-        expected_turn_id: Option<TurnId>,
-        reply: oneshot::Sender<Result<TurnSubmission, AppServerError>>,
-    },
-    Cancel {
-        thread_id: ThreadId,
-        request: TurnCancel,
-        reply: oneshot::Sender<Result<(), AppServerError>>,
-    },
-    ReadThread {
-        thread_id: ThreadId,
-        reply: oneshot::Sender<Result<ThreadCheckpoint, AppServerError>>,
-    },
-    CloseThread {
-        thread_id: ThreadId,
-        reply: oneshot::Sender<Result<(), AppServerError>>,
-    },
-    ReadTurn {
-        turn_id: TurnId,
-        reply: oneshot::Sender<Result<Option<SettledTurn>, AppServerError>>,
-    },
-    CreateThread {
-        thread_id: ThreadId,
-        reply: oneshot::Sender<Result<ThreadId, AppServerError>>,
-    },
-    ForkThread {
-        source_thread_id: ThreadId,
-        new_thread_id: ThreadId,
-        reply: oneshot::Sender<Result<ThreadId, AppServerError>>,
-    },
-    ResumeThread {
-        thread_id: ThreadId,
-        checkpoint: ThreadCheckpoint,
-        reply: oneshot::Sender<Result<ThreadId, AppServerError>>,
-    },
-}
-
-struct BroadcastSink {
-    events: broadcast::Sender<EventEnvelope>,
-}
-
-impl EventSink for BroadcastSink {
-    fn emit(&mut self, event: EventEnvelope) {
-        let _ = self.events.send(event);
-    }
-}
-
-async fn worker_loop<M>(
-    threads: Vec<Thread<M>>,
-    mut commands: mpsc::Receiver<Command>,
-    events: broadcast::Sender<EventEnvelope>,
-    thread_ids: Arc<Mutex<Vec<ThreadId>>>,
-    factory: Option<Arc<dyn ThreadFactory<M>>>,
-) where
-    M: Model + Send + 'static,
-{
-    let control = Arc::new(RunControl::new());
-    let mut threads = threads
-        .into_iter()
-        .map(|thread| (thread.id().as_str().to_string(), thread))
-        .collect::<HashMap<_, _>>();
-    let mut settled_turns = HashMap::new();
-    while let Some(command) = commands.recv().await {
-        match command {
-            Command::Start {
-                thread_id,
-                request,
-                expected_turn_id,
-                reply,
-            } => {
-                if expected_turn_id.is_some() {
-                    let _ = reply.send(Err(AppServerError::NoActiveTurn));
-                    continue;
-                }
-                let key = thread_id.as_str().to_string();
-                let Some(mut thread) = threads.remove(&key) else {
-                    let _ = reply.send(Err(AppServerError::ThreadNotFound(thread_id)));
-                    continue;
-                };
-                if !matches!(
-                    request.input.mode,
-                    TurnInputMode::Start | TurnInputMode::StartIfIdle
-                ) {
-                    let _ = reply.send(Err(AppServerError::InvalidInputMode(request.input.mode)));
-                    threads.insert(key, thread);
-                    continue;
-                }
-                if thread.status() == mini_agent_core::ThreadStatus::Closed {
-                    let _ = reply.send(Err(AppServerError::Closed));
-                    threads.insert(key, thread);
-                    continue;
-                }
-                if thread.status() == mini_agent_core::ThreadStatus::Running {
-                    let _ = reply.send(Err(AppServerError::Busy));
-                    threads.insert(key, thread);
-                    continue;
-                }
-
-                let mut next_input = Some(request.input);
-                let mut initial_reply = Some(reply);
-                loop {
-                    let input = next_input
-                        .take()
-                        .expect("app-server turn input must exist before execution");
-                    let turn_id = thread.next_turn_id();
-                    if let Some(reply) = initial_reply.take() {
-                        let _ = reply.send(Ok(TurnSubmission::Started {
-                            turn_id: turn_id.clone(),
-                        }));
-                    }
-                    let input = TurnInput::new(TurnInputMode::Start, input.text);
-                    let mut sink = BroadcastSink {
-                        events: events.clone(),
-                    };
-                    let mut turn = Box::pin(thread.run_turn_with_events(
-                        input,
-                        &mut sink,
-                        &control,
-                        SteeringMode::StopAtCheckpoint,
-                    ));
-                    let turn_result = loop {
-                        tokio::select! {
-                            result = &mut turn => break result,
-                            Some(command) = commands.recv() => handle_running_command(command, &control, &thread_id, &turn_id),
-                            else => {
-                                drop(turn);
-                                threads.insert(key.clone(), thread);
-                                return;
-                            },
-                        }
-                    };
-                    match turn_result {
-                        Ok(result) => {
-                            settled_turns.insert(
-                                result.id.as_str().to_string(),
-                                SettledTurn {
-                                    id: result.id,
-                                    status: result.status,
-                                    outcome: Some(result.outcome),
-                                    error: None,
-                                },
-                            );
-                        }
-                        Err(error) => {
-                            settled_turns.insert(
-                                turn_id.as_str().to_string(),
-                                SettledTurn {
-                                    id: turn_id.clone(),
-                                    status: mini_agent_core::TurnStatus::Failed,
-                                    outcome: None,
-                                    error: Some(error.to_string()),
-                                },
-                            );
-                        }
-                    }
-                    next_input = control
-                        .take_steer_input()
-                        .or_else(|| control.take_follow_up_input());
-                    if next_input.is_none() {
-                        break;
-                    }
-                }
-                threads.insert(key, thread);
-            }
-            Command::Cancel { reply, .. } => {
-                let _ = reply.send(Err(AppServerError::NoActiveTurn));
-            }
-            Command::ReadThread { thread_id, reply } => {
-                let result = threads
-                    .get(thread_id.as_str())
-                    .ok_or(AppServerError::ThreadNotFound(thread_id))
-                    .and_then(|thread| {
-                        thread
-                            .checkpoint()
-                            .map_err(|error| AppServerError::Checkpoint(error.to_string()))
-                    });
-                let _ = reply.send(result);
-            }
-            Command::CloseThread { thread_id, reply } => {
-                let result = threads
-                    .get_mut(thread_id.as_str())
-                    .ok_or(AppServerError::ThreadNotFound(thread_id))
-                    .and_then(|thread| {
-                        thread
-                            .close()
-                            .map_err(|error| AppServerError::Checkpoint(error.to_string()))
-                    });
-                let _ = reply.send(result);
-            }
-            Command::ReadTurn { turn_id, reply } => {
-                let _ = reply.send(Ok(settled_turns.get(turn_id.as_str()).cloned()));
-            }
-            Command::CreateThread { thread_id, reply } => {
-                let result = create_thread(&mut threads, &thread_ids, factory.as_ref(), thread_id);
-                let _ = reply.send(result);
-            }
-            Command::ForkThread {
-                source_thread_id,
-                new_thread_id,
-                reply,
-            } => {
-                let result = fork_thread(
-                    &mut threads,
-                    &thread_ids,
-                    factory.as_ref(),
-                    source_thread_id,
-                    new_thread_id,
-                );
-                let _ = reply.send(result);
-            }
-            Command::ResumeThread {
-                thread_id,
-                checkpoint,
-                reply,
-            } => {
-                let result = resume_thread(
-                    &mut threads,
-                    &thread_ids,
-                    factory.as_ref(),
-                    thread_id,
-                    checkpoint,
-                );
-                let _ = reply.send(result);
-            }
-        }
-    }
-}
-
-fn create_thread<M>(
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
-    factory: Option<&Arc<dyn ThreadFactory<M>>>,
-    thread_id: ThreadId,
-) -> Result<ThreadId, AppServerError>
-where
-    M: Model + 'static,
-{
-    let key = thread_id.as_str().to_string();
-    if threads.contains_key(&key) {
-        return Err(AppServerError::ThreadAlreadyExists(thread_id));
-    }
-    let factory = factory.ok_or(AppServerError::ThreadFactoryUnavailable)?;
-    let mut thread = factory.create(thread_id.clone())?;
-    thread.set_id(thread_id.clone());
-    threads.insert(key, thread);
-    thread_ids.lock().unwrap().push(thread_id.clone());
-    Ok(thread_id)
-}
-
-fn fork_thread<M>(
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
-    factory: Option<&Arc<dyn ThreadFactory<M>>>,
-    source_thread_id: ThreadId,
-    new_thread_id: ThreadId,
-) -> Result<ThreadId, AppServerError>
-where
-    M: Model + 'static,
-{
-    let new_key = new_thread_id.as_str().to_string();
-    if threads.contains_key(&new_key) {
-        return Err(AppServerError::ThreadAlreadyExists(new_thread_id));
-    }
-    let checkpoint = threads
-        .get(source_thread_id.as_str())
-        .ok_or_else(|| AppServerError::ThreadNotFound(source_thread_id.clone()))?
-        .checkpoint()
-        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-    let factory = factory.ok_or(AppServerError::ThreadFactoryUnavailable)?;
-    let mut fork = factory.create(new_thread_id.clone())?;
-    let mut checkpoint = checkpoint;
-    checkpoint.thread_id = new_thread_id.clone();
-    fork.restore_checkpoint(checkpoint)
-        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-    threads.insert(new_key, fork);
-    thread_ids.lock().unwrap().push(new_thread_id.clone());
-    Ok(new_thread_id)
-}
-
-fn resume_thread<M>(
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
-    factory: Option<&Arc<dyn ThreadFactory<M>>>,
-    thread_id: ThreadId,
-    mut checkpoint: ThreadCheckpoint,
-) -> Result<ThreadId, AppServerError>
-where
-    M: Model + 'static,
-{
-    checkpoint.thread_id = thread_id.clone();
-    let key = thread_id.as_str().to_string();
-    if let Some(thread) = threads.get_mut(&key) {
-        thread
-            .restore_checkpoint(checkpoint)
-            .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-        return Ok(thread_id);
-    }
-    let factory = factory.ok_or(AppServerError::ThreadFactoryUnavailable)?;
-    let mut thread = factory.create(thread_id.clone())?;
-    thread
-        .restore_checkpoint(checkpoint)
-        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-    threads.insert(key, thread);
-    thread_ids.lock().unwrap().push(thread_id.clone());
-    Ok(thread_id)
-}
-
-fn handle_running_command(
-    command: Command,
-    control: &RunControl,
-    active_thread_id: &ThreadId,
-    turn_id: &TurnId,
-) {
-    match command {
-        Command::Start {
-            thread_id,
-            request,
-            expected_turn_id,
-            reply,
-        } => {
-            if thread_id != *active_thread_id {
-                let _ = reply.send(Err(AppServerError::Busy));
-                return;
-            }
-            if let Some(expected_turn_id) = expected_turn_id
-                && expected_turn_id != *turn_id
-            {
-                let _ = reply.send(Err(AppServerError::TurnNotActive(expected_turn_id)));
-                return;
-            }
-            let result = match request.input.mode {
-                TurnInputMode::Steer => control
-                    .submit(request.input)
-                    .map(|()| TurnSubmission::Steered {
-                        turn_id: turn_id.clone(),
-                    })
-                    .map_err(|error| AppServerError::InputQueue(error.to_string())),
-                TurnInputMode::FollowUp => control
-                    .submit(request.input)
-                    .map(|()| TurnSubmission::Queued)
-                    .map_err(|error| AppServerError::InputQueue(error.to_string())),
-                mode => Ok(TurnSubmission::NotSubmitted {
-                    reason: format!("thread is busy; cannot submit {mode:?}"),
-                }),
-            };
-            let _ = reply.send(result);
-        }
-        Command::Cancel {
-            thread_id,
-            request,
-            reply,
-        } => {
-            if thread_id != *active_thread_id {
-                let _ = reply.send(Err(AppServerError::Busy));
-                return;
-            }
-            let result = if request.turn_id == *turn_id {
-                control.request_cancel();
-                Ok(())
-            } else {
-                Err(AppServerError::TurnNotActive(request.turn_id))
-            };
-            let _ = reply.send(result);
-        }
-        Command::ReadThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
-        }
-        Command::CloseThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
-        }
-        Command::ReadTurn { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
-        }
-        Command::CreateThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
-        }
-        Command::ForkThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
-        }
-        Command::ResumeThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
-        }
     }
 }

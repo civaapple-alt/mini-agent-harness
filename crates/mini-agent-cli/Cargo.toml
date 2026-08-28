@@ -16,6 +16,7 @@ name = "mini-agent"
 path = "src/main.rs"
 
 [dependencies]
+mini-agent-app-server = { version = "0.3.0", path = "../mini-agent-app-server" }
 mini-agent-core = { version = "0.3.0", path = "../mini-agent-core" }
 mini-agent-host = { version = "0.3.0", path = "../mini-agent-host" }
 serde_json.workspace = true

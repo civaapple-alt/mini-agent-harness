@@ -738,6 +738,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_and_json_rpc_clients_preserve_the_same_event_trace() {
+        let mut local =
+            crate::LocalAppServerClient::new(AppServerConnection::new(connection().server.clone()));
+        local.initialize("local-trace", "0").await.unwrap();
+        local
+            .start_turn(
+                ThreadId::new("thread-1"),
+                TurnInput::new(TurnInputMode::Start, "hello"),
+            )
+            .await
+            .unwrap();
+        let mut local_events = Vec::new();
+        loop {
+            let event = local.next_event().await.unwrap();
+            let finished = matches!(event.event, mini_agent_core::Event::TurnFinished { .. });
+            local_events.push(event);
+            if finished {
+                break;
+            }
+        }
+
+        let mut json_rpc = connection();
+        json_rpc
+            .handle_request(JsonRpcRequest::request(
+                1,
+                METHOD_INITIALIZE,
+                serde_json::to_value(InitializeParams {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "json-rpc-trace".to_string(),
+                    client_version: "0".to_string(),
+                    capabilities: ClientCapabilities::default(),
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        json_rpc
+            .handle_request(JsonRpcRequest::request(
+                2,
+                METHOD_TURN_START,
+                serde_json::to_value(TurnStartParams {
+                    thread_id: ThreadId::new("thread-1"),
+                    input: TurnInput::new(TurnInputMode::Start, "hello"),
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        let mut json_events = Vec::new();
+        loop {
+            let notification = json_rpc.next_notification().await.unwrap();
+            let params = notification.params.unwrap();
+            let event: TurnEventNotification = serde_json::from_value(params).unwrap();
+            let envelope =
+                EventEnvelope::new(event.thread_id, event.turn_id, event.sequence, event.event);
+            let finished = matches!(envelope.event, mini_agent_core::Event::TurnFinished { .. });
+            json_events.push(envelope);
+            if finished {
+                break;
+            }
+        }
+
+        assert_eq!(local_events, json_events);
+    }
+
+    #[tokio::test]
     async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
         let mut connection = connection();
         let _ = connection

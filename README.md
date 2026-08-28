@@ -42,9 +42,10 @@ limits, failures, and observation events.
   and world state. `RuntimeBuilder` composes these capabilities into a
   provider-backed `HostRuntime`.
 - `mini-agent-app-server` is the service boundary over a core `Thread`. Its
-  typed facade and versioned `mini-agent-app-server-protocol` support
-  initialization, thread lifecycle, turn commands, steering, interruption,
-  settled results, approval requests, and ordered event notifications.
+  host-backed `AppServerRuntime`, typed facade, and versioned
+  `mini-agent-app-server-protocol` support initialization, thread lifecycle,
+  turn commands, steering, interruption, settled results, approval requests,
+  ordered event notifications, and tool-free Mentor review turns.
   `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess
   clients.
 - `mini-agent-acp` is an experimental edge adapter that maps ACP-style
@@ -52,8 +53,9 @@ limits, failures, and observation events.
   app-server. It does not modify the core execution contracts or claim full
   ACP conformance yet.
 - `mini-agent-cli` is the frontend: REPL input, headless commands, output
-  rendering, and local session interaction. It depends on the host instead of
-  owning provider and tool assembly.
+  rendering, and local session interaction. Agent turns go through the local
+  App Server runtime; the CLI does not own provider, tool, Thread, or Harness
+  assembly.
 
 The conceptual runtime direction is:
 
@@ -69,10 +71,10 @@ Core / Protocol execution foundation
 
 The crate dependency direction keeps the foundation independent:
 `mini-agent-core → mini-agent-protocol`; `mini-agent-host` builds on core and
-protocol; the app-server service depends on core, protocol, and the app-server
-wire DTOs; the CLI depends on host and the foundation. A local CLI path may
-invoke host/core directly for efficiency, while external clients use the
-app-server boundary and observe the same Thread/Turn event semantics.
+protocol; the app-server service depends on host, core, protocol, and the
+app-server wire DTOs; the CLI depends on the app-server service for agent turns
+and keeps only frontend concerns. ACP and JSON-RPC clients use the same
+service boundary and observe the same Thread/Turn event semantics.
 
 ## Install
 

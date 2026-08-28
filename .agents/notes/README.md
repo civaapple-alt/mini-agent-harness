@@ -78,6 +78,12 @@ If a proposed approach is rejected during review:
 
 ### Proposed Notes Under Review (`proposed/`)
 
+#### Architecture (`proposed/architecture/`)
+
+| Date | Title | Focus |
+|---|---|---|
+| 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Make App Server the single CLI, JSON-RPC, and ACP execution base and remove parallel turn orchestration |
+
 #### Bug Fixes (`proposed/bug-fix/`)
 
 | Date | Title | Focus |

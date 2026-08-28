@@ -2,23 +2,7 @@ mod args;
 mod ask;
 mod repl;
 
-use mini_agent_core::Harness;
-use mini_agent_core::HarnessConfig;
-use mini_agent_core::Message;
-use mini_agent_core::Model;
-use mini_agent_core::ModelEventSink;
-use mini_agent_core::ModelRequest;
-use mini_agent_core::ModelResponse;
-use mini_agent_core::RunOutcome;
-use mini_agent_core::StopReason;
-use mini_agent_core::Tool;
-use mini_agent_core::ToolCall;
-use mini_agent_core::ToolError;
-use mini_agent_core::ToolRegistry;
-use mini_agent_core::ToolSpec;
-use serde_json::Value;
 use serde_json::json;
-use std::convert::Infallible;
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -27,14 +11,11 @@ use args::Command;
 use args::HelpTopic;
 use args::help_text;
 use args::parse_args;
-use host::ApprovalController;
 use host::ApprovalMode;
-use host::RunObserver;
 use host::RuntimeConfig;
 use host::SandboxKind;
 use host::SecurityPreset;
 use host::SessionRequest;
-use host::SessionStore;
 use mini_agent_host as host;
 
 pub(crate) fn version_line() -> String {
@@ -166,7 +147,8 @@ async fn main() -> ExitCode {
         }
         Command::Sessions => run_sessions(),
         Command::Mentor => {
-            host::mentor::run(invocation.prompt, invocation.trace, invocation.json).await
+            mini_agent_app_server::mentor::run(invocation.prompt, invocation.trace, invocation.json)
+                .await
         }
         Command::TraceReplay => {
             host::trace::replay(std::path::Path::new(&invocation.prompt), invocation.json)
@@ -258,12 +240,12 @@ fn run_sessions() -> ExitCode {
 }
 
 async fn run_demo(prompt: String, trace: Option<PathBuf>) -> ExitCode {
-    let model = DemoModel { turn: 0 };
-    let tools = ToolRegistry::new(vec![Box::new(Uppercase)]);
-    let mut harness = Harness::new(model, tools, HarnessConfig::default());
-    match run_with_observer(&mut harness, prompt, trace).await {
-        Ok(_) => ExitCode::SUCCESS,
-        Err(code) => code,
+    match mini_agent_app_server::demo::run(prompt, trace).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -275,223 +257,16 @@ async fn run_auto(
     web_search_override: Option<bool>,
     session_request: SessionRequest,
 ) -> ExitCode {
-    host::print_auto_warning();
-    let approval = ApprovalController::with_preset(ApprovalMode::Automatic, preset);
-    let mut runtime = match RuntimeConfig::load() {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(2);
-        }
-    };
-    if let Some(enabled) = web_search_override {
-        runtime = runtime.with_web_search(enabled);
-    }
-    let prepared = match host::RuntimeBuilder::new(
-        &runtime,
-        approval.clone(),
-        host::harness_config_auto(true, runtime.copilot_max_steps()),
+    crate::ask::run(
+        prompt,
+        trace,
+        false,
+        true,
+        preset,
         sandbox,
+        web_search_override,
+        session_request,
+        None,
     )
-    .build()
-    {
-        Ok(build) => build,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(2);
-        }
-    };
-    let mut harness = prepared.harness;
-    let images = prepared.images;
-
-    let mut opened_session = match session_request {
-        SessionRequest::Disabled => None,
-        other => match SessionStore::open(&runtime.workspace(), other) {
-            Ok(opened) => {
-                approval.bind_session_file(opened.store.path());
-                images.bind_session_file(opened.store.path());
-                if opened.resumed {
-                    let _ = harness.restore_session(opened.state.clone());
-                }
-                Some(opened)
-            }
-            Err(error) => {
-                eprintln!("error: cannot open session: {error}");
-                return ExitCode::from(2);
-            }
-        },
-    };
-
-    let started_at_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    let mut observer = match RunObserver::new(trace) {
-        Ok(observer) => observer,
-        Err(error) => {
-            eprintln!("error: cannot create trace: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let result = harness.run(prompt.clone(), &mut observer).await;
-    observer.finish();
-
-    match result {
-        Ok(outcome) if outcome.stop_reason != StopReason::StepLimit => {
-            if let Some(ref mut session) = opened_session {
-                let _ = session.store.record_turn(host::session::TurnCommit {
-                    started_at_ms,
-                    prompt: &prompt,
-                    status: host::session::TurnStatus::Completed,
-                    steps: outcome.steps,
-                    error: None,
-                    messages: harness.messages(),
-                    checkpoint: harness.messages(),
-                });
-            }
-            ExitCode::SUCCESS
-        }
-        Ok(outcome) => {
-            eprintln!(
-                "error: auto mode stopped after {} model steps without completing",
-                outcome.steps
-            );
-            if let Some(ref mut session) = opened_session {
-                let error = format!(
-                    "stopped after {} model steps without completing",
-                    outcome.steps
-                );
-                let _ = session.store.record_turn(host::session::TurnCommit {
-                    started_at_ms,
-                    prompt: &prompt,
-                    status: host::session::TurnStatus::StepLimit,
-                    steps: outcome.steps,
-                    error: Some(&error),
-                    messages: harness.messages(),
-                    checkpoint: harness.messages(),
-                });
-            }
-            ExitCode::FAILURE
-        }
-        Err(error) => {
-            eprintln!("error: {error}");
-            if let Some(ref mut session) = opened_session {
-                let err_str = error.to_string();
-                let _ = session.store.record_turn(host::session::TurnCommit {
-                    started_at_ms,
-                    prompt: &prompt,
-                    status: host::session::TurnStatus::Failed,
-                    steps: 1,
-                    error: Some(&err_str),
-                    messages: harness.messages(),
-                    checkpoint: harness.messages(),
-                });
-            }
-            ExitCode::FAILURE
-        }
-    }
-}
-
-async fn run_with_observer<M: Model>(
-    harness: &mut Harness<M>,
-    prompt: String,
-    trace: Option<PathBuf>,
-) -> Result<RunOutcome, ExitCode> {
-    let mut observer = match RunObserver::new(trace) {
-        Ok(observer) => observer,
-        Err(error) => {
-            eprintln!("error: cannot create trace: {error}");
-            return Err(ExitCode::FAILURE);
-        }
-    };
-    let result = harness.run(prompt, &mut observer).await;
-    observer.finish();
-    match result {
-        Ok(outcome) => Ok(outcome),
-        Err(error) => {
-            eprintln!("error: {error}");
-            Err(ExitCode::FAILURE)
-        }
-    }
-}
-
-struct DemoModel {
-    turn: usize,
-}
-
-impl Model for DemoModel {
-    type Error = Infallible;
-
-    async fn respond<'a>(
-        &'a mut self,
-        request: ModelRequest<'a>,
-        _events: &'a mut (dyn ModelEventSink + Send),
-    ) -> Result<ModelResponse, Self::Error> {
-        self.turn += 1;
-        if self.turn == 1 {
-            let prompt = request
-                .messages
-                .iter()
-                .find_map(|message| match message {
-                    Message::User { text } => Some(text.as_str()),
-                    Message::Context { .. } | Message::Assistant { .. } | Message::Tool { .. } => {
-                        None
-                    }
-                })
-                .unwrap_or_default();
-            return Ok(ModelResponse {
-                reasoning: String::new(),
-                text: "I will run one tool.".to_string(),
-                tool_calls: vec![ToolCall {
-                    id: "demo-call".to_string(),
-                    name: "uppercase".to_string(),
-                    arguments: json!({ "text": prompt }),
-                }],
-                usage: None,
-            });
-        }
-
-        let result = request
-            .messages
-            .iter()
-            .rev()
-            .find_map(|message| match message {
-                Message::Tool { content, .. } => Some(content.as_str()),
-                Message::Context { .. } | Message::User { .. } | Message::Assistant { .. } => None,
-            })
-            .unwrap_or("no tool result");
-        Ok(ModelResponse {
-            reasoning: String::new(),
-            text: format!("The tool returned: {result}"),
-            tool_calls: Vec::new(),
-            usage: None,
-        })
-    }
-}
-
-struct Uppercase;
-
-impl Tool for Uppercase {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "uppercase".to_string(),
-            description: "Convert text to uppercase".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": { "text": { "type": "string" } },
-                "required": ["text"],
-                "additionalProperties": false
-            }),
-        }
-    }
-
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let text = arguments
-            .get("text")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ToolError("text must be a string".to_string()))?;
-        Ok(text.to_uppercase())
-    }
+    .await
 }

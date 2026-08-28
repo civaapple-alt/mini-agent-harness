@@ -16,6 +16,7 @@ use std::process::Command;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
+#[derive(Clone)]
 pub struct RuntimeConfig {
     workspace: PathBuf,
     api_key: Option<ResolvedValue>,
@@ -38,6 +39,7 @@ pub struct ProviderSettings {
     pub web_search: bool,
 }
 
+#[derive(Clone)]
 struct ResolvedSetting {
     value: String,
     source: SettingSource,

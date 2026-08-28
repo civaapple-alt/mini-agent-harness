@@ -1,6 +1,7 @@
 use super::AppServer;
 use super::AppServerError;
 use super::ApprovalBroker;
+use super::ThreadUpdate;
 use mini_agent_core::Event;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
@@ -123,6 +124,36 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
         TurnSubmission::Started {
             turn_id: mini_agent_core::TurnId::new("turn-2")
         }
+    );
+}
+
+#[tokio::test]
+async fn applies_thread_updates_without_exposing_the_harness_to_clients() {
+    let server = server(DoneModel);
+    server
+        .thread_update(ThreadUpdate::AppendContext("host context".to_string()))
+        .await
+        .unwrap();
+    let checkpoint = server.thread_read().await.unwrap();
+    assert_eq!(
+        checkpoint.session.messages(),
+        &[mini_agent_core::Message::Context {
+            text: "host context".to_string()
+        }]
+    );
+
+    server
+        .thread_update(ThreadUpdate::ClearHistory)
+        .await
+        .unwrap();
+    assert!(
+        server
+            .thread_read()
+            .await
+            .unwrap()
+            .session
+            .messages()
+            .is_empty()
     );
 }
 

@@ -1,5 +1,4 @@
-use mini_agent_core::StopReason;
-use mini_agent_host::RuntimeBuilder;
+use mini_agent_app_server::AppServerRuntime;
 use mini_agent_host::config::RuntimeConfig;
 use mini_agent_host::harness_config;
 use mini_agent_host::observer::RunObserver;
@@ -9,9 +8,6 @@ use mini_agent_host::print_auto_warning;
 use mini_agent_host::sandbox::SandboxKind;
 use mini_agent_host::security::SecurityPreset;
 use mini_agent_host::session::SessionRequest;
-use mini_agent_host::session::SessionStore;
-use mini_agent_host::session::TurnCommit;
-use mini_agent_host::session::TurnStatus;
 use mini_agent_host::workspace::ApprovalController;
 use mini_agent_host::workspace::ApprovalMode;
 use serde_json::json;
@@ -46,7 +42,6 @@ pub async fn run(
     if let Some(enabled) = web_search_override {
         runtime_config = runtime_config.with_web_search(enabled);
     }
-    let model_name = runtime_config.model().unwrap_or_default().to_string();
     let tty = io::stdin().is_terminal();
     let mode = if automatic || tty {
         print_auto_warning();
@@ -55,41 +50,33 @@ pub async fn run(
         ApprovalMode::Interactive
     };
     let approval = ApprovalController::with_preset(mode, preset);
-    let config = match max_steps {
-        Some(steps) => mini_agent_host::harness_config_auto(true, steps),
-        None => harness_config(false),
+    let config = match (automatic, max_steps) {
+        (true, steps) => mini_agent_host::harness_config_auto(
+            true,
+            steps.unwrap_or_else(|| runtime_config.copilot_max_steps()),
+        ),
+        (false, Some(steps)) => mini_agent_host::harness_config_auto(true, steps),
+        (false, None) => harness_config(false),
     };
-    let prepared =
-        match RuntimeBuilder::new(&runtime_config, approval.clone(), config, sandbox).build() {
-            Ok(build) => build,
+    let mut runtime =
+        match AppServerRuntime::start(runtime_config, approval, config, sandbox, session_request)
+            .await
+        {
+            Ok(runtime) => runtime,
             Err(error) => return preflight_error(json_output, &error),
         };
-    let mut harness = prepared.harness;
-    let images = prepared.images;
 
-    let mut opened_session = match session_request {
-        SessionRequest::Disabled => None,
-        other => match SessionStore::open(&runtime_config.workspace(), other) {
-            Ok(opened) => {
-                approval.bind_session_file(opened.store.path());
-                images.bind_session_file(opened.store.path());
-                if opened.resumed {
-                    let _ = harness.restore_session(opened.state.clone());
-                }
-                Some(opened)
-            }
-            Err(error) => {
-                return preflight_error(json_output, &format!("cannot open session: {error}"));
-            }
-        },
-    };
-
-    let format = if json_output {
-        ScriptFormat::Json
+    let observer_result = if automatic && !json_output {
+        RunObserver::new(trace)
     } else {
-        ScriptFormat::Text
+        let format = if json_output {
+            ScriptFormat::Json
+        } else {
+            ScriptFormat::Text
+        };
+        RunObserver::for_script(trace, format)
     };
-    let mut observer = match RunObserver::for_script(trace, format) {
+    let mut observer = match observer_result {
         Ok(observer) => observer,
         Err(error) => {
             return preflight_error(json_output, &format!("cannot create trace: {error}"));
@@ -101,37 +88,32 @@ pub async fn run(
         .unwrap_or_default()
         .as_millis() as u64;
 
-    let result = harness.run(prompt.clone(), &mut observer).await;
+    let result = runtime.run_turn(prompt.clone(), &mut observer).await;
 
     match result {
-        Ok(outcome) if outcome.stop_reason != StopReason::StepLimit => {
+        Ok(outcome)
+            if !matches!(
+                outcome.status,
+                mini_agent_core::TurnStatus::StepLimit | mini_agent_core::TurnStatus::Failed
+            ) =>
+        {
             observer.finish();
-            if let Some(ref mut session) = opened_session {
-                let _ = session.store.record_turn(TurnCommit {
-                    started_at_ms,
-                    prompt: &prompt,
-                    status: TurnStatus::Completed,
-                    steps: outcome.steps,
-                    error: None,
-                    messages: harness.messages(),
-                    checkpoint: harness.messages(),
-                });
-            }
+            let _ = runtime.record_turn(started_at_ms, &prompt, &outcome);
             if json_output {
                 println!(
                     "{}",
                     json!({
                         "output": outcome.final_text,
                         "exit_code": 0,
-                        "model": model_name,
+                        "model": runtime.model_name(),
                         "steps": outcome.steps,
-                        "session_id": opened_session.as_ref().map(|s| s.store.session_id()),
+                        "session_id": runtime.session().map(|s| s.store.session_id()),
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json()
                     })
                 );
             } else if !observer.assistant_displayed() {
-                print_final_answer(&outcome.final_text);
+                print_final_answer(outcome.final_text.as_deref().unwrap_or_default());
             }
             ExitCode::SUCCESS
         }
@@ -141,17 +123,9 @@ pub async fn run(
                 "stopped after {} model steps without completing",
                 outcome.steps
             );
-            if let Some(ref mut session) = opened_session {
-                let _ = session.store.record_turn(TurnCommit {
-                    started_at_ms,
-                    prompt: &prompt,
-                    status: TurnStatus::StepLimit,
-                    steps: outcome.steps,
-                    error: Some(&error),
-                    messages: harness.messages(),
-                    checkpoint: harness.messages(),
-                });
-            }
+            let mut outcome = outcome;
+            outcome.error = Some(error.clone());
+            let _ = runtime.record_turn(started_at_ms, &prompt, &outcome);
             eprintln!("error: {error}");
             if json_output {
                 println!(
@@ -159,9 +133,9 @@ pub async fn run(
                     json!({
                         "output": outcome.final_text,
                         "exit_code": 1,
-                        "model": model_name,
+                        "model": runtime.model_name(),
                         "steps": outcome.steps,
-                        "session_id": opened_session.as_ref().map(|s| s.store.session_id()),
+                        "session_id": runtime.session().map(|s| s.store.session_id()),
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json(),
                         "error": error
@@ -172,18 +146,6 @@ pub async fn run(
         }
         Err(error) => {
             observer.finish();
-            if let Some(ref mut session) = opened_session {
-                let err_str = error.to_string();
-                let _ = session.store.record_turn(TurnCommit {
-                    started_at_ms,
-                    prompt: &prompt,
-                    status: TurnStatus::Failed,
-                    steps: 0,
-                    error: Some(&err_str),
-                    messages: harness.messages(),
-                    checkpoint: harness.messages(),
-                });
-            }
             eprintln!("error: {error}");
             if json_output {
                 println!(
@@ -191,9 +153,9 @@ pub async fn run(
                     json!({
                         "output": "",
                         "exit_code": 1,
-                        "model": model_name,
+                        "model": runtime.model_name(),
                         "steps": 0,
-                        "session_id": opened_session.as_ref().map(|s| s.store.session_id()),
+                        "session_id": runtime.session().map(|s| s.store.session_id()),
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json(),
                         "error": error.to_string()
