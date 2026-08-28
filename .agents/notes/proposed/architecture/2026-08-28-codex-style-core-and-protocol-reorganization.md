@@ -341,6 +341,8 @@ The following pieces are implemented in the current workspace:
   an uncertain tool effect;
 - Thread lifecycle errors now remain distinct from model, compaction, and
   limit errors when the compatibility outcome helpers are used;
+- obsolete duplicate model/event contract modules were removed from core;
+  `mini-agent-protocol` is now the single source of those boundary types;
 - `mini-agent-app-server` now provides a thin in-process control-plane facade
   over one core `Thread`: it serializes `turn/start` and `turn/cancel`, routes
   running `Steer` and `FollowUp` submissions, and broadcasts ordered
