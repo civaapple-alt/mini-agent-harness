@@ -37,11 +37,16 @@ limits, failures, and observation events.
   messages, events, stop reasons, and limits.
 - `mini-agent-core` implements the execution kernel: context preparation,
   model/tool steps, compaction, hard limits, and cooperative run control.
+- `mini-agent-app-server` provides a thin in-process control-plane facade over
+  a core `Thread`, including typed turn commands and ordered event broadcast.
+  It does not implement a second agent loop or own provider, tool, or storage
+  policy.
 - `mini-agent-cli` provides the executable host: provider adapters, workspace
   tools, permissions, sessions, REPL, Goal/Plan workflows, and terminal output.
 
-The dependency direction is `mini-agent-cli → mini-agent-core →
-mini-agent-protocol`; the protocol and kernel do not depend on the CLI.
+The dependency direction is `mini-agent-core → mini-agent-protocol`.
+`mini-agent-app-server` depends on both and may be used by a CLI or another
+host; the protocol, kernel, and adapter do not depend on the CLI.
 
 ## Install
 

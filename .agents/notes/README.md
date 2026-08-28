@@ -82,7 +82,7 @@ If a proposed approach is rejected during review:
 
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-28 | [Codex-Style Core and Protocol Reorganization](proposed/architecture/2026-08-28-codex-style-core-and-protocol-reorganization.md) | Stabilize core-owned Context, Session, Thread, and Turn semantics before adding an app-server adapter |
+| 2026-08-28 | [Codex-Style Core and Protocol Reorganization](proposed/architecture/2026-08-28-codex-style-core-and-protocol-reorganization.md) | Stabilize core-owned Context, Session, Thread, and Turn semantics, then keep app-server control-plane translation thin |
 
 #### Bug Fixes (`proposed/bug-fix/`)
 

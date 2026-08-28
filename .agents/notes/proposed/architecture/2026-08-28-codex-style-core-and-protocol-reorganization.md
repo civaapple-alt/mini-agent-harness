@@ -30,19 +30,41 @@ back into the CLI.
 Reorganize in four layers, delivered in order:
 
 ```text
-future wire adapter (JSON-RPC / ACP / another host)
-                    |
-mini-agent-protocol | portable request, state, and event contracts
-                    |
-mini-agent-core     | Thread/Session/Turn + Context + agent loop
-                    |
-host adapters       | provider, concrete tools, approval, sandbox, storage, UI
+future wire transport
+        |
+mini-agent-app-server (optional control-plane adapter)
+        |                         \
+mini-agent-core (execution) ----> mini-agent-protocol (contracts)
+        ^
+        |
+host adapters (providers, tools, storage, policy, UI)
 ```
+
+The arrows describe dependency direction. A host can call `mini-agent-core`
+directly, or use `mini-agent-app-server`; the adapter is not a replacement for
+the kernel.
 
 The first two implementation stages stabilize `mini-agent-core`. Protocol
 changes should describe the core state machine, not prematurely become a
 network protocol. A later adapter may serialize the same contracts or define a
 versioned wire DTO layer without coupling the execution kernel to JSON-RPC.
+
+### Codex correspondence
+
+The intended mapping is deliberately behavioral rather than source-level:
+
+| Codex concept | mini-agent location | Boundary decision |
+| --- | --- | --- |
+| app-server `thread/start` | `mini-agent-app-server::AppServer::new` | Adapter creates one worker around a core `Thread`; it owns no loop. |
+| thread/session state | `mini-agent-core::Thread`, `SessionState` | Identity, status, turn numbering, messages, and context revision stay in core; JSONL remains in the CLI. |
+| `turn/start` and follow-up input | protocol `TurnStart`/`TurnInput`; core `Thread` and `RunControl` | The protocol names intent; core decides whether to start, steer, or queue at safe checkpoints. |
+| `run_turn()` | `Thread::run_turn_with_events` over `Harness` | Harness remains the compatibility facade while Thread owns lifecycle and event identity. |
+| model output and tool calls | core `Harness` plus host `Model`/`Tool` implementations | Core owns sequencing and limits; providers and concrete effects remain host supplied. |
+| tool router/orchestrator | current `ToolRegistry` and CLI policy seams | Split routing from approval, sandbox, retry, and process policy in Stage 3. |
+| live events and rollout history | protocol `EventEnvelope`/`EventSink`; CLI observer/trace | One ordered core stream feeds live UI, durable traces, and future notifications. |
+
+This keeps the app-server as Codex's harness control plane while keeping the
+execution kernel independently usable by the CLI and tests.
 
 ### 1. Core owns runtime state, not external storage
 
@@ -124,9 +146,10 @@ Add typed contracts for:
 
 The existing `Model`, `Tool`, `Message`, `Event`, and `Observer` contracts stay
 source-compatible where practical. Do not add JSON-RPC method names or server
-transport code to this crate yet. A future `mini-agent-app-server` or wire
-protocol crate should map these runtime contracts to JSON-RPC/ACP and own
-transport compatibility.
+transport code to this crate. The in-process `mini-agent-app-server` adapter
+maps these runtime contracts to serialized commands and event notifications
+without adding another execution loop. A future wire transport may map the
+same adapter surface to JSON-RPC or ACP and own transport compatibility.
 
 ### 4. Event-driven closure
 
@@ -210,9 +233,10 @@ Acceptance evidence:
 - the CLI's current security and sandbox tests remain authoritative for policy;
 - core remains deterministic with an in-memory executor.
 
-### Stage 4 — Add an external protocol adapter
+### Stage 4 — Add a thin in-process control-plane adapter
 
-Only after Stages 1–3 are stable, add an app-server-like crate or binary:
+The first adapter is deliberately in-process and owns only command
+serialization and event fan-out over one core `Thread`:
 
 ```text
 thread/start
@@ -223,9 +247,17 @@ thread/events
 thread/read or resume
 ```
 
-This adapter will translate wire requests into core operations and translate
-core events into notifications. It must not implement a second agent loop,
-context builder, or tool policy engine.
+`mini-agent-app-server` translates these operations into core calls, routes
+running `Steer` and `FollowUp` submissions through the core pending-input
+queue, and broadcasts `EventEnvelope` values. It must not implement a second
+agent loop, context builder, or tool policy engine.
+
+### Stage 5 — Add a versioned external transport
+
+Only after the in-process adapter is covered by deterministic integration tests,
+add JSON-RPC, ACP, or another wire transport. The wire layer should translate
+requests and notifications, define version/capability negotiation, and keep
+serialization compatibility separate from the execution kernel.
 
 ## Non-goals
 
@@ -296,11 +328,17 @@ Stage 1 has started in the current working tree:
   after model sampling or a complete tool batch;
 - protocol now exposes typed `ThreadStart` and `TurnStart` control payloads,
   and `TurnSubmission` carries `TurnId` values instead of untyped strings;
+- `mini-agent-app-server` now provides a thin in-process control-plane facade
+  over one core `Thread`: it serializes `turn/start` and `turn/cancel`, routes
+  running `Steer` and `FollowUp` submissions, and broadcasts ordered
+  `EventEnvelope` values without duplicating the agent loop;
 - existing core and CLI session, compaction, restart, and interactive tests
   pass after the migration.
 
-The proposal remains `proposed`: Thread lifecycle events and envelope-backed
-REPL traces are now present, while the trace loader remains backward-compatible
-with payload-only JSONL and no external protocol adapter exists. The current
-`StopAtCheckpoint` CLI behavior remains compatible; `ContinueSameTurn` and
-enveloped events are covered at the core boundary for the next host migration.
+The proposal remains `proposed`: the in-process adapter and its lifecycle,
+steer, follow-up, and cancellation coverage are present, while tool outcome
+taxonomy, restart integration at the adapter boundary, and a versioned
+external transport remain future work. The trace loader remains
+backward-compatible with payload-only JSONL. The current `StopAtCheckpoint`
+CLI behavior remains compatible; `ContinueSameTurn` and enveloped events are
+covered at the core boundary for the next host migration.

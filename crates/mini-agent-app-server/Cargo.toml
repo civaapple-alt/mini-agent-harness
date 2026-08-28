@@ -1,0 +1,20 @@
+[package]
+name = "mini-agent-app-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "A thin in-process control-plane adapter for mini-agent Threads"
+readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+mini-agent-core = { version = "0.3.0", path = "../mini-agent-core" }
+mini-agent-protocol = { version = "0.3.0", path = "../mini-agent-protocol" }
+tokio.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -96,6 +96,14 @@ impl<M: Model> Thread<M> {
         self.next_turn_number = next_turn_number.max(1);
     }
 
+    /// Returns the identifier that will be assigned to the next turn.
+    ///
+    /// This is a read-only preview; the counter advances only when a turn is
+    /// accepted by `run_turn` or `run_turn_with_events`.
+    pub fn next_turn_id(&self) -> TurnId {
+        TurnId::new(format!("turn-{}", self.next_turn_number))
+    }
+
     pub fn last_turn_id(&self) -> Option<&TurnId> {
         self.last_turn_id.as_ref()
     }
@@ -241,7 +249,7 @@ impl<M: Model> Thread<M> {
             return Err(ThreadError::InvalidInputMode(input.mode));
         }
 
-        let id = TurnId::new(format!("turn-{}", self.next_turn_number));
+        let id = self.next_turn_id();
         self.next_turn_number = self.next_turn_number.saturating_add(1);
         self.last_turn_id = Some(id.clone());
         self.status = ThreadStatus::Running;
