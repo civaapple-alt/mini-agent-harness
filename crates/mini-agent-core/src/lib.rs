@@ -1,6 +1,9 @@
+mod context;
 mod harness;
+mod session;
 mod tool;
 
+pub use context::Context;
 pub use harness::ContextLimitBehavior;
 pub use harness::Harness;
 pub use harness::HarnessConfig;
@@ -24,4 +27,5 @@ pub use mini_agent_protocol::Tool;
 pub use mini_agent_protocol::ToolCall;
 pub use mini_agent_protocol::ToolError;
 pub use mini_agent_protocol::ToolSpec;
+pub use session::SessionState;
 pub use tool::ToolRegistry;

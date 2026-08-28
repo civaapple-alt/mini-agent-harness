@@ -951,7 +951,7 @@ async fn run_persistence(
             return error_record("persistence", error);
         }
     };
-    let restored_messages = resumed.messages.len();
+    let restored_messages = resumed.state.messages().len();
     let model = match model(
         api_key,
         model_name,
@@ -968,7 +968,7 @@ async fn run_persistence(
         }
     };
     let mut resumed_harness = Harness::new(model, ToolRegistry::default(), config(1));
-    if let Err(error) = resumed_harness.restore_history(std::mem::take(&mut resumed.messages)) {
+    if let Err(error) = resumed_harness.restore_session(std::mem::take(&mut resumed.state)) {
         drop(resumed);
         cleanup();
         return error_record("persistence", error.to_string());
@@ -1102,7 +1102,7 @@ async fn run_mentor(
         }
     };
     let source_checkpoint_seq = resumed.store.checkpoint_seq();
-    let restored_messages = resumed.messages.len();
+    let restored_messages = resumed.state.messages().len();
     let model = match model(
         &api_key,
         &mentor_model,
@@ -1126,7 +1126,7 @@ async fn run_mentor(
         ..HarnessConfig::default()
     };
     let mut harness = Harness::new(model, ToolRegistry::default(), mentor_config);
-    if let Err(error) = harness.restore_history(std::mem::take(&mut resumed.messages)) {
+    if let Err(error) = harness.restore_session(std::mem::take(&mut resumed.state)) {
         drop(resumed);
         cleanup();
         return error_record("mentor", error.to_string());

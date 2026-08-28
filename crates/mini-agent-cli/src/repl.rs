@@ -19,6 +19,7 @@ use mini_agent_core::HarnessError;
 use mini_agent_core::LimitKind;
 use mini_agent_core::Observer;
 use mini_agent_core::RunControl;
+use mini_agent_core::SessionState;
 use mini_agent_core::StopReason;
 use mini_agent_core::ToolError;
 use std::collections::VecDeque;
@@ -455,7 +456,9 @@ fn spawn_worker(
             approval.bind_session_file(opened.store.path());
             images.bind_session_file(opened.store.path());
             if opened.resumed {
-                if let Err(error) = harness.restore_history(std::mem::take(&mut opened.messages)) {
+                if let Err(error) = harness
+                    .restore_session(std::mem::replace(&mut opened.state, SessionState::new()))
+                {
                     let _ = events.send(ReplEvent::InitializationFailed(format!(
                         "cannot restore session history: {error}"
                     )));

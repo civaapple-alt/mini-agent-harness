@@ -78,6 +78,12 @@ If a proposed approach is rejected during review:
 
 ### Proposed Notes Under Review (`proposed/`)
 
+#### Architecture (`proposed/architecture/`)
+
+| Date | Title | Focus |
+|---|---|---|
+| 2026-08-28 | [Codex-Style Core and Protocol Reorganization](proposed/architecture/2026-08-28-codex-style-core-and-protocol-reorganization.md) | Stabilize core-owned Context, Session, Thread, and Turn semantics before adding an app-server adapter |
+
 #### Bug Fixes (`proposed/bug-fix/`)
 
 | Date | Title | Focus |

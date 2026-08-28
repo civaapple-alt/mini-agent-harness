@@ -333,7 +333,7 @@ async fn run_auto(
                 approval.bind_session_file(opened.store.path());
                 images.bind_session_file(opened.store.path());
                 if opened.resumed {
-                    let _ = harness.restore_history(opened.messages.clone());
+                    let _ = harness.restore_session(opened.state.clone());
                 }
                 Some(opened)
             }

@@ -54,7 +54,7 @@ pub(crate) async fn run(arguments: String, trace: Option<PathBuf>, json_output: 
         Err(error) => return preflight_error(json_output, &error),
     };
     let source_checkpoint_seq = opened.store.checkpoint_seq();
-    let source_fingerprint = match fingerprint(&opened.messages) {
+    let source_fingerprint = match fingerprint(opened.state.messages()) {
         Ok(fingerprint) => fingerprint,
         Err(error) => return preflight_error(json_output, &error),
     };
@@ -81,7 +81,7 @@ pub(crate) async fn run(arguments: String, trace: Option<PathBuf>, json_output: 
         ToolRegistry::new(Vec::new()),
         HarnessConfig::default(),
     );
-    if let Err(error) = harness.restore_history(std::mem::take(&mut opened.messages)) {
+    if let Err(error) = harness.restore_session(std::mem::take(&mut opened.state)) {
         return preflight_error(
             json_output,
             &format!("cannot restore mentor source: {error}"),

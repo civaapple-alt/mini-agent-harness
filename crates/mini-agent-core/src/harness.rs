@@ -16,6 +16,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+use crate::SessionState;
+use crate::context::context_bytes_for;
+
 const TRUNCATION_MARKER: &str = "\n[truncated]";
 const COMPACTION_PREFIX: &str = "[Compacted conversation context]";
 const COMPACTION_PROMPT: &str = "Summarize the conversation state for another coding agent that must continue the work. Preserve the user's active goal, constraints, decisions, files changed, commands and tests already run, failures, unresolved work, and the exact next actions. Be concise but do not omit information needed to continue. Output only the summary and do not call tools.";
@@ -119,7 +122,7 @@ pub struct Harness<M> {
     model: M,
     tools: ToolRegistry,
     config: HarnessConfig,
-    messages: Vec<Message>,
+    session: SessionState,
 }
 
 impl<M: Model> Harness<M> {
@@ -128,7 +131,7 @@ impl<M: Model> Harness<M> {
             model,
             tools,
             config,
-            messages: Vec::new(),
+            session: SessionState::new(),
         }
     }
 
@@ -137,7 +140,11 @@ impl<M: Model> Harness<M> {
     }
 
     pub fn messages(&self) -> &[Message] {
-        &self.messages
+        self.session.messages()
+    }
+
+    pub fn session_state(&self) -> &SessionState {
+        &self.session
     }
 
     pub fn tool_specs(&self) -> Vec<crate::ToolSpec> {
@@ -145,7 +152,7 @@ impl<M: Model> Harness<M> {
     }
 
     pub fn clear_history(&mut self) {
-        self.messages.clear();
+        self.session.clear();
     }
 
     pub fn append_context(&mut self, text: impl Into<String>) -> Result<(), LimitExceeded> {
@@ -157,12 +164,17 @@ impl<M: Model> Harness<M> {
                 actual: text.len(),
             });
         }
-        self.messages.push(Message::Context { text });
+        self.session.push(Message::Context { text });
         Ok(())
     }
 
     pub fn restore_history(&mut self, messages: Vec<Message>) -> Result<(), LimitExceeded> {
-        for message in &messages {
+        self.restore_session(SessionState::from_messages(messages))
+    }
+
+    pub fn restore_session(&mut self, session: SessionState) -> Result<(), LimitExceeded> {
+        let messages = session.messages();
+        for message in messages {
             match message {
                 Message::Context { text } if text.len() > self.config.max_context_item_bytes => {
                     return Err(LimitExceeded {
@@ -214,7 +226,7 @@ impl<M: Model> Harness<M> {
             }
         }
         let tool_specs = self.tools.specs();
-        let actual = context_bytes_for(&self.config.system_prompt, &messages, &tool_specs);
+        let actual = context_bytes_for(&self.config.system_prompt, messages, &tool_specs);
         if actual > self.config.max_context_bytes {
             return Err(LimitExceeded {
                 kind: LimitKind::ContextBytes,
@@ -222,7 +234,7 @@ impl<M: Model> Harness<M> {
                 actual,
             });
         }
-        self.messages = messages;
+        self.session = session;
         Ok(())
     }
 
@@ -264,12 +276,12 @@ impl<M: Model> Harness<M> {
             prompt: prompt.clone(),
         });
 
-        let previous_message_count = self.messages.len();
-        self.messages.push(Message::User { text: prompt });
+        let previous_message_count = self.session.messages().len();
+        self.session.push(Message::User { text: prompt });
         let tool_specs = self.tools.specs();
         if let Err(error) = self.prepare_context(&tool_specs, observer).await {
             if self.config.context_limit_behavior == ContextLimitBehavior::Reject {
-                self.messages.truncate(previous_message_count);
+                self.session.truncate_messages(previous_message_count);
             }
             return Err(error);
         }
@@ -282,7 +294,7 @@ impl<M: Model> Harness<M> {
             if control.is_steer_requested() {
                 return Ok(finish(
                     final_text,
-                    self.messages.clone(),
+                    self.session.messages().to_vec(),
                     step,
                     StopReason::Steered,
                     observer,
@@ -292,7 +304,7 @@ impl<M: Model> Harness<M> {
             if step > self.config.max_steps {
                 return Ok(finish(
                     final_text,
-                    self.messages.clone(),
+                    self.session.messages().to_vec(),
                     step.saturating_sub(1),
                     StopReason::StepLimit,
                     observer,
@@ -310,7 +322,7 @@ impl<M: Model> Harness<M> {
                 .respond(
                     ModelRequest {
                         system_prompt: &self.config.system_prompt,
-                        messages: &self.messages,
+                        messages: self.session.messages(),
                         tools: &tool_specs,
                         max_response_bytes: self.config.max_model_response_bytes,
                     },
@@ -356,7 +368,7 @@ impl<M: Model> Harness<M> {
                 usage: response.usage,
             });
             final_text = response.text.clone();
-            self.messages.push(Message::Assistant {
+            self.session.push(Message::Assistant {
                 reasoning: response.reasoning,
                 text: response.text,
                 tool_calls: response.tool_calls.clone(),
@@ -365,7 +377,7 @@ impl<M: Model> Harness<M> {
             if control.is_steer_requested() {
                 return Ok(finish(
                     final_text,
-                    self.messages.clone(),
+                    self.session.messages().to_vec(),
                     step,
                     StopReason::Steered,
                     observer,
@@ -375,7 +387,7 @@ impl<M: Model> Harness<M> {
             if response.tool_calls.is_empty() {
                 return Ok(finish(
                     final_text,
-                    self.messages.clone(),
+                    self.session.messages().to_vec(),
                     step,
                     StopReason::Completed,
                     observer,
@@ -400,7 +412,7 @@ impl<M: Model> Harness<M> {
                     is_error,
                     truncated,
                 });
-                self.messages.push(Message::Tool {
+                self.session.push(Message::Tool {
                     call_id: call.id,
                     name: call.name.clone(),
                     content: content.clone(),
@@ -424,7 +436,7 @@ impl<M: Model> Harness<M> {
             if control.is_steer_requested() {
                 return Ok(finish(
                     final_text,
-                    self.messages.clone(),
+                    self.session.messages().to_vec(),
                     step,
                     StopReason::Steered,
                     observer,
@@ -451,7 +463,7 @@ impl<M: Model> Harness<M> {
     }
 
     fn context_bytes(&self, system_prompt: &str, tool_specs: &[crate::ToolSpec]) -> usize {
-        context_bytes_for(system_prompt, &self.messages, tool_specs)
+        self.session.context_bytes(system_prompt, tool_specs)
     }
 
     async fn prepare_context<O: Observer + Send>(
@@ -462,7 +474,7 @@ impl<M: Model> Harness<M> {
         let actual = self.context_bytes(&self.config.system_prompt, tool_specs);
         let compact_at = self.config.max_context_bytes / 2;
         let should_compact = self.config.context_limit_behavior == ContextLimitBehavior::Compact
-            && self.messages.len() > 1
+            && self.session.messages().len() > 1
             && actual >= compact_at;
         if should_compact {
             self.compact_context(tool_specs, observer).await?;
@@ -478,7 +490,7 @@ impl<M: Model> Harness<M> {
     ) -> Result<(), HarnessError<M::Error>> {
         let before_bytes = self.context_bytes(&self.config.system_prompt, tool_specs);
         let compact_at = self.config.max_context_bytes / 2;
-        let (mut prefix, context, tail) = split_compaction_parts(&self.messages);
+        let (mut prefix, context, tail) = split_compaction_parts(self.session.messages());
         if prefix.is_empty() {
             return Ok(());
         }
@@ -590,7 +602,7 @@ impl<M: Model> Harness<M> {
                 observer,
             ));
         }
-        self.messages = compacted;
+        self.session.replace_messages(compacted);
         observer.observe(&Event::ContextCompactionFinished {
             before_bytes,
             after_bytes,
@@ -732,20 +744,6 @@ fn mechanical_compact(
         }
         remove_first_message_group(&mut prefix);
     }
-}
-
-fn context_bytes_for(
-    system_prompt: &str,
-    messages: &[Message],
-    tool_specs: &[crate::ToolSpec],
-) -> usize {
-    system_prompt.len()
-        + serde_json::to_vec(messages)
-            .expect("messages must serialize")
-            .len()
-        + serde_json::to_vec(tool_specs)
-            .expect("tool specs must serialize")
-            .len()
 }
 
 fn model_response_bytes(response: &ModelResponse) -> usize {

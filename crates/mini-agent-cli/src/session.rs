@@ -1,4 +1,5 @@
 use mini_agent_core::Message;
+use mini_agent_core::SessionState;
 use serde_json::Value;
 use serde_json::json;
 use std::env;
@@ -41,7 +42,7 @@ pub(crate) enum SessionRequest {
 
 pub(crate) struct OpenedSession {
     pub store: SessionStore,
-    pub messages: Vec<Message>,
+    pub state: SessionState,
     pub resumed: bool,
 }
 
@@ -275,7 +276,7 @@ impl SessionStore {
             store.update_summary_and_signals("", 0, None);
             return Ok(OpenedSession {
                 store,
-                messages: Vec::new(),
+                state: SessionState::new(),
                 resumed: false,
             });
         }
@@ -346,7 +347,7 @@ impl SessionStore {
         store.update_summary_and_signals("", 0, None);
         Ok(OpenedSession {
             store,
-            messages: Vec::new(),
+            state: SessionState::new(),
             resumed: false,
         })
     }
@@ -388,7 +389,7 @@ impl SessionStore {
         };
         Ok(OpenedSession {
             store,
-            messages: loaded.messages,
+            state: SessionState::from_messages(loaded.messages),
             resumed: true,
         })
     }
@@ -465,7 +466,7 @@ impl SessionStore {
             store.update_summary_and_signals("", 0, None);
             return Ok(OpenedSession {
                 store,
-                messages: parent_messages,
+                state: SessionState::from_messages(parent_messages),
                 resumed: true,
             });
         }

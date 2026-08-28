@@ -22,6 +22,9 @@ between a protocol crate, an execution-kernel crate, and host adapters:
    - Owns the explicit execution run loop (`prepare -> model -> tool -> observer`).
    - Enforces context hard limits, compaction, step control, and cooperative
      `RunControl` steering boundaries.
+   - Owns storage-neutral `SessionState` and its nested `Context`, including
+     ordered messages and context revision tracking. Hosts restore and persist
+     these values but do not move storage I/O into core.
    - Owns `ToolRegistry` as the in-process dispatch implementation.
    - Re-exports protocol types as a compatibility facade while callers migrate
      to the protocol crate directly.

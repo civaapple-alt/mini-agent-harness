@@ -63,7 +63,7 @@ fn persists_and_resumes_the_latest_settled_checkpoint() {
     let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
 
     assert!(resumed.resumed);
-    assert_eq!(resumed.messages, checkpoint);
+    assert_eq!(resumed.state.messages(), checkpoint);
     drop(resumed);
     fs::remove_dir_all(root).unwrap();
 }
@@ -92,7 +92,7 @@ fn removes_a_torn_final_record_and_uses_the_previous_checkpoint() {
 
     let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
 
-    assert_eq!(resumed.messages, vec![context]);
+    assert_eq!(resumed.state.messages(), [context]);
     assert_eq!(fs::metadata(path).unwrap().len(), settled_bytes);
     drop(resumed);
     fs::remove_dir_all(root).unwrap();
@@ -147,7 +147,7 @@ fn derived_items_reference_a_checkpoint_without_entering_resume_history() {
 
     assert_eq!(derived["source"]["checkpoint_seq"], checkpoint_seq);
     assert_eq!(derived["output"], "derived review");
-    assert_eq!(resumed.messages, vec![context]);
+    assert_eq!(resumed.state.messages(), [context]);
     assert_eq!(resumed.store.checkpoint_seq(), checkpoint_seq);
     drop(resumed);
     fs::remove_dir_all(root).unwrap();
@@ -194,7 +194,7 @@ fn forks_an_existing_session_into_a_new_session() {
     let forked = SessionStore::open(&root, SessionRequest::Fork(parent_id.clone())).unwrap();
     assert_ne!(forked.store.session_id(), parent_id);
     assert!(forked.resumed);
-    assert_eq!(forked.messages, vec![context]);
+    assert_eq!(forked.state.messages(), [context]);
     assert_eq!(
         fs::read(
             forked
