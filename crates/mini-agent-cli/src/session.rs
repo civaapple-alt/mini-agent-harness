@@ -1067,6 +1067,7 @@ pub(crate) fn try_load_session_events(
                                 content,
                                 is_error,
                                 truncated: false,
+                                outcome: None,
                             });
                         }
                         _ => {}
@@ -1147,6 +1148,7 @@ pub(crate) fn try_load_session_events(
                                         content,
                                         is_error,
                                         truncated: false,
+                                        outcome: None,
                                     });
                                 }
                                 _ => {}

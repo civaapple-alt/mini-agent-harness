@@ -1,5 +1,7 @@
 use mini_agent_protocol::Message;
 use mini_agent_protocol::ToolSpec;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// The ordered set of conversation items that can be projected into a model
 /// request.
@@ -7,7 +9,7 @@ use mini_agent_protocol::ToolSpec;
 /// `Context` owns conversation items inside the execution core. It deliberately
 /// does not know how a session is stored on disk or how external effects are
 /// replayed.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct Context {
     messages: Vec<Message>,
 }

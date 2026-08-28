@@ -624,6 +624,7 @@ mod tests {
                     .to_string(),
                 is_error: false,
                 truncated: false,
+                outcome: None,
             },
             Event::ModelStarted { step: 2 },
             Event::ToolStarted {
@@ -639,6 +640,7 @@ mod tests {
                 content: "Subagent [sub-123] completed follow-up turn:\n\nTests pass.".to_string(),
                 is_error: false,
                 truncated: false,
+                outcome: None,
             },
             Event::RunFinished {
                 stop_reason: StopReason::Completed,

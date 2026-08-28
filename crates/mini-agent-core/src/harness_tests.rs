@@ -4,6 +4,8 @@ use crate::ModelUsage;
 use crate::Tool;
 use crate::ToolCall;
 use crate::ToolError;
+use crate::ToolExecutionOutcome;
+use crate::ToolExecutionStatus;
 use crate::ToolSpec;
 use crate::TurnInputMode;
 use serde_json::Value;
@@ -86,6 +88,29 @@ impl Tool for Uppercase {
             .and_then(Value::as_str)
             .ok_or_else(|| ToolError("text must be a string".to_string()))?;
         Ok(text.to_uppercase())
+    }
+}
+
+struct ApprovalTool;
+
+impl Tool for ApprovalTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "needs_approval".to_string(),
+            description: "A tool whose host policy requires approval".to_string(),
+            parameters: json!({"type": "object"}),
+        }
+    }
+
+    fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
+        Err(ToolError("approval required".to_string()))
+    }
+
+    fn execute_outcome(&self, _arguments: &Value) -> ToolExecutionOutcome {
+        ToolExecutionOutcome {
+            status: ToolExecutionStatus::NeedsApproval,
+            content: "approval required".to_string(),
+        }
     }
 }
 
@@ -303,6 +328,57 @@ async fn returns_unknown_tool_failure_to_model() {
             is_error: true,
         }
     );
+}
+
+#[tokio::test]
+async fn preserves_structured_tool_policy_outcome_in_events() {
+    let model = ScriptedModel {
+        responses: VecDeque::from([
+            ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call-approval".to_string(),
+                    name: "needs_approval".to_string(),
+                    arguments: json!({}),
+                }],
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: "waiting for approval".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            },
+        ]),
+    };
+    let mut harness = Harness::new(
+        model,
+        ToolRegistry::new(vec![Box::new(ApprovalTool)]),
+        HarnessConfig::default(),
+    );
+    let mut events = Vec::new();
+
+    struct Recorder<'a>(&'a mut Vec<Event>);
+    impl Observer for Recorder<'_> {
+        fn observe(&mut self, event: &Event) {
+            self.0.push(event.clone());
+        }
+    }
+
+    harness
+        .run("use the protected tool", &mut Recorder(&mut events))
+        .await
+        .unwrap();
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::ToolFinished {
+            is_error: true,
+            outcome: Some(ToolExecutionStatus::NeedsApproval),
+            ..
+        }
+    )));
 }
 
 #[tokio::test]

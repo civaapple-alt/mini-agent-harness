@@ -1,12 +1,14 @@
 use crate::Context;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::ToolSpec;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Storage-neutral conversation state owned by the execution core.
 ///
 /// Hosts may serialize checkpoints or append JSONL records, but the runtime
 /// only exchanges this value and never opens files or replays external effects.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct SessionState {
     context: Context,
     context_revision: u64,

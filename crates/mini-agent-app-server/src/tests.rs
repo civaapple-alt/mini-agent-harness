@@ -213,3 +213,48 @@ async fn rejects_idle_steer_and_cancel_without_starting_a_second_loop() {
         Err(AppServerError::NoActiveTurn)
     );
 }
+
+#[tokio::test]
+async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
+    let initial_harness =
+        Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let mut initial = Thread::new(ThreadId::new("thread-1"), initial_harness);
+    initial
+        .run_turn(
+            TurnInput::new(TurnInputMode::Start, "first"),
+            &mut (),
+            &mini_agent_core::RunControl::new(),
+            mini_agent_core::SteeringMode::StopAtCheckpoint,
+        )
+        .await
+        .unwrap();
+    let checkpoint = initial.checkpoint().unwrap();
+
+    let replacement = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let mut restored = Thread::new(ThreadId::new("placeholder"), replacement);
+    restored.restore_checkpoint(checkpoint).unwrap();
+    let server = AppServer::new(ThreadStart::new(ThreadId::new("thread-1")), restored);
+    let mut events = server.subscribe();
+
+    assert_eq!(
+        server
+            .turn_start(TurnStart::new(TurnInput::new(
+                TurnInputMode::Start,
+                "second",
+            )))
+            .await
+            .unwrap(),
+        TurnSubmission::Started {
+            turn_id: mini_agent_core::TurnId::new("turn-2")
+        }
+    );
+
+    let mut turn_ids = Vec::new();
+    for _ in 0..6 {
+        let event = events.recv().await.unwrap();
+        if matches!(event.event, Event::TurnStarted { .. }) {
+            turn_ids.push(event.turn_id);
+        }
+    }
+    assert_eq!(turn_ids, [Some(mini_agent_core::TurnId::new("turn-2"))]);
+}

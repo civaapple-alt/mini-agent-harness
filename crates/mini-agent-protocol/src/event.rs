@@ -3,6 +3,7 @@ use crate::ModelUsage;
 use crate::StopReason;
 use crate::ThreadId;
 use crate::ToolCall;
+use crate::ToolExecutionStatus;
 use crate::TurnId;
 use crate::TurnInputMode;
 use crate::TurnStatus;
@@ -43,6 +44,8 @@ pub enum Event {
         content: String,
         is_error: bool,
         truncated: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outcome: Option<ToolExecutionStatus>,
     },
     ContextCompactionStarted {
         before_bytes: usize,
@@ -101,6 +104,10 @@ pub trait Observer {
 pub trait EventSink {
     fn emit(&mut self, event: EventEnvelope);
 }
+
+#[cfg(test)]
+#[path = "event_tests.rs"]
+mod tests;
 
 impl Observer for () {
     fn observe(&mut self, _event: &Event) {}

@@ -295,7 +295,7 @@ This proposal can move to `implemented/architecture/` only when:
 
 ## Implementation progress
 
-Stage 1 has started in the current working tree:
+The following pieces are implemented in the current workspace:
 
 - `mini-agent-core` now exposes storage-neutral `Context` and `SessionState`;
 - `Harness` owns `SessionState` instead of a raw message vector;
@@ -328,6 +328,17 @@ Stage 1 has started in the current working tree:
   after model sampling or a complete tool batch;
 - protocol now exposes typed `ThreadStart` and `TurnStart` control payloads,
   and `TurnSubmission` carries `TurnId` values instead of untyped strings;
+- protocol now defines `ToolExecutionRequest`, `ToolExecutionOutcome`, and
+  `ToolExecutionStatus`; `ToolFinished` carries an optional status so new
+  traces distinguish approval, deferral, and retryable outcomes while old
+  payload-only traces remain readable;
+- `mini-agent-core` now exposes `ToolRouter` with `ToolRegistry` as a
+  compatibility alias. The router owns capability lookup, while a host tool
+  may override `Tool::execute_outcome` to report policy-aware results;
+- core now exposes a storage-neutral `ThreadCheckpoint` containing settled
+  `SessionState`, identity, turn numbering, and event sequence. Restoring a
+  checkpoint validates it through the active Harness limits and never replays
+  an uncertain tool effect;
 - `mini-agent-app-server` now provides a thin in-process control-plane facade
   over one core `Thread`: it serializes `turn/start` and `turn/cancel`, routes
   running `Steer` and `FollowUp` submissions, and broadcasts ordered
@@ -336,9 +347,10 @@ Stage 1 has started in the current working tree:
   pass after the migration.
 
 The proposal remains `proposed`: the in-process adapter and its lifecycle,
-steer, follow-up, and cancellation coverage are present, while tool outcome
-taxonomy, restart integration at the adapter boundary, and a versioned
-external transport remain future work. The trace loader remains
+steer, follow-up, cancellation, and restored-checkpoint coverage are present,
+and the first structured tool outcome contract is now in place. Host policy
+implementations, persisted history status, and a versioned external transport
+remain future work. The trace loader remains
 backward-compatible with payload-only JSONL. The current `StopAtCheckpoint`
 CLI behavior remains compatible; `ContinueSameTurn` and enveloped events are
 covered at the core boundary for the next host migration.

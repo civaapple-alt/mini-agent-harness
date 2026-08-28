@@ -15,6 +15,8 @@ use mini_agent_protocol::TurnId;
 use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnStatus;
+use serde::Deserialize;
+use serde::Serialize;
 use std::error::Error;
 use std::fmt;
 use std::ops::Deref;
@@ -52,6 +54,19 @@ pub struct TurnResult {
     pub id: TurnId,
     pub status: TurnStatus,
     pub outcome: RunOutcome,
+}
+
+/// Storage-neutral settled Thread state for host checkpointing and restart.
+///
+/// A checkpoint contains only core values. It never includes an in-flight
+/// external effect, and restoring it does not replay a tool invocation.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ThreadCheckpoint {
+    pub thread_id: ThreadId,
+    pub session: crate::SessionState,
+    pub next_turn_number: u64,
+    pub last_turn_id: Option<TurnId>,
+    pub next_event_sequence: u64,
 }
 
 pub struct Thread<M> {
@@ -110,6 +125,40 @@ impl<M: Model> Thread<M> {
 
     pub fn next_event_sequence(&self) -> u64 {
         self.next_event_sequence
+    }
+
+    /// Projects settled runtime state into a host-owned checkpoint value.
+    pub fn checkpoint(&self) -> Result<ThreadCheckpoint, ThreadError<M::Error>> {
+        if self.status == ThreadStatus::Running {
+            return Err(ThreadError::Busy);
+        }
+        Ok(ThreadCheckpoint {
+            thread_id: self.id.clone(),
+            session: self.harness.session_state().clone(),
+            next_turn_number: self.next_turn_number,
+            last_turn_id: self.last_turn_id.clone(),
+            next_event_sequence: self.next_event_sequence,
+        })
+    }
+
+    /// Restores a settled checkpoint after validating it against this
+    /// Thread's model, tools, and context limits.
+    pub fn restore_checkpoint(
+        &mut self,
+        checkpoint: ThreadCheckpoint,
+    ) -> Result<(), ThreadError<M::Error>> {
+        if self.status == ThreadStatus::Running {
+            return Err(ThreadError::Busy);
+        }
+        self.harness
+            .restore_session(checkpoint.session)
+            .map_err(|error| ThreadError::Harness(HarnessError::Limit(error)))?;
+        self.id = checkpoint.thread_id;
+        self.status = ThreadStatus::Idle;
+        self.next_turn_number = checkpoint.next_turn_number.max(1);
+        self.last_turn_id = checkpoint.last_turn_id;
+        self.next_event_sequence = checkpoint.next_event_sequence.max(1);
+        Ok(())
     }
 
     pub fn harness(&self) -> &Harness<M> {

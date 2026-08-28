@@ -10,6 +10,7 @@ use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::Observer;
 use mini_agent_protocol::StopReason;
+use mini_agent_protocol::ToolExecutionRequest;
 use mini_agent_protocol::TurnInput;
 use std::error::Error;
 use std::fmt;
@@ -494,11 +495,10 @@ impl<M: Model> Harness<M> {
             let mut current_executed_batch = Vec::new();
             for call in response.tool_calls {
                 observer.observe(&Event::ToolStarted { call: call.clone() });
-                let result = self.tools.execute(&call.name, &call.arguments);
-                let (content, is_error) = match result {
-                    Ok(content) => (content, false),
-                    Err(error) => (error.to_string(), true),
-                };
+                let request = ToolExecutionRequest::from(call.clone());
+                let outcome = self.tools.execute_outcome(&request);
+                let is_error = outcome.status.is_error();
+                let content = outcome.content.clone();
                 let truncated = content.len() > self.config.max_tool_output_bytes;
                 let content = truncate_utf8(content, self.config.max_tool_output_bytes);
 
@@ -508,6 +508,7 @@ impl<M: Model> Harness<M> {
                     content: content.clone(),
                     is_error,
                     truncated,
+                    outcome: Some(outcome.status),
                 });
                 self.session.push(Message::Tool {
                     call_id: call.id,

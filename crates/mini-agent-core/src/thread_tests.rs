@@ -10,6 +10,7 @@ use crate::ModelRequest;
 use crate::ModelResponse;
 use crate::RunControl;
 use crate::SteeringMode;
+use crate::ThreadCheckpoint;
 use crate::ThreadError;
 use crate::ThreadId;
 use crate::ThreadStatus;
@@ -139,6 +140,45 @@ async fn thread_assigns_turn_ids_and_returns_to_idle() {
     assert_eq!(first.id.as_str(), "turn-1");
     assert_eq!(first.status, TurnStatus::Completed);
     assert_eq!(second.id.as_str(), "turn-2");
+}
+
+#[tokio::test]
+async fn checkpoint_round_trip_preserves_context_and_turn_sequence() {
+    let harness = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let mut thread = Thread::new(ThreadId::new("thread-1"), harness);
+    let control = RunControl::new();
+
+    thread
+        .run_turn(
+            TurnInput::new(TurnInputMode::Start, "remember this"),
+            &mut (),
+            &control,
+            SteeringMode::StopAtCheckpoint,
+        )
+        .await
+        .unwrap();
+    let checkpoint = thread.checkpoint().unwrap();
+    let encoded = serde_json::to_value(&checkpoint).unwrap();
+    let decoded: ThreadCheckpoint = serde_json::from_value(encoded).unwrap();
+
+    let replacement = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let mut restored = Thread::new(ThreadId::new("placeholder"), replacement);
+    restored.restore_checkpoint(decoded).unwrap();
+
+    assert_eq!(restored.id(), &ThreadId::new("thread-1"));
+    assert_eq!(restored.harness().messages(), thread.harness().messages());
+    assert_eq!(restored.next_event_sequence(), thread.next_event_sequence());
+
+    let next = restored
+        .run_turn(
+            TurnInput::new(TurnInputMode::StartIfIdle, "continue"),
+            &mut (),
+            &control,
+            SteeringMode::StopAtCheckpoint,
+        )
+        .await
+        .unwrap();
+    assert_eq!(next.id, TurnId::new("turn-2"));
 }
 
 #[tokio::test]
