@@ -53,9 +53,15 @@ evidence below is from the current working tree:
   passed the Ubuntu, macOS, Windows, and Rust 1.88 jobs; its quality job
   failed only the line-budget check. That run does not include this working
   tree.
-- Current `python scripts/line_budget.py`: core 4,058 / 20,000 lines; all Rust
-  source 34,377 / 30,000 lines, including tests. The repository-wide gate is
-  over budget by 4,377 lines.
+- Current `python scripts/line_budget.py`: runtime layers (core + protocol +
+  host + app-server) 25,863 / 20,000 lines; all Rust source 34,377 / 30,000
+  lines, including tests. The ACP edge is reported separately and excluded
+  from the runtime gate. The runtime gate is over budget by 5,863 lines and
+  the repository-wide gate is over budget by 4,377 lines. The diagnostic layer
+  breakdown is core 4,058, protocol 699, host 18,213, app-server 2,893,
+  acp 667, and CLI 7,847 lines. The same report separates production/unit/integration
+  lines as core 1,781/1,928/349, protocol 519/180/0, host 13,117/5,096/0,
+  app-server 2,105/788/0, acp 557/110/0, and CLI 4,904/486/2,457.
 - Using temporary Zig compiler/linker/archive wrappers on Windows, the Linux
   target `cargo check` passes. A stronger
   `cargo test --workspace --target x86_64-unknown-linux-gnu --no-run` attempt

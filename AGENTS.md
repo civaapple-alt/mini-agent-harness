@@ -21,9 +21,12 @@ every feature in Codex, Pi, fx, or Qi.
 
 ## Size budget
 
-- Core hard limit: 20,000 Rust source lines.
+- Runtime hard limit: 20,000 Rust source lines across `core`, `protocol`,
+  `host`, and `app-server`. The separately reported `acp` edge is excluded
+  from this runtime limit.
 - Whole workspace hard limit: 30,000 Rust source lines.
-- Tests count toward both limits.
+- The CLI is excluded from the runtime limit but included in the whole
+  workspace limit. Tests count toward both limits.
 - Run `python scripts/line_budget.py` after code changes.
 
 The limit is a ceiling, not a target. Removing a concept is better than fitting

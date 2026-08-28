@@ -164,5 +164,6 @@ sequenceDiagram
 
 - `persona.rs` is purely functional prompt assembly and text parsing: $\sim 300$ lines.
 - No dynamic template engines or complex plugin registries added.
-- `mini-agent-core` remains untouched ($\le 20,000$ lines).
+- The runtime layers are subject to the 20,000-line budget; the workspace
+  budget is tracked separately.
 - Workspace stays comfortably under $30,000$ lines.

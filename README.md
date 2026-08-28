@@ -222,6 +222,17 @@ cargo test --workspace
 python3 scripts/line_budget.py
 ```
 
+  The line-budget report breaks Rust source down by the runtime layers: `core`,
+  `protocol`, `host`, `app-server`, `acp`, and `cli`, followed by the enforced
+  workspace total. Each layer and the
+  workspace total also show `production`, `unit`, and `integration` lines:
+  inline `#[cfg(test)]` modules and `*_tests.rs` files are counted as unit
+  tests, while Rust files below a `tests/` directory are counted as
+  integration tests. The enforced ceilings are 20,000 lines for the runtime
+  layers (`core` + `protocol` + `host` + `app-server`); the separately
+  reported `acp` edge is excluded from this runtime limit. The 30,000-line
+  workspace ceiling includes all Rust source, including ACP and the CLI.
+
 The CI matrix covers Ubuntu, macOS, and Windows. Current development is
 validated on macOS arm64; Windows remains a first-class target and is checked
 by CI and the Windows release build.

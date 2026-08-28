@@ -191,5 +191,6 @@ When a user initiates `/goal` in a session where `plan.md` already exists:
 ## 4. Line Budget & Complexity Guardrails
 
 - `goal.rs` is fully decoupled from `mini-agent-core`: $\sim 280$ lines.
-- `mini-agent-core` remains untouched ($\le 20,000$ lines).
+- The runtime layers are subject to the 20,000-line budget; the workspace
+  budget is tracked separately.
 - Total workspace size: **21,097 / 30,000 lines**.

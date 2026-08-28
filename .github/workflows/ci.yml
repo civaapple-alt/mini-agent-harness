@@ -22,10 +22,10 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test maintenance scripts
+        run: python3 -m unittest scripts/test_package_release.py scripts/test_line_budget.py
       - name: Enforce line budget
         run: python3 scripts/line_budget.py
-      - name: Test release packager
-        run: python3 -m unittest scripts/test_package_release.py
       - name: Validate Cargo packages
         run: cargo package --workspace --locked --no-verify
 
