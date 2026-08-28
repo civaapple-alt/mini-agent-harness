@@ -255,6 +255,7 @@ impl RuntimeProfile {
         }];
         CapabilityManifest {
             profile: self.name.clone(),
+            model_provider: self.model_provider.clone(),
             enabled,
             disabled,
             extension_depth: self.extensions,
@@ -298,6 +299,7 @@ impl RuntimeProfile {
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityManifest {
     pub profile: String,
+    pub model_provider: String,
     pub enabled: Vec<String>,
     pub disabled: Vec<(String, String)>,
     pub extension_depth: ExtensionLoadDepth,

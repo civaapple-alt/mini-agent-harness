@@ -2,6 +2,7 @@
 members = [
     "crates/mini-agent-app-server",
     "crates/mini-agent-acp",
+    "crates/mini-agent-capabilities",
     "crates/mini-agent-host",
     "crates/mini-agent-app-server-protocol",
     "crates/mini-agent-protocol",

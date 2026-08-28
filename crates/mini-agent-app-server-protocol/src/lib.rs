@@ -207,6 +207,7 @@ pub struct InitializeResult {
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityManifest {
     pub profile: String,
+    pub model_provider: String,
     pub enabled: Vec<String>,
     pub disabled: Vec<DisabledCapability>,
     pub extension_depth: String,

@@ -530,6 +530,7 @@ pub fn capability_manifest_to_protocol(
 ) -> ProtocolCapabilityManifest {
     ProtocolCapabilityManifest {
         profile: manifest.profile.clone(),
+        model_provider: manifest.model_provider.clone(),
         enabled: manifest.enabled.clone(),
         disabled: manifest
             .disabled

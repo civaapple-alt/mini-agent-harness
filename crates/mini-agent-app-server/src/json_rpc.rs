@@ -709,6 +709,7 @@ async fn next_event_notification(
 fn default_capability_manifest() -> CapabilityManifest {
     CapabilityManifest {
         profile: "unknown".to_string(),
+        model_provider: "unknown".to_string(),
         enabled: Vec::new(),
         disabled: vec![DisabledCapability {
             name: "host-profile".to_string(),

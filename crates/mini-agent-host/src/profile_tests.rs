@@ -184,6 +184,7 @@ fn workspace_profile_file_overlays_bounded_selections() {
         root.join(".agents/profile.json"),
         r#"{
             "name": "repo-review",
+            "modelProvider": "openai",
             "tools": "none",
             "extensionDepth": "selected",
             "selectedExtensions": ["review"],
@@ -201,6 +202,7 @@ fn workspace_profile_file_overlays_bounded_selections() {
     let profile = load_workspace_profile(&root, RuntimeProfile::ask_default()).unwrap();
 
     assert_eq!(profile.name, "repo-review");
+    assert_eq!(profile.model_provider, "openai");
     assert_eq!(profile.tools, ToolScope::None);
     assert_eq!(profile.extensions, ExtensionLoadDepth::Selected);
     assert_eq!(

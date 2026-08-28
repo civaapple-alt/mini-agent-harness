@@ -8,19 +8,14 @@ pub mod config;
 pub mod env_file;
 pub mod goal;
 pub mod harness_builder;
-pub mod image;
-pub mod marketplaces;
 pub mod mcp;
 pub mod observer;
-pub mod openai;
 pub mod persona;
 pub mod processes;
 pub mod profile;
 pub mod project_context;
 pub mod result_store;
 pub mod runtime_factory;
-pub mod sandbox;
-pub mod security;
 pub mod session;
 pub mod skills;
 pub mod subagent;
@@ -28,6 +23,15 @@ pub mod tool_outcome;
 pub mod web;
 pub mod workspace;
 pub mod world;
+
+/// Concrete model and image providers live in `mini-agent-capabilities`.
+/// These re-exports preserve the current Host API while callers migrate to
+/// profile-selected provider construction.
+pub use mini_agent_capabilities::image;
+pub use mini_agent_capabilities::marketplaces;
+pub use mini_agent_capabilities::openai;
+pub use mini_agent_capabilities::sandbox;
+pub use mini_agent_capabilities::security;
 
 /// Build metadata used by host diagnostics and persisted status output.
 pub fn git_sha() -> &'static str {
@@ -44,9 +48,10 @@ pub use harness_builder::prepare_openai_harness;
 pub use harness_builder::prepare_openai_harness_with_profile;
 pub use harness_builder::prepare_openai_harness_with_profile_and_result_store;
 pub use harness_builder::print_auto_warning;
-pub use image::ImageStore;
+pub use mini_agent_capabilities::ImageStore;
+pub use mini_agent_capabilities::OpenAiError;
+pub use mini_agent_capabilities::OpenAiModel;
 pub use observer::RunObserver;
-pub use openai::OpenAiModel;
 pub use profile::AgentKind;
 pub use profile::CapabilityManifest;
 pub use profile::ContextLimits;

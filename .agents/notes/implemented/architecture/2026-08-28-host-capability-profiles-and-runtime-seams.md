@@ -1,6 +1,6 @@
 # Host Capability Profiles and Runtime Seams
 
-Status: implemented (Windows scope; cross-platform and line-budget work deferred)
+Status: Stage 1 implemented; Stage 2 provider extraction in progress (Windows scope)
 Date: 2026-08-28
 
 ## Implementation update (2026-08-28)
@@ -78,6 +78,15 @@ The startup callback test proves a wire profile is resolved before App Server
 construction, and the selected-extension integration test proves an omitted
 MCP server is not started. The complete Windows workspace test run passes
 serially.
+
+The Stage 2 migration has started with a real provider boundary: the new
+`mini-agent-capabilities` crate now owns the image store, OpenAI-compatible
+model provider, sandbox, security, and marketplace implementations. Host keeps
+compatibility re-exports for existing callers, but `RuntimeBuilder` selects the
+model through the capabilities registry and the resolved profile carries an
+allowlisted `modelProvider` identifier. The remaining workspace/process/web,
+skills/MCP, and approval composition will move behind the same registry rather
+than being copied into private Host-only seams.
 
 ## Problem
 
@@ -433,7 +442,12 @@ with a visible capability-scope diagnostic.
 ### Stage 2: Extract seams inside Host
 
 - Extract model, tools, extensions, policy, context, and state composition into
-  focused private modules.
+  focused provider modules; concrete model, image, sandbox, security, and
+  marketplace implementations belong in `mini-agent-capabilities`, while Host
+  retains profile resolution and runtime orchestration.
+- Expose narrow provider descriptors/factories and keep compatibility exports
+  only during migration; Host must not become the permanent owner of concrete
+  capability implementations.
 - Make each seam return bounded diagnostics and selected capability metadata.
 - Keep prompt assembly in one `ContextSeam`; add snapshots for agent/persona/
   workflow combinations and disabled-workflow errors.

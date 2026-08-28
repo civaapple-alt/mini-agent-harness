@@ -12,6 +12,7 @@ PROJECT_LIMIT = 30_000
 LAYERS = (
     ("core", ("mini-agent-core",)),
     ("protocol", ("mini-agent-protocol",)),
+    ("capabilities", ("mini-agent-capabilities",)),
     ("host", ("mini-agent-host",)),
     (
         "app-server",
@@ -23,6 +24,7 @@ LAYERS = (
 RUNTIME_PACKAGES = (
     "mini-agent-core",
     "mini-agent-protocol",
+    "mini-agent-capabilities",
     "mini-agent-host",
     "mini-agent-app-server",
     "mini-agent-app-server-protocol",
@@ -211,7 +213,7 @@ def check(root: Path = ROOT) -> int:
         layer_counts(root, RUNTIME_PACKAGES)
     )
     print(
-        f"runtime (core + protocol + host + app-server): "
+        f"runtime (core + protocol + capabilities + host + app-server): "
         f"{runtime_total}/{RUNTIME_LIMIT} lines "
         f"(production {runtime_production}, unit {runtime_unit}, "
         f"integration {runtime_integration})"

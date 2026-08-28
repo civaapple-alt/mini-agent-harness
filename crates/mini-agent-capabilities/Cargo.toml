@@ -1,10 +1,10 @@
 [package]
-name = "mini-agent-host"
+name = "mini-agent-capabilities"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Profile resolver, runtime assembler, persistence, and workflow host for mini-agent"
+description = "Concrete model, tool, extension, and policy providers for mini-agent"
 readme.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -14,12 +14,9 @@ categories.workspace = true
 [dependencies]
 eventsource-stream.workspace = true
 futures-util.workspace = true
-htmd = "0.5"
 http.workspace = true
-mini-agent-capabilities = { version = "0.3.0", path = "../mini-agent-capabilities" }
 mini-agent-core = { version = "0.3.0", path = "../mini-agent-core" }
 reqwest.workspace = true
-rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

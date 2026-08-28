@@ -139,6 +139,8 @@ pub type PromptRulePolicy = RegularAgentConfig;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeProfile {
     pub name: String,
+    /// Bounded identifier resolved by the capability provider registry.
+    pub model_provider: String,
     pub tools: ToolScope,
     pub extensions: ExtensionLoadDepth,
     pub extension_selection: ExtensionSelection,
@@ -224,6 +226,12 @@ impl RuntimeProfile {
         self
     }
 
+    /// Selects an allowlisted model provider by stable identifier.
+    pub fn with_model_provider(mut self, provider: impl Into<String>) -> Self {
+        self.model_provider = provider.into();
+        self
+    }
+
     /// Replaces the prompt-source selection for a regular agent.
     pub fn with_prompt_sources(mut self, prompts: PromptSources) -> Self {
         self.regular_agent.prompts = prompts;
@@ -288,6 +296,7 @@ impl RuntimeProfile {
     fn named(name: &str, tools: ToolScope, extensions: ExtensionLoadDepth) -> Self {
         Self {
             name: name.to_string(),
+            model_provider: mini_agent_capabilities::OPENAI_MODEL_PROVIDER.to_string(),
             tools,
             extensions,
             extension_selection: ExtensionSelection::All,

@@ -19,6 +19,7 @@ const MAX_EXTENSION_NAME_BYTES: usize = 128;
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct ProfileFile {
     name: Option<String>,
+    model_provider: Option<String>,
     tools: Option<ToolScope>,
     extension_depth: Option<ExtensionLoadDepth>,
     selected_extensions: Option<Vec<String>>,
@@ -33,10 +34,10 @@ struct ProfileFile {
 
 /// Loads an optional, bounded workspace profile over a caller-provided base.
 ///
-/// The file contains only enum selections, source switches, and extension
-/// names. It cannot provide credentials, arbitrary prompt text, commands, or
-/// filesystem paths. Callers apply explicit command-line deny overrides after
-/// this function returns.
+/// The file contains only allowlisted provider/enum selections, source
+/// switches, and extension names. It cannot provide credentials, arbitrary
+/// prompt text, commands, or filesystem paths. Callers apply explicit
+/// command-line deny overrides after this function returns.
 pub fn load_workspace_profile(
     workspace: &Path,
     mut base: RuntimeProfile,
@@ -58,6 +59,10 @@ pub fn load_workspace_profile(
     if let Some(name) = file.name {
         validate_profile_name(&name)?;
         base.name = name;
+    }
+    if let Some(provider) = file.model_provider {
+        validate_model_provider(&provider)?;
+        base.model_provider = provider;
     }
     if let Some(tools) = file.tools {
         base.tools = tools;
@@ -128,4 +133,12 @@ fn validate_extension_names(names: &[String]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn validate_model_provider(provider: &str) -> Result<(), String> {
+    if mini_agent_capabilities::CapabilityRegistry::builtin().contains_model(provider) {
+        Ok(())
+    } else {
+        Err(format!("unknown model provider {provider:?}"))
+    }
 }

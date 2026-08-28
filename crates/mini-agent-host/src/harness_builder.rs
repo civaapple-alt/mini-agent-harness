@@ -1,3 +1,7 @@
+use mini_agent_capabilities::CapabilityRegistry;
+use mini_agent_capabilities::ModelProviderSettings;
+use mini_agent_capabilities::OpenAiModel;
+use mini_agent_capabilities::build_model;
 use mini_agent_core::ContextLimitBehavior;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
@@ -6,7 +10,6 @@ use mini_agent_core::ToolRegistry;
 use crate::config::RuntimeConfig;
 use crate::image::ImageStore;
 use crate::mcp;
-use crate::openai::OpenAiModel;
 use crate::profile::{
     CapabilityManifest, ExtensionLoadDepth, ExtensionSelection, RuntimeProfile, SourceFingerprint,
     ToolScope,
@@ -154,14 +157,23 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
     profile: RuntimeProfile,
     results: ResultStore,
 ) -> Result<HarnessBuild, String> {
+    if !CapabilityRegistry::builtin().contains_model(&profile.model_provider) {
+        return Err(format!(
+            "unknown model provider `{}`",
+            profile.model_provider
+        ));
+    }
     let provider = runtime_config.provider_settings()?;
     let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
     let images = ImageStore::for_provider(provider.api_key.clone(), &provider.base_url);
-    let model = match OpenAiModel::new(
-        provider.api_key,
-        provider.model,
-        provider.base_url,
-        provider.web_search,
+    let model = match build_model(
+        &profile.model_provider,
+        ModelProviderSettings {
+            api_key: provider.api_key,
+            model: provider.model,
+            base_url: provider.base_url,
+            web_search: provider.web_search,
+        },
         images.clone(),
     ) {
         Ok(model) => model,
