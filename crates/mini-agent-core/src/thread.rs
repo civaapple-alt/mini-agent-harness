@@ -191,6 +191,22 @@ impl<M: Model> Thread<M> {
             })
     }
 
+    pub async fn run_turn_with_events_outcome<S: EventSink + Send>(
+        &mut self,
+        input: TurnInput,
+        sink: &mut S,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+    ) -> Result<RunOutcome, HarnessError<M::Error>> {
+        self.run_turn_with_events(input, sink, control, steering_mode)
+            .await
+            .map(|result| result.outcome)
+            .map_err(|error| match error {
+                ThreadError::Harness(error) => error,
+                other => HarnessError::Compaction(other.to_string()),
+            })
+    }
+
     fn begin_turn(&mut self, input: &TurnInput) -> Result<TurnId, ThreadError<M::Error>> {
         if self.status == ThreadStatus::Closed {
             return Err(ThreadError::Closed);

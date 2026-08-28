@@ -1,4 +1,6 @@
 use mini_agent_core::Event;
+use mini_agent_core::EventEnvelope;
+use mini_agent_core::EventSink;
 use mini_agent_core::Observer;
 use mini_agent_core::ToolCall;
 use serde_json::Value;
@@ -204,6 +206,12 @@ impl Observer for RunObserver {
         {
             self.trace_error = Some(error.to_string());
         }
+    }
+}
+
+impl EventSink for RunObserver {
+    fn emit(&mut self, event: EventEnvelope) {
+        self.observe(&event.event);
     }
 }
 

@@ -15,11 +15,11 @@ use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
 use crate::world::WorldState;
 use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
-use mini_agent_core::Event;
+use mini_agent_core::EventEnvelope;
+use mini_agent_core::EventSink;
 use mini_agent_core::HarnessError;
 use mini_agent_core::InputQueueError;
 use mini_agent_core::LimitKind;
-use mini_agent_core::Observer;
 use mini_agent_core::RunControl;
 use mini_agent_core::SessionState;
 use mini_agent_core::SteeringMode;
@@ -45,7 +45,7 @@ const MAX_WELCOME_NAMES: usize = 8;
 
 enum ReplEvent {
     Input(Result<Option<String>, String>),
-    Observed(Event),
+    Observed(EventEnvelope),
     Ready,
     WorkStarted,
     WorkFinished,
@@ -81,9 +81,9 @@ enum WorkerCommand {
 
 struct ChannelObserver(mpsc::SyncSender<ReplEvent>);
 
-impl Observer for ChannelObserver {
-    fn observe(&mut self, event: &Event) {
-        let _ = self.0.send(ReplEvent::Observed(event.clone()));
+impl EventSink for ChannelObserver {
+    fn emit(&mut self, event: EventEnvelope) {
+        let _ = self.0.send(ReplEvent::Observed(event));
     }
 }
 
@@ -345,7 +345,7 @@ pub async fn run(
                 exiting = true;
                 let _ = worker_tx.send(WorkerCommand::Shutdown);
             }
-            ReplEvent::Observed(event) => observer.observe(&event),
+            ReplEvent::Observed(event) => observer.emit(event),
             ReplEvent::Ready => {
                 ready = true;
                 if pending_work == 0 && !exiting {
@@ -561,7 +561,7 @@ fn spawn_worker(
                             match model_runtime.block_on(async {
                                 tokio::time::timeout(
                                     timeout,
-                                    harness.run_turn_outcome(
+                                    harness.run_turn_with_events_outcome(
                                         TurnInput::new(TurnInputMode::Start, prompt.clone()),
                                         &mut observer,
                                         &run_control,
@@ -585,7 +585,7 @@ fn spawn_worker(
                                 }
                             }
                         } else {
-                            model_runtime.block_on(harness.run_turn_outcome(
+                            model_runtime.block_on(harness.run_turn_with_events_outcome(
                                 TurnInput::new(TurnInputMode::Start, prompt.clone()),
                                 &mut observer,
                                 &run_control,
