@@ -351,7 +351,7 @@ fn tool_detail(call: &ToolCall) -> Option<String> {
             arg_str(&call.arguments, "url")?,
             MAX_TOOL_DETAIL_BYTES,
         )),
-        "process_read" | "process_stop" => Some(bounded_single_line(
+        "process_read" | "process_write" | "process_stop" => Some(bounded_single_line(
             arg_str(&call.arguments, "process_id")?,
             MAX_TOOL_DETAIL_BYTES,
         )),

@@ -24,7 +24,6 @@ use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
-use std::process::ExitStatus;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -688,10 +687,12 @@ fn shell_description(approval: ApprovalMode) -> String {
     };
     if cfg!(windows) {
         format!(
-            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Use PowerShell syntax and cmdlets; do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`."
+            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Use PowerShell syntax and cmdlets; do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`. For long-running or interactive programs, use process_start and process_write instead."
         )
     } else {
-        format!("Run one POSIX sh command in the workspace {approval}, with a 120-second deadline")
+        format!(
+            "Run one POSIX sh command in the workspace {approval}, with a 120-second deadline. For long-running or interactive programs, use process_start and process_write instead"
+        )
     }
 }
 
@@ -739,31 +740,6 @@ pub(crate) fn shell_command(command: &str) -> Command {
         }
         process
     }
-}
-
-pub(crate) fn terminate_process_tree(child: &mut std::process::Child) -> io::Result<ExitStatus> {
-    #[cfg(windows)]
-    {
-        let process_id = child.id().to_string();
-        let _ = Command::new("taskkill")
-            .args(["/PID", &process_id, "/T", "/F"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    #[cfg(not(windows))]
-    {
-        let process_id = child.id().to_string();
-        let _ = Command::new("kill")
-            .args(["-KILL", "--", &format!("-{process_id}")])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    if child.try_wait()?.is_none() {
-        let _ = child.kill();
-    }
-    child.wait()
 }
 
 pub(crate) struct CommandOutput {

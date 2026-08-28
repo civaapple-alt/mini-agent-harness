@@ -3,7 +3,6 @@ use crate::sandbox::ProcessSandbox;
 use crate::sandbox::SandboxKind;
 use crate::workspace::ApprovalController;
 use crate::workspace::shell_command;
-use crate::workspace::terminate_process_tree;
 use mini_agent_core::Tool;
 use mini_agent_core::ToolError;
 use mini_agent_core::ToolSpec;
@@ -11,8 +10,10 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::VecDeque;
 use std::io::Read;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Child;
+use std::process::ChildStdin;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -22,6 +23,7 @@ const MAX_PROCESSES: usize = 8;
 const MAX_COMMAND_BYTES: usize = 16 * 1024;
 const MAX_LOG_BYTES_PER_STREAM: usize = 256 * 1024;
 const INLINE_LOG_BYTES: usize = 16 * 1024;
+const MAX_INPUT_BYTES: usize = 32 * 1024;
 
 #[derive(Clone)]
 pub struct ProcessManager(Arc<ProcessManagerInner>);
@@ -44,6 +46,8 @@ struct ProcessJob {
     id: u64,
     command: String,
     child: Child,
+    _sandbox: ProcessSandbox,
+    stdin: ChildStdin,
     stdout: SharedLog,
     stderr: SharedLog,
     exit: Option<String>,
@@ -128,6 +132,7 @@ impl ProcessManager {
 
         let mut child = shell_command(command)
             .current_dir(&self.0.root)
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -142,6 +147,10 @@ impl ProcessManager {
             .stderr
             .take()
             .ok_or_else(|| ToolError("cannot capture process stderr".to_string()))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| ToolError("cannot open process stdin".to_string()))?;
         let stdout_log = Arc::new(Mutex::new(BoundedLog::new()));
         let stderr_log = Arc::new(Mutex::new(BoundedLog::new()));
         spawn_log_reader(stdout, Arc::clone(&stdout_log));
@@ -153,6 +162,8 @@ impl ProcessManager {
             id,
             command: command.to_string(),
             child,
+            _sandbox: sandbox,
+            stdin,
             stdout: stdout_log,
             stderr: stderr_log,
             exit: None,
@@ -203,6 +214,36 @@ impl ProcessManager {
         ))
     }
 
+    fn write(&self, id: u64, input: &str) -> Result<String, ToolError> {
+        if input.is_empty() || input.len() > MAX_INPUT_BYTES {
+            return Err(ToolError(format!(
+                "input must contain 1..={MAX_INPUT_BYTES} bytes"
+            )));
+        }
+        self.0.approval.ensure_plan_mode_unlocked()?;
+        self.0
+            .approval
+            .approve(&format!("write to managed process `{id}`"))?;
+        let mut state = self.0.state.lock().unwrap();
+        refresh_jobs(&mut state.jobs)?;
+        let job = state
+            .jobs
+            .iter_mut()
+            .find(|job| job.id == id)
+            .ok_or_else(|| ToolError(format!("unknown process_id: {id}")))?;
+        if let Some(exit) = &job.exit {
+            return Err(ToolError(format!(
+                "process_id={id} is no longer running ({exit})"
+            )));
+        }
+        job.stdin.write_all(input.as_bytes()).map_err(io_error)?;
+        job.stdin.flush().map_err(io_error)?;
+        Ok(format!(
+            "process_id={id}\nstatus=running\nbytes_written={}",
+            input.len()
+        ))
+    }
+
     fn stop(&self, id: u64) -> Result<String, ToolError> {
         self.0.approval.ensure_plan_mode_unlocked()?;
         self.0
@@ -218,7 +259,7 @@ impl ProcessManager {
         if let Some(exit) = &job.exit {
             return Ok(format!("process_id={id}\nstatus={exit}"));
         }
-        let status = terminate_process_tree(&mut job.child).map_err(io_error)?;
+        let status = job._sandbox.terminate(&mut job.child).map_err(io_error)?;
         let exit = status_text(status.code(), "stopped");
         job.exit = Some(exit.clone());
         Ok(format!("process_id={id}\nstatus={exit}"))
@@ -253,7 +294,7 @@ impl Drop for ProcessManagerInner {
         };
         for job in &mut state.jobs {
             if job.exit.is_none() {
-                let _ = terminate_process_tree(&mut job.child);
+                let _ = job._sandbox.terminate(&mut job.child);
             }
         }
     }
@@ -263,6 +304,7 @@ pub fn process_tools(manager: ProcessManager) -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(ProcessStart(manager.clone())),
         Box::new(ProcessRead(manager.clone())),
+        Box::new(ProcessWrite(manager.clone())),
         Box::new(ProcessStop(manager.clone())),
         Box::new(ProcessList(manager)),
     ]
@@ -270,6 +312,7 @@ pub fn process_tools(manager: ProcessManager) -> Vec<Box<dyn Tool>> {
 
 struct ProcessStart(ProcessManager);
 struct ProcessRead(ProcessManager);
+struct ProcessWrite(ProcessManager);
 struct ProcessStop(ProcessManager);
 struct ProcessList(ProcessManager);
 
@@ -298,6 +341,31 @@ impl Tool for ProcessRead {
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         self.0.read(process_id(arguments)?)
+    }
+}
+
+impl Tool for ProcessWrite {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "process_write".to_string(),
+            description: format!(
+                "Write up to {MAX_INPUT_BYTES} UTF-8 bytes to a running managed process stdin. The input is sent exactly as provided; include a newline to submit a line to an interactive program. Use process_read to inspect output and process_stop to terminate the process."
+            ),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "process_id": {"type": "integer", "minimum": 1},
+                    "input": {"type": "string", "minLength": 1, "maxLength": MAX_INPUT_BYTES}
+                },
+                "required": ["process_id", "input"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        self.0
+            .write(process_id(arguments)?, string_arg(arguments, "input")?)
     }
 }
 
@@ -440,6 +508,43 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert!(output.contains("managed-ready"), "{output}");
+        assert!(output.contains("exited(0)"), "{output}");
+
+        drop(manager);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn managed_process_accepts_interactive_stdin() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("mini-agent-process-stdin-{nonce}"));
+        fs::create_dir(&root).unwrap();
+        let manager = ProcessManager::new(
+            root.clone(),
+            ApprovalController::new(ApprovalMode::Automatic),
+            ResultStore::default(),
+            SandboxKind::Native,
+        );
+        let command = if cfg!(windows) {
+            "$line = [Console]::In.ReadLine(); Write-Output \"got:$line\""
+        } else {
+            "read line; printf 'got:%s' \"$line\""
+        };
+
+        manager.start(command).unwrap();
+        manager.write(1, "hello\n").unwrap();
+        let mut output = String::new();
+        for _ in 0..100 {
+            output = manager.read(1).unwrap();
+            if output.contains("got:hello") && output.contains("exited(0)") {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(output.contains("got:hello"), "{output}");
         assert!(output.contains("exited(0)"), "{output}");
 
         drop(manager);
