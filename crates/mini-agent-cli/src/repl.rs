@@ -14,52 +14,31 @@ use crate::skills;
 use crate::workspace::ApprovalController;
 use crate::workspace::ApprovalMode;
 use crate::world::WorldState;
+use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
 use mini_agent_core::Event;
 use mini_agent_core::HarnessError;
+use mini_agent_core::InputQueueError;
 use mini_agent_core::LimitKind;
 use mini_agent_core::Observer;
 use mini_agent_core::RunControl;
 use mini_agent_core::SessionState;
 use mini_agent_core::StopReason;
 use mini_agent_core::ToolError;
+use mini_agent_core::TurnInput;
+use mini_agent_core::TurnInputMode;
 use std::collections::VecDeque;
 use std::io;
 use std::io::IsTerminal;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-const MAX_QUEUED_INPUTS: usize = 16;
 const MAX_INPUT_BYTES: usize = 32 * 1024;
 const EVENT_BUFFER: usize = 64;
 const MAX_WELCOME_NAMES: usize = 8;
-
-#[derive(Clone, Default)]
-struct SteeringQueue {
-    prompts: Arc<Mutex<VecDeque<String>>>,
-}
-
-impl SteeringQueue {
-    fn request(&self, prompt: String) -> bool {
-        let Ok(mut prompts) = self.prompts.lock() else {
-            return false;
-        };
-        if prompts.len() >= MAX_QUEUED_INPUTS {
-            return false;
-        }
-        prompts.push_back(prompt);
-        true
-    }
-
-    fn take(&self) -> Option<String> {
-        self.prompts.lock().ok()?.pop_front()
-    }
-}
 
 enum ReplEvent {
     Input(Result<Option<String>, String>),
@@ -147,7 +126,6 @@ pub async fn run(
         .map(|workspace| WorldState::detect(workspace, initial_approval, copilot, sandbox_kind));
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
-    let steering = SteeringQueue::default();
     let run_control = RunControl::new();
     let worker = spawn_worker(
         copilot,
@@ -158,7 +136,6 @@ pub async fn run(
         web_search_override,
         worker_rx,
         event_tx,
-        steering.clone(),
         run_control.clone(),
     );
 
@@ -239,13 +216,18 @@ pub async fn run(
                         } else if prompt.len() > MAX_INPUT_BYTES {
                             eprintln!("input exceeds {MAX_INPUT_BYTES} byte limit");
                         } else if active_turn {
-                            if steering.request(prompt.to_string()) {
-                                run_control.request_steer();
-                                println!(
+                            match run_control
+                                .submit(TurnInput::new(TurnInputMode::Steer, prompt.to_string()))
+                            {
+                                Ok(()) => println!(
                                     "steer requested; current turn will stop at the next safe checkpoint"
-                                );
-                            } else {
-                                eprintln!("steer queue limit reached: {MAX_QUEUED_INPUTS}");
+                                ),
+                                Err(InputQueueError::Full { capacity }) => {
+                                    eprintln!("steer queue limit reached: {capacity}");
+                                }
+                                Err(InputQueueError::UnsupportedMode(_)) => {
+                                    eprintln!("cannot queue steer input")
+                                }
                             }
                         } else {
                             queue_work(
@@ -326,9 +308,6 @@ pub async fn run(
                             print_prompt();
                         }
                     }
-                    _ if pending_work >= MAX_QUEUED_INPUTS => {
-                        eprintln!("input queue limit reached: {MAX_QUEUED_INPUTS}");
-                    }
                     _ => queue_work(
                         &worker_tx,
                         WorkerCommand::Prompt(input.to_string()),
@@ -361,8 +340,12 @@ pub async fn run(
                 observer.finish();
                 active_turn = false;
                 pending_work = pending_work.saturating_sub(1);
-                if let Some(prompt) = steering.take() {
-                    queue_work(&worker_tx, WorkerCommand::Prompt(prompt), &mut pending_work);
+                if let Some(input) = run_control.take_steer_input() {
+                    queue_work(
+                        &worker_tx,
+                        WorkerCommand::Prompt(input.text),
+                        &mut pending_work,
+                    );
                 }
                 if ready && pending_work == 0 && !exiting {
                     print_prompt();
@@ -404,7 +387,6 @@ fn spawn_worker(
     web_search_override: Option<bool>,
     commands: mpsc::Receiver<WorkerCommand>,
     events: mpsc::SyncSender<ReplEvent>,
-    steering: SteeringQueue,
     run_control: RunControl,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
@@ -637,9 +619,8 @@ fn spawn_worker(
                                             .to_string(),
                                     ));
                                 }
-                                if let Some(next) = steering.take() {
-                                    run_control.clear_steer();
-                                    command = WorkerCommand::Prompt(next);
+                                if let Some(next) = run_control.take_steer_input() {
+                                    command = WorkerCommand::Prompt(next.text);
                                     continue;
                                 }
                             }
@@ -774,9 +755,8 @@ fn spawn_worker(
                                 fail_active_goal(&approval, &mut goal_objective, world.workspace());
                             }
                         }
-                        if let Some(next) = steering.take() {
-                            run_control.clear_steer();
-                            command = WorkerCommand::Prompt(next);
+                        if let Some(next) = run_control.take_steer_input() {
+                            command = WorkerCommand::Prompt(next.text);
                             continue;
                         }
                     }
@@ -1225,8 +1205,8 @@ fn queue_work(
     command: WorkerCommand,
     pending_work: &mut usize,
 ) {
-    if *pending_work >= MAX_QUEUED_INPUTS {
-        eprintln!("input queue limit reached: {MAX_QUEUED_INPUTS}");
+    if *pending_work >= DEFAULT_MAX_PENDING_INPUTS {
+        eprintln!("input queue limit reached: {DEFAULT_MAX_PENDING_INPUTS}");
         return;
     }
     if worker.send(command).is_ok() {

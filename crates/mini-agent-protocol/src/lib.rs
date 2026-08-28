@@ -1,6 +1,7 @@
 mod event;
 mod model;
 mod tool;
+mod turn;
 
 pub use event::Event;
 pub use event::Observer;
@@ -16,6 +17,11 @@ pub use model::ToolCall;
 pub use tool::Tool;
 pub use tool::ToolError;
 pub use tool::ToolSpec;
+pub use turn::ThreadStatus;
+pub use turn::TurnInput;
+pub use turn::TurnInputMode;
+pub use turn::TurnStatus;
+pub use turn::TurnSubmission;
 
 pub use run::LimitExceeded;
 pub use run::LimitKind;

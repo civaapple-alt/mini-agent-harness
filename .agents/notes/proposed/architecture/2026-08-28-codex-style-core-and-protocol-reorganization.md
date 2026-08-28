@@ -271,8 +271,12 @@ Stage 1 has started in the current working tree:
   against the active model/tool limits;
 - CLI `SessionStore` still owns JSONL, locks, paths, and torn-tail recovery,
   but hands a `SessionState` value to the harness;
+- `mini-agent-protocol` now names `TurnInputMode` and `TurnInput`, and core
+  `RunControl` owns a bounded pending input queue with Steer priority;
 - existing core and CLI session, compaction, restart, and interactive tests
   pass after the migration.
 
-The proposal remains `proposed`: Thread/Turn identity, typed input modes,
-pending input, and a protocol adapter are not implemented yet.
+The proposal remains `proposed`: Thread/Turn identity, active Turn status,
+safe input consumption inside the run loop, and a protocol adapter are not
+implemented yet. The current queue is the first migration seam for those
+future semantics; it does not claim Codex-equivalent same-Turn steering.

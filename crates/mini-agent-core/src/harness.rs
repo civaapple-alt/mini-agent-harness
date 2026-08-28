@@ -10,6 +10,7 @@ use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::Observer;
 use mini_agent_protocol::StopReason;
+use mini_agent_protocol::TurnInput;
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
@@ -18,6 +19,8 @@ use std::sync::atomic::Ordering;
 
 use crate::SessionState;
 use crate::context::context_bytes_for;
+use crate::input::InputQueueError;
+use crate::input::PendingInputQueue;
 
 const TRUNCATION_MARKER: &str = "\n[truncated]";
 const COMPACTION_PREFIX: &str = "[Compacted conversation context]";
@@ -71,6 +74,7 @@ impl Default for HarnessConfig {
 #[derive(Clone, Default)]
 pub struct RunControl {
     steer_requested: Arc<AtomicBool>,
+    pending_inputs: PendingInputQueue,
 }
 
 impl RunControl {
@@ -80,6 +84,31 @@ impl RunControl {
 
     pub fn request_steer(&self) {
         self.steer_requested.store(true, Ordering::Release);
+    }
+
+    pub fn submit(&self, input: TurnInput) -> Result<(), InputQueueError> {
+        let is_steer = input.mode == mini_agent_protocol::TurnInputMode::Steer;
+        self.pending_inputs.submit(input)?;
+        if is_steer {
+            self.request_steer();
+        }
+        Ok(())
+    }
+
+    pub fn take_steer_input(&self) -> Option<TurnInput> {
+        let input = self.pending_inputs.take_steer();
+        if input.is_none() {
+            self.clear_steer();
+        }
+        input
+    }
+
+    pub fn take_follow_up_input(&self) -> Option<TurnInput> {
+        self.pending_inputs.take_follow_up()
+    }
+
+    pub fn pending_input_count(&self) -> usize {
+        self.pending_inputs.len()
     }
 
     pub fn clear_steer(&self) {
