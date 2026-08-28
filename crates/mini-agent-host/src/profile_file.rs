@@ -6,8 +6,8 @@ use super::{
     AgentKind, ExtensionLoadDepth, ExtensionSelection, PersonaKind, PromptSources, RuleSources,
     RuntimeProfile, ToolScope, WorkflowScope,
 };
-use crate::sandbox::SandboxKind;
-use crate::security::SecurityPreset;
+use mini_agent_capabilities::sandbox::SandboxKind;
+use mini_agent_capabilities::security::SecurityPreset;
 
 const PROFILE_FILE: &str = ".agents/profile.json";
 const MAX_PROFILE_FILE_BYTES: usize = 16 * 1024;

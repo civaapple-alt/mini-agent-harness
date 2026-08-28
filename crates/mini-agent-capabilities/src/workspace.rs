@@ -121,7 +121,8 @@ impl ApprovalController {
     }
 
     pub fn set_living_plan(&self, path: Option<PathBuf>) {
-        *self.living_plan.lock().unwrap() = path.map(|path| crate::goal::normalize_path(&path));
+        *self.living_plan.lock().unwrap() =
+            path.map(|path| crate::path_policy::normalize_path(&path));
     }
 
     pub fn living_plan(&self) -> Option<PathBuf> {
@@ -137,7 +138,7 @@ impl ApprovalController {
     }
 
     pub fn set_goal_dir(&self, path: Option<PathBuf>) {
-        *self.goal_dir.lock().unwrap() = path.map(|path| crate::goal::normalize_path(&path));
+        *self.goal_dir.lock().unwrap() = path.map(|path| crate::path_policy::normalize_path(&path));
     }
 
     pub fn goal_dir(&self) -> Option<PathBuf> {
@@ -145,7 +146,9 @@ impl ApprovalController {
     }
 
     pub fn bind_session_file(&self, session_jsonl: &Path) {
-        *self.session_dir.lock().unwrap() = session_jsonl.parent().map(crate::goal::normalize_path);
+        *self.session_dir.lock().unwrap() = session_jsonl
+            .parent()
+            .map(crate::path_policy::normalize_path);
     }
 
     pub fn session_dir(&self) -> Option<PathBuf> {
@@ -394,12 +397,12 @@ impl Workspace {
             ));
         }
         if let Some(living) = self.approval.living_plan()
-            && crate::goal::is_plan_md_alias(path)
+            && crate::path_policy::is_plan_md_alias(path)
         {
             return Ok(living);
         }
         if let Some(goal_dir) = self.approval.goal_dir()
-            && let Some(rest) = crate::goal::goal_relative_rest(path)
+            && let Some(rest) = crate::path_policy::goal_relative_rest(path)
         {
             return Ok(goal_dir.join(rest));
         }
@@ -422,13 +425,13 @@ impl Workspace {
     fn is_living_plan(&self, path: &Path) -> bool {
         self.approval
             .living_plan()
-            .is_some_and(|living| crate::goal::same_path(path, &living))
+            .is_some_and(|living| crate::path_policy::same_path(path, &living))
     }
 
     fn is_goal_artifact(&self, path: &Path) -> bool {
         self.approval
             .goal_dir()
-            .is_some_and(|dir| crate::goal::is_under_dir(path, &dir))
+            .is_some_and(|dir| crate::path_policy::is_under_dir(path, &dir))
     }
 
     fn is_session_artifact(&self, path: &Path) -> bool {
@@ -1233,7 +1236,8 @@ mod tests {
         let root = test_root();
         let session = test_root();
         fs::write(root.join("note.txt"), "workspace note").unwrap();
-        let plan = crate::goal::init_plan_mode_with_prompt(&session, None).unwrap();
+        let plan = session.join("plan.md");
+        fs::write(&plan, "# Implementation Plan\n").unwrap();
         let approval = ApprovalController::new(ApprovalMode::Automatic);
         approval.set_living_plan(Some(plan.clone()));
         let workspace = Arc::new(
@@ -1323,9 +1327,13 @@ mod tests {
     fn goal_mode_allows_session_goal_plan_reads_and_workspace_writes() {
         let root = test_root();
         let session = test_root();
-        let state = crate::goal::init_goal_workspace(&session, "Ship HTML intro", 5).unwrap();
-        assert_eq!(state.current_milestone, 1);
         let goal_dir = session.join("goal");
+        fs::create_dir_all(&goal_dir).unwrap();
+        fs::write(
+            goal_dir.join("plan.md"),
+            "# Autonomous Goal Plan: Ship HTML intro\n\n## Milestone 1\n",
+        )
+        .unwrap();
         let approval = ApprovalController::new(ApprovalMode::Automatic);
         approval.set_goal_dir(Some(goal_dir.clone()));
         let workspace = Arc::new(

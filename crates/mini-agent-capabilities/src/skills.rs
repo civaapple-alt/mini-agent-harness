@@ -284,7 +284,7 @@ impl Discovery {
         if self.skills.is_empty() {
             return Ok(None);
         }
-        Ok(Some(crate::profile::stable_fingerprint(
+        Ok(Some(crate::registry::stable_fingerprint(
             self.metadata_catalog()?.as_bytes(),
         )))
     }

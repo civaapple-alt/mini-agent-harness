@@ -80,15 +80,14 @@ MCP server is not started. The complete Windows workspace test run passes
 serially.
 
 The Stage 2 migration has started with a real provider boundary: the new
-`mini-agent-capabilities` crate now owns the image store, OpenAI-compatible
-model provider, sandbox, security, and marketplace implementations. Host keeps
-compatibility re-exports for existing callers, but `RuntimeBuilder` selects the
-model through the capabilities registry and the resolved profile carries an
-allowlisted `modelProvider` identifier. The remaining workspace/process/web,
-skills/MCP, and approval composition will move behind the same registry rather
-than being copied into private Host-only seams. Session and Result Store
-implementations have also moved with the provider crate; Host retains their
-application-level binding and compatibility facade.
+`mini-agent-capabilities` crate now owns the image, OpenAI-compatible model,
+sandbox, security, marketplace, workspace, process, web, subagent, session,
+Result Store, skills, and MCP implementations. Host keeps compatibility
+re-exports for existing callers, but `RuntimeBuilder` now selects model, tool,
+extension discovery, and MCP loading through the capabilities registry. The
+resolved profile carries an allowlisted `modelProvider` identifier. Host no
+longer owns concrete Harness hands and feet; it retains profile resolution,
+context/workflow composition, and application-level binding.
 
 ## Problem
 

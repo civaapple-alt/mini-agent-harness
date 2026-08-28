@@ -9,18 +9,11 @@ pub mod config;
 pub mod env_file;
 pub mod goal;
 pub mod harness_builder;
-pub mod mcp;
 pub mod observer;
-pub mod persona;
-pub mod processes;
 pub mod profile;
 pub mod project_context;
 pub mod runtime_factory;
-pub mod skills;
-pub mod subagent;
 pub mod tool_outcome;
-pub mod web;
-pub mod workspace;
 pub mod world;
 
 /// Concrete model and image providers live in `mini-agent-capabilities`.
@@ -28,11 +21,18 @@ pub mod world;
 /// profile-selected provider construction.
 pub use mini_agent_capabilities::image;
 pub use mini_agent_capabilities::marketplaces;
+pub use mini_agent_capabilities::mcp;
 pub use mini_agent_capabilities::openai;
+pub use mini_agent_capabilities::persona;
+pub use mini_agent_capabilities::processes;
 pub use mini_agent_capabilities::result_store;
 pub use mini_agent_capabilities::sandbox;
 pub use mini_agent_capabilities::security;
 pub use mini_agent_capabilities::session;
+pub use mini_agent_capabilities::skills;
+pub use mini_agent_capabilities::subagent;
+pub use mini_agent_capabilities::web;
+pub use mini_agent_capabilities::workspace;
 
 /// Build metadata used by host diagnostics and persisted status output.
 pub fn git_sha() -> &'static str {

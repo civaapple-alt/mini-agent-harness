@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const GOAL_SCHEMA_VERSION: u32 = 1;
@@ -110,56 +110,11 @@ pub fn living_plan_path(session_dir: &Path) -> PathBuf {
     session_dir.join("plan.md")
 }
 
-pub fn normalize_path(path: &Path) -> PathBuf {
-    if let Ok(canonical) = path.canonicalize() {
-        return canonical;
-    }
-    if let Some(parent) = path.parent()
-        && let Ok(parent) = parent.canonicalize()
-        && let Some(name) = path.file_name()
-    {
-        return parent.join(name);
-    }
-    path.to_path_buf()
-}
-
-pub fn same_path(left: &Path, right: &Path) -> bool {
-    left == right || normalize_path(left) == normalize_path(right)
-}
-
-pub fn is_plan_md_alias(path: &Path) -> bool {
-    let mut name = None;
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::Normal(part) if name.is_none() => name = Some(part),
-            _ => return false,
-        }
-    }
-    name.is_some_and(|name| name.eq_ignore_ascii_case("plan.md"))
-}
-
-pub fn goal_relative_rest(path: &Path) -> Option<PathBuf> {
-    let mut parts = Vec::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::Normal(part) => parts.push(part),
-            _ => return None,
-        }
-    }
-    let name = parts.first()?;
-    if !name.eq_ignore_ascii_case("goal") || parts.len() < 2 {
-        return None;
-    }
-    Some(parts.into_iter().skip(1).collect())
-}
-
-pub fn is_under_dir(path: &Path, dir: &Path) -> bool {
-    let path = normalize_path(path);
-    let dir = normalize_path(dir);
-    path.starts_with(&dir) && path != dir
-}
+pub use mini_agent_capabilities::path_policy::goal_relative_rest;
+pub use mini_agent_capabilities::path_policy::is_plan_md_alias;
+pub use mini_agent_capabilities::path_policy::is_under_dir;
+pub use mini_agent_capabilities::path_policy::normalize_path;
+pub use mini_agent_capabilities::path_policy::same_path;
 
 fn unquote(text: &str) -> &str {
     let bytes = text.as_bytes();
@@ -186,7 +141,7 @@ Research only to inform the plan. Cite sources; do not copy full page content.
 Reply with a short summary, risks, and open questions.";
 
 pub fn with_plan_mode_overlay(base: &str) -> String {
-    let architect = crate::persona::AgentPromptKind::Plan.prompt_template();
+    let architect = mini_agent_capabilities::persona::AgentPromptKind::Plan.prompt_template();
     if base.contains("=== LIVING PLAN MODE ===") {
         base.to_string()
     } else {

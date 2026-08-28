@@ -3,10 +3,10 @@ use crate::env_file::ResolvedValue;
 use crate::env_file::ValueSource;
 use crate::goal::GoalLimits;
 use crate::project_context;
-use crate::session;
-use crate::skills;
-use crate::workspace::ApprovalMode;
 use crate::world::WorldState;
+use mini_agent_capabilities::session;
+use mini_agent_capabilities::skills;
+use mini_agent_capabilities::workspace::ApprovalMode;
 use reqwest::Url;
 use serde_json::Value;
 use serde_json::json;
@@ -479,7 +479,7 @@ impl RuntimeConfig {
                 &self.workspace,
                 ApprovalMode::Automatic,
                 false,
-                crate::sandbox::SandboxKind::Native,
+                mini_agent_capabilities::sandbox::SandboxKind::Native,
             ),
         )
     }

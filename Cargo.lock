@@ -825,9 +825,11 @@ version = "0.3.0"
 dependencies = [
  "eventsource-stream",
  "futures-util",
+ "htmd",
  "http",
  "mini-agent-core",
  "reqwest 0.12.28",
+ "rmcp",
  "serde",
  "serde_json",
  "tokio",

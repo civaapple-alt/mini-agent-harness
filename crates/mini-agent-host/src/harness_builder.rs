@@ -8,20 +8,19 @@ use mini_agent_core::HarnessConfig;
 use mini_agent_core::ToolRegistry;
 
 use crate::config::RuntimeConfig;
-use crate::image::ImageStore;
-use crate::mcp;
 use crate::profile::{
     CapabilityManifest, ExtensionLoadDepth, ExtensionSelection, RuntimeProfile, SourceFingerprint,
     ToolScope,
 };
 use crate::project_context;
-use crate::result_store::ResultStore;
-use crate::sandbox::SandboxKind;
-use crate::skills;
 use crate::tool_outcome::classify_tools;
-use crate::workspace::ApprovalController;
-use crate::workspace::workspace_tools_with_read_roots_and_results;
 use crate::world::WorldState;
+use mini_agent_capabilities::ImageStore;
+use mini_agent_capabilities::McpLoadResult;
+use mini_agent_capabilities::McpServerConfig;
+use mini_agent_capabilities::result_store::ResultStore;
+use mini_agent_capabilities::sandbox::SandboxKind;
+use mini_agent_capabilities::workspace::ApprovalController;
 
 pub const AUTO_MAX_STEPS: usize = 0;
 
@@ -32,7 +31,7 @@ pub struct HarnessBuild {
     pub world: WorldState,
     pub enabled_mcp_servers: Vec<String>,
     pub mcp_tool_count: usize,
-    pub retry_mcp_servers: Vec<skills::McpServerConfig>,
+    pub retry_mcp_servers: Vec<McpServerConfig>,
     pub capability_manifest: CapabilityManifest,
 }
 
@@ -201,7 +200,7 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
         };
     let mut skill_discovery = (profile.extensions != ExtensionLoadDepth::None
         && (profile.regular_agent.prompts.extensions || profile.regular_agent.rules.extensions))
-        .then(|| skills::discover(&workspace));
+        .then(|| CapabilityRegistry::builtin().discover_extensions(&workspace));
     if let Some(discovery) = &mut skill_discovery {
         if let ExtensionSelection::Named(names) = &profile.extension_selection {
             discovery.retain_selected(names);
@@ -254,7 +253,7 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
         let extra_read_roots = skill_discovery
             .as_ref()
             .map_or_else(Vec::new, |discovery| discovery.extra_read_roots().to_vec());
-        match workspace_tools_with_read_roots_and_results(
+        match CapabilityRegistry::builtin().build_tools(
             workspace.clone(),
             approval.clone(),
             extra_read_roots,
@@ -277,14 +276,14 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
             Vec::new()
         };
     let approval_mode = approval.mode();
-    let mcp::LoadResult {
+    let McpLoadResult {
         tools: mcp_tools,
         loaded_servers,
         diagnostics,
     } = if profile.extensions == ExtensionLoadDepth::Enabled && profile.tools == ToolScope::All {
-        mcp::load(&configured_mcp_servers, approval)
+        CapabilityRegistry::builtin().load_mcp(&configured_mcp_servers, approval)
     } else {
-        mcp::LoadResult {
+        McpLoadResult {
             tools: Vec::new(),
             loaded_servers: Default::default(),
             diagnostics: Vec::new(),

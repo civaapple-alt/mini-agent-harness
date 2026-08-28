@@ -10,7 +10,7 @@ use crate::RuntimeBuilder;
 use crate::RuntimeConfig;
 use crate::RuntimeProfile;
 use crate::SandboxKind;
-use crate::result_store::ResultStore;
+use mini_agent_capabilities::result_store::ResultStore;
 use mini_agent_core::HarnessConfig;
 
 /// Builds a concrete host runtime for an App Server service boundary.
