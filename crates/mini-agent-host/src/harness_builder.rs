@@ -275,7 +275,7 @@ where
     let provider = runtime_config.provider_settings()?;
     let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
     let images = ImageStore::for_provider(provider.api_key.clone(), &provider.base_url);
-    let model = match model_factory.build(
+    let model = model_factory.build(
         &profile.model_provider,
         ModelProviderSettings {
             api_key: provider.api_key,
@@ -284,10 +284,7 @@ where
             web_search: provider.web_search,
         },
         images.clone(),
-    ) {
-        Ok(model) => model,
-        Err(error) => return Err(error),
-    };
+    )?;
     let workspace = runtime_config.workspace();
     let mut capability_manifest = profile.manifest_with_config(&config);
     let profile_overlay = profile.prompt_overlay();

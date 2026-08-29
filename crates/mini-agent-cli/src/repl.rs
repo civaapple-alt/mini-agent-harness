@@ -48,6 +48,7 @@ mod repl_worker;
 
 use repl_worker::{ReplEvent, WorkerCommand};
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     initial_approval: ApprovalMode,
     copilot: bool,

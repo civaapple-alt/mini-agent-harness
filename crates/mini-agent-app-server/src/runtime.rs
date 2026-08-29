@@ -206,6 +206,7 @@ impl AppServerRuntime<OpenAiModel> {
     /// Builds a runtime with an embedding application's model provider and
     /// capability registry. The Host still owns tool, policy, extension, and
     /// world assembly; only model construction crosses this seam.
+    #[allow(clippy::too_many_arguments)]
     pub async fn start_with_control_and_profile_and_registry_with_model_factory<M, F>(
         runtime_config: RuntimeConfig,
         approval: ApprovalController,
@@ -335,6 +336,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
     /// Starts an App Server runtime with an embedding application's model
     /// provider. This is the provider-neutral entry point for hosts that do
     /// not use the built-in OpenAI-compatible model.
+    #[allow(clippy::too_many_arguments)]
     pub async fn start_with_model_factory<F>(
         runtime_config: RuntimeConfig,
         approval: ApprovalController,
