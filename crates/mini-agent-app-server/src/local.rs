@@ -5,17 +5,41 @@
 //! input/output and approval adapter.
 
 use crate::AppServerRuntime;
+use crate::SessionRequest;
 use mini_agent_capabilities::SandboxKind;
 use mini_agent_capabilities::SecurityPreset;
-use mini_agent_capabilities::SessionRequest;
+use mini_agent_capabilities::session;
 use mini_agent_capabilities::workspace::ApprovalController;
+use mini_agent_capabilities::workspace::ApprovalMode;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::RunControl;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
+use mini_agent_host::WorldState;
 use mini_agent_host::harness_config;
 use mini_agent_host::harness_config_auto;
 use std::sync::Arc;
+
+/// Bounded session listing data exposed to frontend commands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionSummary {
+    pub id: String,
+    pub bytes: u64,
+}
+
+/// Lists durable sessions without exposing the capability session type to a
+/// frontend.
+pub fn list_sessions(workspace: &std::path::Path) -> Result<Vec<SessionSummary>, String> {
+    session::list(workspace).map(|sessions| {
+        sessions
+            .into_iter()
+            .map(|session| SessionSummary {
+                id: session.id,
+                bytes: session.bytes,
+            })
+            .collect()
+    })
+}
 
 /// Inputs used by an embedded local frontend to resolve one runtime.
 pub struct LocalRuntimeRequest {
@@ -28,6 +52,17 @@ pub struct LocalRuntimeRequest {
     pub web_search_override: Option<bool>,
     pub session_request: SessionRequest,
     pub max_steps: Option<usize>,
+}
+
+/// Returns the bounded startup summary shown by local frontends before the
+/// runtime worker is ready.
+pub fn world_summary(
+    workspace: &std::path::Path,
+    approval: ApprovalMode,
+    copilot: bool,
+    sandbox: SandboxKind,
+) -> String {
+    WorldState::detect(workspace, approval, copilot, sandbox).summary()
 }
 
 /// Fully resolved local runtime inputs, before the frontend approval callback

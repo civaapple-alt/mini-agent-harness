@@ -63,6 +63,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   the REPL no longer calls the Host Goal module directly.
 - Workflow management is now available through typed App Server JSON-RPC
   methods and ACP `session/workflow/*` mappings without exposing Host paths.
+- Session metadata, workspace state, execution policy, and MCP status/retry are
+  now App Server protocol methods shared by JSON-RPC and `LocalAppServerClient`.
+  The CLI REPL uses that management boundary instead of direct Host world state
+  or capability session access.
 
 ### Fixed
 

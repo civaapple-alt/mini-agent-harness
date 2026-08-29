@@ -1,7 +1,7 @@
+use mini_agent_app_server::SessionRequest;
 use mini_agent_app_server::local::LocalRuntimeRequest;
 use mini_agent_capabilities::sandbox::SandboxKind;
 use mini_agent_capabilities::security::SecurityPreset;
-use mini_agent_capabilities::session::SessionRequest;
 use mini_agent_capabilities::workspace::{ApprovalController, ApprovalMode};
 use mini_agent_host::observer::RunObserver;
 use mini_agent_host::observer::ScriptFormat;
@@ -77,6 +77,13 @@ pub async fn run(
         .as_millis() as u64;
 
     let result = runtime.run_turn(prompt.clone(), &mut observer).await;
+    let session_id = runtime
+        .client_mut()
+        .session_info()
+        .await
+        .ok()
+        .flatten()
+        .map(|session| session.session_id);
 
     match result {
         Ok(outcome)
@@ -95,7 +102,7 @@ pub async fn run(
                         "exit_code": 0,
                         "model": runtime.model_name(),
                         "steps": outcome.steps,
-                        "session_id": runtime.session().map(|s| s.store.session_id()),
+                        "session_id": session_id,
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json(),
                         "capabilities": runtime.capability_manifest()
@@ -124,7 +131,7 @@ pub async fn run(
                         "exit_code": 1,
                         "model": runtime.model_name(),
                         "steps": outcome.steps,
-                        "session_id": runtime.session().map(|s| s.store.session_id()),
+                        "session_id": session_id,
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json(),
                         "error": error,
@@ -145,7 +152,7 @@ pub async fn run(
                         "exit_code": 1,
                         "model": runtime.model_name(),
                         "steps": 0,
-                        "session_id": runtime.session().map(|s| s.store.session_id()),
+                        "session_id": session_id,
                         "usage": observer.stats_json(),
                         "tool_calls": observer.tool_calls_json(),
                         "error": error.to_string(),

@@ -126,20 +126,29 @@ pub mod client;
 pub mod demo;
 pub mod json_rpc;
 pub mod local;
+pub mod management;
 pub mod mentor;
 pub mod runtime;
 pub mod workflows;
 
 pub use client::LocalAppServerClient;
 pub use json_rpc::AppServerConnection;
+pub use json_rpc::StartupServices;
 pub use json_rpc::serve_stdio;
 pub use json_rpc::serve_stdio_with_approval;
 pub use json_rpc::serve_stdio_with_approval_and_manifest;
 pub use json_rpc::serve_stdio_with_startup;
+pub use json_rpc::serve_stdio_with_startup_and_services;
 pub use json_rpc::serve_stdio_with_startup_and_workflows;
+pub use management::RuntimeManagementService;
+pub use mini_agent_app_server_protocol::{
+    McpRetryResult as ProtocolMcpRetryResult, McpStatusResult, SessionInfoResult,
+    WorldRefreshResult, WorldSetExecutionResult, WorldStateResult,
+};
 pub use runtime::capability_manifest_to_protocol;
 pub use runtime::{
     AppServerRuntime, McpRetryResult, RuntimeSessionInfo, RuntimeTurnBatch, RuntimeTurnResult,
+    SessionRequest,
 };
 pub use workflows::WorkflowService;
 

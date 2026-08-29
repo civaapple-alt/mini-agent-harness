@@ -8,6 +8,7 @@
 use crate::AppServer;
 use crate::AppServerConnection;
 use crate::LocalAppServerClient;
+use crate::RuntimeManagementService;
 use crate::ThreadUpdate;
 use crate::workflows::WorkflowService;
 use mini_agent_app_server_protocol::CapabilityManifest as ProtocolCapabilityManifest;
@@ -19,13 +20,8 @@ use mini_agent_app_server_protocol::SourceFingerprint as ProtocolSourceFingerpri
 use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_capabilities::CapabilityRegistry;
 use mini_agent_capabilities::ImageStore;
-use mini_agent_capabilities::McpServerConfig;
 use mini_agent_capabilities::OpenAiModel;
-use mini_agent_capabilities::OpenedSession;
-use mini_agent_capabilities::SessionRequest;
 use mini_agent_capabilities::SessionStore;
-use mini_agent_capabilities::TurnCommit;
-use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
 use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_core::Event;
 use mini_agent_core::EventSink;
@@ -36,13 +32,11 @@ use mini_agent_core::ThreadId;
 use mini_agent_core::ThreadStart;
 use mini_agent_core::TurnInput;
 use mini_agent_core::TurnInputMode;
-use mini_agent_core::TurnStatus;
 use mini_agent_host::CapabilityManifest;
 use mini_agent_host::HostRuntimeFactory;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
 use mini_agent_host::WorldState;
-use mini_agent_host::tool_outcome::classify_tools;
 use std::path::PathBuf;
 
 /// The settled result projected by the local App Server runtime.
@@ -54,6 +48,16 @@ pub type RuntimeTurnResult = TurnReadResult;
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeTurnBatch {
     pub turns: Vec<RuntimeTurnResult>,
+}
+
+/// Session selection requested by a local or remote App Server client.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionRequest {
+    Disabled,
+    New,
+    Named(String),
+    Resume(String),
+    Fork(String),
 }
 
 /// Stable session metadata exposed to local and remote management clients.
@@ -80,17 +84,11 @@ pub struct AppServerRuntime {
     control: std::sync::Arc<RunControl>,
     client: LocalAppServerClient<OpenAiModel>,
     images: ImageStore,
-    session: Option<OpenedSession>,
-    thread_id: ThreadId,
     model_name: String,
     stable_system_prompt: String,
-    world: mini_agent_host::WorldState,
-    enabled_mcp_servers: Vec<String>,
-    mcp_tool_count: usize,
-    retry_mcp_servers: Vec<mini_agent_capabilities::McpServerConfig>,
     capability_manifest: CapabilityManifest,
-    approval: ApprovalController,
     workflow_service: WorkflowService,
+    management: RuntimeManagementService<OpenAiModel>,
 }
 
 impl AppServerRuntime {
@@ -186,7 +184,16 @@ impl AppServerRuntime {
         let session = match session_request {
             SessionRequest::Disabled => None,
             other => {
-                let opened = SessionStore::open(&workspace, other)
+                let request = match other {
+                    SessionRequest::New => mini_agent_capabilities::SessionRequest::New,
+                    SessionRequest::Named(id) => mini_agent_capabilities::SessionRequest::Named(id),
+                    SessionRequest::Resume(id) => {
+                        mini_agent_capabilities::SessionRequest::Resume(id)
+                    }
+                    SessionRequest::Fork(id) => mini_agent_capabilities::SessionRequest::Fork(id),
+                    SessionRequest::Disabled => unreachable!("disabled session handled above"),
+                };
+                let opened = SessionStore::open(&workspace, request)
                     .map_err(|error| format!("cannot open session: {error}"))?;
                 approval.bind_session_file(opened.store.path());
                 Some(opened)
@@ -237,10 +244,21 @@ impl AppServerRuntime {
                 .unwrap_or_else(|| world.workspace().to_path_buf()),
             goal_limits,
         );
+        let management = RuntimeManagementService::new(
+            server.clone(),
+            session,
+            thread_id.clone(),
+            world,
+            enabled_mcp_servers,
+            mcp_tool_count,
+            retry_mcp_servers,
+            approval.clone(),
+        );
         let connection = AppServerConnection::with_capability_manifest(
             server.clone(),
             capability_manifest_to_protocol(&capability_manifest),
         )
+        .with_runtime_management(management.clone())
         .with_workflow_service(workflow_service.clone());
         let mut client = LocalAppServerClient::new(connection);
         client
@@ -256,17 +274,11 @@ impl AppServerRuntime {
             control,
             client,
             images,
-            session,
-            thread_id,
             model_name,
             stable_system_prompt,
-            world,
-            enabled_mcp_servers,
-            mcp_tool_count,
-            retry_mcp_servers,
             capability_manifest,
-            approval,
             workflow_service,
+            management,
         })
     }
 
@@ -287,6 +299,7 @@ impl AppServerRuntime {
     pub fn into_connection(self) -> AppServerConnection<OpenAiModel> {
         let manifest = capability_manifest_to_protocol(&self.capability_manifest);
         AppServerConnection::with_capability_manifest(self.server, manifest)
+            .with_runtime_management(self.management)
             .with_workflow_service(self.workflow_service)
     }
 
@@ -294,16 +307,16 @@ impl AppServerRuntime {
         &self.images
     }
 
-    pub fn session(&self) -> Option<&OpenedSession> {
-        self.session.as_ref()
+    pub fn session(&self) -> Option<RuntimeSessionInfo> {
+        self.management.session_info()
     }
 
     pub fn model_name(&self) -> &str {
         &self.model_name
     }
 
-    pub fn thread_id(&self) -> &ThreadId {
-        &self.thread_id
+    pub fn thread_id(&self) -> ThreadId {
+        self.management.thread_id()
     }
 
     pub fn pending_input_count(&self) -> usize {
@@ -314,24 +327,24 @@ impl AppServerRuntime {
         &self.stable_system_prompt
     }
 
-    pub fn world(&self) -> &mini_agent_host::WorldState {
-        &self.world
+    pub fn world(&self) -> WorldState {
+        self.management.world()
     }
 
-    pub fn enabled_mcp_servers(&self) -> &[String] {
-        &self.enabled_mcp_servers
+    pub fn enabled_mcp_servers(&self) -> Vec<String> {
+        self.management.enabled_mcp_servers()
     }
 
     pub fn mcp_tool_count(&self) -> usize {
-        self.mcp_tool_count
+        self.management.mcp_tool_count()
     }
 
     pub fn capability_manifest(&self) -> &CapabilityManifest {
         &self.capability_manifest
     }
 
-    pub fn retry_mcp_servers(&self) -> &[mini_agent_capabilities::McpServerConfig] {
-        &self.retry_mcp_servers
+    pub fn retry_mcp_servers(&self) -> Vec<mini_agent_capabilities::McpServerConfig> {
+        self.management.retry_mcp_servers()
     }
 
     /// Returns workflow operations bound to this runtime's session directory.
@@ -343,136 +356,47 @@ impl AppServerRuntime {
 
     /// Returns bounded metadata without exposing the persistence store.
     pub fn session_info(&self) -> Option<RuntimeSessionInfo> {
-        self.session.as_ref().map(|opened| RuntimeSessionInfo {
-            session_id: opened.store.session_id().to_string(),
-            thread_id: opened.store.thread_id().to_string(),
-            path: opened.store.path().display().to_string(),
-            resumed: opened.resumed,
-        })
+        self.management.session_info()
+    }
+
+    pub fn checkpoint_seq(&self) -> Option<u64> {
+        self.management.checkpoint_seq()
     }
 
     /// Re-detects the world and appends changed state to the same Thread
     /// context. Persistence remains owned by the App Server runtime.
     pub async fn refresh_world(&mut self) -> Result<bool, String> {
-        let refreshed = WorldState::detect(
-            self.world.workspace(),
-            self.world.approval(),
-            self.world.copilot(),
-            self.world.sandbox(),
-        );
-        self.update_world(refreshed).await
+        self.management.refresh_world().await
     }
 
     /// Applies a resolved world snapshot to the service-owned Thread.
     pub async fn update_world(&mut self, updated: WorldState) -> Result<bool, String> {
-        if updated == self.world {
-            return Ok(false);
-        }
-        let context = updated.model_context()?;
-        self.update_thread(ThreadUpdate::AppendContext(context))
-            .await?;
-        self.world = updated;
-        let checkpoint = self.read_checkpoint().await?;
-        self.record_context(&checkpoint)?;
-        Ok(true)
+        self.management.update_world(updated).await
     }
 
     /// Retries MCP servers deferred at startup and atomically adds any tools
     /// that loaded successfully to the service-owned Thread.
     pub async fn retry_mcp(&mut self) -> Result<McpRetryResult, String> {
-        if self.retry_mcp_servers.is_empty() {
-            return Ok(McpRetryResult {
-                enabled_servers: Vec::new(),
-                inactive_servers: Vec::new(),
-                diagnostics: Vec::new(),
-                tool_count: 0,
-            });
-        }
-        let mini_agent_capabilities::McpLoadResult {
-            tools,
-            loaded_servers,
-            diagnostics,
-        } = mini_agent_capabilities::mcp::load(&self.retry_mcp_servers, self.approval.clone());
-        let inactive_servers = self
-            .retry_mcp_servers
-            .iter()
-            .filter(|server| {
-                !loaded_servers.contains(&format!("{}/{}", server.plugin_name, server.server_name))
-            })
-            .map(|server: &McpServerConfig| {
-                format!("{}/{}", server.plugin_name, server.server_name)
-            })
-            .collect::<Vec<_>>();
-        let enabled_servers = loaded_servers.iter().cloned().collect::<Vec<_>>();
-        let tool_count = tools.len();
-        self.update_thread(ThreadUpdate::ExtendTools(classify_tools(tools)))
-            .await?;
-        self.retry_mcp_servers = self
-            .retry_mcp_servers
-            .iter()
-            .filter(|server| {
-                !loaded_servers.contains(&format!("{}/{}", server.plugin_name, server.server_name))
-            })
-            .cloned()
-            .collect();
-        self.enabled_mcp_servers
-            .extend(enabled_servers.iter().cloned());
-        self.mcp_tool_count += tool_count;
-        Ok(McpRetryResult {
-            enabled_servers,
-            inactive_servers,
-            diagnostics,
-            tool_count,
-        })
+        self.management.retry_mcp().await
     }
 
     pub async fn update_thread(&self, update: ThreadUpdate) -> Result<(), String> {
-        self.server
-            .thread_update_for(self.thread_id.clone(), update)
-            .await
-            .map_err(|error| error.to_string())
+        self.management.update_thread(update).await
     }
 
     pub async fn start_new_thread(&mut self) -> Result<(), String> {
-        let new_thread_id = {
-            let Some(session) = self.session.as_mut() else {
-                return Err("session persistence is disabled".to_string());
-            };
-            session.store.start_thread()?;
-            ThreadId::new(session.store.thread_id().to_string())
-        };
-        self.server
-            .thread_reset(self.thread_id.clone(), new_thread_id.clone(), 1)
-            .await
-            .map_err(|error| error.to_string())?;
-        self.thread_id = new_thread_id;
-        Ok(())
+        self.management.start_new_thread().await
     }
 
     pub async fn read_checkpoint(&self) -> Result<mini_agent_core::ThreadCheckpoint, String> {
-        self.server
-            .thread_read_for(self.thread_id.clone())
-            .await
-            .map_err(|error| error.to_string())
+        self.management.read_checkpoint().await
     }
 
     pub fn record_context(
         &mut self,
         checkpoint: &mini_agent_core::ThreadCheckpoint,
     ) -> Result<(), String> {
-        let Some(session) = self.session.as_mut() else {
-            return Ok(());
-        };
-        let context = checkpoint
-            .session
-            .messages()
-            .iter()
-            .rev()
-            .find(|message| matches!(message, mini_agent_core::Message::Context { .. }))
-            .ok_or_else(|| "no context item is available to persist".to_string())?;
-        session
-            .store
-            .record_context(context, checkpoint.session.messages())
+        self.management.record_context(checkpoint)
     }
 
     /// Runs one turn through the protocol client and returns the final settled
@@ -501,7 +425,7 @@ impl AppServerRuntime {
         let submission = self
             .client
             .start_turn(
-                self.thread_id.clone(),
+                self.thread_id(),
                 TurnInput::new(TurnInputMode::Start, prompt.into()),
             )
             .await
@@ -575,7 +499,7 @@ impl AppServerRuntime {
     ) -> Result<mini_agent_app_server_protocol::ThreadReadResult, String> {
         let mut last_error = None;
         for _ in 0..256 {
-            match self.client.read_thread(self.thread_id.clone()).await {
+            match self.client.read_thread(self.thread_id()).await {
                 Ok(checkpoint) => return Ok(checkpoint),
                 Err(error) => {
                     last_error = Some(error.message);
@@ -594,45 +518,7 @@ impl AppServerRuntime {
         prompt: &str,
         result: &RuntimeTurnResult,
     ) -> Result<(), String> {
-        self.record_turn_with_messages(
-            started_at_ms,
-            prompt,
-            result,
-            &result.messages,
-            &result.messages,
-        )
-    }
-
-    fn record_turn_with_messages(
-        &mut self,
-        started_at_ms: u64,
-        prompt: &str,
-        result: &RuntimeTurnResult,
-        messages: &[mini_agent_core::Message],
-        checkpoint: &[mini_agent_core::Message],
-    ) -> Result<(), String> {
-        let Some(session) = self.session.as_mut() else {
-            return Ok(());
-        };
-        let status = match result.status {
-            TurnStatus::Completed => SessionTurnStatus::Completed,
-            TurnStatus::StepLimit => SessionTurnStatus::StepLimit,
-            TurnStatus::Steered => SessionTurnStatus::Steered,
-            TurnStatus::Cancelled => SessionTurnStatus::Cancelled,
-            TurnStatus::Failed | TurnStatus::InProgress => SessionTurnStatus::Failed,
-        };
-        session.store.record_turn_with_id(
-            result.turn_id.as_str(),
-            TurnCommit {
-                started_at_ms,
-                prompt,
-                status,
-                steps: result.steps,
-                error: result.error.as_deref(),
-                messages,
-                checkpoint,
-            },
-        )
+        self.management.record_turn(started_at_ms, prompt, result)
     }
 
     pub fn record_batch(
@@ -658,7 +544,7 @@ impl AppServerRuntime {
                 .unwrap_or(&result.messages)
                 .to_vec();
             previous_message_count = result.messages.len();
-            self.record_turn_with_messages(
+            self.management.record_turn_with_messages(
                 started_at_ms,
                 prompt,
                 result,

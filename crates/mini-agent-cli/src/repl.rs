@@ -1,12 +1,11 @@
 use mini_agent_app_server::AppServerRuntime;
+use mini_agent_app_server::SessionRequest;
 use mini_agent_app_server::ThreadUpdate;
 use mini_agent_app_server::local::LocalRuntimeRequest;
 use mini_agent_app_server::mentor;
 use mini_agent_app_server::workflows as workflow_api;
 use mini_agent_capabilities::sandbox::SandboxKind;
 use mini_agent_capabilities::security::{SecurityPolicy, SecurityPreset};
-use mini_agent_capabilities::session;
-use mini_agent_capabilities::session::SessionRequest;
 use mini_agent_capabilities::skills;
 use mini_agent_capabilities::workspace::{ApprovalController, ApprovalMode};
 use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
@@ -22,7 +21,6 @@ use mini_agent_host::WorkflowScope;
 use mini_agent_host::harness_config_auto;
 use mini_agent_host::observer::RunObserver;
 use mini_agent_host::print_auto_warning;
-use mini_agent_host::world::WorldState;
 use std::collections::VecDeque;
 use std::io;
 use std::io::IsTerminal;
@@ -168,14 +166,6 @@ pub async fn run(
     } else {
         startup_profile
     };
-    let startup_world = workspace.as_ref().map(|workspace| {
-        WorldState::detect(
-            workspace,
-            initial_approval,
-            copilot,
-            startup_profile.sandbox,
-        )
-    });
     let manifest = startup_profile.manifest();
     let disabled = manifest
         .disabled
@@ -196,8 +186,16 @@ pub async fn run(
     if let Some(discovery) = startup_extensions {
         print_extension_summary(&discovery);
     }
-    if let Some(world) = startup_world {
-        println!("world> {}", world.summary());
+    if let Some(workspace) = workspace.as_ref() {
+        println!(
+            "world> {}",
+            mini_agent_app_server::local::world_summary(
+                workspace,
+                initial_approval,
+                copilot,
+                startup_profile.sandbox,
+            )
+        );
     }
     println!("initializing extensions...");
 
@@ -503,19 +501,33 @@ fn spawn_worker(
         let workflow_service = runtime.workflows();
         let mut copilot = copilot;
         let mut goal_objective: Option<String> = None;
-        let mut world = runtime.world().clone();
+        let mut world = match model_runtime.block_on(runtime.client_mut().world_state()) {
+            Ok(world) => world,
+            Err(error) => {
+                let _ = events.send(ReplEvent::InitializationFailed(error.message));
+                let _ = events.send(ReplEvent::Exited);
+                return;
+            }
+        };
         let stable_system_prompt = runtime.stable_system_prompt().to_string();
-        let enabled_mcp_servers = runtime.enabled_mcp_servers().to_vec();
-        let mcp_tool_count = runtime.mcp_tool_count();
-        if let Some(opened) = runtime.session() {
+        let mcp_status = match model_runtime.block_on(runtime.client_mut().mcp_status()) {
+            Ok(status) => status,
+            Err(error) => {
+                let _ = events.send(ReplEvent::InitializationFailed(error.message));
+                let _ = events.send(ReplEvent::Exited);
+                return;
+            }
+        };
+        let enabled_mcp_servers = mcp_status.enabled_servers;
+        let mcp_tool_count = mcp_status.tool_count;
+        if let Ok(Some(opened)) = model_runtime.block_on(runtime.client_mut().session_info()) {
             if opened.resumed {
                 let _ = model_runtime.block_on(runtime.update_thread(ThreadUpdate::AppendContext(
                     "[Session resumed. Note: previously running background processes and result preview handles from prior sessions have expired.]".to_string(),
                 )));
-                if let Ok(context) = world.model_context() {
-                    let _ = model_runtime
-                        .block_on(runtime.update_thread(ThreadUpdate::AppendContext(context)));
-                }
+                let _ = model_runtime.block_on(
+                    runtime.update_thread(ThreadUpdate::AppendContext(world.context.clone())),
+                );
                 if let Ok(Some(state)) = workflow_service.load_goal_state()
                     && state.status == workflow_api::GoalStatus::Running
                 {
@@ -528,9 +540,7 @@ fn spawn_worker(
             let label = if opened.resumed { "resumed" } else { "new" };
             let _ = events.send(ReplEvent::Notice(format!(
                 "session> {label} {} | thread {} | {}",
-                opened.store.session_id(),
-                opened.store.thread_id(),
-                opened.store.path().display()
+                opened.session_id, opened.thread_id, opened.path
             )));
             if let Ok(checkpoint) = model_runtime.block_on(runtime.read_checkpoint()) {
                 let _ = runtime.record_context(&checkpoint);
@@ -542,12 +552,8 @@ fn spawn_worker(
                 bounded_names(&enabled_mcp_servers)
             )));
         }
-        if !runtime.retry_mcp_servers().is_empty() {
-            let inactive = runtime
-                .retry_mcp_servers()
-                .iter()
-                .map(|server| format!("{}/{}", server.plugin_name, server.server_name))
-                .collect::<Vec<_>>();
+        if !mcp_status.inactive_servers.is_empty() {
+            let inactive = mcp_status.inactive_servers;
             let _ = events.send(ReplEvent::Notice(format!(
                 "mcp> inactive — {}; use /mcp to retry",
                 bounded_names(&inactive)
@@ -567,7 +573,10 @@ fn spawn_worker(
                         } else {
                             prompt
                         };
-                        let started_at_ms = session::timestamp_ms();
+                        let started_at_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
                         let mut observer = ChannelObserver(events.clone());
                         let goal_timeout = approval.goal_dir().and_then(|goal_dir| {
                             goal_dir
@@ -651,10 +660,7 @@ fn spawn_worker(
                                 let Some(_goal_dir) = approval.goal_dir() else {
                                     break;
                                 };
-                                let Some(checkpoint_seq) = runtime
-                                    .session()
-                                    .map(|opened| opened.store.checkpoint_seq())
-                                else {
+                                let Some(checkpoint_seq) = runtime.checkpoint_seq() else {
                                     let _ = events.send(ReplEvent::Warning(
                                         "goal> cannot verify without a settled durable checkpoint"
                                             .to_string(),
@@ -775,7 +781,12 @@ fn spawn_worker(
                         }
                     }
                     WorkerCommand::ClearHistory => {
-                        if runtime.session().is_some()
+                        let has_session = model_runtime
+                            .block_on(runtime.client_mut().session_info())
+                            .ok()
+                            .flatten()
+                            .is_some();
+                        if has_session
                             && let Err(error) = model_runtime.block_on(runtime.start_new_thread())
                         {
                             let _ = events.send(ReplEvent::Warning(format!(
@@ -791,21 +802,15 @@ fn spawn_worker(
                             )));
                             continue;
                         }
-                        match world.model_context() {
-                            Ok(context) => match model_runtime.block_on(
-                                runtime.update_thread(ThreadUpdate::AppendContext(context)),
-                            ) {
-                                Ok(()) => {
-                                    persist_latest_context(&mut runtime, &model_runtime, &events);
-                                    let _ = events
-                                        .send(ReplEvent::Notice("new conversation".to_string()));
-                                }
-                                Err(error) => {
-                                    let _ = events.send(ReplEvent::Warning(format!(
-                                        "error: cannot restore world state: {error}"
-                                    )));
-                                }
-                            },
+                        match model_runtime.block_on(
+                            runtime
+                                .update_thread(ThreadUpdate::AppendContext(world.context.clone())),
+                        ) {
+                            Ok(()) => {
+                                persist_latest_context(&mut runtime, &model_runtime, &events);
+                                let _ =
+                                    events.send(ReplEvent::Notice("new conversation".to_string()));
+                            }
                             Err(error) => {
                                 let _ = events.send(ReplEvent::Warning(format!(
                                     "error: cannot restore world state: {error}"
@@ -827,17 +832,17 @@ fn spawn_worker(
                         } else {
                             "off".to_string()
                         };
-                        let session_str = if let Some(opened) = runtime.session() {
+                        let session_str = if let Ok(Some(opened)) =
+                            model_runtime.block_on(runtime.client_mut().session_info())
+                        {
                             format!(
                                 "{} (thread {}) [durable: {}]",
-                                opened.store.session_id(),
-                                opened.store.thread_id(),
-                                opened.store.path().display()
+                                opened.session_id, opened.thread_id, opened.path
                             )
                         } else {
                             "unavailable".to_string()
                         };
-                        let workspace_str = world.workspace().display().to_string();
+                        let workspace_str = world.workspace.clone();
 
                         let _ = events.send(ReplEvent::Notice(format!(
                             "status> workspace:        {workspace_str}"
@@ -880,45 +885,59 @@ fn spawn_worker(
                         )));
                     }
                     WorkerCommand::ShowWorld => {
-                        for line in world.status_lines() {
+                        for line in &world.lines {
                             let _ = events.send(ReplEvent::Notice(format!("world> {line}")));
                         }
                     }
                     WorkerCommand::RefreshWorld => {
-                        match model_runtime.block_on(runtime.refresh_world()) {
-                            Ok(true) => {
-                                world = runtime.world().clone();
+                        match model_runtime.block_on(runtime.client_mut().refresh_world()) {
+                            Ok(result) if result.changed => {
+                                world = result.state;
                                 let _ = events.send(ReplEvent::Notice(
                                     "world> refreshed and appended to context".to_string(),
                                 ));
                             }
-                            Ok(false) => {
+                            Ok(_result) => {
                                 let _ = events.send(ReplEvent::Notice(
                                     "world> unchanged; no context item appended".to_string(),
                                 ));
                             }
                             Err(error) => {
                                 let _ = events.send(ReplEvent::Warning(format!(
-                                    "error: cannot refresh world state: {error}"
+                                    "error: cannot refresh world state: {}",
+                                    error.message
                                 )));
                             }
                         }
                     }
                     WorkerCommand::EnableMcp => {
-                        if runtime.retry_mcp_servers().is_empty() {
+                        let status = match model_runtime.block_on(runtime.client_mut().mcp_status())
+                        {
+                            Ok(status) => status,
+                            Err(error) => {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "mcp> cannot read status: {}",
+                                    error.message
+                                )));
+                                continue;
+                            }
+                        };
+                        if !status.retry_available {
                             let _ = events.send(ReplEvent::Notice(
                                 "no MCP servers are waiting to be enabled".to_string(),
                             ));
                         } else {
-                            let result = match model_runtime.block_on(runtime.retry_mcp()) {
-                                Ok(result) => result,
-                                Err(error) => {
-                                    let _ = events.send(ReplEvent::Warning(format!(
-                                        "mcp> cannot enable tools: {error}"
-                                    )));
-                                    continue;
-                                }
-                            };
+                            let result =
+                                match model_runtime.block_on(runtime.client_mut().retry_mcp()) {
+                                    Ok(result) => result,
+                                    Err(error) => {
+                                        let _ = events.send(ReplEvent::Warning(format!(
+                                            "mcp> cannot enable tools: {}",
+                                            error.message
+                                        )));
+                                        continue;
+                                    }
+                                };
                             for diagnostic in result.diagnostics {
                                 let _ = events
                                     .send(ReplEvent::Warning(format!("warning: {diagnostic}")));
@@ -941,19 +960,27 @@ fn spawn_worker(
                             }
                         }
                     }
-                    WorkerCommand::ShowSession => match runtime.session_info() {
-                        Some(session) => {
-                            let _ = events.send(ReplEvent::Notice(format!(
-                                "session> durable {} | thread {} | {}",
-                                session.session_id, session.thread_id, session.path
-                            )));
+                    WorkerCommand::ShowSession => {
+                        match model_runtime.block_on(runtime.client_mut().session_info()) {
+                            Ok(Some(session)) => {
+                                let _ = events.send(ReplEvent::Notice(format!(
+                                    "session> durable {} | thread {} | {}",
+                                    session.session_id, session.thread_id, session.path
+                                )));
+                            }
+                            Ok(None) => {
+                                let _ = events.send(ReplEvent::Notice(
+                                    "session> no durable session is attached".to_string(),
+                                ));
+                            }
+                            Err(error) => {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "session> cannot read session info: {}",
+                                    error.message
+                                )));
+                            }
                         }
-                        None => {
-                            let _ = events.send(ReplEvent::Notice(
-                                "session> no durable session is attached".to_string(),
-                            ));
-                        }
-                    },
+                    }
                     WorkerCommand::SetExecution {
                         approval: mode,
                         copilot: new_copilot,
@@ -974,16 +1001,19 @@ fn spawn_worker(
                                 "error: cannot change execution mode: {error}"
                             )));
                         }
-                        let updated_world = world.with_execution(mode, copilot, sandbox_kind);
-                        if updated_world != world {
-                            match model_runtime.block_on(runtime.update_world(updated_world)) {
-                                Ok(true) => world = runtime.world().clone(),
-                                Ok(false) => {}
-                                Err(error) => {
-                                    let _ = events.send(ReplEvent::Warning(format!(
-                                        "error: cannot append execution mode state: {error}"
-                                    )));
-                                }
+                        match model_runtime.block_on(runtime.client_mut().set_world_execution(
+                            match mode {
+                                ApprovalMode::Automatic => "automatic",
+                                ApprovalMode::Interactive => "interactive",
+                            },
+                            copilot,
+                        )) {
+                            Ok(result) => world = result.state,
+                            Err(error) => {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "error: cannot append execution mode state: {}",
+                                    error.message
+                                )));
                             }
                         }
                         if copilot {
@@ -1068,7 +1098,11 @@ fn spawn_worker(
                             ));
                             continue;
                         }
-                        if runtime.session().is_none() {
+                        let session = model_runtime
+                            .block_on(runtime.client_mut().session_info())
+                            .ok()
+                            .flatten();
+                        if session.is_none() {
                             let _ = events.send(ReplEvent::Warning(
                                 "goal> requires a durable session".to_string(),
                             ));
@@ -1080,11 +1114,13 @@ fn spawn_worker(
                             )));
                             break;
                         }
-                        let session_dir = runtime
-                            .session()
-                            .as_ref()
-                            .and_then(|opened| opened.store.path().parent())
-                            .unwrap_or(world.workspace());
+                        let session_dir = session
+                            .and_then(|opened| {
+                                std::path::Path::new(&opened.path)
+                                    .parent()
+                                    .map(std::path::Path::to_path_buf)
+                            })
+                            .unwrap_or_else(|| std::path::PathBuf::from(&world.workspace));
                         match workflow_service.init_goal(objective) {
                             Ok(state) => {
                                 goal_objective = Some(objective.clone());

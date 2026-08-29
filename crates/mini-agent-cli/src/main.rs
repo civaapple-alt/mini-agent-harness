@@ -13,9 +13,9 @@ use args::parse_args;
 use host::RuntimeConfig;
 use host::RuntimeProfile;
 use host::load_workspace_profile;
+use mini_agent_app_server::SessionRequest;
 use mini_agent_capabilities::sandbox::SandboxKind;
 use mini_agent_capabilities::security::SecurityPreset;
-use mini_agent_capabilities::session::SessionRequest;
 use mini_agent_capabilities::workspace::ApprovalMode;
 use mini_agent_host as host;
 
@@ -239,7 +239,7 @@ fn run_sessions() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match mini_agent_capabilities::session::list(&workspace) {
+    match mini_agent_app_server::local::list_sessions(&workspace) {
         Ok(sessions) if sessions.is_empty() => {
             println!("no durable sessions");
             ExitCode::SUCCESS

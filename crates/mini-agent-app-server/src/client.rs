@@ -8,6 +8,9 @@ use mini_agent_app_server_protocol::InitializeResult;
 use mini_agent_app_server_protocol::JsonRpcError;
 use mini_agent_app_server_protocol::JsonRpcRequest;
 use mini_agent_app_server_protocol::METHOD_INITIALIZE;
+use mini_agent_app_server_protocol::METHOD_MCP_RETRY;
+use mini_agent_app_server_protocol::METHOD_MCP_STATUS;
+use mini_agent_app_server_protocol::METHOD_SESSION_INFO;
 use mini_agent_app_server_protocol::METHOD_THREAD_CLOSE;
 use mini_agent_app_server_protocol::METHOD_THREAD_FORK;
 use mini_agent_app_server_protocol::METHOD_THREAD_LIST;
@@ -25,6 +28,12 @@ use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_PAUSE;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_START;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_PLAN_SET;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
+use mini_agent_app_server_protocol::METHOD_WORLD_REFRESH;
+use mini_agent_app_server_protocol::METHOD_WORLD_SET_EXECUTION;
+use mini_agent_app_server_protocol::METHOD_WORLD_STATE;
+use mini_agent_app_server_protocol::McpRetryResult;
+use mini_agent_app_server_protocol::McpStatusResult;
+use mini_agent_app_server_protocol::SessionInfoResult;
 use mini_agent_app_server_protocol::ThreadCloseParams;
 use mini_agent_app_server_protocol::ThreadForkParams;
 use mini_agent_app_server_protocol::ThreadForkResult;
@@ -48,6 +57,10 @@ use mini_agent_app_server_protocol::WorkflowGoalStartParams;
 use mini_agent_app_server_protocol::WorkflowGoalState;
 use mini_agent_app_server_protocol::WorkflowPlanSetParams;
 use mini_agent_app_server_protocol::WorkflowState;
+use mini_agent_app_server_protocol::WorldRefreshResult;
+use mini_agent_app_server_protocol::WorldSetExecutionParams;
+use mini_agent_app_server_protocol::WorldSetExecutionResult;
+use mini_agent_app_server_protocol::WorldStateResult;
 use mini_agent_core::EventEnvelope;
 use mini_agent_core::Model;
 use mini_agent_core::ThreadId;
@@ -265,6 +278,41 @@ where
         params: WorkflowGoalAdvanceParams,
     ) -> Result<WorkflowGoalState, JsonRpcError> {
         self.call(METHOD_WORKFLOW_GOAL_ADVANCE, params).await
+    }
+
+    pub async fn session_info(&mut self) -> Result<Option<SessionInfoResult>, JsonRpcError> {
+        self.call(METHOD_SESSION_INFO, serde_json::json!({})).await
+    }
+
+    pub async fn world_state(&mut self) -> Result<WorldStateResult, JsonRpcError> {
+        self.call(METHOD_WORLD_STATE, serde_json::json!({})).await
+    }
+
+    pub async fn refresh_world(&mut self) -> Result<WorldRefreshResult, JsonRpcError> {
+        self.call(METHOD_WORLD_REFRESH, serde_json::json!({})).await
+    }
+
+    pub async fn set_world_execution(
+        &mut self,
+        approval: impl Into<String>,
+        copilot: bool,
+    ) -> Result<WorldSetExecutionResult, JsonRpcError> {
+        self.call(
+            METHOD_WORLD_SET_EXECUTION,
+            WorldSetExecutionParams {
+                approval: approval.into(),
+                copilot,
+            },
+        )
+        .await
+    }
+
+    pub async fn mcp_status(&mut self) -> Result<McpStatusResult, JsonRpcError> {
+        self.call(METHOD_MCP_STATUS, serde_json::json!({})).await
+    }
+
+    pub async fn retry_mcp(&mut self) -> Result<McpRetryResult, JsonRpcError> {
+        self.call(METHOD_MCP_RETRY, serde_json::json!({})).await
     }
 
     pub async fn next_event(&mut self) -> Result<EventEnvelope, JsonRpcError> {

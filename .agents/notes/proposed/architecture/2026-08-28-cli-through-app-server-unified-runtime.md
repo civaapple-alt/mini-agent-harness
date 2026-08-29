@@ -37,6 +37,16 @@ evidence (cross-platform CI and a real provider Goal run). The source tree now
 has one CLI turn owner, and concrete provider implementations are isolated in
 `mini-agent-capabilities` behind Host profile seams.
 
+The session/world/MCP management slice is implemented. App Server protocol
+methods `session/info`, `world/state`, `world/refresh`, `world/set_execution`,
+`mcp/status`, and `mcp/retry` are backed by `RuntimeManagementService` and are
+available through `LocalAppServerClient`. REPL status, world, session, and MCP
+operations use this client; the standalone App Server binary attaches the same
+service and advertises it during initialize. The proposal remains open for the
+workspace line gate and cross-platform/real-provider evidence, while
+frontend-only profile, safety, approval, and extension discovery imports stay
+at the CLI bootstrap edge.
+
 Follow-up verification on 2026-08-29 at `e317b14` passed
 `cargo test --workspace --all-targets -- --test-threads=1` and
 `cargo clippy --workspace --all-targets --locked -- -D warnings`. This is

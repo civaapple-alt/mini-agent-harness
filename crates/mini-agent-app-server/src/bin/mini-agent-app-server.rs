@@ -1,7 +1,9 @@
 use mini_agent_app_server::AppServerError;
 use mini_agent_app_server::ApprovalBroker;
+use mini_agent_app_server::RuntimeManagementService;
+use mini_agent_app_server::StartupServices;
 use mini_agent_app_server::capability_manifest_to_protocol;
-use mini_agent_app_server::serve_stdio_with_startup_and_workflows;
+use mini_agent_app_server::serve_stdio_with_startup_and_services;
 use mini_agent_app_server_protocol::CapabilityProviderSelection;
 use mini_agent_capabilities::SecurityPreset;
 use mini_agent_capabilities::security::SecurityPolicy;
@@ -33,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let startup_broker = broker.clone();
     let stdin = BufReader::new(tokio::io::stdin());
     let stdout = tokio::io::stdout();
-    serve_stdio_with_startup_and_workflows(broker, stdin, stdout, move |params| {
+    serve_stdio_with_startup_and_services(broker, stdin, stdout, move |params| {
         let base_profile = match params.profile {
             Some(name) => RuntimeProfile::builtin(&name)
                 .ok_or_else(|| format!("unknown startup profile `{name}`"))?,
@@ -43,15 +45,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         apply_provider_selection(&mut profile, params.providers.as_ref())?;
         let factory_profile = profile.clone();
         let approval = approval_for(startup_broker.clone());
+        let management_approval = approval.clone();
         let runtime = HostRuntimeFactory::new(&startup_config, approval, HarnessConfig::default())
             .build(profile, Default::default())?;
-        let capability_manifest = capability_manifest_to_protocol(&runtime.capability_manifest);
+        let mini_agent_host::HarnessBuild {
+            harness,
+            world,
+            enabled_mcp_servers,
+            mcp_tool_count,
+            retry_mcp_servers,
+            capability_manifest,
+            ..
+        } = runtime;
+        let capability_manifest = capability_manifest_to_protocol(&capability_manifest);
         let thread_id = ThreadId::new("default");
-        let thread = Thread::new(thread_id.clone(), runtime.harness);
+        let thread = Thread::new(thread_id.clone(), harness);
         let factory_broker = startup_broker.clone();
         let factory_config = startup_config.clone();
         let server = mini_agent_app_server::AppServer::with_thread_factory(
-            ThreadStart::new(thread_id),
+            ThreadStart::new(thread_id.clone()),
             vec![thread],
             move |thread_id| {
                 let approval = approval_for(factory_broker.clone());
@@ -62,11 +74,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Ok(Thread::new(thread_id, runtime.harness))
             },
         );
+        let management = RuntimeManagementService::new(
+            server.clone(),
+            None,
+            thread_id,
+            world,
+            enabled_mcp_servers,
+            mcp_tool_count,
+            retry_mcp_servers,
+            management_approval,
+        );
         let workflows = mini_agent_app_server::WorkflowService::new(
             startup_config.workspace(),
             startup_config.goal_limits(),
         );
-        Ok((server, capability_manifest, Some(workflows)))
+        Ok((
+            server,
+            capability_manifest,
+            StartupServices {
+                workflows: Some(workflows),
+                management: Some(management),
+            },
+        ))
     })
     .await?;
     Ok(())

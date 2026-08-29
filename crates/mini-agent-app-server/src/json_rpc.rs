@@ -4,6 +4,7 @@ use super::AppServer;
 use super::AppServerError;
 use super::ApprovalBroker;
 use super::ApprovalRequest;
+use super::RuntimeManagementService;
 use super::WorkflowService;
 use mini_agent_app_server_protocol::ApprovalRequestNotification;
 use mini_agent_app_server_protocol::ApprovalRespondParams;
@@ -17,6 +18,9 @@ use mini_agent_app_server_protocol::JsonRpcResponse;
 use mini_agent_app_server_protocol::METHOD_APPROVAL_RESPOND;
 use mini_agent_app_server_protocol::METHOD_INITIALIZE;
 use mini_agent_app_server_protocol::METHOD_INITIALIZED;
+use mini_agent_app_server_protocol::METHOD_MCP_RETRY;
+use mini_agent_app_server_protocol::METHOD_MCP_STATUS;
+use mini_agent_app_server_protocol::METHOD_SESSION_INFO;
 use mini_agent_app_server_protocol::METHOD_THREAD_CLOSE;
 use mini_agent_app_server_protocol::METHOD_THREAD_FORK;
 use mini_agent_app_server_protocol::METHOD_THREAD_LIST;
@@ -35,8 +39,14 @@ use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_PAUSE;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_START;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_PLAN_SET;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
+use mini_agent_app_server_protocol::METHOD_WORLD_REFRESH;
+use mini_agent_app_server_protocol::METHOD_WORLD_SET_EXECUTION;
+use mini_agent_app_server_protocol::METHOD_WORLD_STATE;
+use mini_agent_app_server_protocol::McpRetryResult as ProtocolMcpRetryResult;
+use mini_agent_app_server_protocol::McpStatusResult;
 use mini_agent_app_server_protocol::PROTOCOL_VERSION;
 use mini_agent_app_server_protocol::ServerCapabilities;
+use mini_agent_app_server_protocol::SessionInfoResult;
 use mini_agent_app_server_protocol::ThreadCloseParams;
 use mini_agent_app_server_protocol::ThreadForkParams;
 use mini_agent_app_server_protocol::ThreadForkResult;
@@ -61,6 +71,11 @@ use mini_agent_app_server_protocol::WorkflowPlanSetParams;
 use mini_agent_app_server_protocol::WorkflowState;
 use mini_agent_app_server_protocol::WorkflowVerdictOutcome;
 use mini_agent_app_server_protocol::WorkflowVerifierVerdict;
+use mini_agent_app_server_protocol::WorldRefreshResult;
+use mini_agent_app_server_protocol::WorldSetExecutionParams;
+use mini_agent_app_server_protocol::WorldSetExecutionResult;
+use mini_agent_app_server_protocol::WorldStateResult;
+use mini_agent_capabilities::workspace::ApprovalMode;
 use mini_agent_core::EventEnvelope;
 use mini_agent_core::Model;
 use mini_agent_core::SessionState;
@@ -86,6 +101,7 @@ pub struct AppServerConnection<M> {
     approval_enabled: bool,
     capability_manifest: CapabilityManifest,
     workflows: Option<WorkflowService>,
+    management: Option<RuntimeManagementService<M>>,
 }
 
 impl<M> AppServerConnection<M>
@@ -134,6 +150,7 @@ where
             approval_enabled,
             capability_manifest,
             workflows: None,
+            management: None,
         }
     }
 
@@ -142,6 +159,11 @@ where
     /// App Servers that were not built from a Host runtime.
     pub fn with_workflow_service(mut self, workflows: WorkflowService) -> Self {
         self.workflows = Some(workflows);
+        self
+    }
+
+    pub fn with_runtime_management(mut self, management: RuntimeManagementService<M>) -> Self {
+        self.management = Some(management);
         self
     }
 
@@ -221,6 +243,12 @@ where
             METHOD_WORKFLOW_GOAL_FAIL => self.handle_workflow_goal_fail(request).await,
             METHOD_WORKFLOW_GOAL_CRITERIA => self.handle_workflow_goal_criteria(request).await,
             METHOD_WORKFLOW_GOAL_ADVANCE => self.handle_workflow_goal_advance(request).await,
+            METHOD_SESSION_INFO => self.handle_session_info(request).await,
+            METHOD_WORLD_STATE => self.handle_world_state(request).await,
+            METHOD_WORLD_REFRESH => self.handle_world_refresh(request).await,
+            METHOD_WORLD_SET_EXECUTION => self.handle_world_set_execution(request).await,
+            METHOD_MCP_STATUS => self.handle_mcp_status(request).await,
+            METHOD_MCP_RETRY => self.handle_mcp_retry(request).await,
             _ => response_error(id, JsonRpcError::method_not_found(request.method)),
         }
     }
@@ -316,6 +344,7 @@ where
                 thread_list: true,
                 approval_requests: self.approval_enabled,
                 workflows: self.workflows.is_some(),
+                runtime_management: self.management.is_some(),
             },
             profile: self.capability_manifest.profile.clone(),
             capability_manifest: self.capability_manifest.clone(),
@@ -672,6 +701,123 @@ where
             .ok_or_else(|| JsonRpcError::server_error("workflow service is unavailable"))
     }
 
+    async fn handle_session_info(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        match management.session_info() {
+            Some(info) => response_value(
+                request.id,
+                SessionInfoResult {
+                    session_id: info.session_id,
+                    thread_id: info.thread_id,
+                    path: info.path,
+                    resumed: info.resumed,
+                },
+            ),
+            None => response_value(request.id, serde_json::Value::Null),
+        }
+    }
+
+    async fn handle_world_state(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        response_value(request.id, world_state_result(management))
+    }
+
+    async fn handle_world_refresh(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        match management.refresh_world().await {
+            Ok(changed) => response_value(
+                request.id,
+                WorldRefreshResult {
+                    changed,
+                    state: world_state_result(management),
+                },
+            ),
+            Err(error) => response_error(request.id, workflow_error(error)),
+        }
+    }
+
+    async fn handle_world_set_execution(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<WorldSetExecutionParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        let approval = match params.approval.as_str() {
+            "interactive" => ApprovalMode::Interactive,
+            "automatic" => ApprovalMode::Automatic,
+            _ => {
+                return response_error(
+                    request.id,
+                    JsonRpcError::invalid_params("approval must be interactive or automatic"),
+                );
+            }
+        };
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        match management.set_execution(approval, params.copilot).await {
+            Ok(changed) => response_value(
+                request.id,
+                WorldSetExecutionResult {
+                    changed,
+                    state: world_state_result(management),
+                },
+            ),
+            Err(error) => response_error(request.id, workflow_error(error)),
+        }
+    }
+
+    async fn handle_mcp_status(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        let (enabled_servers, inactive_servers, tool_count) = management.mcp_status();
+        response_value(
+            request.id,
+            McpStatusResult {
+                enabled_servers,
+                inactive_servers,
+                tool_count,
+                retry_available: !management.retry_mcp_servers().is_empty(),
+            },
+        )
+    }
+
+    async fn handle_mcp_retry(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        match management.retry_mcp().await {
+            Ok(result) => response_value(
+                request.id,
+                ProtocolMcpRetryResult {
+                    enabled_servers: result.enabled_servers,
+                    inactive_servers: result.inactive_servers,
+                    diagnostics: result.diagnostics,
+                    tool_count: result.tool_count,
+                },
+            ),
+            Err(error) => response_error(request.id, workflow_error(error)),
+        }
+    }
+
+    fn management_service(&self) -> Result<&RuntimeManagementService<M>, JsonRpcError> {
+        self.management
+            .as_ref()
+            .ok_or_else(|| JsonRpcError::server_error("runtime management is unavailable"))
+    }
+
     fn check_thread(&self, thread_id: &mini_agent_core::ThreadId) -> Result<(), JsonRpcError> {
         if self.server.has_thread(thread_id) {
             Ok(())
@@ -765,15 +911,61 @@ where
     W: AsyncWrite + Unpin,
     F: FnOnce(InitializeParams) -> Result<(AppServer<M>, CapabilityManifest), String>,
 {
-    serve_stdio_with_startup_and_workflows(approval, reader, writer, move |params| {
-        startup(params).map(|(server, manifest)| (server, manifest, None))
+    serve_stdio_with_startup_and_services(approval, reader, writer, move |params| {
+        startup(params).map(|(server, manifest)| (server, manifest, StartupServices::default()))
     })
     .await
+}
+
+/// Optional services attached to a startup-created App Server connection.
+pub struct StartupServices<M> {
+    pub workflows: Option<WorkflowService>,
+    pub management: Option<RuntimeManagementService<M>>,
+}
+
+impl<M> Default for StartupServices<M> {
+    fn default() -> Self {
+        Self {
+            workflows: None,
+            management: None,
+        }
+    }
 }
 
 /// Serves stdio after startup while attaching a runtime-bound workflow
 /// service to the JSON-RPC connection.
 pub async fn serve_stdio_with_startup_and_workflows<M, R, W, F>(
+    approval: ApprovalBroker,
+    reader: R,
+    writer: W,
+    startup: F,
+) -> Result<(), std::io::Error>
+where
+    M: Model + Send + 'static,
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+    F: FnOnce(
+        InitializeParams,
+    ) -> Result<(AppServer<M>, CapabilityManifest, Option<WorkflowService>), String>,
+{
+    serve_stdio_with_startup_and_services(approval, reader, writer, move |params| {
+        startup(params).map(|(server, manifest, workflows)| {
+            (
+                server,
+                manifest,
+                StartupServices {
+                    workflows,
+                    management: None,
+                },
+            )
+        })
+    })
+    .await
+}
+
+/// Serves stdio after startup while attaching optional runtime services to the
+/// JSON-RPC connection.
+pub async fn serve_stdio_with_startup_and_services<M, R, W, F>(
     approval: ApprovalBroker,
     mut reader: R,
     mut writer: W,
@@ -785,7 +977,7 @@ where
     W: AsyncWrite + Unpin,
     F: FnOnce(
         InitializeParams,
-    ) -> Result<(AppServer<M>, CapabilityManifest, Option<WorkflowService>), String>,
+    ) -> Result<(AppServer<M>, CapabilityManifest, StartupServices<M>), String>,
 {
     let mut line = String::new();
     let read = reader.read_line(&mut line).await?;
@@ -835,7 +1027,7 @@ where
         .await?;
         return Ok(());
     }
-    let (server, capability_manifest, workflows) = match startup(params) {
+    let (server, capability_manifest, services) = match startup(params) {
         Ok(started) => started,
         Err(error) => {
             write_json_line(
@@ -851,8 +1043,11 @@ where
         approval.clone(),
         capability_manifest,
     );
-    if let Some(workflows) = workflows {
+    if let Some(workflows) = services.workflows {
         connection = connection.with_workflow_service(workflows);
+    }
+    if let Some(management) = services.management {
+        connection = connection.with_runtime_management(management);
     }
     if let Some(response) = connection.handle_request(request).await {
         write_json_line(&mut writer, &response).await?;
@@ -987,6 +1182,18 @@ fn workflow_error(message: String) -> JsonRpcError {
     JsonRpcError::server_error(format!("workflow operation failed: {message}"))
 }
 
+fn world_state_result<M: Model + Send + 'static>(
+    management: &RuntimeManagementService<M>,
+) -> WorldStateResult {
+    let world = management.world();
+    WorldStateResult {
+        workspace: world.workspace().display().to_string(),
+        status: world.status_json(),
+        lines: world.status_lines(),
+        context: world.model_context().unwrap_or_default(),
+    }
+}
+
 fn workflow_goal_state(state: mini_agent_host::goal::GoalState) -> WorkflowGoalState {
     WorkflowGoalState {
         schema_version: state.schema_version,
@@ -1035,6 +1242,9 @@ mod tests {
     use super::*;
     use mini_agent_app_server_protocol::CapabilityProviderSelection;
     use mini_agent_app_server_protocol::ClientCapabilities;
+    use mini_agent_capabilities::sandbox::SandboxKind;
+    use mini_agent_capabilities::workspace::ApprovalController;
+    use mini_agent_capabilities::workspace::ApprovalMode;
     use mini_agent_core::Harness;
     use mini_agent_core::HarnessConfig;
     use mini_agent_core::ModelEventSink;
@@ -1098,6 +1308,100 @@ mod tests {
             AppServerConnection::new(server).with_workflow_service(workflows),
             root,
         )
+    }
+
+    fn management_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "mini-agent-management-rpc-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let harness = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+        let server = AppServer::new(
+            ThreadStart::new(ThreadId::new("thread-1")),
+            Thread::new(ThreadId::new("initial"), harness),
+        );
+        let management = RuntimeManagementService::new(
+            server.clone(),
+            None,
+            ThreadId::new("thread-1"),
+            mini_agent_host::WorldState::detect(
+                &root,
+                ApprovalMode::Automatic,
+                false,
+                SandboxKind::Native,
+            ),
+            Vec::new(),
+            0,
+            Vec::new(),
+            ApprovalController::with_preset(ApprovalMode::Automatic, Default::default()),
+        );
+        (
+            AppServerConnection::new(server).with_runtime_management(management),
+            root,
+        )
+    }
+
+    #[tokio::test]
+    async fn exposes_session_world_and_mcp_management() {
+        let (mut connection, root) = management_connection();
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                1,
+                METHOD_INITIALIZE,
+                serde_json::json!(InitializeParams {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "management-test".to_string(),
+                    client_version: "0".to_string(),
+                    capabilities: ClientCapabilities::default(),
+                    profile: None,
+                    providers: None,
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.result.unwrap()["capabilities"]["runtimeManagement"],
+            true
+        );
+
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                2,
+                METHOD_SESSION_INFO,
+                serde_json::json!({}),
+            ))
+            .await
+            .unwrap();
+        assert!(response.result.unwrap().is_null());
+
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                3,
+                METHOD_WORLD_STATE,
+                serde_json::json!({}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.result.unwrap()["workspace"],
+            root.display().to_string()
+        );
+
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                4,
+                METHOD_MCP_STATUS,
+                serde_json::json!({}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.result.unwrap()["toolCount"], 0);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

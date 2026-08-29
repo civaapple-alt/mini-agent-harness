@@ -41,6 +41,12 @@ pub const METHOD_WORKFLOW_GOAL_PAUSE: &str = "workflow/goal/pause";
 pub const METHOD_WORKFLOW_GOAL_FAIL: &str = "workflow/goal/fail";
 pub const METHOD_WORKFLOW_GOAL_CRITERIA: &str = "workflow/goal/criteria";
 pub const METHOD_WORKFLOW_GOAL_ADVANCE: &str = "workflow/goal/advance";
+pub const METHOD_SESSION_INFO: &str = "session/info";
+pub const METHOD_WORLD_STATE: &str = "world/state";
+pub const METHOD_WORLD_REFRESH: &str = "world/refresh";
+pub const METHOD_WORLD_SET_EXECUTION: &str = "world/set_execution";
+pub const METHOD_MCP_STATUS: &str = "mcp/status";
+pub const METHOD_MCP_RETRY: &str = "mcp/retry";
 
 /// A JSON-RPC request or notification received by the app-server.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -218,6 +224,8 @@ pub struct ServerCapabilities {
     pub approval_requests: bool,
     #[serde(default)]
     pub workflows: bool,
+    #[serde(default)]
+    pub runtime_management: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -312,6 +320,63 @@ pub enum WorkflowGoalStatus {
     Converged,
     Failed,
     UserPaused,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfoResult {
+    pub session_id: String,
+    pub thread_id: String,
+    pub path: String,
+    pub resumed: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorldStateResult {
+    pub workspace: String,
+    pub status: Value,
+    pub lines: Vec<String>,
+    pub context: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorldRefreshResult {
+    pub changed: bool,
+    pub state: WorldStateResult,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorldSetExecutionResult {
+    pub changed: bool,
+    pub state: WorldStateResult,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorldSetExecutionParams {
+    pub approval: String,
+    pub copilot: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpStatusResult {
+    pub enabled_servers: Vec<String>,
+    pub inactive_servers: Vec<String>,
+    pub tool_count: usize,
+    pub retry_available: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRetryResult {
+    pub enabled_servers: Vec<String>,
+    pub inactive_servers: Vec<String>,
+    pub diagnostics: Vec<String>,
+    pub tool_count: usize,
 }
 
 /// Bounded, secret-free capability metadata advertised at service startup.
