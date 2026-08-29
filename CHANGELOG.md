@@ -18,6 +18,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   Goal verification/milestone advancement, and production MCP stdio tool calls.
 - Explicit provider output-token caps for controlled integration checks through
   the single Responses adapter.
+- Host-embedded external tool-provider registration through
+  `CapabilityRegistry::with_tool_provider`, with a runnable echo-provider
+  example.
 
 ### Changed
 
@@ -50,6 +53,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - RuntimeBuilder and AppServerRuntime now accept a profile seam; ACP initialize
   reports its default profile and capability manifest while compatibility
   startup paths retain their existing defaults.
+- HostRuntimeFactory and RuntimeBuilder accept an optional capability registry;
+  the default registry and all existing CLI/App Server paths remain built-in.
 
 ### Fixed
 

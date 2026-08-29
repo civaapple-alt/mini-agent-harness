@@ -43,7 +43,9 @@ limits, failures, and observation events.
   host for profile resolution, context/workflow composition, and runtime
   assembly; `HostRuntimeFactory` composes selected capabilities into a
   provider-backed `HostRuntime`, while `RuntimeBuilder` remains a compatibility
-  API.
+  API. Embedders can register an external tool provider with
+  `CapabilityRegistry::with_tool_provider`; see
+  `crates/mini-agent-capabilities/examples/external_tool_provider.rs`.
 - `mini-agent-app-server` is the service boundary over a core `Thread`. Its
   host-backed `AppServerRuntime`, typed facade, and versioned
   `mini-agent-app-server-protocol` support initialization, thread lifecycle,

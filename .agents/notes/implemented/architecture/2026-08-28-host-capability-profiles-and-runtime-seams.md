@@ -1,8 +1,8 @@
 # Host Capability Profiles and Runtime Seams
 
-Status: Stage 3 frontend routing, provider selection, and policy/sandbox
-boundary cleanup implemented; Stage 4 workspace-budget reduction pending
-(Windows scope)
+Status: Stage 3 frontend routing, provider selection, policy/sandbox boundary
+cleanup, and the first external tool-provider seam implemented; Stage 4
+workspace-budget reduction pending (Windows scope)
 Date: 2026-08-28
 
 ## Implementation update (2026-08-28)
@@ -68,9 +68,9 @@ unavailable profile requests are rejected, and a CLI integration test proves
 Profile-file parsing and CLI integration tests also pass.
 The line-budget report now separates capabilities from Host and ACP from App
 Server. Under the established gate, runtime (`core + protocol + host +
-app-server`) is 14,384/20,000 lines; capabilities is 13,863 lines and remains
+app-server`) is 14,409/20,000 lines; capabilities is 14,077 lines and remains
 separately visible as provider implementation weight. All Rust source is
-36,858/30,000 lines, so Stage 4 must reduce workspace implementation/test
+37,181/30,000 lines, so Stage 4 must reduce workspace implementation/test
 weight or revise that budget with explicit evidence.
 Source-specific rule-body resolution (the current source fields select and
 diagnoses bounded inputs rather than parse user-authored rule bodies) is
@@ -105,9 +105,9 @@ those IDs without carrying live provider instances or secrets. App Server and
 ACP initialization accept an optional `providers` selector and fail closed when
 it does not match the frozen runtime. The standalone App Server applies the
 selector before constructing its first Thread, while in-process clients and ACP
-verify that their request matches the already assembled profile. Only the
-built-in provider IDs are available today; adding a new implementation requires
-registering it in `mini-agent-capabilities` before it can be selected.
+verify that their request matches the already assembled profile. Built-in IDs
+remain the default; trusted embedders may register external tool providers in
+`mini-agent-capabilities` before selecting them in a local profile.
 
 ## Boundary cleanup (2026-08-29)
 
@@ -121,16 +121,29 @@ use `RuntimeProfile.sandbox` directly. CLI parsing records whether sandbox or
 security flags were explicitly supplied, so a workspace profile is retained
 when the invocation did not request an override.
 
-The remaining boundary work is intentionally staged. The registry still has
-only built-in implementations; external provider registration would require a
-model-provider abstraction in the App Server runtime. `RuntimeProfile` stays a
-Host-owned application configuration rather than entering Core, while the
-protocol receives only bounded profile/provider selectors and a read-only
-`CapabilityManifest` projection. Those choices keep credentials, live
-callbacks, tools, and filesystem handles out of the service contract.
+The registry now supports host-embedded external tool providers through the
+`ToolProvider` trait and `CapabilityRegistry::with_tool_provider`. The provider
+receives only runtime-scoped `ToolBuildRequest` inputs and is selected by a
+stable profile ID; profile files still cannot load arbitrary code. The runnable
+example is `crates/mini-agent-capabilities/examples/external_tool_provider.rs`.
+This is intentionally a narrow first registration seam: external model,
+extension, and policy providers still require genericizing the concrete
+`AppServerRuntime` model and its policy/extension adapters.
 
-The post-cleanup line report is runtime `14,347/20,000` lines, capabilities
-`13,905` lines, and all Rust source `36,947/30,000` lines. The runtime gate
+`RuntimeProfile` stays a Host-owned application configuration rather than
+entering Core, while the protocol receives only bounded profile/provider
+selectors and a read-only `CapabilityManifest` projection. These choices keep
+credentials, live callbacks, tools, and filesystem handles out of the service
+contract. The manifest is evidence about the resolved profile, not an input
+that can replace it.
+
+The host factory, builder, and in-process App Server startup now accept a
+registry seam, so CLI and App Server defaults remain unchanged while trusted
+embedders can opt into the external provider example without creating a second
+execution loop.
+
+The post-cleanup line report is runtime `14,409/20,000` lines, capabilities
+`14,077` lines, and all Rust source `37,181/30,000` lines. The runtime gate
 still passes; the workspace gate remains the active reduction task.
 
 ## Problem

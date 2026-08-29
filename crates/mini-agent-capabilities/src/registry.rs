@@ -8,6 +8,7 @@ use mini_agent_core::Tool;
 use mini_agent_core::ToolError;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub(crate) fn stable_fingerprint(bytes: &[u8]) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
@@ -46,6 +47,18 @@ pub struct ToolBuildRequest {
     pub results: ResultStore,
 }
 
+/// A host-embedded tool provider.
+///
+/// Implementations own their concrete tool constructors and may capture
+/// application resources in the provider value. The host only sees the
+/// bounded descriptor and passes runtime-scoped inputs through
+/// [`ToolBuildRequest`]. Providers must not execute tools while building them.
+pub trait ToolProvider: Send + Sync {
+    fn descriptor(&self) -> CapabilityDescriptor;
+
+    fn build_tools(&self, request: ToolBuildRequest) -> Result<Vec<Box<dyn Tool>>, ToolError>;
+}
+
 const BUILTIN_DESCRIPTORS: [CapabilityDescriptor; 4] = [
     CapabilityDescriptor {
         id: crate::OPENAI_MODEL_PROVIDER,
@@ -69,50 +82,18 @@ const BUILTIN_DESCRIPTORS: [CapabilityDescriptor; 4] = [
     },
 ];
 
-/// Registry of concrete providers available to a local Host.
-///
-/// The registry is intentionally data-only at the App Server boundary. A
-/// profile selects stable IDs; provider construction and secrets stay local to
-/// the capabilities crate.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct CapabilityRegistry;
+struct BuiltinToolProvider;
 
-impl CapabilityRegistry {
-    pub fn builtin() -> Self {
-        Self
-    }
-
-    pub fn descriptors(self) -> &'static [CapabilityDescriptor] {
-        &BUILTIN_DESCRIPTORS
-    }
-
-    pub fn contains_model(self, provider_id: &str) -> bool {
-        self.contains(CapabilityKind::Model, provider_id)
-    }
-
-    /// Returns whether a stable provider ID is registered for a capability
-    /// category.
-    pub fn contains(self, kind: CapabilityKind, provider_id: &str) -> bool {
-        self.descriptors()
-            .iter()
-            .any(|descriptor| descriptor.kind == kind && descriptor.id == provider_id)
-    }
-
-    /// Validates a provider selection before any local resources are opened.
-    pub fn validate(self, kind: CapabilityKind, provider_id: &str) -> Result<(), String> {
-        if self.contains(kind, provider_id) {
-            Ok(())
-        } else {
-            Err(format!("unknown {:?} provider `{provider_id}`", kind))
+impl ToolProvider for BuiltinToolProvider {
+    fn descriptor(&self) -> CapabilityDescriptor {
+        CapabilityDescriptor {
+            id: crate::BUILTIN_TOOL_PROVIDER,
+            kind: CapabilityKind::Tool,
+            description: "Built-in workspace, process, web, image, and subagent tools",
         }
     }
 
-    /// Builds the selected built-in tool provider without exposing its
-    /// concrete workspace, process, web, or subagent implementations to Host.
-    pub fn build_tools(self, request: ToolBuildRequest) -> Result<Vec<Box<dyn Tool>>, ToolError> {
-        if let Err(error) = self.validate(CapabilityKind::Tool, &request.provider_id) {
-            return Err(ToolError(error));
-        }
+    fn build_tools(&self, request: ToolBuildRequest) -> Result<Vec<Box<dyn Tool>>, ToolError> {
         crate::workspace::workspace_tools_with_read_roots_and_results(
             request.workspace,
             request.approval,
@@ -122,11 +103,104 @@ impl CapabilityRegistry {
             request.results,
         )
     }
+}
+
+/// Registry of concrete providers available to a local Host.
+///
+/// The registry is intentionally data-only at the App Server boundary. A
+/// profile selects stable IDs; provider construction and secrets stay local to
+/// the capabilities crate. External providers are registered by an embedding
+/// application rather than discovered from untrusted profile data.
+#[derive(Clone)]
+pub struct CapabilityRegistry {
+    tool_providers: Arc<Vec<Arc<dyn ToolProvider>>>,
+}
+
+impl Default for CapabilityRegistry {
+    fn default() -> Self {
+        Self::builtin()
+    }
+}
+
+impl CapabilityRegistry {
+    pub fn builtin() -> Self {
+        Self {
+            tool_providers: Arc::new(vec![Arc::new(BuiltinToolProvider)]),
+        }
+    }
+
+    /// Returns a registry with an additional host-embedded tool provider.
+    ///
+    /// The provider ID is still validated against the profile selection before
+    /// any workspace resources are opened.
+    pub fn with_tool_provider(self, provider: Arc<dyn ToolProvider>) -> Self {
+        let mut providers = (*self.tool_providers).clone();
+        providers.push(provider);
+        Self {
+            tool_providers: Arc::new(providers),
+        }
+    }
+
+    pub fn descriptors(&self) -> Vec<CapabilityDescriptor> {
+        let mut descriptors = BUILTIN_DESCRIPTORS.to_vec();
+        for descriptor in self
+            .tool_providers
+            .iter()
+            .map(|provider| provider.descriptor())
+        {
+            if descriptor.kind != CapabilityKind::Tool {
+                continue;
+            }
+            if !descriptors.iter().any(|registered| {
+                registered.kind == descriptor.kind && registered.id == descriptor.id
+            }) {
+                descriptors.push(descriptor);
+            }
+        }
+        descriptors
+    }
+
+    pub fn contains_model(&self, provider_id: &str) -> bool {
+        self.contains(CapabilityKind::Model, provider_id)
+    }
+
+    /// Returns whether a stable provider ID is registered for a capability
+    /// category.
+    pub fn contains(&self, kind: CapabilityKind, provider_id: &str) -> bool {
+        self.descriptors()
+            .iter()
+            .any(|descriptor| descriptor.kind == kind && descriptor.id == provider_id)
+    }
+
+    /// Validates a provider selection before any local resources are opened.
+    pub fn validate(&self, kind: CapabilityKind, provider_id: &str) -> Result<(), String> {
+        if self.contains(kind, provider_id) {
+            Ok(())
+        } else {
+            Err(format!("unknown {:?} provider `{provider_id}`", kind))
+        }
+    }
+
+    /// Builds the selected built-in tool provider without exposing its
+    /// concrete workspace, process, web, or subagent implementations to Host.
+    pub fn build_tools(&self, request: ToolBuildRequest) -> Result<Vec<Box<dyn Tool>>, ToolError> {
+        if let Err(error) = self.validate(CapabilityKind::Tool, &request.provider_id) {
+            return Err(ToolError(error));
+        }
+        self.tool_providers
+            .iter()
+            .find(|provider| {
+                let descriptor = provider.descriptor();
+                descriptor.kind == CapabilityKind::Tool && descriptor.id == request.provider_id
+            })
+            .expect("validated tool provider must be registered")
+            .build_tools(request)
+    }
 
     /// Builds the selected policy provider without owning the frontend's
     /// approval callback or transport-specific interaction.
     pub fn build_policy(
-        self,
+        &self,
         provider_id: &str,
         preset: SecurityPreset,
     ) -> Result<SecurityPolicy, String> {
@@ -136,7 +210,7 @@ impl CapabilityRegistry {
 
     /// Discovers the selected extension provider inputs once for a runtime.
     pub fn discover_extensions(
-        self,
+        &self,
         provider_id: &str,
         workspace: &Path,
     ) -> Result<skills::Discovery, String> {
@@ -147,7 +221,7 @@ impl CapabilityRegistry {
     /// Starts selected MCP provider entries after Host policy has resolved the
     /// approval controller.
     pub fn load_mcp(
-        self,
+        &self,
         provider_id: &str,
         servers: &[skills::McpServerConfig],
         approval: ApprovalController,

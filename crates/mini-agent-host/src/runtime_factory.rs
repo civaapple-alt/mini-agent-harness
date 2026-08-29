@@ -8,6 +8,7 @@ use crate::HostRuntime;
 use crate::RuntimeBuilder;
 use crate::RuntimeConfig;
 use crate::RuntimeProfile;
+use mini_agent_capabilities::CapabilityRegistry;
 use mini_agent_capabilities::result_store::ResultStore;
 use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_core::HarnessConfig;
@@ -22,6 +23,7 @@ pub struct HostRuntimeFactory<'a> {
     runtime_config: &'a RuntimeConfig,
     approval: ApprovalController,
     config: HarnessConfig,
+    registry: CapabilityRegistry,
 }
 
 impl<'a> HostRuntimeFactory<'a> {
@@ -34,7 +36,14 @@ impl<'a> HostRuntimeFactory<'a> {
             runtime_config,
             approval,
             config,
+            registry: CapabilityRegistry::builtin(),
         }
+    }
+
+    /// Uses providers registered by the embedding application for new runs.
+    pub fn with_registry(mut self, registry: CapabilityRegistry) -> Self {
+        self.registry = registry;
+        self
     }
 
     pub fn build(
@@ -50,6 +59,7 @@ impl<'a> HostRuntimeFactory<'a> {
             self.config.clone(),
         )
         .with_profile(profile)
+        .with_registry(self.registry.clone())
         .build_with_result_store(results)
     }
 }

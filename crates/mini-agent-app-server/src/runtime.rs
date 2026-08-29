@@ -16,6 +16,7 @@ use mini_agent_app_server_protocol::RulePolicy as ProtocolRulePolicy;
 use mini_agent_app_server_protocol::RuleSourceStatus as ProtocolRuleSourceStatus;
 use mini_agent_app_server_protocol::SourceFingerprint as ProtocolSourceFingerprint;
 use mini_agent_app_server_protocol::TurnReadResult;
+use mini_agent_capabilities::CapabilityRegistry;
 use mini_agent_capabilities::ImageStore;
 use mini_agent_capabilities::OpenAiModel;
 use mini_agent_capabilities::OpenedSession;
@@ -132,6 +133,28 @@ impl AppServerRuntime {
         control: std::sync::Arc<RunControl>,
         profile: RuntimeProfile,
     ) -> Result<Self, String> {
+        Self::start_with_control_and_profile_and_registry(
+            runtime_config,
+            approval,
+            config,
+            session_request,
+            control,
+            profile,
+            CapabilityRegistry::builtin(),
+        )
+        .await
+    }
+
+    /// Builds a runtime with a host-embedded capability registry.
+    pub async fn start_with_control_and_profile_and_registry(
+        runtime_config: RuntimeConfig,
+        approval: ApprovalController,
+        config: HarnessConfig,
+        session_request: SessionRequest,
+        control: std::sync::Arc<RunControl>,
+        profile: RuntimeProfile,
+        registry: CapabilityRegistry,
+    ) -> Result<Self, String> {
         let workspace = runtime_config.workspace();
         let model_name = runtime_config.model().unwrap_or_default().to_string();
         let session = match session_request {
@@ -157,6 +180,7 @@ impl AppServerRuntime {
             retry_mcp_servers,
             capability_manifest,
         } = HostRuntimeFactory::new(&runtime_config, approval.clone(), config)
+            .with_registry(registry)
             .build(profile, results)?;
         let mut harness = harness;
         if let Some(opened) = &session {

@@ -36,6 +36,7 @@ pub use registry::CapabilityDescriptor;
 pub use registry::CapabilityKind;
 pub use registry::CapabilityRegistry;
 pub use registry::ToolBuildRequest;
+pub use registry::ToolProvider;
 pub use sandbox::SandboxKind;
 pub use security::SecurityPreset;
 pub use session::OpenedSession;

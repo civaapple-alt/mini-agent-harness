@@ -1,4 +1,21 @@
 use super::*;
+use std::sync::Arc;
+
+struct EmptyExternalProvider;
+
+impl ToolProvider for EmptyExternalProvider {
+    fn descriptor(&self) -> CapabilityDescriptor {
+        CapabilityDescriptor {
+            id: "example-test",
+            kind: CapabilityKind::Tool,
+            description: "test external tool provider",
+        }
+    }
+
+    fn build_tools(&self, _request: ToolBuildRequest) -> Result<Vec<Box<dyn Tool>>, ToolError> {
+        Ok(Vec::new())
+    }
+}
 
 #[test]
 fn builtin_registry_exposes_allowlisted_provider_categories() {
@@ -46,4 +63,18 @@ fn policy_provider_builds_the_profile_selected_preset() {
         .unwrap();
 
     assert_eq!(policy.preset, crate::security::SecurityPreset::Turbomode);
+}
+
+#[test]
+fn external_tool_provider_is_registered_without_changing_builtin_order() {
+    let registry =
+        CapabilityRegistry::builtin().with_tool_provider(Arc::new(EmptyExternalProvider));
+
+    assert!(
+        registry
+            .validate(CapabilityKind::Tool, "example-test")
+            .is_ok()
+    );
+    assert_eq!(registry.descriptors()[4].id, "example-test");
+    assert_eq!(registry.descriptors()[4].kind, CapabilityKind::Tool);
 }

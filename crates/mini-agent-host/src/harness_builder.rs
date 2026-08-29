@@ -47,6 +47,7 @@ pub struct RuntimeBuilder<'a> {
     approval: ApprovalController,
     config: HarnessConfig,
     profile: RuntimeProfile,
+    registry: CapabilityRegistry,
 }
 
 impl<'a> RuntimeBuilder<'a> {
@@ -60,6 +61,7 @@ impl<'a> RuntimeBuilder<'a> {
             approval,
             config,
             profile: RuntimeProfile::default(),
+            registry: CapabilityRegistry::builtin(),
         }
     }
 
@@ -68,26 +70,35 @@ impl<'a> RuntimeBuilder<'a> {
         self
     }
 
+    /// Uses an embedding application's provider registry for this runtime.
+    pub fn with_registry(mut self, registry: CapabilityRegistry) -> Self {
+        self.registry = registry;
+        self
+    }
+
     pub fn build(&self) -> Result<HostRuntime, String> {
         self.approval
             .set_read_only_agent(self.profile.agent.is_read_only());
-        prepare_openai_harness_with_profile(
+        prepare_openai_harness_with_profile_and_result_store_and_registry(
             self.runtime_config,
             self.approval.clone(),
             self.config.clone(),
             self.profile.clone(),
+            ResultStore::default(),
+            self.registry.clone(),
         )
     }
 
     pub fn build_with_result_store(&self, results: ResultStore) -> Result<HostRuntime, String> {
         self.approval
             .set_read_only_agent(self.profile.agent.is_read_only());
-        prepare_openai_harness_with_profile_and_result_store(
+        prepare_openai_harness_with_profile_and_result_store_and_registry(
             self.runtime_config,
             self.approval.clone(),
             self.config.clone(),
             self.profile.clone(),
             results,
+            self.registry.clone(),
         )
     }
 }
@@ -139,11 +150,28 @@ pub fn prepare_openai_harness_with_result_store(
 pub fn prepare_openai_harness_with_profile_and_result_store(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
-    mut config: HarnessConfig,
+    config: HarnessConfig,
     profile: RuntimeProfile,
     results: ResultStore,
 ) -> Result<HarnessBuild, String> {
-    let registry = CapabilityRegistry::builtin();
+    prepare_openai_harness_with_profile_and_result_store_and_registry(
+        runtime_config,
+        approval,
+        config,
+        profile,
+        results,
+        CapabilityRegistry::builtin(),
+    )
+}
+
+fn prepare_openai_harness_with_profile_and_result_store_and_registry(
+    runtime_config: &RuntimeConfig,
+    approval: ApprovalController,
+    mut config: HarnessConfig,
+    profile: RuntimeProfile,
+    results: ResultStore,
+    registry: CapabilityRegistry,
+) -> Result<HarnessBuild, String> {
     let policy = registry.build_policy(&profile.policy_provider, profile.security)?;
     approval.set_policy(policy);
     registry.validate(

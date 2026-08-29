@@ -95,6 +95,34 @@ after the file.
 }
 ```
 
+### Embedding an external capability provider
+
+Profiles contain provider IDs only. An embedding application registers the
+implementation in a local `CapabilityRegistry`, then passes that registry to
+`HostRuntimeFactory`; profile files cannot load arbitrary code. The repository
+includes a complete, runnable tool-provider example at
+`crates/mini-agent-capabilities/examples/external_tool_provider.rs`:
+
+```rust
+let registry = CapabilityRegistry::builtin()
+    .with_tool_provider(Arc::new(ExampleToolProvider));
+
+let runtime = HostRuntimeFactory::new(&config, approval, harness_config)
+    .with_registry(registry)
+    .build(profile, results)?;
+```
+
+An in-process App Server embedder can pass the same registry through
+`AppServerRuntime::start_with_control_and_profile_and_registry`; the regular
+`start*` methods continue to use the built-in registry.
+
+`ExampleToolProvider` publishes the stable ID `example-echo` and constructs an
+`external_echo` tool. The provider receives runtime-scoped workspace, sandbox,
+approval, image, and result-store inputs through `ToolBuildRequest`; it does
+not own the execution loop. External model, extension, and policy providers
+remain a follow-up stage because the current App Server runtime is concrete
+over the built-in OpenAI-compatible model and policy/extension implementations.
+
 `read_image` bytes stay in the session `attachments/` directory (not `session.jsonl`). Resume reloads
 them; fork copies them. Compaction does not attach images.
 
