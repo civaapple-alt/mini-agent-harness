@@ -847,7 +847,7 @@ fn durable_session_resumes_settled_history_after_restart() {
         .unwrap();
     let first_session_records = fs::read_to_string(find_session_file(&root, session_id)).unwrap();
     assert!(first_session_records.contains("\"turn_id\":\"turn-1\""));
-    let second_stdout = run(&["resume", session_id], b"second question\n/exit\n");
+    let second_stdout = run(&["--session-id", session_id], b"second question\n/exit\n");
 
     server.join().unwrap();
     let first: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();

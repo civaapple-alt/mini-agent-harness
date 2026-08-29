@@ -39,7 +39,9 @@ async fn main() -> ExitCode {
     };
     match invocation.command {
         Command::Interactive => {
-            let request = SessionRequest::New;
+            let request = invocation
+                .session_id
+                .map_or(SessionRequest::New, SessionRequest::Resume);
             repl::run(
                 ApprovalMode::Automatic,
                 false,

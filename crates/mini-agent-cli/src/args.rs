@@ -26,7 +26,7 @@ COMMON OPTIONS:
     --sandbox KIND                      native | docker
     --web-search / --no-web-search      Built-in web search toggle
     --no-tools                          Model-only runtime; disable all tools and extensions
-    --auto-approve, -y                  Allow sensitive tools in non-TTY ask
+    --auto-approve, -y                  Allow sensitive tools in non-TTY ask/run
     --json                              Machine-readable output
 
 CONFIG:
@@ -43,7 +43,7 @@ Use `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.";
 pub const INTERACTIVE_HELP: &str = "mini-agent interactive
 
 USAGE:
-    mini-agent [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--no-tools]
+    mini-agent [--session-id SESSION_ID] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--no-tools]
 
 Starts the interactive REPL. Tools run without per-step approval; shell is protected by the sandbox.
 Interactive, one-shot ask, and auto sessions persist settled checkpoints under ~/.mini-agent/sessions.
@@ -52,6 +52,7 @@ Use `/plan` or `/plan <prompt>` to enter Plan Mode (locks codebase mutations, dr
 Use `/goal <objective>` to start Autonomous Goal Mode and immediately execute the first milestone.
 
 OPTIONS:
+    --session-id SESSION_ID     Resume this durable session instead of opening a new one
     --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
@@ -96,14 +97,15 @@ CONFIGURATION:
 pub const ASK_HELP: &str = "mini-agent ask
 
 USAGE:
-    mini-agent ask [--auto-approve|-y] [--max-steps N] [--json] [--no-tools] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
+    mini-agent ask [--session-id SESSION_ID] [--auto-approve|-y] [--max-steps N] [--json] [--no-tools] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
 
 Runs one script-facing turn (8 steps by default, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.
 On a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).
 Progress is written to stderr and the final result to stdout.
 
 OPTIONS:
-    --auto-approve, -y           Permit sensitive tools non-interactively (auto-approve)
+    --session-id SESSION_ID      Resume this durable session instead of opening a new one
+    --auto-approve, -y           Permit sensitive tools non-interactively (aliases: --yes, --auto)
     --max-steps N                Cap model steps for this turn (default: 8; 0 means unlimited)
     --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
@@ -116,23 +118,32 @@ OPTIONS:
 pub const RUN_HELP: &str = "mini-agent run
 
 USAGE:
-    mini-agent run [--auto-approve|-y] [--json] [--no-tools] [--] <PROMPT>
+    mini-agent run [--session-id SESSION_ID] [--auto-approve|-y] [--max-steps N] [--json] [--no-tools] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] <PROMPT>
 
 Alias of `ask`. Prefer `ask` in scripts and docs.
 
 OPTIONS:
-    --no-tools                   Disable all host tools and extension loading";
+    --session-id SESSION_ID      Resume this durable session instead of opening a new one
+    --auto-approve, -y            Permit sensitive tools non-interactively (aliases: --yes, --auto)
+    --max-steps N                 Cap model steps for this turn (default: 8; 0 means unlimited)
+    --security-preset PRESET      Security policy preset: default, turbomode, full-machine [default: default]
+    --sandbox KIND                Execution sandbox: native (JobObject/process groups), docker [default: native]
+    --web-search, --search        Enable built-in Responses web_search [default: enabled]
+    --no-web-search, --no-search  Disable built-in Responses web_search
+    --no-tools                    Disable all host tools and extension loading
+    --json                        Emit a machine-readable final result";
 
 pub const AUTO_HELP: &str = "mini-agent auto
 
 USAGE:
-    mini-agent auto [--security-preset PRESET] [--sandbox KIND] [--no-tools] [--web-search|--no-web-search] [--] [PROMPT]
+    mini-agent auto [--session-id SESSION_ID] [--security-preset PRESET] [--sandbox KIND] [--no-tools] [--web-search|--no-web-search] [--] [PROMPT]
 
 Unattended copilot: runs continuous model/tool cycles without per-step approval, unlimited steps (unless capped by MINI_AGENT_MAX_STEPS), and automatic context compaction that preserves recent tool work.
 With a prompt, runs one autonomous copilot turn to completion.
 Without a prompt, starts the interactive REPL in copilot mode.
 
 OPTIONS:
+    --session-id SESSION_ID      Resume this durable session instead of opening a new one
     --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
@@ -438,10 +449,10 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             Command::Ask | Command::Run | Command::Mentor | Command::Status | Command::Doctor
         )
     {
-        return Err("--json is supported only by ask, mentor, status, and doctor".to_string());
+        return Err("--json is supported only by ask, run, mentor, status, and doctor".to_string());
     }
     if automatic && !matches!(command, Command::Ask | Command::Run) {
-        return Err("--auto-approve is supported only by ask".to_string());
+        return Err("--auto-approve is supported only by ask and run".to_string());
     }
     if session_id.is_some()
         && !matches!(
@@ -449,10 +460,12 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             Command::Ask | Command::Run | Command::Interactive | Command::Auto
         )
     {
-        return Err("--session-id is supported only by ask, auto, and interactive".to_string());
+        return Err(
+            "--session-id is supported only by ask, run, auto, and interactive".to_string(),
+        );
     }
     if max_steps.is_some() && !matches!(command, Command::Ask | Command::Run) {
-        return Err("--max-steps is supported only by ask".to_string());
+        return Err("--max-steps is supported only by ask and run".to_string());
     }
     if no_tools
         && !matches!(
@@ -859,7 +872,7 @@ mod tests {
                 "prompt".to_string()
             ])
             .unwrap_err(),
-            "--json is supported only by ask, mentor, status, and doctor"
+            "--json is supported only by ask, run, mentor, status, and doctor"
         );
         let auto_inv = parse_args(vec![
             "ask".to_string(),

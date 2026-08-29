@@ -21,6 +21,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- CLI README and subcommand help now document session, run, safety, sandbox,
+  web-search, max-step, and JSON options consistently. Interactive
+  `--session-id` resumes the requested durable session.
 - CLI `ask`, one-shot `auto`, interactive REPL, `demo`, `mentor`, and Goal
   verifier turns now use the local App Server boundary and its ordered event
   stream. The App Server also exposes the same runtime through typed local and

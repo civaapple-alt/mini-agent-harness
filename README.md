@@ -158,6 +158,29 @@ mini-agent mentor verify SESSION_ID -- "tests pass and the diff is clean"
 Use `--` before a prompt that begins with `-`. Run `mini-agent help` or
 `mini-agent help <command>` for the complete command reference.
 
+## Arguments
+
+Turn commands accept the following options:
+
+| Option | Applies to | Meaning |
+| --- | --- | --- |
+| `--session-id ID` (also `--session ID`) | interactive, `ask`, `run`, `auto` | Resume a durable session instead of opening a new one. |
+| `--auto-approve`, `-y` (also `--yes`, `--auto`) | `ask`, `run` | Allow sensitive tools without an interactive approval prompt. |
+| `--max-steps N` | `ask`, `run` | Limit model steps; default is 8 for `ask`, and `0` means unlimited. |
+| `--no-tools` | interactive, `ask`, `run`, `auto` | Disable workspace, shell, web, image, process, subagent, and MCP tools. |
+| `--security-preset PRESET` | interactive, `ask`, `run`, `auto` | Choose `default`, `turbomode`, or `full-machine`; default is `default`. |
+| `--sandbox KIND` | interactive, `ask`, `run`, `auto` | Choose `native` or `docker`; default is `native`. |
+| `--web-search` / `--search` | interactive, `ask`, `run`, `auto` | Enable built-in Responses `web_search`. |
+| `--no-web-search` / `--no-search` | interactive, `ask`, `run`, `auto` | Disable built-in Responses `web_search`. |
+| `--json` | `ask`, `run`, `mentor`, `status`, `doctor` | Emit machine-readable output. |
+
+`ask` reads at most 32 KiB from stdin when no prompt is supplied. `run` is an
+alias of `ask` and requires a prompt. `auto PROMPT` runs one autonomous turn;
+bare `auto` opens an interactive copilot. `resume SESSION_ID` resumes a
+session directly, while `fork SESSION_ID` creates an independent session.
+`mentor insight SESSION_ID` performs an open-ended review; `mentor verify
+SESSION_ID -- CRITERIA` checks explicit acceptance criteria.
+
 Interactive, one-shot, and auto sessions always append their settled history and
 stored result handles to `~/.mini-agent/sessions/`. Running processes, queued input, and
 other live effects are not resumed.
