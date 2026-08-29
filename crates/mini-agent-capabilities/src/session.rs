@@ -20,10 +20,6 @@ use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-#[path = "session_derived.rs"]
-mod derived;
-pub use derived::DerivedItem;
-
 const SCHEMA_VERSION: u64 = 1;
 const MAX_SESSION_BYTES: u64 = 32 * 1024 * 1024;
 pub(crate) const MAX_RECORD_BYTES: usize = 512 * 1024;
@@ -115,6 +111,10 @@ impl SessionStore {
         self.thread_turn_count
     }
 
+    pub fn checkpoint_seq(&self) -> u64 {
+        self.checkpoint_seq
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -124,11 +124,6 @@ impl SessionStore {
             self.path.clone(),
             Arc::clone(&self.append_lock),
         )
-    }
-
-    #[cfg(test)]
-    pub fn session_dir(&self) -> &Path {
-        &self.session_dir
     }
 
     pub fn start_thread(&mut self) -> Result<(), String> {
@@ -154,11 +149,6 @@ impl SessionStore {
         ])?;
         self.checkpoint_seq = self.next_seq.saturating_sub(1);
         Ok(())
-    }
-
-    pub fn record_turn(&mut self, turn: TurnCommit<'_>) -> Result<(), String> {
-        let turn_id = new_id("turn");
-        self.record_turn_with_id(&turn_id, turn)
     }
 
     pub fn record_turn_with_id(
@@ -915,242 +905,4 @@ pub fn timestamp_ms() -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
-}
-
-pub fn try_load_session_events(
-    lines: &[String],
-) -> Result<Option<Vec<mini_agent_protocol::Event>>, String> {
-    use mini_agent_protocol::Event;
-    use mini_agent_protocol::RunFailure;
-    use mini_agent_protocol::StopReason;
-    use mini_agent_protocol::ToolCall;
-
-    if lines.is_empty() {
-        return Ok(None);
-    }
-    let first_val: Value = match serde_json::from_str(&lines[0]) {
-        Ok(val) => val,
-        Err(_) => return Ok(None),
-    };
-    if first_val.get("session_id").is_none() && first_val.get("kind").is_none() {
-        return Ok(None);
-    }
-
-    let mut events = Vec::new();
-    let mut step = 1usize;
-
-    for (line_idx, line) in lines.iter().enumerate() {
-        let is_last = line_idx == lines.len() - 1;
-        let record: Value = match serde_json::from_str(line) {
-            Ok(val) => val,
-            Err(_) if is_last => break,
-            Err(e) => {
-                return Err(format!(
-                    "error parsing session record at line {}: {e}",
-                    line_idx + 1
-                ));
-            }
-        };
-        let kind = record.get("kind").and_then(|k| k.as_str()).unwrap_or("");
-        match kind {
-            "session_created" => {
-                let session_id = record
-                    .get("session_id")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("");
-                if events.is_empty() {
-                    events.push(Event::RunStarted {
-                        prompt: format!("session created: {session_id}"),
-                    });
-                }
-            }
-            "turn_started" => {
-                if let Some(prompt) = record.get("prompt").and_then(|p| p.as_str()) {
-                    if events.len() == 1
-                        && matches!(&events[0], Event::RunStarted { prompt: p } if p.starts_with("session created:"))
-                    {
-                        events[0] = Event::RunStarted {
-                            prompt: prompt.to_string(),
-                        };
-                    } else {
-                        events.push(Event::RunStarted {
-                            prompt: prompt.to_string(),
-                        });
-                    }
-                }
-            }
-            "item" => {
-                if let Some(msg_val) = record.get("message")
-                    && let Ok(msg) = serde_json::from_value::<Message>(msg_val.clone())
-                {
-                    match msg {
-                        Message::Assistant {
-                            reasoning,
-                            text,
-                            tool_calls,
-                        } => {
-                            events.push(Event::ModelStarted { step });
-                            if !reasoning.is_empty() {
-                                events.push(Event::AssistantReasoningDelta {
-                                    delta: reasoning.clone(),
-                                });
-                            }
-                            if !text.is_empty() {
-                                events.push(Event::AssistantTextDelta {
-                                    delta: text.clone(),
-                                });
-                            }
-                            events.push(Event::ModelResponded {
-                                reasoning,
-                                text,
-                                tool_calls,
-                                usage: None,
-                            });
-                            step = step.saturating_add(1);
-                        }
-                        Message::Tool {
-                            call_id,
-                            name,
-                            content,
-                            is_error,
-                            outcome,
-                        } => {
-                            events.push(Event::ToolStarted {
-                                call: ToolCall {
-                                    id: call_id.clone(),
-                                    name: name.clone(),
-                                    arguments: serde_json::json!({}),
-                                },
-                            });
-                            events.push(Event::ToolFinished {
-                                call_id,
-                                name,
-                                content,
-                                is_error,
-                                truncated: false,
-                                outcome,
-                            });
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            "turn_settled" => {
-                let status = record
-                    .get("status")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("completed");
-                let steps = record.get("steps").and_then(|s| s.as_u64()).unwrap_or(1) as usize;
-                match status {
-                    "failed" => {
-                        events.push(Event::RunFailed {
-                            reason: RunFailure::Model,
-                        });
-                    }
-                    "step_limit" => {
-                        events.push(Event::RunFinished {
-                            stop_reason: StopReason::StepLimit,
-                            steps,
-                        });
-                    }
-                    "steered" => {
-                        events.push(Event::RunFinished {
-                            stop_reason: StopReason::Steered,
-                            steps,
-                        });
-                    }
-                    _ => {
-                        events.push(Event::RunFinished {
-                            stop_reason: StopReason::Completed,
-                            steps,
-                        });
-                    }
-                }
-            }
-            "turn_completed" => {
-                let steps = record.get("steps").and_then(|s| s.as_u64()).unwrap_or(1) as usize;
-                if let Some(messages) = record.get("messages").and_then(|m| m.as_array()) {
-                    for msg in messages {
-                        if let Ok(msg) = serde_json::from_value::<Message>(msg.clone()) {
-                            match msg {
-                                Message::Assistant {
-                                    reasoning,
-                                    text,
-                                    tool_calls,
-                                } => {
-                                    events.push(Event::ModelStarted { step });
-                                    if !reasoning.is_empty() {
-                                        events.push(Event::AssistantReasoningDelta {
-                                            delta: reasoning.clone(),
-                                        });
-                                    }
-                                    if !text.is_empty() {
-                                        events.push(Event::AssistantTextDelta {
-                                            delta: text.clone(),
-                                        });
-                                    }
-                                    events.push(Event::ModelResponded {
-                                        reasoning,
-                                        text,
-                                        tool_calls,
-                                        usage: None,
-                                    });
-                                    step = step.saturating_add(1);
-                                }
-                                Message::Tool {
-                                    call_id,
-                                    name,
-                                    content,
-                                    is_error,
-                                    outcome,
-                                } => {
-                                    events.push(Event::ToolFinished {
-                                        call_id,
-                                        name,
-                                        content,
-                                        is_error,
-                                        truncated: false,
-                                        outcome,
-                                    });
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                events.push(Event::RunFinished {
-                    stop_reason: StopReason::Completed,
-                    steps,
-                });
-            }
-            "derived" => {
-                let summary = record.get("summary").and_then(|s| s.as_str()).unwrap_or("");
-                events.push(Event::RunStarted {
-                    prompt: "mentor verification".to_string(),
-                });
-                events.push(Event::ModelStarted { step });
-                events.push(Event::AssistantTextDelta {
-                    delta: summary.to_string(),
-                });
-                events.push(Event::ModelResponded {
-                    reasoning: String::new(),
-                    text: summary.to_string(),
-                    tool_calls: vec![],
-                    usage: None,
-                });
-                events.push(Event::RunFinished {
-                    stop_reason: StopReason::Completed,
-                    steps: 1,
-                });
-                step = step.saturating_add(1);
-            }
-            _ => {}
-        }
-    }
-
-    if events.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(events))
-    }
 }

@@ -60,12 +60,6 @@ impl OpenAiModel {
             max_output_tokens: None,
         })
     }
-
-    #[allow(dead_code)]
-    pub fn with_max_output_tokens(mut self, max_output_tokens: usize) -> Self {
-        self.max_output_tokens = Some(max_output_tokens);
-        self
-    }
 }
 
 impl Model for OpenAiModel {

@@ -16,7 +16,7 @@ pub fn normalize_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-pub fn same_path(left: &Path, right: &Path) -> bool {
+pub(crate) fn same_path(left: &Path, right: &Path) -> bool {
     left == right || normalize_path(left) == normalize_path(right)
 }
 

@@ -153,8 +153,6 @@ pub mod windows_job {
 }
 
 pub struct ProcessSandbox {
-    #[allow(dead_code)]
-    kind: SandboxKind,
     #[cfg(windows)]
     job_object: Option<windows_job::JobObjectGuard>,
 }
@@ -169,15 +167,9 @@ impl ProcessSandbox {
         };
 
         Self {
-            kind,
             #[cfg(windows)]
             job_object,
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn kind(&self) -> SandboxKind {
-        self.kind
     }
 
     pub fn attach_child(&self, child: &Child) {
@@ -236,7 +228,6 @@ mod tests {
     #[test]
     fn creates_and_attaches_sandbox_guard() {
         let sandbox = ProcessSandbox::new(SandboxKind::Native);
-        assert_eq!(sandbox.kind(), SandboxKind::Native);
         #[cfg(windows)]
         assert!(sandbox.job_object.is_some());
     }

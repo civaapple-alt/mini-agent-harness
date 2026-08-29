@@ -233,12 +233,14 @@ impl RuntimeProfile {
         if self.persona != PersonaKind::None {
             let persona_prompt = match self.persona {
                 PersonaKind::Reviewer => {
-                    mini_agent_capabilities::PersonaPromptKind::Reviewer.prompt_template(None, None)
+                    mini_agent_capabilities::PersonaPromptKind::Reviewer.prompt_template()
                 }
-                PersonaKind::Implementer => mini_agent_capabilities::PersonaPromptKind::Implementer
-                    .prompt_template(None, None),
-                PersonaKind::Researcher => mini_agent_capabilities::PersonaPromptKind::Researcher
-                    .prompt_template(None, None),
+                PersonaKind::Implementer => {
+                    mini_agent_capabilities::PersonaPromptKind::Implementer.prompt_template()
+                }
+                PersonaKind::Researcher => {
+                    mini_agent_capabilities::PersonaPromptKind::Researcher.prompt_template()
+                }
                 PersonaKind::None => unreachable!(),
             };
             prompt_source_fingerprints.push(SourceFingerprint {

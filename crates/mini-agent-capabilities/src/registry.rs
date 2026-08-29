@@ -181,10 +181,6 @@ impl CapabilityRegistry {
         descriptors
     }
 
-    pub fn contains_model(&self, provider_id: &str) -> bool {
-        self.contains(CapabilityKind::Model, provider_id)
-    }
-
     /// Returns whether a stable provider ID is registered for a capability
     /// category.
     pub fn contains(&self, kind: CapabilityKind, provider_id: &str) -> bool {

@@ -97,28 +97,8 @@ pub fn discover(workspace: &Path) -> Discovery {
 }
 
 impl Discovery {
-    pub fn len(&self) -> usize {
-        self.skills.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.skills.is_empty()
-    }
-
-    pub fn skill_count(&self) -> usize {
-        self.skills.len()
-    }
-
     pub fn mcp_servers(&self) -> &[McpServerConfig] {
         &self.mcp_servers
-    }
-
-    pub fn mcp_server_count(&self) -> usize {
-        self.mcp_servers.len()
-    }
-
-    pub fn plugin_count(&self) -> usize {
-        self.plugins.len()
     }
 
     pub fn skill_names(&self) -> Vec<String> {
@@ -134,20 +114,6 @@ impl Discovery {
             .iter()
             .map(|server| format!("{}/{}", server.plugin_name, server.server_name))
             .collect()
-    }
-
-    pub fn stdio_mcp_server_count(&self) -> usize {
-        self.mcp_servers
-            .iter()
-            .filter(|server| matches!(server.transport, McpTransportConfig::Stdio { .. }))
-            .count()
-    }
-
-    pub fn http_mcp_server_count(&self) -> usize {
-        self.mcp_servers
-            .iter()
-            .filter(|server| matches!(server.transport, McpTransportConfig::StreamableHttp { .. }))
-            .count()
     }
 
     pub fn diagnostics(&self) -> &[String] {

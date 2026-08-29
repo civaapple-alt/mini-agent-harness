@@ -6,15 +6,6 @@ pub enum AgentPromptKind {
 }
 
 impl AgentPromptKind {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.to_ascii_lowercase().as_str() {
-            "explore" => Some(Self::Explore),
-            "plan" => Some(Self::Plan),
-            "general" | "general-purpose" => Some(Self::General),
-            _ => None,
-        }
-    }
-
     pub fn prompt_template(self) -> &'static str {
         match self {
             Self::Explore => {
@@ -89,41 +80,18 @@ Guidelines:
 pub enum PersonaPromptKind {
     Reviewer,
     Implementer,
-    SecurityAuditor,
-    TestWriter,
     Researcher,
-    DesignDocWriter,
-    DesignDocReviewer,
 }
 
 impl PersonaPromptKind {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.to_ascii_lowercase().as_str() {
-            "reviewer" | "code-reviewer" => Some(Self::Reviewer),
-            "implementer" => Some(Self::Implementer),
-            "security-auditor" | "security" | "auditor" => Some(Self::SecurityAuditor),
-            "test-writer" | "tester" => Some(Self::TestWriter),
-            "researcher" => Some(Self::Researcher),
-            "design-doc-writer" | "doc-writer" => Some(Self::DesignDocWriter),
-            "design-doc-reviewer" | "doc-reviewer" => Some(Self::DesignDocReviewer),
-            _ => None,
-        }
-    }
-
-    pub fn prompt_template(self, review_file: Option<&str>, summary_file: Option<&str>) -> String {
+    pub fn prompt_template(self) -> &'static str {
         match self {
             Self::Reviewer => {
-                let file_clause = if let Some(rf) = review_file {
-                    format!("\nOutput file: Write your structured review notes to `{rf}`.\n")
-                } else {
-                    String::new()
-                };
-                format!(
-                    r#"You are a meticulous code reviewer. Review code and produce structured review notes.{file_clause}
+                r#"You are a meticulous code reviewer. Review code and produce structured review notes.
 
 Process:
 1. Read all relevant code thoroughly.
-2. Write findings to the review notes file.
+2. Write findings in the response.
 3. Use structured format: Severity, Location (file:line), Description, Suggestion, Status.
 
 Finding Format:
@@ -139,172 +107,25 @@ Rules:
 - Look for edge cases, missing error handling, unwrap(), unnecessary clone(), or lock contentions.
 - Every finding MUST cite a specific file:line.
 - Do NOT fix the code yourself.
-- State the file path and summarize verdict in your final response."#
-                )
+- State the file path and summarize verdict in your response."#
             }
             Self::Implementer => {
-                if let Some(rf) = review_file {
-                    format!(
-                        r#"You are a pragmatic implementer resolving review feedback.
-
-Review notes file: `{rf}`
-
-Process:
-1. Read the review notes file `{rf}` in full.
-2. For each "Status: open" issue, implement the fix in the codebase.
-3. Update `{rf}`: change "Status: open" -> "Status: fixed", and add a "Response: [explanation]" field.
-4. If you disagree with an issue, set "Status: wontfix" with a factual explanation.
-5. Append an Implementation Summary at the bottom of `{rf}`.
-
-Rules:
-- Follow existing code patterns and abstractions exactly.
-- Make the smallest change that completely solves the problem.
-- Run tests (`cargo test`) and linters before declaring done.
-- Do NOT add unrequested features."#
-                    )
-                } else {
-                    let sum_clause = if let Some(sf) = summary_file {
-                        format!("\nWrite an implementation summary to `{sf}`.\n")
-                    } else {
-                        String::new()
-                    };
-                    format!(
-                        r#"You are a pragmatic implementer. Implement code changes and document what you did.{sum_clause}
+                r#"You are a pragmatic implementer. Implement code changes and document what you did.
 
 Rules:
 - Follow existing code patterns and abstractions exactly.
 - Make the smallest change that completely solves the problem.
 - Run tests and verification before declaring done.
 - Do NOT add unrequested features or documentation files unless asked."#
-                    )
-                }
             }
-            Self::SecurityAuditor => {
-                let file_clause = if let Some(rf) = review_file {
-                    format!(
-                        "\nOutput file: Write your structured security audit report to `{rf}`.\n"
-                    )
-                } else {
-                    String::new()
-                };
-                format!(
-                    r#"You are a security engineer performing a focused security audit. You find real vulnerabilities, not theoretical risks.{file_clause}
-
-Audit Focus Areas:
-- **Injection**: Command, SQL, Template, Path Traversal
-- **Authentication & Authz**: Broken access control, privilege escalation, bypasses
-- **Data Exposure & Secrets**: Hardcoded credentials, sensitive tokens in logs or errors
-- **Concurrency**: TOCTOU, double-spend, deadlock, race conditions
-- **Bounds & Resource Limits**: Unbounded buffer reads, OOM vectors, regex DoS
-
-Finding Format:
-### Finding 1: [Vulnerability Title]
-- **Severity**: critical | high | medium | low | informational
-- **Category**: [OWASP or Custom category]
-- **Location**: [file:line]
-- **Description**: [What the vulnerability is]
-- **Impact**: [What an attacker could achieve]
-- **Reproduction**: [Concrete scenario or input to trigger]
-- **Remediation**: [Exact fix with code snippet]
-- **Status**: open
-
-Rules:
-- Trace actual data flow from untrusted input to sensitive sink.
-- Every finding must be reproducible with evidence.
-- Do NOT modify the source code."#
-                )
-            }
-            Self::TestWriter => {
-                if let Some(rf) = review_file {
-                    format!(
-                        r#"You are a thorough test engineer resolving test review notes.
-
-Review notes file: `{rf}`
-
-Process:
-1. Read the review notes file `{rf}` in full.
-2. For each "Status: open" issue, fix or add the corresponding tests.
-3. Update `{rf}`: change "Status: open" -> "Status: fixed", and add a "Response: [explanation]" field.
-4. Append a Fix Summary at the bottom of `{rf}`.
-
-Rules:
-- Match existing test patterns and conventions.
-- Run tests to verify they pass."#
-                    )
-                } else {
-                    let sum_clause = if let Some(sf) = summary_file {
-                        format!("\nWrite a test summary to `{sf}`.\n")
-                    } else {
-                        String::new()
-                    };
-                    format!(
-                        r#"You are a thorough test engineer. You write comprehensive tests that catch real bugs, not just tests that pass.{sum_clause}
-
-Test Strategy:
-- **Happy path**: Core functionality works as intended.
-- **Edge cases**: Empty inputs, max size limits, boundary values, zero/none.
-- **Error paths**: Invalid arguments, corrupted checkpoints, network/IO failures.
-- **Concurrency & Replay**: Race conditions, torn-tail session recovery.
-
-Rules:
-- Match the project's existing test framework and style conventions exactly.
-- Each test must test ONE specific behavior with descriptive test names.
-- Tests must be deterministic — never rely on flaky timers or unseeded randoms.
-- Run the full test suite after writing to guarantee no regressions."#
-                    )
-                }
-            }
-            Self::Researcher => r#"You are a thorough researcher. When exploring a question:
+            Self::Researcher => {
+                r#"You are a thorough researcher. When exploring a question:
 - Exhaust all reasonable search avenues before concluding.
 - Always cite specific file paths and line numbers for claims.
 - Show the evidence chain: what you searched, what you found, what it means.
 - If you find conflicting evidence, present both sides.
 - Never guess when you can search — verify assumptions with tool calls.
 - Prefer depth over breadth: fully understand one area before moving to the next."#
-                .to_string(),
-            Self::DesignDocWriter => {
-                let file_clause = if let Some(rf) = review_file {
-                    format!(
-                        "\nReview notes file: `{rf}`. Address all open issues and update status to addressed.\n"
-                    )
-                } else {
-                    String::new()
-                };
-                format!(
-                    r#"You are an experienced systems architect who writes clear, thorough design documents.{file_clause}
-
-Document Structure:
-- **Overview**: 1-2 paragraph summary of the problem and proposed solution.
-- **Goals & Non-Goals**: Explicit scope boundaries.
-- **Proposed Design**: Detailed technical approach with Mermaid diagrams.
-- **Alternatives Considered**: At least 2 alternatives with trade-off analysis.
-- **Security & Reliability**: Failure modes, bounds, and recovery.
-- **Rollout & Verification**: Staged deployment and test strategy."#
-                )
-            }
-            Self::DesignDocReviewer => {
-                let file_clause = if let Some(rf) = review_file {
-                    format!("\nOutput file: Write your structured review notes to `{rf}`.\n")
-                } else {
-                    String::new()
-                };
-                format!(
-                    r#"You are a senior staff engineer reviewing system design documents. Your goal is to ensure the design is complete, technically sound, and ready for implementation.{file_clause}
-
-Review Checklist:
-- **Completeness**: Are all required sections present?
-- **Correctness & Feasibility**: Do claims match reality? Are assumptions valid?
-- **Scalability & Security**: Will it handle scale? Are failure modes addressed?
-- **Alternatives & Risks**: Are meaningful alternatives explored?
-
-Format:
-### Issue 1: [Title]
-- **Severity**: critical | major | minor | nit
-- **Section**: [Section name]
-- **Description**: [What is wrong or missing]
-- **Suggestion**: [How to fix]
-- **Status**: open"#
-                )
             }
         }
     }

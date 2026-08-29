@@ -32,7 +32,6 @@ use mini_agent_host::CapabilityManifest;
 use mini_agent_host::ModelProviderFactory;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
-use mini_agent_host::WorldState;
 use mini_agent_host::prepare_harness_with_model_factory;
 use mini_agent_protocol::Event;
 use mini_agent_protocol::EventSink;
@@ -310,10 +309,6 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         &self.images
     }
 
-    pub fn session(&self) -> Option<RuntimeSessionInfo> {
-        self.management.session_info()
-    }
-
     pub fn model_name(&self) -> &str {
         &self.model_name
     }
@@ -322,58 +317,16 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         self.management.thread_id()
     }
 
-    pub fn pending_input_count(&self) -> usize {
-        self.control.pending_input_count()
-    }
-
     pub fn stable_system_prompt(&self) -> &str {
         &self.stable_system_prompt
-    }
-
-    pub fn world(&self) -> WorldState {
-        self.management.world()
-    }
-
-    pub fn enabled_mcp_servers(&self) -> Vec<String> {
-        self.management.enabled_mcp_servers()
-    }
-
-    pub fn mcp_tool_count(&self) -> usize {
-        self.management.mcp_tool_count()
     }
 
     pub fn capability_manifest(&self) -> &CapabilityManifest {
         &self.capability_manifest
     }
 
-    pub fn retry_mcp_servers(&self) -> Vec<mini_agent_capabilities::McpServerConfig> {
-        self.management.retry_mcp_servers()
-    }
-
-    /// Returns bounded metadata without exposing the persistence store.
-    pub fn session_info(&self) -> Option<RuntimeSessionInfo> {
-        self.management.session_info()
-    }
-
     pub fn checkpoint_seq(&self) -> Option<u64> {
         self.management.checkpoint_seq()
-    }
-
-    /// Re-detects the world and appends changed state to the same Thread
-    /// context. Persistence remains owned by the App Server runtime.
-    pub async fn refresh_world(&mut self) -> Result<bool, String> {
-        self.management.refresh_world().await
-    }
-
-    /// Applies a resolved world snapshot to the service-owned Thread.
-    pub async fn update_world(&mut self, updated: WorldState) -> Result<bool, String> {
-        self.management.update_world(updated).await
-    }
-
-    /// Retries MCP servers deferred at startup and atomically adds any tools
-    /// that loaded successfully to the service-owned Thread.
-    pub async fn retry_mcp(&mut self) -> Result<McpRetryResult, String> {
-        self.management.retry_mcp().await
     }
 
     pub async fn update_thread(&self, update: ThreadUpdate) -> Result<(), String> {

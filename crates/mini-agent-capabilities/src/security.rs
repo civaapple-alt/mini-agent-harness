@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -71,12 +70,6 @@ impl ApprovalStore {
             store.clear();
         }
         store.insert(key.to_string());
-    }
-
-    #[allow(dead_code)]
-    pub fn clear(&self) {
-        let mut store = self.0.lock().unwrap();
-        store.clear();
     }
 }
 
@@ -153,22 +146,6 @@ impl SecurityPolicy {
             }
             SecurityPreset::Default | SecurityPreset::Custom => SecurityDecision::Ask,
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn check_file_access(&self, path: &Path, is_write: bool) -> SecurityDecision {
-        let path_str = path.to_string_lossy().replace('\\', "/");
-        let action = format!(
-            "file:{}:{}",
-            if is_write { "write" } else { "read" },
-            path_str
-        );
-        self.evaluate(&action)
-    }
-
-    #[allow(dead_code)]
-    pub fn check_command(&self, command: &str) -> SecurityDecision {
-        self.evaluate(&format!("shell:{command}"))
     }
 }
 
@@ -311,23 +288,26 @@ mod tests {
     fn evaluates_preset_priorities() {
         let default_policy = SecurityPolicy::for_preset(SecurityPreset::Default);
         assert_eq!(
-            default_policy.check_command("cargo test"),
+            default_policy.evaluate("shell command `cargo test`"),
             SecurityDecision::Ask
         );
         assert_eq!(
-            default_policy.check_command("gh auth login"),
+            default_policy.evaluate("shell command `gh auth login`"),
             SecurityDecision::Deny
         );
 
         let turbo = SecurityPolicy::for_preset(SecurityPreset::Turbomode);
-        assert_eq!(turbo.check_command("cargo build"), SecurityDecision::Allow);
+        assert_eq!(
+            turbo.evaluate("shell command `cargo build`"),
+            SecurityDecision::Allow
+        );
 
         let full = SecurityPolicy::for_preset(SecurityPreset::FullMachine);
         assert_eq!(
-            full.check_file_access(Path::new("C:/some/file.txt"), false),
+            full.evaluate("read C:/some/file.txt"),
             SecurityDecision::Allow
         );
-        assert_eq!(full.check_command("dir"), SecurityDecision::Ask);
+        assert_eq!(full.evaluate("shell command `dir`"), SecurityDecision::Ask);
     }
 
     #[test]
@@ -338,9 +318,6 @@ mod tests {
 
         store.remember_approval(key);
         assert!(store.is_approved(key));
-
-        store.clear();
-        assert!(!store.is_approved(key));
     }
 
     #[test]

@@ -48,7 +48,6 @@ pub use path_policy::goal_relative_rest;
 pub use path_policy::is_plan_md_alias;
 pub use path_policy::is_under_dir;
 pub use path_policy::normalize_path;
-pub use path_policy::same_path;
 pub use persona::AgentPromptKind;
 pub use persona::PersonaPromptKind;
 pub use registry::CapabilityDescriptor;
@@ -61,20 +60,15 @@ pub use result_store::ResultStore;
 pub use result_store::StoredResult;
 pub use sandbox::ProcessSandbox;
 pub use sandbox::SandboxKind;
-pub use security::ApprovalStore;
 pub use security::SecurityDecision;
 pub use security::SecurityPolicy;
 pub use security::SecurityPreset;
-pub use session::DerivedItem;
 pub use session::OpenedSession;
 pub use session::SessionRequest;
 pub use session::SessionStore;
 pub use session::TurnCommit;
 pub use session::TurnStatus;
-pub use session::resolve_session_file;
-pub use session::session_directory;
 pub use session::timestamp_ms;
-pub use session::try_load_session_events;
 pub use skills::Discovery;
 pub use skills::McpServerConfig;
 pub use skills::McpTransportConfig;
@@ -99,8 +93,3 @@ pub const BUILTIN_EXTENSION_PROVIDER: &str = "builtin";
 
 /// Stable identifier for the built-in policy provider.
 pub const BUILTIN_POLICY_PROVIDER: &str = "builtin";
-
-/// Lists the concrete model providers currently available to a host registry.
-pub fn model_provider_ids() -> &'static [&'static str] {
-    &[OPENAI_MODEL_PROVIDER]
-}

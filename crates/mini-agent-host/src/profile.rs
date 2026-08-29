@@ -131,10 +131,6 @@ pub struct RegularAgentConfig {
     pub rules: RuleSources,
 }
 
-/// Compatibility name retained for callers that used the original combined
-/// prompt/rule settings before they were assigned to the regular agent.
-pub type PromptRulePolicy = RegularAgentConfig;
-
 /// Declarative selections used by a frontend before host composition starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeProfile {
@@ -191,14 +187,6 @@ impl RuntimeProfile {
         self
     }
 
-    pub fn without_workflows(mut self) -> Self {
-        self.workflows = WorkflowScope::Disabled;
-        self.regular_agent.prompts.workflows = false;
-        self.regular_agent.rules.workflows = false;
-        self.name.push_str("-no-workflows");
-        self
-    }
-
     pub fn with_sandbox(mut self, sandbox: SandboxKind) -> Self {
         self.sandbox = sandbox;
         self
@@ -212,60 +200,6 @@ impl RuntimeProfile {
     /// Selects an allowlisted model provider by stable identifier.
     pub fn with_model_provider(mut self, provider: impl Into<String>) -> Self {
         self.model_provider = provider.into();
-        self
-    }
-
-    /// Selects an allowlisted tool provider by stable identifier.
-    pub fn with_tool_provider(mut self, provider: impl Into<String>) -> Self {
-        self.tool_provider = provider.into();
-        self
-    }
-
-    /// Selects an allowlisted extension provider by stable identifier.
-    pub fn with_extension_provider(mut self, provider: impl Into<String>) -> Self {
-        self.extension_provider = provider.into();
-        self
-    }
-
-    /// Selects an allowlisted policy provider by stable identifier.
-    pub fn with_policy_provider(mut self, provider: impl Into<String>) -> Self {
-        self.policy_provider = provider.into();
-        self
-    }
-
-    /// Replaces the prompt-source selection for a regular agent.
-    pub fn with_prompt_sources(mut self, prompts: PromptSources) -> Self {
-        self.regular_agent.prompts = prompts;
-        self
-    }
-
-    /// Replaces the rule-source selection for a regular agent.
-    pub fn with_rule_sources(mut self, rules: RuleSources) -> Self {
-        self.regular_agent.rules = rules;
-        self
-    }
-
-    /// Restricts metadata discovery to named skills, plugins, or MCP servers.
-    pub fn with_selected_extensions<I, S>(mut self, names: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.extensions = ExtensionLoadDepth::Selected;
-        self.extension_selection =
-            ExtensionSelection::Named(names.into_iter().map(Into::into).collect());
-        self
-    }
-
-    /// Enables only the named extensions after policy and approval checks.
-    pub fn with_enabled_extensions<I, S>(mut self, names: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.extensions = ExtensionLoadDepth::Enabled;
-        self.extension_selection =
-            ExtensionSelection::Named(names.into_iter().map(Into::into).collect());
         self
     }
 
@@ -289,7 +223,7 @@ impl RuntimeProfile {
                 PersonaKind::Researcher => mini_agent_capabilities::PersonaPromptKind::Researcher,
                 PersonaKind::None => unreachable!(),
             };
-            sections.push(persona.prompt_template(None, None));
+            sections.push(persona.prompt_template().to_string());
         }
         sections.join("\n\n")
     }

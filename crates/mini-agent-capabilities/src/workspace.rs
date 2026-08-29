@@ -177,11 +177,6 @@ impl ApprovalController {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn store(&self) -> &ApprovalStore {
-        &self.store
-    }
-
     pub fn approve(&self, action: &str) -> Result<(), ToolError> {
         match self.policy.read().unwrap().evaluate(action) {
             SecurityDecision::Deny => {

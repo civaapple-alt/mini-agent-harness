@@ -48,7 +48,6 @@ pub use profile::ContextLimits;
 pub use profile::ExtensionLoadDepth;
 pub use profile::ExtensionSelection;
 pub use profile::PersonaKind;
-pub use profile::PromptRulePolicy;
 pub use profile::PromptSources;
 pub use profile::RegularAgentConfig;
 pub use profile::RulePolicy;

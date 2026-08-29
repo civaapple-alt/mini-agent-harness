@@ -36,8 +36,6 @@ fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
     let discovery = discover(&root);
     let prompt = discovery.augment_system_prompt("base").unwrap();
 
-    assert_eq!(discovery.len(), 2);
-    assert_eq!(discovery.plugin_count(), 1);
     assert_eq!(discovery.mcp_server_labels(), ["deploy.tools/local"]);
     assert!(prompt.contains(".agents/skills/review/SKILL.md"));
     assert!(prompt.contains(".agents/plugins/deploy/skills/deploy/SKILL.md"));
@@ -114,8 +112,6 @@ for line in sys.stdin:
     .unwrap();
 
     let mut discovery = discover(&root);
-    assert_eq!(discovery.stdio_mcp_server_count(), 2);
-    assert_eq!(discovery.http_mcp_server_count(), 1);
     discovery.retain_selected(&["keep".to_string()]);
     let loaded = crate::mcp::load(
         discovery.mcp_servers(),
@@ -157,7 +153,6 @@ fn project_skill_overrides_invalid_or_plugin_duplicate() {
     let discovery = discover(&root);
     let prompt = discovery.augment_system_prompt("base").unwrap();
 
-    assert_eq!(discovery.len(), 1);
     assert!(prompt.contains("Project review"));
     assert!(!prompt.contains("Plugin review"));
     assert!(

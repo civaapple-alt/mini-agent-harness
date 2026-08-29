@@ -81,10 +81,6 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         })
     }
 
-    pub fn has_session(&self) -> bool {
-        self.state.lock().unwrap().session.is_some()
-    }
-
     pub fn checkpoint_seq(&self) -> Option<u64> {
         self.state
             .lock()
@@ -112,14 +108,6 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
 
     pub fn retry_mcp_servers(&self) -> Vec<McpServerConfig> {
         self.state.lock().unwrap().retry_mcp_servers.clone()
-    }
-
-    pub fn world_status_json(&self) -> serde_json::Value {
-        self.world().status_json()
-    }
-
-    pub fn world_status_lines(&self) -> Vec<String> {
-        self.world().status_lines()
     }
 
     pub async fn refresh_world(&self) -> Result<bool, String> {
@@ -312,14 +300,5 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 checkpoint,
             },
         )
-    }
-
-    pub fn session_store_path(&self) -> Option<std::path::PathBuf> {
-        self.state
-            .lock()
-            .unwrap()
-            .session
-            .as_ref()
-            .map(|opened| opened.store.path().to_path_buf())
     }
 }
