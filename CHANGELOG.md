@@ -56,8 +56,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   run-control, context compaction, tool-batch execution, and model-event
   forwarding now live in focused private modules while the public turn API is
   unchanged.
-- The workspace-wide Rust line total remains visible as an advisory metric for
-  0.4.0; only the 20,000-line runtime budget blocks the release gate.
+- The full workspace Rust line total, including tests, is enforced at 30,000
+  lines for the 0.4.0 release; the runtime layers retain their 20,000-line
+  ceiling.
 - Host responsibilities are separated from App Server transport and worker
   orchestration. Runtime configuration, provider setup, tools, workspace
   policy, persistence, Goal state, and Plan state remain in the Host layer.

@@ -95,7 +95,7 @@ class LineBudgetTests(unittest.TestCase):
                 output.getvalue(),
             )
             self.assertIn("acp: 2 lines", output.getvalue())
-            self.assertIn("all Rust source (advisory): 3/30000 lines", output.getvalue())
+            self.assertIn("all Rust source: 3/30000 lines", output.getvalue())
             self.assertIn(
                 "acp: 2 lines (production 2, unit 0, integration 0) [mini-agent-acp]",
                 output.getvalue(),
@@ -125,7 +125,7 @@ class LineBudgetTests(unittest.TestCase):
                 output.getvalue(),
             )
 
-    def test_workspace_total_is_advisory_for_release_gate(self):
+    def test_workspace_total_is_release_gate(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             package_root = root / "crates" / "mini-agent-core" / "src"
@@ -135,8 +135,9 @@ class LineBudgetTests(unittest.TestCase):
             output = io.StringIO()
             with mock.patch.object(line_budget, "PROJECT_LIMIT", 0):
                 with contextlib.redirect_stdout(output):
-                    self.assertEqual(line_budget.check(root), 0)
-            self.assertIn("all Rust source (advisory): 1/0 lines", output.getvalue())
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        self.assertEqual(line_budget.check(root), 1)
+            self.assertIn("all Rust source: 1/0 lines", output.getvalue())
 
 
 if __name__ == "__main__":

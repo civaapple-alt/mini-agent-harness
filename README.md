@@ -275,9 +275,9 @@ python3 scripts/line_budget.py
   integration tests. The enforced ceilings are 20,000 lines for the runtime
   layers (`core` + `protocol` + `host` + `app-server`); the separately
   reported `acp` edge is excluded from this runtime limit. The 30,000-line
-  workspace total is advisory for the 0.4.0 release; only the runtime ceiling
-  is enforced. The report still includes all Rust source, including ACP and
-  the CLI, so future cleanup remains measurable.
+  workspace total is enforced for the 0.4.0 release, including tests. Both
+  ceilings block the release gate. The report still includes all Rust source,
+  including ACP and the CLI, so cleanup remains measurable.
 
 The CI matrix covers Ubuntu, macOS, and Windows. Current development is
 validated on macOS arm64; Windows remains a first-class target and is checked
