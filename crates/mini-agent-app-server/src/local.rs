@@ -6,10 +6,10 @@
 
 use crate::AppServerRuntime;
 use crate::SessionRequest;
+use crate::frontend::ApprovalController;
 use mini_agent_capabilities::SandboxKind;
 use mini_agent_capabilities::SecurityPreset;
 use mini_agent_capabilities::session;
-use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_capabilities::workspace::ApprovalMode;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::RunControl;
@@ -129,7 +129,7 @@ impl LocalRuntimeLaunch {
     ) -> Result<AppServerRuntime, String> {
         AppServerRuntime::start_with_control_and_profile(
             self.runtime_config,
-            approval,
+            approval.into_capability(),
             self.harness_config,
             self.session_request,
             control,
