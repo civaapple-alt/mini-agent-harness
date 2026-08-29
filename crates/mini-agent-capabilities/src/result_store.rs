@@ -374,6 +374,7 @@ mod tests {
     use super::*;
     use crate::session::SessionRequest;
     use crate::session::SessionStore;
+    use crate::test_support::HOME_LOCK;
     use mini_agent_protocol::Message;
     use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
@@ -420,6 +421,9 @@ mod tests {
 
     #[test]
     fn session_result_store_reloads_from_append_log() {
+        let _home_lock = HOME_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -452,6 +456,9 @@ mod tests {
 
     #[test]
     fn session_result_store_bounds_persisted_content() {
+        let _home_lock = HOME_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

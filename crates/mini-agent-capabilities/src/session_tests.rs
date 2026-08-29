@@ -1,8 +1,6 @@
 use super::*;
+use crate::test_support::HOME_LOCK;
 use std::env;
-use std::sync::Mutex;
-
-static HOME_LOCK: Mutex<()> = Mutex::new(());
 
 struct HomeGuard {
     _lock: std::sync::MutexGuard<'static, ()>,

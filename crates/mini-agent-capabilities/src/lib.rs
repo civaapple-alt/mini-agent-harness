@@ -22,6 +22,9 @@ pub mod subagent;
 pub mod web;
 pub mod workspace;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 pub use image::DeepSeekFiles;
 pub use image::FileUploader;
 pub use image::ImageStore;
