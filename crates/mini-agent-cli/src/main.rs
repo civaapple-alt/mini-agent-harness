@@ -16,7 +16,6 @@ use mini_agent_app_server::frontend::RuntimeConfig;
 use mini_agent_app_server::frontend::RuntimeProfile;
 use mini_agent_app_server::frontend::SandboxKind;
 use mini_agent_app_server::frontend::SecurityPreset;
-use mini_agent_app_server::frontend::harness_config;
 use mini_agent_app_server::frontend::load_workspace_profile;
 
 pub(crate) fn version_line() -> String {
@@ -180,7 +179,7 @@ fn run_status(json: bool) -> ExitCode {
                 return ExitCode::from(2);
             }
         };
-    let manifest = profile.manifest_with_config(&harness_config(false));
+    let manifest = profile.manifest();
     if json {
         let mut status = config.status_json();
         status["capabilities"] =

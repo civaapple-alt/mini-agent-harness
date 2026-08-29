@@ -96,10 +96,10 @@ pub(super) fn spawn_worker(
                 return;
             }
         };
-        let auto_max_steps = launch.runtime_config.copilot_max_steps();
-        let web_search_enabled = launch.runtime_config.web_search();
-        let runtime_config = launch.runtime_config.clone();
-        let workflow_scope = launch.profile.workflows;
+        let auto_max_steps = launch.copilot_max_steps();
+        let web_search_enabled = launch.web_search_enabled();
+        let runtime_config = launch.runtime_config();
+        let workflow_scope = launch.workflow_scope();
         let mut runtime = match model_runtime.block_on(
             launch.start_with_control(approval.clone(), std::sync::Arc::new(run_control.clone())),
         ) {

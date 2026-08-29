@@ -68,10 +68,32 @@ pub fn world_summary(
 /// Fully resolved local runtime inputs, before the frontend approval callback
 /// is attached and the App Server starts its Thread.
 pub struct LocalRuntimeLaunch {
-    pub runtime_config: RuntimeConfig,
-    pub harness_config: HarnessConfig,
-    pub profile: RuntimeProfile,
-    pub session_request: SessionRequest,
+    runtime_config: RuntimeConfig,
+    harness_config: HarnessConfig,
+    profile: RuntimeProfile,
+    session_request: SessionRequest,
+}
+
+impl LocalRuntimeLaunch {
+    pub fn runtime_config(&self) -> RuntimeConfig {
+        self.runtime_config.clone()
+    }
+
+    pub fn copilot_max_steps(&self) -> usize {
+        self.runtime_config.copilot_max_steps()
+    }
+
+    pub fn web_search_enabled(&self) -> bool {
+        self.runtime_config.web_search()
+    }
+
+    pub fn workflow_scope(&self) -> crate::frontend::WorkflowScope {
+        self.profile.workflows.into()
+    }
+
+    pub fn security_preset(&self) -> SecurityPreset {
+        self.profile.security
+    }
 }
 
 /// Resolves configuration and the bounded workspace profile for a local

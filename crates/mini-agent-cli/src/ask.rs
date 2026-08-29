@@ -56,7 +56,7 @@ pub async fn run(
         Ok(launch) => launch,
         Err(error) => return preflight_error(json_output, &error),
     };
-    let approval = ApprovalController::with_preset(mode, launch.profile.security);
+    let approval = ApprovalController::with_preset(mode, launch.security_preset());
     let mut runtime = match launch.start(approval).await {
         Ok(runtime) => runtime,
         Err(error) => return preflight_error(json_output, &error),

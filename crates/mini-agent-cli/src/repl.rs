@@ -141,7 +141,7 @@ pub async fn run(
     let disabled = manifest
         .disabled
         .iter()
-        .map(|(name, _)| name.as_str())
+        .map(|capability| capability.name.as_str())
         .collect::<Vec<_>>()
         .join(",");
     println!(
@@ -164,7 +164,7 @@ pub async fn run(
                 workspace,
                 initial_approval,
                 copilot,
-                startup_profile.sandbox,
+                startup_profile.sandbox(),
             )
         );
     }
