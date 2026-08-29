@@ -17,7 +17,11 @@ use mini_agent_app_server::frontend::ToolError;
 use mini_agent_app_server::frontend::TurnInput;
 use mini_agent_app_server::frontend::TurnInputMode;
 use mini_agent_app_server::frontend::TurnStatus;
+use mini_agent_app_server::frontend::WorkflowGoalAdvanceParams;
+use mini_agent_app_server::frontend::WorkflowGoalStatus;
 use mini_agent_app_server::frontend::WorkflowScope;
+use mini_agent_app_server::frontend::WorkflowVerdictOutcome;
+use mini_agent_app_server::frontend::WorkflowVerifierVerdict;
 use mini_agent_app_server::frontend::harness_config_auto;
 use mini_agent_app_server::frontend::load_workspace_profile;
 use mini_agent_app_server::frontend::observer::RunObserver;
@@ -504,9 +508,12 @@ fn spawn_worker(
                 return;
             }
         };
-        let workflow_service = runtime.workflows();
         let mut copilot = copilot;
         let mut goal_objective: Option<String> = None;
+        let mut plan_active = model_runtime
+            .block_on(runtime.client_mut().workflow_state())
+            .map(|state| state.plan_active)
+            .unwrap_or(false);
         let mut world = match model_runtime.block_on(runtime.client_mut().world_state()) {
             Ok(world) => world,
             Err(error) => {
@@ -534,10 +541,12 @@ fn spawn_worker(
                 let _ = model_runtime.block_on(
                     runtime.update_thread(ThreadUpdate::AppendContext(world.context.clone())),
                 );
-                if let Ok(Some(state)) = workflow_service.load_goal_state()
-                    && state.status == workflow_api::GoalStatus::Running
+                if let Ok(state) = model_runtime.block_on(runtime.client_mut().workflow_state())
+                    && state
+                        .goal
+                        .is_some_and(|goal| goal.status == WorkflowGoalStatus::Running)
                 {
-                    let _ = workflow_service.pause_goal();
+                    let _ = model_runtime.block_on(runtime.client_mut().pause_goal());
                     let _ = events.send(ReplEvent::Warning(
                         "goal> paused on restart; reissue /goal to continue".to_string(),
                     ));
@@ -574,7 +583,7 @@ fn spawn_worker(
                 match command {
                     WorkerCommand::Prompt(prompt) => {
                         run_control.clear_steer();
-                        let prompt = if approval.living_plan().is_some() {
+                        let prompt = if plan_active {
                             workflow_api::planning_turn_prompt(&prompt)
                         } else {
                             prompt
@@ -584,12 +593,15 @@ fn spawn_worker(
                             .unwrap_or_default()
                             .as_millis() as u64;
                         let mut observer = ChannelObserver(events.clone());
-                        let goal_timeout = approval.goal_dir().and_then(|goal_dir| {
-                            goal_dir
-                                .parent()
-                                .and_then(|_| workflow_service.load_goal_state().ok().flatten())
+                        let goal_timeout = if goal_objective.is_some() {
+                            model_runtime
+                                .block_on(runtime.client_mut().workflow_state())
+                                .ok()
+                                .and_then(|state| state.goal)
                                 .map(|state| Duration::from_secs(state.milestone_timeout_secs))
-                        });
+                        } else {
+                            None
+                        };
                         let result = if let Some(timeout) = goal_timeout {
                             match model_runtime.block_on(async {
                                 tokio::time::timeout(
@@ -605,9 +617,10 @@ fn spawn_worker(
                                         timeout.as_secs()
                                     )));
                                     fail_active_goal(
+                                        &mut runtime,
+                                        &model_runtime,
                                         &approval,
                                         &mut goal_objective,
-                                        &workflow_service,
                                     );
                                     break;
                                 }
@@ -620,7 +633,12 @@ fn spawn_worker(
                             Ok(batch) => batch,
                             Err(error) => {
                                 report_run_error(&events, &error);
-                                fail_active_goal(&approval, &mut goal_objective, &workflow_service);
+                                fail_active_goal(
+                                    &mut runtime,
+                                    &model_runtime,
+                                    &approval,
+                                    &mut goal_objective,
+                                );
                                 break;
                             }
                         };
@@ -646,8 +664,9 @@ fn spawn_worker(
                                     "steer> checkpoint saved after {} model step(s); continuing with the new message",
                                     outcome.steps
                                 )));
-                                if approval.goal_dir().is_some() {
-                                    let _ = workflow_service.pause_goal();
+                                if goal_objective.is_some() {
+                                    let _ =
+                                        model_runtime.block_on(runtime.client_mut().pause_goal());
                                     approval.set_goal_dir(None);
                                     goal_objective = None;
                                     let _ = events.send(ReplEvent::Notice(
@@ -661,34 +680,44 @@ fn spawn_worker(
                                     "warning: stopped after {} model steps",
                                     outcome.steps
                                 )));
-                                fail_active_goal(&approval, &mut goal_objective, &workflow_service);
+                                fail_active_goal(
+                                    &mut runtime,
+                                    &model_runtime,
+                                    &approval,
+                                    &mut goal_objective,
+                                );
                             }
                             _ => {
-                                let Some(_goal_dir) = approval.goal_dir() else {
+                                if goal_objective.is_none() {
                                     break;
-                                };
+                                }
                                 let Some(checkpoint_seq) = runtime.checkpoint_seq() else {
                                     let _ = events.send(ReplEvent::Warning(
                                         "goal> cannot verify without a settled durable checkpoint"
                                             .to_string(),
                                     ));
                                     fail_active_goal(
+                                        &mut runtime,
+                                        &model_runtime,
                                         &approval,
                                         &mut goal_objective,
-                                        &workflow_service,
                                     );
                                     break;
                                 };
-                                let criteria = match workflow_service.verification_criteria() {
-                                    Ok(criteria) => criteria,
+                                let criteria = match model_runtime
+                                    .block_on(runtime.client_mut().goal_criteria())
+                                {
+                                    Ok(result) => result.criteria,
                                     Err(error) => {
                                         let _ = events.send(ReplEvent::Warning(format!(
-                                            "goal> verifier unavailable: {error}"
+                                            "goal> verifier unavailable: {}",
+                                            error.message
                                         )));
                                         fail_active_goal(
+                                            &mut runtime,
+                                            &model_runtime,
                                             &approval,
                                             &mut goal_objective,
-                                            &workflow_service,
                                         );
                                         break;
                                     }
@@ -701,9 +730,10 @@ fn spawn_worker(
                                                 "goal> checkpoint unavailable: {error}"
                                             )));
                                             fail_active_goal(
+                                                &mut runtime,
+                                                &model_runtime,
                                                 &approval,
                                                 &mut goal_objective,
-                                                &workflow_service,
                                             );
                                             break;
                                         }
@@ -720,23 +750,28 @@ fn spawn_worker(
                                                 "goal> verifier failed: {error}"
                                             )));
                                             fail_active_goal(
+                                                &mut runtime,
+                                                &model_runtime,
                                                 &approval,
                                                 &mut goal_objective,
-                                                &workflow_service,
                                             );
                                             break;
                                         }
                                     };
-                                if let Err(error) = workflow_service
-                                    .record_verifier_verdict(checkpoint_seq, &verifier_output)
-                                {
+                                if let Err(error) = model_runtime.block_on(
+                                    runtime
+                                        .client_mut()
+                                        .record_verifier_verdict(checkpoint_seq, &verifier_output),
+                                ) {
                                     let _ = events.send(ReplEvent::Warning(format!(
-                                        "goal> cannot persist verifier verdict: {error}"
+                                        "goal> cannot persist verifier verdict: {}",
+                                        error.message
                                     )));
                                     fail_active_goal(
+                                        &mut runtime,
+                                        &model_runtime,
                                         &approval,
                                         &mut goal_objective,
-                                        &workflow_service,
                                     );
                                     break;
                                 }
@@ -746,33 +781,42 @@ fn spawn_worker(
                                             .to_string(),
                                     ));
                                     fail_active_goal(
+                                        &mut runtime,
+                                        &model_runtime,
                                         &approval,
                                         &mut goal_objective,
-                                        &workflow_service,
                                     );
                                     break;
                                 }
-                                let next = match workflow_service.advance_goal(Some(verdict)) {
-                                    Ok(next) => next,
-                                    Err(error) => {
-                                        let _ = events.send(ReplEvent::Warning(format!(
-                                            "goal> cannot advance milestone: {error}"
-                                        )));
-                                        fail_active_goal(
-                                            &approval,
-                                            &mut goal_objective,
-                                            &workflow_service,
-                                        );
-                                        break;
-                                    }
-                                };
+                                let next =
+                                    match model_runtime.block_on(runtime.client_mut().advance_goal(
+                                        WorkflowGoalAdvanceParams {
+                                            verdict: Some(protocol_verifier_verdict(&verdict)),
+                                        },
+                                    )) {
+                                        Ok(next) => next,
+                                        Err(error) => {
+                                            let _ = events.send(ReplEvent::Warning(format!(
+                                                "goal> cannot advance milestone: {}",
+                                                error.message
+                                            )));
+                                            fail_active_goal(
+                                                &mut runtime,
+                                                &model_runtime,
+                                                &approval,
+                                                &mut goal_objective,
+                                            );
+                                            break;
+                                        }
+                                    };
                                 let _ = events.send(ReplEvent::Notice(format!(
                                     "goal> verifier: {:?} (milestone {}/{})",
                                     next.status, next.current_milestone, next.total_milestones
                                 )));
-                                if next.status == workflow_api::GoalStatus::Converged
-                                    || next.status == workflow_api::GoalStatus::Failed
-                                {
+                                if matches!(
+                                    next.status,
+                                    WorkflowGoalStatus::Converged | WorkflowGoalStatus::Failed
+                                ) {
                                     approval.set_goal_dir(None);
                                     goal_objective = None;
                                     break;
@@ -992,8 +1036,8 @@ fn spawn_worker(
                         approval: mode,
                         copilot: new_copilot,
                     } => {
-                        if !new_copilot && approval.goal_dir().is_some() {
-                            let _ = workflow_service.pause_goal();
+                        if !new_copilot && goal_objective.is_some() {
+                            let _ = model_runtime.block_on(runtime.client_mut().pause_goal());
                             approval.set_goal_dir(None);
                             goal_objective = None;
                         }
@@ -1046,8 +1090,24 @@ fn spawn_worker(
                             continue;
                         }
                         if active {
-                            match workflow_service.init_plan_mode(prompt.as_deref()) {
-                                Ok(plan_file) => {
+                            match model_runtime
+                                .block_on(runtime.client_mut().set_plan_mode(true, prompt.clone()))
+                            {
+                                Ok(_) => {
+                                    let plan_file = model_runtime
+                                        .block_on(runtime.client_mut().session_info())
+                                        .ok()
+                                        .flatten()
+                                        .and_then(|session| {
+                                            std::path::Path::new(&session.path)
+                                                .parent()
+                                                .map(std::path::Path::to_path_buf)
+                                        })
+                                        .unwrap_or_else(|| {
+                                            std::path::PathBuf::from(&world.workspace)
+                                        })
+                                        .join("plan.md");
+                                    plan_active = true;
                                     approval.set_goal_dir(None);
                                     goal_objective = None;
                                     approval.set_living_plan(Some(plan_file.clone()));
@@ -1078,13 +1138,16 @@ fn spawn_worker(
                                 }
                                 Err(e) => {
                                     let _ = events.send(ReplEvent::Warning(format!(
-                                        "error: cannot init plan mode: {e}"
+                                        "error: cannot init plan mode: {}",
+                                        e.message
                                     )));
                                 }
                             }
                         } else {
                             approval.set_living_plan(None);
-                            let _ = workflow_service.disable_plan_mode();
+                            plan_active = false;
+                            let _ = model_runtime
+                                .block_on(runtime.client_mut().set_plan_mode(false, None));
                             let mut config = harness_config_auto(copilot, auto_max_steps);
                             config.system_prompt.clone_from(&stable_system_prompt);
                             let _ = model_runtime.block_on(
@@ -1128,13 +1191,17 @@ fn spawn_worker(
                                     .map(std::path::Path::to_path_buf)
                             })
                             .unwrap_or_else(|| std::path::PathBuf::from(&world.workspace));
-                        match workflow_service.init_goal(objective) {
+                        match model_runtime
+                            .block_on(runtime.client_mut().start_goal(objective.clone()))
+                        {
                             Ok(state) => {
                                 goal_objective = Some(objective.clone());
                                 approval.set_living_plan(None);
                                 let goal_dir = session_dir.join("goal");
                                 approval.set_goal_dir(Some(goal_dir.clone()));
-                                let _ = workflow_service.disable_plan_mode();
+                                plan_active = false;
+                                let _ = model_runtime
+                                    .block_on(runtime.client_mut().set_plan_mode(false, None));
                                 copilot = true;
                                 approval.set_mode(ApprovalMode::Automatic);
                                 let mut config = harness_config_auto(true, auto_max_steps);
@@ -1172,7 +1239,8 @@ fn spawn_worker(
                             }
                             Err(e) => {
                                 let _ = events.send(ReplEvent::Warning(format!(
-                                    "error: cannot start goal mode: {e}"
+                                    "error: cannot start goal mode: {}",
+                                    e.message
                                 )));
                             }
                         }
@@ -1203,14 +1271,30 @@ fn persist_latest_context(
 }
 
 fn fail_active_goal(
+    runtime: &mut AppServerRuntime,
+    model_runtime: &tokio::runtime::Runtime,
     approval: &ApprovalController,
     goal_objective: &mut Option<String>,
-    workflows: &mini_agent_app_server::WorkflowService,
 ) {
-    if approval.goal_dir().is_some() {
-        let _ = workflows.fail_goal();
+    if goal_objective.is_some() {
+        let _ = model_runtime.block_on(runtime.client_mut().fail_goal());
         approval.set_goal_dir(None);
         *goal_objective = None;
+    }
+}
+
+fn protocol_verifier_verdict(verdict: &workflow_api::VerifierVerdict) -> WorkflowVerifierVerdict {
+    WorkflowVerifierVerdict {
+        outcome: match verdict.outcome {
+            workflow_api::VerdictOutcome::Approved => WorkflowVerdictOutcome::Approved,
+            workflow_api::VerdictOutcome::Rejected => WorkflowVerdictOutcome::Rejected,
+            workflow_api::VerdictOutcome::NeedsClarification => {
+                WorkflowVerdictOutcome::NeedsClarification
+            }
+            workflow_api::VerdictOutcome::Invalid => WorkflowVerdictOutcome::Invalid,
+        },
+        score: verdict.score,
+        summary: verdict.summary.clone(),
     }
 }
 

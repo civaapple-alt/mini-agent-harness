@@ -5,6 +5,11 @@
 //! contracts from this module. This keeps those implementation crates out of
 //! the frontend's direct dependency graph.
 
+pub use mini_agent_app_server_protocol::WorkflowGoalAdvanceParams;
+pub use mini_agent_app_server_protocol::WorkflowGoalStatus;
+pub use mini_agent_app_server_protocol::WorkflowState;
+pub use mini_agent_app_server_protocol::WorkflowVerdictOutcome;
+pub use mini_agent_app_server_protocol::WorkflowVerifierVerdict;
 pub use mini_agent_capabilities::sandbox::SandboxKind;
 pub use mini_agent_capabilities::security::SecurityPolicy;
 pub use mini_agent_capabilities::security::SecurityPreset;

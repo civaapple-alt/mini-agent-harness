@@ -41,6 +41,7 @@ pub const METHOD_WORKFLOW_GOAL_PAUSE: &str = "workflow/goal/pause";
 pub const METHOD_WORKFLOW_GOAL_FAIL: &str = "workflow/goal/fail";
 pub const METHOD_WORKFLOW_GOAL_CRITERIA: &str = "workflow/goal/criteria";
 pub const METHOD_WORKFLOW_GOAL_ADVANCE: &str = "workflow/goal/advance";
+pub const METHOD_WORKFLOW_GOAL_RECORD_VERDICT: &str = "workflow/goal/record_verdict";
 pub const METHOD_SESSION_INFO: &str = "session/info";
 pub const METHOD_WORLD_STATE: &str = "world/state";
 pub const METHOD_WORLD_REFRESH: &str = "world/refresh";
@@ -270,6 +271,13 @@ pub struct WorkflowGoalStartParams {
 pub struct WorkflowGoalAdvanceParams {
     #[serde(default)]
     pub verdict: Option<WorkflowVerifierVerdict>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowGoalRecordVerdictParams {
+    pub checkpoint_seq: u64,
+    pub output: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

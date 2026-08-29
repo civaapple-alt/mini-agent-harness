@@ -36,6 +36,7 @@ use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_ADVANCE;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_CRITERIA;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_FAIL;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_PAUSE;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_RECORD_VERDICT;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_START;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_PLAN_SET;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
@@ -64,6 +65,7 @@ use mini_agent_app_server_protocol::TurnReadParams;
 use mini_agent_app_server_protocol::TurnStartParams;
 use mini_agent_app_server_protocol::TurnSteerParams;
 use mini_agent_app_server_protocol::WorkflowGoalAdvanceParams;
+use mini_agent_app_server_protocol::WorkflowGoalRecordVerdictParams;
 use mini_agent_app_server_protocol::WorkflowGoalStartParams;
 use mini_agent_app_server_protocol::WorkflowGoalState;
 use mini_agent_app_server_protocol::WorkflowGoalStatus;
@@ -243,6 +245,9 @@ where
             METHOD_WORKFLOW_GOAL_FAIL => self.handle_workflow_goal_fail(request).await,
             METHOD_WORKFLOW_GOAL_CRITERIA => self.handle_workflow_goal_criteria(request).await,
             METHOD_WORKFLOW_GOAL_ADVANCE => self.handle_workflow_goal_advance(request).await,
+            METHOD_WORKFLOW_GOAL_RECORD_VERDICT => {
+                self.handle_workflow_goal_record_verdict(request).await
+            }
             METHOD_SESSION_INFO => self.handle_session_info(request).await,
             METHOD_WORLD_STATE => self.handle_world_state(request).await,
             METHOD_WORLD_REFRESH => self.handle_world_refresh(request).await,
@@ -691,6 +696,24 @@ where
         let verdict = params.verdict.map(host_verifier_verdict);
         match workflows.advance_goal(verdict) {
             Ok(state) => response_value(request.id, workflow_goal_state(state)),
+            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+        }
+    }
+
+    async fn handle_workflow_goal_record_verdict(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<WorkflowGoalRecordVerdictParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        match workflows.record_verifier_verdict(params.checkpoint_seq, &params.output) {
+            Ok(()) => response_value(request.id, serde_json::json!({"recorded": true})),
             Err(error) => response_error(request.id, workflow_error(error.to_string())),
         }
     }
