@@ -131,53 +131,6 @@ for line in sys.stdin:
 }
 
 #[test]
-fn discovers_legacy_plugin_agents_and_standalone_mcp() {
-    let root = test_root();
-    let plugin = root.join(".agents/plugins/code-simplifier");
-    fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
-    fs::write(
-        plugin.join(".claude-plugin/plugin.json"),
-        serde_json::to_vec(&json!({"name": "code-simplifier"})).unwrap(),
-    )
-    .unwrap();
-    fs::create_dir_all(plugin.join("agents")).unwrap();
-    fs::write(
-        plugin.join("agents/code-simplifier.md"),
-        "---\nname: code-simplifier\ndescription: Simplify changed code.\n---\nbody\n",
-    )
-    .unwrap();
-    fs::write(
-        plugin.join(".mcp.json"),
-        serde_json::to_vec(&json!({"formatter": {"command": "bun"}})).unwrap(),
-    )
-    .unwrap();
-    fs::create_dir_all(root.join(".agents/mcp")).unwrap();
-    fs::write(
-        root.join(".agents/mcp/context7.json"),
-        serde_json::to_vec(&json!({
-            "name": "context7", "transport": "stdio", "enabled": true, "command": "npx"
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-
-    let discovery = discover(&root);
-    let prompt = discovery.augment_system_prompt("base").unwrap();
-
-    assert_eq!(discovery.len(), 1);
-    assert_eq!(discovery.plugin_count(), 1);
-    assert_eq!(discovery.mcp_server_count(), 2);
-    assert!(prompt.contains("plugin-agent"));
-    assert!(prompt.contains("agents/code-simplifier.md"));
-    assert!(
-        discovery.diagnostics().is_empty(),
-        "{:?}",
-        discovery.diagnostics()
-    );
-    remove_test_root(&root);
-}
-
-#[test]
 fn project_skill_overrides_invalid_or_plugin_duplicate() {
     let root = test_root();
     let plugin = root.join(".agents/plugins/review");

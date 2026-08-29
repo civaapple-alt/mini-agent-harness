@@ -15,7 +15,6 @@ QUICK START:
 
 COMMANDS:
     resume, fork                        Durable session management
-    mentor                              Review settled runs
 
 COMMON OPTIONS:
     --security-preset PRESET            default | turbomode | full-machine
@@ -70,19 +69,6 @@ USAGE:
 
 Forks a new independent session from the latest settled checkpoint of an existing session.";
 
-pub const MENTOR_HELP: &str = "mini-agent mentor
-
-USAGE:
-    mini-agent mentor insight SESSION_ID [--json]
-    mini-agent mentor verify SESSION_ID [--json] [--] <CRITERIA>
-
-Runs a tool-free independent model against the latest settled checkpoint. The result is appended as a derived item and never enters the primary conversation history.
-
-CONFIGURATION:
-    MENTOR_OPENAI_MODEL      Required dedicated mentor model
-    MENTOR_OPENAI_API_KEY    Optional; falls back to OPENAI_API_KEY
-    MENTOR_OPENAI_BASE_URL   Optional; falls back to OPENAI_BASE_URL";
-
 pub const ASK_HELP: &str = "mini-agent ask
 
 USAGE:
@@ -135,7 +121,6 @@ pub enum Command {
     Auto,
     Resume,
     Fork,
-    Mentor,
     Help,
     Version,
 }
@@ -166,7 +151,6 @@ pub enum HelpTopic {
     Auto,
     Resume,
     Fork,
-    Mentor,
     Version,
 }
 
@@ -210,10 +194,6 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         Some("fork") => {
             args.next();
             Command::Fork
-        }
-        Some("mentor") => {
-            args.next();
-            Command::Mentor
         }
         None => Command::Interactive,
         Some(other) if other.starts_with('-') => Command::Interactive,
@@ -345,24 +325,8 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if command == Command::Fork && prompt.len() != 1 {
         return Err("fork requires exactly one SESSION_ID".to_string());
     }
-    if command == Command::Mentor {
-        match prompt.first().map(String::as_str) {
-            Some("insight") => {
-                if prompt.len() != 2 {
-                    return Err("mentor insight requires exactly one SESSION_ID".to_string());
-                }
-            }
-            Some("verify") => {
-                if prompt.len() < 3 {
-                    return Err("mentor verify requires criteria text".to_string());
-                }
-            }
-            Some(other) => return Err(format!("unknown mentor subcommand: {other}")),
-            None => return Ok(help_invocation(HelpTopic::Mentor)),
-        }
-    }
-    if json && !matches!(command, Command::Ask | Command::Mentor) {
-        return Err("--json is supported only by ask and mentor".to_string());
+    if json && !matches!(command, Command::Ask) {
+        return Err("--json is supported only by ask".to_string());
     }
     if automatic && !matches!(command, Command::Ask) {
         return Err("--auto-approve is supported only by ask".to_string());
@@ -420,7 +384,6 @@ fn help_topic(name: &str) -> Result<HelpTopic, String> {
         "auto" => Ok(HelpTopic::Auto),
         "resume" => Ok(HelpTopic::Resume),
         "fork" => Ok(HelpTopic::Fork),
-        "mentor" => Ok(HelpTopic::Mentor),
         "version" => Ok(HelpTopic::Version),
         _ => Err(format!("unknown help topic: {name}")),
     }
@@ -433,7 +396,6 @@ fn help_topic_for(command: Command) -> HelpTopic {
         Command::Auto => HelpTopic::Auto,
         Command::Resume => HelpTopic::Resume,
         Command::Fork => HelpTopic::Fork,
-        Command::Mentor => HelpTopic::Mentor,
         Command::Version => HelpTopic::Version,
         Command::Help => HelpTopic::Root,
     }
@@ -447,7 +409,6 @@ pub fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::Auto => AUTO_HELP,
         HelpTopic::Resume => RESUME_HELP,
         HelpTopic::Fork => FORK_HELP,
-        HelpTopic::Mentor => MENTOR_HELP,
         HelpTopic::Version => VERSION_HELP,
     }
 }
@@ -519,51 +480,6 @@ mod tests {
         assert_eq!(
             parse_args(vec!["resume".to_string()]).unwrap_err(),
             "resume requires exactly one SESSION_ID"
-        );
-    }
-
-    #[test]
-    fn parses_mentor_commands_and_options() {
-        let insight = parse_args(vec![
-            "mentor".to_string(),
-            "insight".to_string(),
-            "s-12345678".to_string(),
-            "--json".to_string(),
-        ])
-        .unwrap();
-        assert_eq!(insight.command, Command::Mentor);
-        assert_eq!(insight.prompt, "insight s-12345678");
-        assert!(insight.json);
-
-        let verify = parse_args(vec![
-            "mentor".to_string(),
-            "verify".to_string(),
-            "s-12345678".to_string(),
-            "--json".to_string(),
-            "--".to_string(),
-            "- leading criteria".to_string(),
-        ])
-        .unwrap();
-        assert_eq!(verify.command, Command::Mentor);
-        assert_eq!(verify.prompt, "verify s-12345678 - leading criteria");
-        assert!(verify.json);
-
-        assert_eq!(
-            parse_args(vec!["mentor".to_string(), "unknown".to_string()]).unwrap_err(),
-            "unknown mentor subcommand: unknown"
-        );
-        assert_eq!(
-            parse_args(vec!["mentor".to_string(), "insight".to_string()]).unwrap_err(),
-            "mentor insight requires exactly one SESSION_ID"
-        );
-        assert_eq!(
-            parse_args(vec![
-                "mentor".to_string(),
-                "verify".to_string(),
-                "s-12345678".to_string()
-            ])
-            .unwrap_err(),
-            "mentor verify requires criteria text"
         );
     }
 
@@ -732,7 +648,7 @@ mod tests {
     fn rejects_options_unsupported_by_a_command() {
         assert_eq!(
             parse_args(vec!["--json".to_string()]).unwrap_err(),
-            "--json is supported only by ask and mentor"
+            "--json is supported only by ask"
         );
         let auto_inv = parse_args(vec![
             "ask".to_string(),

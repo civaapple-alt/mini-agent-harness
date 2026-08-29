@@ -61,27 +61,12 @@ struct Skill {
     description: String,
     location: String,
     source: String,
-    kind: &'static str,
 }
 
 #[derive(Deserialize)]
 struct SkillMetadata {
     name: String,
     description: String,
-}
-
-#[derive(Clone, Copy)]
-enum InstructionNameRule {
-    ParentDirectory,
-    FileStem,
-    Compatible,
-}
-
-#[derive(Clone, Copy)]
-enum SkillDiscoveryPolicy {
-    Direct,
-    Strict,
-    Compatible,
 }
 
 pub fn discover(workspace: &Path) -> Discovery {
@@ -101,7 +86,7 @@ pub fn discover(workspace: &Path) -> Discovery {
         &workspace,
         &workspace,
         "project",
-        SkillDiscoveryPolicy::Direct,
+        true,
         &mut skills,
         &mut discovery.diagnostics,
     );
@@ -121,17 +106,7 @@ impl Discovery {
     }
 
     pub fn skill_count(&self) -> usize {
-        self.skills
-            .iter()
-            .filter(|skill| skill.kind == "skill")
-            .count()
-    }
-
-    pub fn plugin_agent_count(&self) -> usize {
-        self.skills
-            .iter()
-            .filter(|skill| skill.kind == "plugin-agent")
-            .count()
+        self.skills.len()
     }
 
     pub fn mcp_servers(&self) -> &[McpServerConfig] {
@@ -147,11 +122,7 @@ impl Discovery {
     }
 
     pub fn skill_names(&self) -> Vec<String> {
-        self.skills
-            .iter()
-            .filter(|skill| skill.kind == "skill")
-            .map(|skill| skill.name.clone())
-            .collect()
+        self.skills.iter().map(|skill| skill.name.clone()).collect()
     }
 
     pub fn plugin_names(&self) -> Vec<String> {
@@ -248,7 +219,6 @@ impl Discovery {
             "{base}\n\nAvailable project extensions (metadata only):\n\
              When a task matches an entry, read its listed instruction file \
              with read_file before proceeding. Resolve relative references from that file's directory. \
-             A plugin-agent entry supplies compatible task instructions for the current run.\n\
              <available_extensions>\n{}{}</available_extensions>",
             catalog,
             if catalog.ends_with('\n') { "" } else { "\n" }
@@ -262,7 +232,6 @@ impl Discovery {
                 "name": skill.name,
                 "description": skill.description,
                 "location": skill.location,
-                "kind": skill.kind,
             });
             catalog.push_str(
                 &serde_json::to_string(&record)
@@ -302,13 +271,6 @@ fn discover_plugins(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PluginFlavor {
-    Portable,
-    Claude,
-    Grok,
-}
-
 fn load_plugin(
     workspace: &Path,
     plugin_root: &Path,
@@ -316,40 +278,8 @@ fn load_plugin(
     skills: &mut BTreeMap<String, Skill>,
     discovery: &mut Discovery,
 ) {
-    let manifest = find_plugin_manifest(plugin_root);
-    let (plugin_name, flavor) = match manifest {
-        Ok(Some((manifest_path, PluginFlavor::Portable))) => {
-            let value = match read_json(&manifest_path) {
-                Ok(value) => value,
-                Err(error) => {
-                    discovery.diagnostics.push(error);
-                    return;
-                }
-            };
-            match validate_plugin_manifest(&value, &manifest_path, &mut discovery.diagnostics) {
-                Ok(name) => (name, PluginFlavor::Portable),
-                Err(error) => {
-                    discovery.diagnostics.push(error);
-                    return;
-                }
-            }
-        }
-        Ok(Some((manifest_path, flavor))) => {
-            let value = match read_json(&manifest_path) {
-                Ok(value) => value,
-                Err(error) => {
-                    discovery.diagnostics.push(error);
-                    return;
-                }
-            };
-            match validate_legacy_plugin_manifest(&value, &manifest_path) {
-                Ok(name) => (name, flavor),
-                Err(error) => {
-                    discovery.diagnostics.push(error);
-                    return;
-                }
-            }
-        }
+    let manifest = match find_plugin_manifest(plugin_root) {
+        Ok(Some(path)) => path,
         Ok(None) => {
             discovery.diagnostics.push(format!(
                 "{} has no supported plugin manifest",
@@ -362,6 +292,21 @@ fn load_plugin(
             return;
         }
     };
+    let value = match read_json(&manifest) {
+        Ok(value) => value,
+        Err(error) => {
+            discovery.diagnostics.push(error);
+            return;
+        }
+    };
+    let plugin_name = match validate_plugin_manifest(&value, &manifest, &mut discovery.diagnostics)
+    {
+        Ok(name) => name,
+        Err(error) => {
+            discovery.diagnostics.push(error);
+            return;
+        }
+    };
     discovery.plugins.push(plugin_name.clone());
     let source = format!("{source} plugin {plugin_name}");
     discover_skill_root(
@@ -369,74 +314,26 @@ fn load_plugin(
         plugin_root,
         workspace,
         &source,
-        if flavor == PluginFlavor::Portable {
-            SkillDiscoveryPolicy::Strict
-        } else {
-            SkillDiscoveryPolicy::Compatible
-        },
+        false,
         skills,
         &mut discovery.diagnostics,
     );
-    if matches!(flavor, PluginFlavor::Claude | PluginFlavor::Grok) {
-        discover_agent_root(
-            &plugin_root.join("agents"),
-            plugin_root,
-            workspace,
-            &source,
-            skills,
-            &mut discovery.diagnostics,
-        );
-    }
-    match flavor {
-        PluginFlavor::Portable => discover_mcp_file(
-            workspace,
-            plugin_root,
-            &plugin_name,
-            &plugin_root.join("mcp.json"),
-            McpFileFormat::Portable,
-            discovery,
-        ),
-        PluginFlavor::Claude | PluginFlavor::Grok => discover_mcp_file(
-            workspace,
-            plugin_root,
-            &plugin_name,
-            &plugin_root.join(".mcp.json"),
-            McpFileFormat::Legacy,
-            discovery,
-        ),
-    }
+    discover_mcp_file(
+        workspace,
+        plugin_root,
+        &plugin_name,
+        &plugin_root.join("mcp.json"),
+        discovery,
+    );
 }
 
-fn find_plugin_manifest(root: &Path) -> Result<Option<(PathBuf, PluginFlavor)>, String> {
-    let candidates = [
-        (root.join("plugin.json"), PluginFlavor::Portable),
-        (
-            root.join(".claude-plugin/plugin.json"),
-            PluginFlavor::Claude,
-        ),
-        (root.join(".grok-plugin/plugin.json"), PluginFlavor::Grok),
-    ];
-    let present = candidates
-        .into_iter()
-        .filter(|(path, _)| path.is_file())
-        .collect::<Vec<_>>();
-    match present.as_slice() {
-        [] => Ok(None),
-        [(path, flavor)] => contained_file(path, root).map(|path| Some((path, *flavor))),
-        _ => Err(format!(
-            "{} contains multiple supported plugin manifests",
-            root.display()
-        )),
+fn find_plugin_manifest(root: &Path) -> Result<Option<PathBuf>, String> {
+    let path = root.join("plugin.json");
+    if path.is_file() {
+        contained_file(&path, root).map(Some)
+    } else {
+        Ok(None)
     }
-}
-
-fn validate_legacy_plugin_manifest(value: &Value, path: &Path) -> Result<String, String> {
-    let object = value
-        .as_object()
-        .ok_or_else(|| format!("{} must contain a JSON object", path.display()))?;
-    let name = required_string(object, "name", path)?;
-    validate_plugin_name(name).map_err(|error| format!("{}: {error}", path.display()))?;
-    Ok(name.to_string())
 }
 
 fn validate_plugin_manifest(
@@ -519,21 +416,7 @@ fn validate_plugin_manifest(
     Ok(name.to_string())
 }
 
-#[derive(Clone, Copy)]
-enum McpFileFormat {
-    Portable,
-    Legacy,
-}
-
 fn discover_project_mcp(workspace: &Path, discovery: &mut Discovery) {
-    discover_mcp_file(
-        workspace,
-        workspace,
-        "project",
-        &workspace.join(".agents/mcp.json"),
-        McpFileFormat::Legacy,
-        discovery,
-    );
     let root = workspace.join(".agents/mcp");
     if !root.exists() {
         return;
@@ -623,7 +506,6 @@ fn discover_native_mcp_file(workspace: &Path, path: &Path, discovery: &mut Disco
         server_name,
         &Value::Object(server),
         timeout,
-        false,
     ) {
         Ok(server) => push_mcp_server(server, discovery),
         Err(error) => discovery
@@ -637,7 +519,6 @@ fn discover_mcp_file(
     plugin_root: &Path,
     plugin_name: &str,
     path: &Path,
-    format: McpFileFormat,
     discovery: &mut Discovery,
 ) {
     if !path.exists() {
@@ -666,54 +547,29 @@ fn discover_mcp_file(
             return;
         }
     };
-    let servers = match format {
-        McpFileFormat::Portable => {
-            if object
-                .keys()
-                .any(|key| key != "$schema" && key != "mcpServers")
-            {
-                discovery.diagnostics.push(format!(
-                    "{} contains unknown top-level fields; MCP was disabled for this plugin",
-                    path.display()
-                ));
-                return;
-            }
-            if required_string(object, "$schema", &path).ok() != Some(MCP_SCHEMA) {
-                discovery.diagnostics.push(format!(
-                    "{} must target Agent Plugins MCP schema 1.0.0",
-                    path.display()
-                ));
-                return;
-            }
-            let Some(servers) = object.get("mcpServers").and_then(Value::as_object) else {
-                discovery.diagnostics.push(format!(
-                    "{} field \"mcpServers\" must be an object",
-                    path.display()
-                ));
-                return;
-            };
-            servers
-        }
-        McpFileFormat::Legacy => match object.get("mcpServers") {
-            Some(value) => {
-                let Some(servers) = value.as_object() else {
-                    discovery.diagnostics.push(format!(
-                        "{} field \"mcpServers\" must be an object",
-                        path.display()
-                    ));
-                    return;
-                };
-                if object.keys().any(|key| key != "mcpServers") {
-                    discovery.diagnostics.push(format!(
-                        "{} contains fields beside \"mcpServers\"",
-                        path.display()
-                    ));
-                    return;
-                }
-                servers
-            }
-            None => object,
-        },
+    if object
+        .keys()
+        .any(|key| key != "$schema" && key != "mcpServers")
+    {
+        discovery.diagnostics.push(format!(
+            "{} contains unknown top-level fields; MCP was disabled",
+            path.display()
+        ));
+        return;
+    }
+    if required_string(object, "$schema", &path).ok() != Some(MCP_SCHEMA) {
+        discovery.diagnostics.push(format!(
+            "{} must target Agent Plugins MCP schema 1.0.0",
+            path.display()
+        ));
+        return;
+    }
+    let Some(servers) = object.get("mcpServers").and_then(Value::as_object) else {
+        discovery.diagnostics.push(format!(
+            "{} field \"mcpServers\" must be an object",
+            path.display()
+        ));
+        return;
     };
     let mut server_names = servers.keys().collect::<Vec<_>>();
     server_names.sort();
@@ -725,7 +581,6 @@ fn discover_mcp_file(
             server_name,
             &servers[server_name],
             DEFAULT_CONNECT_TIMEOUT,
-            matches!(format, McpFileFormat::Legacy),
         ) {
             Ok(server) => push_mcp_server(server, discovery),
             Err(error) => discovery.diagnostics.push(format!(
@@ -743,7 +598,6 @@ fn parse_mcp_server(
     server_name: &str,
     value: &Value,
     connect_timeout: Duration,
-    allow_implicit_stdio: bool,
 ) -> Result<McpServerConfig, String> {
     validate_plugin_name(server_name)
         .map_err(|_| format!("invalid MCP server name {server_name:?}"))?;
@@ -754,7 +608,6 @@ fn parse_mcp_server(
         Some(value) => value
             .as_str()
             .ok_or_else(|| "field \"type\" must be a string".to_string())?,
-        None if allow_implicit_stdio && object.contains_key("command") => "stdio",
         None => return Err("field \"type\" must be a string".to_string()),
     };
     let transport = match transport {
@@ -788,15 +641,11 @@ fn parse_stdio_transport(object: &Map<String, Value>) -> Result<McpTransportConf
         .ok_or_else(|| "field \"command\" must be a non-empty string".to_string())?;
     let args = string_array(object.get("args"), "args")?;
     let env = string_map(object.get("env"), "env")?;
-    if env.keys().any(|key| {
-        matches!(
-            key.as_str(),
-            "PLUGIN_ROOT" | "PLUGIN_DATA" | "CLAUDE_PLUGIN_ROOT"
-        )
-    }) {
-        return Err(
-            "env must not define PLUGIN_ROOT, PLUGIN_DATA, or CLAUDE_PLUGIN_ROOT".to_string(),
-        );
+    if env
+        .keys()
+        .any(|key| matches!(key.as_str(), "PLUGIN_ROOT" | "PLUGIN_DATA"))
+    {
+        return Err("env must not define PLUGIN_ROOT or PLUGIN_DATA".to_string());
     }
     let cwd = optional_string(object.get("cwd"), "cwd")?;
     if cwd.as_deref().is_some_and(|cwd| {
@@ -805,8 +654,6 @@ fn parse_stdio_transport(object: &Map<String, Value>) -> Result<McpTransportConf
             && !cwd.starts_with("${PLUGIN_ROOT}/")
             && cwd != "${PLUGIN_DATA}"
             && !cwd.starts_with("${PLUGIN_DATA}/")
-            && cwd != "${CLAUDE_PLUGIN_ROOT}"
-            && !cwd.starts_with("${CLAUDE_PLUGIN_ROOT}/")
     }) {
         return Err("cwd must be package-relative or rooted at a plugin placeholder".to_string());
     }
@@ -882,15 +729,10 @@ fn discover_skill_root(
     boundary: &Path,
     workspace: &Path,
     source: &str,
-    policy: SkillDiscoveryPolicy,
+    overrides: bool,
     skills: &mut BTreeMap<String, Skill>,
     diagnostics: &mut Vec<String>,
 ) {
-    let (overrides, name_rule) = match policy {
-        SkillDiscoveryPolicy::Direct => (true, InstructionNameRule::ParentDirectory),
-        SkillDiscoveryPolicy::Strict => (false, InstructionNameRule::ParentDirectory),
-        SkillDiscoveryPolicy::Compatible => (false, InstructionNameRule::Compatible),
-    };
     if !root.exists() {
         return;
     }
@@ -912,44 +754,8 @@ fn discover_skill_root(
         if !skill_path.exists() {
             continue;
         }
-        match parse_instruction(&skill_path, boundary, workspace, source, "skill", name_rule) {
+        match parse_instruction(&skill_path, boundary, workspace, source) {
             Ok(skill) => insert_skill(skill, overrides, skills, diagnostics),
-            Err(error) => diagnostics.push(error),
-        }
-    }
-}
-
-fn discover_agent_root(
-    root: &Path,
-    boundary: &Path,
-    workspace: &Path,
-    source: &str,
-    skills: &mut BTreeMap<String, Skill>,
-    diagnostics: &mut Vec<String>,
-) {
-    if !root.exists() {
-        return;
-    }
-    let root = match contained_directory(root, boundary) {
-        Ok(root) => root,
-        Err(error) => {
-            diagnostics.push(error);
-            return;
-        }
-    };
-    for path in directory_children(&root, "plugin agent", diagnostics) {
-        if path.extension().and_then(|extension| extension.to_str()) != Some("md") {
-            continue;
-        }
-        match parse_instruction(
-            &path,
-            boundary,
-            workspace,
-            source,
-            "plugin-agent",
-            InstructionNameRule::FileStem,
-        ) {
-            Ok(skill) => insert_skill(skill, false, skills, diagnostics),
             Err(error) => diagnostics.push(error),
         }
     }
@@ -994,8 +800,6 @@ fn parse_instruction(
     boundary: &Path,
     workspace: &Path,
     source: &str,
-    kind: &'static str,
-    name_rule: InstructionNameRule,
 ) -> Result<Skill, String> {
     let path = path
         .canonicalize()
@@ -1009,14 +813,10 @@ fn parse_instruction(
     let metadata: SkillMetadata = yaml_serde::from_str(frontmatter)
         .map_err(|error| format!("cannot parse {} frontmatter: {error}", path.display()))?;
     validate_skill_name(&metadata.name).map_err(|error| format!("{}: {error}", path.display()))?;
-    let expected_name = match name_rule {
-        InstructionNameRule::ParentDirectory => path
-            .parent()
-            .and_then(Path::file_name)
-            .and_then(|name| name.to_str()),
-        InstructionNameRule::FileStem => path.file_stem().and_then(|name| name.to_str()),
-        InstructionNameRule::Compatible => None,
-    };
+    let expected_name = path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str());
     if let Some(expected_name) = expected_name
         && metadata.name != expected_name
     {
@@ -1047,7 +847,6 @@ fn parse_instruction(
         description,
         location,
         source: source.to_string(),
-        kind,
     })
 }
 
@@ -1062,7 +861,6 @@ fn bounded_catalog(
             "name": skill.name,
             "description": skill.description,
             "location": skill.location,
-            "kind": skill.kind,
         }))
         .expect("skill catalog metadata must serialize")
         .len()

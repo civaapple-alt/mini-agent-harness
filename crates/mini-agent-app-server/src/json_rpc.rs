@@ -848,53 +848,6 @@ where
     }
 }
 
-/// Serves newline-delimited JSON-RPC over an async reader and writer.
-///
-/// Requests and event notifications share one ordered output stream. The
-/// supplied AppServer remains the execution backend; this function only owns
-/// framing, decoding, and connection-level protocol state.
-pub async fn serve_stdio<M, R, W>(
-    server: AppServer<M>,
-    reader: R,
-    writer: W,
-) -> Result<(), std::io::Error>
-where
-    M: Model + Send + 'static,
-    R: AsyncBufRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    serve_stdio_with_approval_and_manifest(
-        server,
-        ApprovalBroker::new(),
-        default_capability_manifest(),
-        reader,
-        writer,
-    )
-    .await
-}
-
-/// Serves stdio while forwarding host approval callbacks to the client.
-pub async fn serve_stdio_with_approval<M, R, W>(
-    server: AppServer<M>,
-    approval: ApprovalBroker,
-    reader: R,
-    writer: W,
-) -> Result<(), std::io::Error>
-where
-    M: Model + Send + 'static,
-    R: AsyncBufRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    serve_stdio_with_approval_and_manifest(
-        server,
-        approval,
-        default_capability_manifest(),
-        reader,
-        writer,
-    )
-    .await
-}
-
 /// Serves stdio with a host-resolved capability manifest.
 pub async fn serve_stdio_with_approval_and_manifest<M, R, W>(
     server: AppServer<M>,
@@ -916,28 +869,6 @@ where
     serve_connection(&mut connection, approval, reader, writer).await
 }
 
-/// Serves stdio after selecting the host profile from the first initialize
-/// request. The callback runs before a Thread or App Server is constructed,
-/// so profile selection is a startup decision and remains frozen for the
-/// service lifetime.
-pub async fn serve_stdio_with_startup<M, R, W, F>(
-    approval: ApprovalBroker,
-    reader: R,
-    writer: W,
-    startup: F,
-) -> Result<(), std::io::Error>
-where
-    M: Model + Send + 'static,
-    R: AsyncBufRead + Unpin,
-    W: AsyncWrite + Unpin,
-    F: FnOnce(InitializeParams) -> Result<(AppServer<M>, CapabilityManifest), String>,
-{
-    serve_stdio_with_startup_and_services(approval, reader, writer, move |params| {
-        startup(params).map(|(server, manifest)| (server, manifest, StartupServices::default()))
-    })
-    .await
-}
-
 /// Optional services attached to a startup-created App Server connection.
 pub struct StartupServices<M> {
     pub workflows: Option<WorkflowService>,
@@ -951,37 +882,6 @@ impl<M> Default for StartupServices<M> {
             management: None,
         }
     }
-}
-
-/// Serves stdio after startup while attaching a runtime-bound workflow
-/// service to the JSON-RPC connection.
-pub async fn serve_stdio_with_startup_and_workflows<M, R, W, F>(
-    approval: ApprovalBroker,
-    reader: R,
-    writer: W,
-    startup: F,
-) -> Result<(), std::io::Error>
-where
-    M: Model + Send + 'static,
-    R: AsyncBufRead + Unpin,
-    W: AsyncWrite + Unpin,
-    F: FnOnce(
-        InitializeParams,
-    ) -> Result<(AppServer<M>, CapabilityManifest, Option<WorkflowService>), String>,
-{
-    serve_stdio_with_startup_and_services(approval, reader, writer, move |params| {
-        startup(params).map(|(server, manifest, workflows)| {
-            (
-                server,
-                manifest,
-                StartupServices {
-                    workflows,
-                    management: None,
-                },
-            )
-        })
-    })
-    .await
 }
 
 /// Serves stdio after startup while attaching optional runtime services to the
@@ -1605,8 +1505,10 @@ mod tests {
     async fn serves_initialize_over_jsonl_stdio() {
         let (mut input, server_input) = tokio::io::duplex(4096);
         let (server_output, client_output) = tokio::io::duplex(4096);
-        let task = tokio::spawn(serve_stdio(
+        let task = tokio::spawn(serve_stdio_with_approval_and_manifest(
             connection().server.clone(),
+            ApprovalBroker::new(),
+            default_capability_manifest(),
             tokio::io::BufReader::new(server_input),
             server_output,
         ));

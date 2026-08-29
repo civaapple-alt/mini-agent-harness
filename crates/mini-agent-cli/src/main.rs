@@ -142,9 +142,6 @@ async fn main() -> ExitCode {
             )
             .await
         }
-        Command::Mentor => {
-            mini_agent_app_server::mentor::run(invocation.prompt, invocation.json).await
-        }
     }
 }
 
