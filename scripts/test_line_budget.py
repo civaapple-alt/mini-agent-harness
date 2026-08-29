@@ -52,7 +52,6 @@ class LineBudgetTests(unittest.TestCase):
                 "mini-agent-host": "fn host() {}\n",
                 "mini-agent-app-server": "fn server() {}\n",
                 "mini-agent-app-server-protocol": "fn wire() {}\n",
-                "mini-agent-acp": "fn acp() {}\n",
                 "mini-agent-cli": "fn cli() {}\nfn repl() {}\n",
             }.items():
                 package_root = root / "crates" / package / "src"
@@ -67,10 +66,9 @@ class LineBudgetTests(unittest.TestCase):
                     (
                         "mini-agent-app-server",
                         "mini-agent-app-server-protocol",
-                        "mini-agent-acp",
                     ),
                 ),
-                3,
+                2,
             )
             self.assertEqual(line_budget.layer_lines(root, ("mini-agent-cli",)), 2)
 
@@ -80,12 +78,6 @@ class LineBudgetTests(unittest.TestCase):
             package_root = root / "crates" / "mini-agent-core" / "src"
             package_root.mkdir(parents=True)
             (package_root / "lib.rs").write_text("fn core() {}\n", encoding="utf-8")
-            acp_root = root / "crates" / "mini-agent-acp" / "src"
-            acp_root.mkdir(parents=True)
-            (acp_root / "lib.rs").write_text(
-                "fn acp() {}\nfn edge() {}\n", encoding="utf-8"
-            )
-
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 self.assertEqual(line_budget.check(root), 0)
@@ -94,12 +86,7 @@ class LineBudgetTests(unittest.TestCase):
                 "runtime (core + protocol + host + app-server): 1/20000 lines",
                 output.getvalue(),
             )
-            self.assertIn("acp: 2 lines", output.getvalue())
-            self.assertIn("all Rust source: 3/30000 lines", output.getvalue())
-            self.assertIn(
-                "acp: 2 lines (production 2, unit 0, integration 0) [mini-agent-acp]",
-                output.getvalue(),
-            )
+            self.assertIn("all Rust source: 1/30000 lines", output.getvalue())
 
     def test_capabilities_are_reported_but_excluded_from_runtime_gate(self):
         with tempfile.TemporaryDirectory() as directory:
