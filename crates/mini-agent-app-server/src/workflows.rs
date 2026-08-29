@@ -51,6 +51,10 @@ impl WorkflowService {
         goal::disable_plan_mode(&self.session_dir)
     }
 
+    pub fn plan_active(&self) -> bool {
+        goal::is_plan_mode_active(&self.session_dir)
+    }
+
     pub fn init_goal(&self, objective: &str) -> io::Result<GoalState> {
         goal::init_goal_workspace_with_limits(&self.session_dir, objective, self.goal_limits)
     }

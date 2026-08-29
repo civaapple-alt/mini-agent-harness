@@ -42,7 +42,6 @@ use mini_agent_host::HostRuntimeFactory;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
 use mini_agent_host::WorldState;
-use mini_agent_host::goal::GoalLimits;
 use mini_agent_host::tool_outcome::classify_tools;
 use std::path::PathBuf;
 
@@ -91,7 +90,7 @@ pub struct AppServerRuntime {
     retry_mcp_servers: Vec<mini_agent_capabilities::McpServerConfig>,
     capability_manifest: CapabilityManifest,
     approval: ApprovalController,
-    goal_limits: GoalLimits,
+    workflow_service: WorkflowService,
 }
 
 impl AppServerRuntime {
@@ -231,10 +230,18 @@ impl AppServerRuntime {
             thread,
             control.clone(),
         );
+        let workflow_service = WorkflowService::new(
+            session
+                .as_ref()
+                .and_then(|opened| opened.store.path().parent().map(PathBuf::from))
+                .unwrap_or_else(|| world.workspace().to_path_buf()),
+            goal_limits,
+        );
         let connection = AppServerConnection::with_capability_manifest(
             server.clone(),
             capability_manifest_to_protocol(&capability_manifest),
-        );
+        )
+        .with_workflow_service(workflow_service.clone());
         let mut client = LocalAppServerClient::new(connection);
         client
             .initialize_with_profile(
@@ -259,7 +266,7 @@ impl AppServerRuntime {
             retry_mcp_servers,
             capability_manifest,
             approval,
-            goal_limits,
+            workflow_service,
         })
     }
 
@@ -280,6 +287,7 @@ impl AppServerRuntime {
     pub fn into_connection(self) -> AppServerConnection<OpenAiModel> {
         let manifest = capability_manifest_to_protocol(&self.capability_manifest);
         AppServerConnection::with_capability_manifest(self.server, manifest)
+            .with_workflow_service(self.workflow_service)
     }
 
     pub fn images(&self) -> &ImageStore {
@@ -330,12 +338,7 @@ impl AppServerRuntime {
     /// A non-durable runtime uses the workspace as its local Plan directory;
     /// Goal creation still requires a durable session at the CLI policy edge.
     pub fn workflows(&self) -> WorkflowService {
-        let session_dir = self
-            .session
-            .as_ref()
-            .and_then(|opened| opened.store.path().parent().map(PathBuf::from))
-            .unwrap_or_else(|| self.world.workspace().to_path_buf());
-        WorkflowService::new(session_dir, self.goal_limits)
+        self.workflow_service.clone()
     }
 
     /// Returns bounded metadata without exposing the persistence store.

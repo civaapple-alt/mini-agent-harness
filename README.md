@@ -51,11 +51,14 @@ limits, failures, and observation events.
   `mini-agent-app-server-protocol` support initialization, thread lifecycle,
   turn commands, steering, interruption, settled results, approval requests,
   ordered event notifications, tool-free Mentor review turns, and local
-  Session/World/MCP/Goal/Plan management through the runtime service.
+  Session/World/MCP/Goal/Plan management through the runtime service. The
+  JSON-RPC surface also exposes `workflow/state`, `workflow/plan/set`, and
+  typed Goal lifecycle methods; ACP maps these to `session/workflow/*`.
   `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess
   clients.
 - `mini-agent-acp` is an experimental edge adapter that maps ACP-style
-  `session/new`, `session/prompt`, and `session/cancel` messages to the
+  `session/new`, `session/prompt`, `session/cancel`, and
+  `session/workflow/*` messages to the
   app-server. It does not modify the core execution contracts or claim full
   ACP conformance yet.
 - `mini-agent-cli` is the frontend: REPL input, headless commands, output

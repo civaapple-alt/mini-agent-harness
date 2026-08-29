@@ -1,7 +1,7 @@
 use mini_agent_app_server::AppServerError;
 use mini_agent_app_server::ApprovalBroker;
 use mini_agent_app_server::capability_manifest_to_protocol;
-use mini_agent_app_server::serve_stdio_with_startup;
+use mini_agent_app_server::serve_stdio_with_startup_and_workflows;
 use mini_agent_app_server_protocol::CapabilityProviderSelection;
 use mini_agent_capabilities::SecurityPreset;
 use mini_agent_capabilities::security::SecurityPolicy;
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let startup_broker = broker.clone();
     let stdin = BufReader::new(tokio::io::stdin());
     let stdout = tokio::io::stdout();
-    serve_stdio_with_startup(broker, stdin, stdout, move |params| {
+    serve_stdio_with_startup_and_workflows(broker, stdin, stdout, move |params| {
         let base_profile = match params.profile {
             Some(name) => RuntimeProfile::builtin(&name)
                 .ok_or_else(|| format!("unknown startup profile `{name}`"))?,
@@ -62,7 +62,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Ok(Thread::new(thread_id, runtime.harness))
             },
         );
-        Ok((server, capability_manifest))
+        let workflows = mini_agent_app_server::WorkflowService::new(
+            startup_config.workspace(),
+            startup_config.goal_limits(),
+        );
+        Ok((server, capability_manifest, Some(workflows)))
     })
     .await?;
     Ok(())

@@ -180,12 +180,34 @@ pause/fail, verifier criteria and verdict persistence, milestone advancement,
 restart recovery, and bounded prompt construction. Direct
 `mini-agent-host::goal` calls have been removed from the CLI.
 
-The service is currently an in-process management seam. Goal/Plan JSON-RPC
-methods and ACP mapping are intentionally separate follow-up work; they should
-expose typed state and diagnostics rather than Host paths or filesystem handles.
+The service is the in-process implementation seam for the protocol methods
+described below; clients receive typed state and diagnostics rather than Host
+paths or filesystem handles.
 
-The post-cleanup line report is runtime `14,726/20,000` lines, capabilities
-`14,077` lines, CLI `7,617` lines, and all Rust source `37,342/30,000` lines.
+## Workflow protocol stage (2026-08-29)
+
+The App Server protocol now exposes typed workflow methods:
+
+- `workflow/state` returns Plan activity and a secret-free Goal state projection.
+- `workflow/plan/set` toggles Plan mode with an optional bounded prompt.
+- `workflow/goal/start`, `workflow/goal/pause`, and `workflow/goal/fail` manage
+  Goal lifecycle state.
+- `workflow/goal/criteria` returns verifier criteria, and
+  `workflow/goal/advance` accepts a typed verifier verdict.
+
+`AppServerConnection` attaches an optional `WorkflowService`; generic core-only
+connections advertise `workflows: false`, while Host-backed runtimes and the
+standalone App Server binary attach the service. The local client uses the same
+JSON-RPC methods. ACP maps the methods to `session/workflow/*` after validating
+the active session id, so both edges share one workflow implementation.
+
+The wire projection deliberately omits `plan_file` and other filesystem
+handles. The remaining follow-up is event notifications for workflow state
+changes and a versioned ACP schema once the management vocabulary stabilizes.
+
+The post-cleanup line report is runtime `15,210/20,000` lines, capabilities
+`14,077` lines, ACP `1,176` lines, CLI `7,617` lines, and all Rust source
+`38,080/30,000` lines.
 The runtime gate
 still passes; the workspace gate remains the active reduction task.
 

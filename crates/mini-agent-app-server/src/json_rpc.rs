@@ -4,6 +4,7 @@ use super::AppServer;
 use super::AppServerError;
 use super::ApprovalBroker;
 use super::ApprovalRequest;
+use super::WorkflowService;
 use mini_agent_app_server_protocol::ApprovalRequestNotification;
 use mini_agent_app_server_protocol::ApprovalRespondParams;
 use mini_agent_app_server_protocol::CapabilityManifest;
@@ -27,6 +28,13 @@ use mini_agent_app_server_protocol::METHOD_TURN_INTERRUPT;
 use mini_agent_app_server_protocol::METHOD_TURN_READ;
 use mini_agent_app_server_protocol::METHOD_TURN_START;
 use mini_agent_app_server_protocol::METHOD_TURN_STEER;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_ADVANCE;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_CRITERIA;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_FAIL;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_PAUSE;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_START;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_PLAN_SET;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
 use mini_agent_app_server_protocol::PROTOCOL_VERSION;
 use mini_agent_app_server_protocol::ServerCapabilities;
 use mini_agent_app_server_protocol::ThreadCloseParams;
@@ -45,6 +53,14 @@ use mini_agent_app_server_protocol::TurnInterruptParams;
 use mini_agent_app_server_protocol::TurnReadParams;
 use mini_agent_app_server_protocol::TurnStartParams;
 use mini_agent_app_server_protocol::TurnSteerParams;
+use mini_agent_app_server_protocol::WorkflowGoalAdvanceParams;
+use mini_agent_app_server_protocol::WorkflowGoalStartParams;
+use mini_agent_app_server_protocol::WorkflowGoalState;
+use mini_agent_app_server_protocol::WorkflowGoalStatus;
+use mini_agent_app_server_protocol::WorkflowPlanSetParams;
+use mini_agent_app_server_protocol::WorkflowState;
+use mini_agent_app_server_protocol::WorkflowVerdictOutcome;
+use mini_agent_app_server_protocol::WorkflowVerifierVerdict;
 use mini_agent_core::EventEnvelope;
 use mini_agent_core::Model;
 use mini_agent_core::SessionState;
@@ -69,6 +85,7 @@ pub struct AppServerConnection<M> {
     approval: ApprovalBroker,
     approval_enabled: bool,
     capability_manifest: CapabilityManifest,
+    workflows: Option<WorkflowService>,
 }
 
 impl<M> AppServerConnection<M>
@@ -116,7 +133,16 @@ where
             approval,
             approval_enabled,
             capability_manifest,
+            workflows: None,
         }
+    }
+
+    /// Attaches the runtime-bound workflow service to this protocol
+    /// connection. Workflow state remains optional for generic in-process
+    /// App Servers that were not built from a Host runtime.
+    pub fn with_workflow_service(mut self, workflows: WorkflowService) -> Self {
+        self.workflows = Some(workflows);
+        self
     }
 
     pub fn initialized(&self) -> bool {
@@ -188,6 +214,13 @@ where
             METHOD_TURN_READ => self.handle_turn_read(request).await,
             METHOD_TURN_STEER => self.handle_turn_steer(request).await,
             METHOD_TURN_INTERRUPT => self.handle_turn_interrupt(request).await,
+            METHOD_WORKFLOW_STATE => self.handle_workflow_state(request).await,
+            METHOD_WORKFLOW_PLAN_SET => self.handle_workflow_plan_set(request).await,
+            METHOD_WORKFLOW_GOAL_START => self.handle_workflow_goal_start(request).await,
+            METHOD_WORKFLOW_GOAL_PAUSE => self.handle_workflow_goal_pause(request).await,
+            METHOD_WORKFLOW_GOAL_FAIL => self.handle_workflow_goal_fail(request).await,
+            METHOD_WORKFLOW_GOAL_CRITERIA => self.handle_workflow_goal_criteria(request).await,
+            METHOD_WORKFLOW_GOAL_ADVANCE => self.handle_workflow_goal_advance(request).await,
             _ => response_error(id, JsonRpcError::method_not_found(request.method)),
         }
     }
@@ -282,6 +315,7 @@ where
                 turn_read: true,
                 thread_list: true,
                 approval_requests: self.approval_enabled,
+                workflows: self.workflows.is_some(),
             },
             profile: self.capability_manifest.profile.clone(),
             capability_manifest: self.capability_manifest.clone(),
@@ -513,6 +547,131 @@ where
         }
     }
 
+    async fn handle_workflow_state(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        let goal = match workflows.load_goal_state() {
+            Ok(goal) => goal,
+            Err(error) => {
+                return response_error(request.id, workflow_error(error.to_string()));
+            }
+        };
+        response_value(
+            request.id,
+            WorkflowState {
+                plan_active: workflows.plan_active(),
+                goal: goal.map(workflow_goal_state),
+            },
+        )
+    }
+
+    async fn handle_workflow_plan_set(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<WorkflowPlanSetParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        let result = if params.active {
+            workflows
+                .init_plan_mode(params.prompt.as_deref())
+                .map(|_| ())
+        } else {
+            workflows.disable_plan_mode()
+        };
+        if let Err(error) = result {
+            return response_error(request.id, workflow_error(error.to_string()));
+        }
+        self.handle_workflow_state(request).await
+    }
+
+    async fn handle_workflow_goal_start(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<WorkflowGoalStartParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        match workflows.init_goal(&params.objective) {
+            Ok(state) => response_value(request.id, workflow_goal_state(state)),
+            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+        }
+    }
+
+    async fn handle_workflow_goal_pause(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = workflows.pause_goal() {
+            return response_error(request.id, workflow_error(error.to_string()));
+        }
+        match workflows.load_goal_state() {
+            Ok(Some(state)) => response_value(request.id, workflow_goal_state(state)),
+            Ok(None) => response_error(request.id, JsonRpcError::server_error("no active goal")),
+            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+        }
+    }
+
+    async fn handle_workflow_goal_fail(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        match workflows.fail_goal() {
+            Ok(state) => response_value(request.id, workflow_goal_state(state)),
+            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+        }
+    }
+
+    async fn handle_workflow_goal_criteria(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        match workflows.verification_criteria() {
+            Ok(criteria) => response_value(
+                request.id,
+                mini_agent_app_server_protocol::WorkflowGoalCriteriaResult { criteria },
+            ),
+            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+        }
+    }
+
+    async fn handle_workflow_goal_advance(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<WorkflowGoalAdvanceParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        let verdict = params.verdict.map(host_verifier_verdict);
+        match workflows.advance_goal(verdict) {
+            Ok(state) => response_value(request.id, workflow_goal_state(state)),
+            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+        }
+    }
+
+    fn workflow_service(&self) -> Result<&WorkflowService, JsonRpcError> {
+        self.workflows
+            .as_ref()
+            .ok_or_else(|| JsonRpcError::server_error("workflow service is unavailable"))
+    }
+
     fn check_thread(&self, thread_id: &mini_agent_core::ThreadId) -> Result<(), JsonRpcError> {
         if self.server.has_thread(thread_id) {
             Ok(())
@@ -596,6 +755,26 @@ where
 /// service lifetime.
 pub async fn serve_stdio_with_startup<M, R, W, F>(
     approval: ApprovalBroker,
+    reader: R,
+    writer: W,
+    startup: F,
+) -> Result<(), std::io::Error>
+where
+    M: Model + Send + 'static,
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+    F: FnOnce(InitializeParams) -> Result<(AppServer<M>, CapabilityManifest), String>,
+{
+    serve_stdio_with_startup_and_workflows(approval, reader, writer, move |params| {
+        startup(params).map(|(server, manifest)| (server, manifest, None))
+    })
+    .await
+}
+
+/// Serves stdio after startup while attaching a runtime-bound workflow
+/// service to the JSON-RPC connection.
+pub async fn serve_stdio_with_startup_and_workflows<M, R, W, F>(
+    approval: ApprovalBroker,
     mut reader: R,
     mut writer: W,
     startup: F,
@@ -604,7 +783,9 @@ where
     M: Model + Send + 'static,
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
-    F: FnOnce(InitializeParams) -> Result<(AppServer<M>, CapabilityManifest), String>,
+    F: FnOnce(
+        InitializeParams,
+    ) -> Result<(AppServer<M>, CapabilityManifest, Option<WorkflowService>), String>,
 {
     let mut line = String::new();
     let read = reader.read_line(&mut line).await?;
@@ -654,7 +835,7 @@ where
         .await?;
         return Ok(());
     }
-    let (server, capability_manifest) = match startup(params) {
+    let (server, capability_manifest, workflows) = match startup(params) {
         Ok(started) => started,
         Err(error) => {
             write_json_line(
@@ -670,6 +851,9 @@ where
         approval.clone(),
         capability_manifest,
     );
+    if let Some(workflows) = workflows {
+        connection = connection.with_workflow_service(workflows);
+    }
     if let Some(response) = connection.handle_request(request).await {
         write_json_line(&mut writer, &response).await?;
     }
@@ -799,6 +983,49 @@ fn response_error(id: Option<Value>, error: JsonRpcError) -> Option<JsonRpcRespo
     Some(JsonRpcResponse::error(id, error))
 }
 
+fn workflow_error(message: String) -> JsonRpcError {
+    JsonRpcError::server_error(format!("workflow operation failed: {message}"))
+}
+
+fn workflow_goal_state(state: mini_agent_host::goal::GoalState) -> WorkflowGoalState {
+    WorkflowGoalState {
+        schema_version: state.schema_version,
+        goal_id: state.goal_id,
+        status: match state.status {
+            mini_agent_host::goal::GoalStatus::Running => WorkflowGoalStatus::Running,
+            mini_agent_host::goal::GoalStatus::Converged => WorkflowGoalStatus::Converged,
+            mini_agent_host::goal::GoalStatus::Failed => WorkflowGoalStatus::Failed,
+            mini_agent_host::goal::GoalStatus::UserPaused => WorkflowGoalStatus::UserPaused,
+        },
+        current_milestone: state.current_milestone,
+        total_milestones: state.total_milestones,
+        loop_count: state.loop_count,
+        max_loops: state.max_loops,
+        milestone_step_budget: state.milestone_step_budget,
+        milestone_timeout_secs: state.milestone_timeout_secs,
+        verifier_model: state.verifier_model,
+        last_verifier_score: state.last_verifier_score,
+        updated_at_ms: state.updated_at_ms,
+    }
+}
+
+fn host_verifier_verdict(
+    verdict: WorkflowVerifierVerdict,
+) -> mini_agent_host::goal::VerifierVerdict {
+    mini_agent_host::goal::VerifierVerdict {
+        outcome: match verdict.outcome {
+            WorkflowVerdictOutcome::Approved => mini_agent_host::goal::VerdictOutcome::Approved,
+            WorkflowVerdictOutcome::Rejected => mini_agent_host::goal::VerdictOutcome::Rejected,
+            WorkflowVerdictOutcome::NeedsClarification => {
+                mini_agent_host::goal::VerdictOutcome::NeedsClarification
+            }
+            WorkflowVerdictOutcome::Invalid => mini_agent_host::goal::VerdictOutcome::Invalid,
+        },
+        score: verdict.score,
+        summary: verdict.summary,
+    }
+}
+
 fn map_server_error(error: AppServerError) -> JsonRpcError {
     JsonRpcError::server_error(error.to_string())
 }
@@ -848,6 +1075,29 @@ mod tests {
             Thread::new(ThreadId::new("initial"), harness),
         );
         AppServerConnection::new(server)
+    }
+
+    fn workflow_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "mini-agent-workflow-rpc-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let harness = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+        let server = AppServer::new(
+            ThreadStart::new(ThreadId::new("thread-1")),
+            Thread::new(ThreadId::new("initial"), harness),
+        );
+        let workflows =
+            WorkflowService::new(root.clone(), mini_agent_host::goal::GoalLimits::default());
+        (
+            AppServerConnection::new(server).with_workflow_service(workflows),
+            root,
+        )
     }
 
     #[tokio::test]
@@ -904,6 +1154,71 @@ mod tests {
             .unwrap();
         assert!(response.error.is_none());
         assert_eq!(response.result.unwrap()["status"], "started");
+    }
+
+    #[tokio::test]
+    async fn exposes_workflow_management_without_host_paths() {
+        let (mut connection, root) = workflow_connection();
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                1,
+                METHOD_INITIALIZE,
+                serde_json::json!(InitializeParams {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "workflow-test".to_string(),
+                    client_version: "0".to_string(),
+                    capabilities: ClientCapabilities::default(),
+                    profile: None,
+                    providers: None,
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.result.unwrap()["capabilities"]["workflows"], true);
+
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                2,
+                METHOD_WORKFLOW_PLAN_SET,
+                serde_json::json!({"active": true, "prompt": "rpc plan"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.result.unwrap()["planActive"], true);
+
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                3,
+                METHOD_WORKFLOW_GOAL_START,
+                serde_json::json!({"objective": "rpc goal"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.result.unwrap()["status"], "running");
+
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                4,
+                METHOD_WORKFLOW_STATE,
+                serde_json::json!({}),
+            ))
+            .await
+            .unwrap();
+        let state = response.result.unwrap();
+        assert_eq!(state["planActive"], true);
+        assert_eq!(state["goal"]["status"], "running");
+        assert!(state["goal"].get("planFile").is_none());
+
+        let response = connection
+            .handle_request(JsonRpcRequest::request(
+                5,
+                METHOD_WORKFLOW_GOAL_PAUSE,
+                serde_json::json!({}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.result.unwrap()["status"], "user_paused");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

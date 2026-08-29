@@ -136,6 +136,7 @@ pub use json_rpc::serve_stdio;
 pub use json_rpc::serve_stdio_with_approval;
 pub use json_rpc::serve_stdio_with_approval_and_manifest;
 pub use json_rpc::serve_stdio_with_startup;
+pub use json_rpc::serve_stdio_with_startup_and_workflows;
 pub use runtime::capability_manifest_to_protocol;
 pub use runtime::{
     AppServerRuntime, McpRetryResult, RuntimeSessionInfo, RuntimeTurnBatch, RuntimeTurnResult,

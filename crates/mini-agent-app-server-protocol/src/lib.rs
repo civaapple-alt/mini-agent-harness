@@ -34,6 +34,13 @@ pub const METHOD_TURN_INTERRUPT: &str = "turn/interrupt";
 pub const METHOD_TURN_EVENT: &str = "turn/event";
 pub const METHOD_APPROVAL_REQUEST: &str = "approval/request";
 pub const METHOD_APPROVAL_RESPOND: &str = "approval/respond";
+pub const METHOD_WORKFLOW_STATE: &str = "workflow/state";
+pub const METHOD_WORKFLOW_PLAN_SET: &str = "workflow/plan/set";
+pub const METHOD_WORKFLOW_GOAL_START: &str = "workflow/goal/start";
+pub const METHOD_WORKFLOW_GOAL_PAUSE: &str = "workflow/goal/pause";
+pub const METHOD_WORKFLOW_GOAL_FAIL: &str = "workflow/goal/fail";
+pub const METHOD_WORKFLOW_GOAL_CRITERIA: &str = "workflow/goal/criteria";
+pub const METHOD_WORKFLOW_GOAL_ADVANCE: &str = "workflow/goal/advance";
 
 /// A JSON-RPC request or notification received by the app-server.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -209,6 +216,8 @@ pub struct ServerCapabilities {
     pub thread_list: bool,
     #[serde(default)]
     pub approval_requests: bool,
+    #[serde(default)]
+    pub workflows: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -220,6 +229,89 @@ pub struct InitializeResult {
     pub capabilities: ServerCapabilities,
     pub profile: String,
     pub capability_manifest: CapabilityManifest,
+}
+
+/// Secret-free workflow state projected by the App Server.
+///
+/// Filesystem paths and Host implementation types stay private to the
+/// workflow service. Clients only receive whether Plan mode is active and the
+/// bounded Goal state needed to render progress or resume control.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowState {
+    pub plan_active: bool,
+    pub goal: Option<WorkflowGoalState>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowPlanSetParams {
+    pub active: bool,
+    #[serde(default)]
+    pub prompt: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowGoalStartParams {
+    pub objective: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowGoalAdvanceParams {
+    #[serde(default)]
+    pub verdict: Option<WorkflowVerifierVerdict>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowGoalCriteriaResult {
+    pub criteria: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowVerifierVerdict {
+    pub outcome: WorkflowVerdictOutcome,
+    #[serde(default)]
+    pub score: Option<u32>,
+    pub summary: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowVerdictOutcome {
+    Approved,
+    Rejected,
+    NeedsClarification,
+    Invalid,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowGoalState {
+    pub schema_version: u32,
+    pub goal_id: String,
+    pub status: WorkflowGoalStatus,
+    pub current_milestone: usize,
+    pub total_milestones: usize,
+    pub loop_count: usize,
+    pub max_loops: usize,
+    pub milestone_step_budget: usize,
+    pub milestone_timeout_secs: u64,
+    pub verifier_model: Option<String>,
+    pub last_verifier_score: Option<u32>,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowGoalStatus {
+    Running,
+    Converged,
+    Failed,
+    UserPaused,
 }
 
 /// Bounded, secret-free capability metadata advertised at service startup.

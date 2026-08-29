@@ -61,6 +61,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - App Server workflow management now binds Goal/Plan persistence, verifier
   state, milestone transitions, and prompt construction to the runtime session;
   the REPL no longer calls the Host Goal module directly.
+- Workflow management is now available through typed App Server JSON-RPC
+  methods and ACP `session/workflow/*` mappings without exposing Host paths.
 
 ### Fixed
 
