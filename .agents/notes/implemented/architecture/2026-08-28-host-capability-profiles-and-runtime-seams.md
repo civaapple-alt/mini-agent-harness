@@ -158,8 +158,21 @@ assembly stay behind App Server. The next CLI reduction should expose those
 management operations as App Server service methods before removing the
 remaining direct Host/Capabilities imports.
 
-The post-cleanup line report is runtime `14,515/20,000` lines, capabilities
-`14,077` lines, CLI `7,716` lines, and all Rust source `37,230/30,000` lines.
+## App Server management API stage (2026-08-29)
+
+`AppServerRuntime` now owns the local management operations that mutate or
+inspect runtime state: `session_info`, `refresh_world`, `update_world`, and
+`retry_mcp`. The REPL delegates `/world refresh`, `/mcp`, `/session`, and
+execution-mode world updates through these methods. This keeps Thread context
+updates, persistence checkpoints, MCP tool installation, and runtime metadata
+serialized behind the service runtime rather than reimplemented in the CLI.
+
+Goal/Plan state transitions and JSON-RPC wire methods remain the next part of
+this stage. They still require a workflow service API so ACP and remote JSON-RPC
+clients can use the same operations without exposing Host filesystem types.
+
+The post-cleanup line report is runtime `14,625/20,000` lines, capabilities
+`14,077` lines, CLI `7,657` lines, and all Rust source `37,281/30,000` lines.
 The runtime gate
 still passes; the workspace gate remains the active reduction task.
 

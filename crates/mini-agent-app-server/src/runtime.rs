@@ -18,6 +18,7 @@ use mini_agent_app_server_protocol::SourceFingerprint as ProtocolSourceFingerpri
 use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_capabilities::CapabilityRegistry;
 use mini_agent_capabilities::ImageStore;
+use mini_agent_capabilities::McpServerConfig;
 use mini_agent_capabilities::OpenAiModel;
 use mini_agent_capabilities::OpenedSession;
 use mini_agent_capabilities::SessionRequest;
@@ -39,6 +40,8 @@ use mini_agent_host::CapabilityManifest;
 use mini_agent_host::HostRuntimeFactory;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
+use mini_agent_host::WorldState;
+use mini_agent_host::tool_outcome::classify_tools;
 
 /// The settled result projected by the local App Server runtime.
 pub type RuntimeTurnResult = TurnReadResult;
@@ -49,6 +52,24 @@ pub type RuntimeTurnResult = TurnReadResult;
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeTurnBatch {
     pub turns: Vec<RuntimeTurnResult>,
+}
+
+/// Stable session metadata exposed to local and remote management clients.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeSessionInfo {
+    pub session_id: String,
+    pub thread_id: String,
+    pub path: String,
+    pub resumed: bool,
+}
+
+/// Result of retrying MCP servers that were deferred during startup.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpRetryResult {
+    pub enabled_servers: Vec<String>,
+    pub inactive_servers: Vec<String>,
+    pub diagnostics: Vec<String>,
+    pub tool_count: usize,
 }
 
 /// A provider-backed App Server plus the host state needed by local clients.
@@ -66,6 +87,7 @@ pub struct AppServerRuntime {
     mcp_tool_count: usize,
     retry_mcp_servers: Vec<mini_agent_capabilities::McpServerConfig>,
     capability_manifest: CapabilityManifest,
+    approval: ApprovalController,
 }
 
 impl AppServerRuntime {
@@ -231,6 +253,7 @@ impl AppServerRuntime {
             mcp_tool_count,
             retry_mcp_servers,
             capability_manifest,
+            approval,
         })
     }
 
@@ -295,6 +318,91 @@ impl AppServerRuntime {
 
     pub fn retry_mcp_servers(&self) -> &[mini_agent_capabilities::McpServerConfig] {
         &self.retry_mcp_servers
+    }
+
+    /// Returns bounded metadata without exposing the persistence store.
+    pub fn session_info(&self) -> Option<RuntimeSessionInfo> {
+        self.session.as_ref().map(|opened| RuntimeSessionInfo {
+            session_id: opened.store.session_id().to_string(),
+            thread_id: opened.store.thread_id().to_string(),
+            path: opened.store.path().display().to_string(),
+            resumed: opened.resumed,
+        })
+    }
+
+    /// Re-detects the world and appends changed state to the same Thread
+    /// context. Persistence remains owned by the App Server runtime.
+    pub async fn refresh_world(&mut self) -> Result<bool, String> {
+        let refreshed = WorldState::detect(
+            self.world.workspace(),
+            self.world.approval(),
+            self.world.copilot(),
+            self.world.sandbox(),
+        );
+        self.update_world(refreshed).await
+    }
+
+    /// Applies a resolved world snapshot to the service-owned Thread.
+    pub async fn update_world(&mut self, updated: WorldState) -> Result<bool, String> {
+        if updated == self.world {
+            return Ok(false);
+        }
+        let context = updated.model_context()?;
+        self.update_thread(ThreadUpdate::AppendContext(context))
+            .await?;
+        self.world = updated;
+        let checkpoint = self.read_checkpoint().await?;
+        self.record_context(&checkpoint)?;
+        Ok(true)
+    }
+
+    /// Retries MCP servers deferred at startup and atomically adds any tools
+    /// that loaded successfully to the service-owned Thread.
+    pub async fn retry_mcp(&mut self) -> Result<McpRetryResult, String> {
+        if self.retry_mcp_servers.is_empty() {
+            return Ok(McpRetryResult {
+                enabled_servers: Vec::new(),
+                inactive_servers: Vec::new(),
+                diagnostics: Vec::new(),
+                tool_count: 0,
+            });
+        }
+        let mini_agent_capabilities::McpLoadResult {
+            tools,
+            loaded_servers,
+            diagnostics,
+        } = mini_agent_capabilities::mcp::load(&self.retry_mcp_servers, self.approval.clone());
+        let inactive_servers = self
+            .retry_mcp_servers
+            .iter()
+            .filter(|server| {
+                !loaded_servers.contains(&format!("{}/{}", server.plugin_name, server.server_name))
+            })
+            .map(|server: &McpServerConfig| {
+                format!("{}/{}", server.plugin_name, server.server_name)
+            })
+            .collect::<Vec<_>>();
+        let enabled_servers = loaded_servers.iter().cloned().collect::<Vec<_>>();
+        let tool_count = tools.len();
+        self.update_thread(ThreadUpdate::ExtendTools(classify_tools(tools)))
+            .await?;
+        self.retry_mcp_servers = self
+            .retry_mcp_servers
+            .iter()
+            .filter(|server| {
+                !loaded_servers.contains(&format!("{}/{}", server.plugin_name, server.server_name))
+            })
+            .cloned()
+            .collect();
+        self.enabled_mcp_servers
+            .extend(enabled_servers.iter().cloned());
+        self.mcp_tool_count += tool_count;
+        Ok(McpRetryResult {
+            enabled_servers,
+            inactive_servers,
+            diagnostics,
+            tool_count,
+        })
     }
 
     pub async fn update_thread(&self, update: ThreadUpdate) -> Result<(), String> {

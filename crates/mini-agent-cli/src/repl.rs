@@ -2,7 +2,6 @@ use mini_agent_app_server::AppServerRuntime;
 use mini_agent_app_server::ThreadUpdate;
 use mini_agent_app_server::local::LocalRuntimeRequest;
 use mini_agent_app_server::mentor;
-use mini_agent_capabilities::mcp;
 use mini_agent_capabilities::sandbox::SandboxKind;
 use mini_agent_capabilities::security::{SecurityPolicy, SecurityPreset};
 use mini_agent_capabilities::session;
@@ -22,7 +21,6 @@ use mini_agent_host::WorkflowScope;
 use mini_agent_host::harness_config_auto;
 use mini_agent_host::observer::RunObserver;
 use mini_agent_host::print_auto_warning;
-use mini_agent_host::tool_outcome::classify_tools;
 use mini_agent_host::world::WorldState;
 use std::collections::VecDeque;
 use std::io;
@@ -508,7 +506,6 @@ fn spawn_worker(
         let stable_system_prompt = runtime.stable_system_prompt().to_string();
         let enabled_mcp_servers = runtime.enabled_mcp_servers().to_vec();
         let mcp_tool_count = runtime.mcp_tool_count();
-        let mut retry_mcp_servers = runtime.retry_mcp_servers().to_vec();
         if let Some(opened) = runtime.session() {
             if opened.resumed {
                 let _ = model_runtime.block_on(runtime.update_thread(ThreadUpdate::AppendContext(
@@ -545,8 +542,9 @@ fn spawn_worker(
                 bounded_names(&enabled_mcp_servers)
             )));
         }
-        if !retry_mcp_servers.is_empty() {
-            let inactive = retry_mcp_servers
+        if !runtime.retry_mcp_servers().is_empty() {
+            let inactive = runtime
+                .retry_mcp_servers()
                 .iter()
                 .map(|server| format!("{}/{}", server.plugin_name, server.server_name))
                 .collect::<Vec<_>>();
@@ -907,109 +905,67 @@ fn spawn_worker(
                         }
                     }
                     WorkerCommand::RefreshWorld => {
-                        let refreshed = WorldState::detect(
-                            world.workspace(),
-                            world.approval(),
-                            world.copilot(),
-                            world.sandbox(),
-                        );
-                        if refreshed != world {
-                            match refreshed.model_context() {
-                                Ok(context) => match model_runtime.block_on(
-                                    runtime.update_thread(ThreadUpdate::AppendContext(context)),
-                                ) {
-                                    Ok(()) => {
-                                        world = refreshed;
-                                        persist_latest_context(
-                                            &mut runtime,
-                                            &model_runtime,
-                                            &events,
-                                        );
-                                        let _ = events.send(ReplEvent::Notice(
-                                            "world> refreshed and appended to context".to_string(),
-                                        ));
-                                    }
-                                    Err(error) => {
-                                        let _ = events.send(ReplEvent::Warning(format!(
-                                            "error: cannot append world state: {error}"
-                                        )));
-                                    }
-                                },
-                                Err(error) => {
-                                    let _ = events.send(ReplEvent::Warning(format!(
-                                        "error: cannot refresh world state: {error}"
-                                    )));
-                                }
+                        match model_runtime.block_on(runtime.refresh_world()) {
+                            Ok(true) => {
+                                world = runtime.world().clone();
+                                let _ = events.send(ReplEvent::Notice(
+                                    "world> refreshed and appended to context".to_string(),
+                                ));
                             }
-                        } else {
-                            let _ = events.send(ReplEvent::Notice(
-                                "world> unchanged; no context item appended".to_string(),
-                            ));
+                            Ok(false) => {
+                                let _ = events.send(ReplEvent::Notice(
+                                    "world> unchanged; no context item appended".to_string(),
+                                ));
+                            }
+                            Err(error) => {
+                                let _ = events.send(ReplEvent::Warning(format!(
+                                    "error: cannot refresh world state: {error}"
+                                )));
+                            }
                         }
                     }
                     WorkerCommand::EnableMcp => {
-                        if retry_mcp_servers.is_empty() {
+                        if runtime.retry_mcp_servers().is_empty() {
                             let _ = events.send(ReplEvent::Notice(
                                 "no MCP servers are waiting to be enabled".to_string(),
                             ));
                         } else {
-                            let mcp::LoadResult {
-                                tools,
-                                loaded_servers,
-                                diagnostics,
-                            } = mcp::load(&retry_mcp_servers, approval.clone());
-                            for diagnostic in diagnostics {
+                            let result = match model_runtime.block_on(runtime.retry_mcp()) {
+                                Ok(result) => result,
+                                Err(error) => {
+                                    let _ = events.send(ReplEvent::Warning(format!(
+                                        "mcp> cannot enable tools: {error}"
+                                    )));
+                                    continue;
+                                }
+                            };
+                            for diagnostic in result.diagnostics {
                                 let _ = events
                                     .send(ReplEvent::Warning(format!("warning: {diagnostic}")));
                             }
-                            retry_mcp_servers.retain(|server| {
-                                !loaded_servers.contains(&format!(
-                                    "{}/{}",
-                                    server.plugin_name, server.server_name
-                                ))
-                            });
-                            let enabled = loaded_servers.iter().cloned().collect::<Vec<_>>();
-                            let tool_count = tools.len();
-                            if let Err(error) =
-                                model_runtime.block_on(runtime.update_thread(
-                                    ThreadUpdate::ExtendTools(classify_tools(tools)),
-                                ))
-                            {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "mcp> cannot enable tools: {error}"
-                                )));
-                                continue;
-                            }
-                            let message = if enabled.is_empty() {
+                            let message = if result.enabled_servers.is_empty() {
                                 "mcp> inactive — no servers enabled; use /mcp to retry".to_string()
                             } else {
                                 format!(
                                     "mcp> enabled — {} ({tool_count} tool(s))",
-                                    bounded_names(&enabled)
+                                    bounded_names(&result.enabled_servers),
+                                    tool_count = result.tool_count,
                                 )
                             };
                             let _ = events.send(ReplEvent::Notice(message));
-                            if !retry_mcp_servers.is_empty() {
-                                let inactive = retry_mcp_servers
-                                    .iter()
-                                    .map(|server| {
-                                        format!("{}/{}", server.plugin_name, server.server_name)
-                                    })
-                                    .collect::<Vec<_>>();
+                            if !result.inactive_servers.is_empty() {
                                 let _ = events.send(ReplEvent::Notice(format!(
                                     "mcp> inactive — {}; use /mcp to retry",
-                                    bounded_names(&inactive)
+                                    bounded_names(&result.inactive_servers)
                                 )));
                             }
                         }
                     }
-                    WorkerCommand::ShowSession => match runtime.session() {
-                        Some(opened) => {
+                    WorkerCommand::ShowSession => match runtime.session_info() {
+                        Some(session) => {
                             let _ = events.send(ReplEvent::Notice(format!(
                                 "session> durable {} | thread {} | {}",
-                                opened.store.session_id(),
-                                opened.store.thread_id(),
-                                opened.store.path().display()
+                                session.session_id, session.thread_id, session.path
                             )));
                         }
                         None => {
@@ -1044,27 +1000,12 @@ fn spawn_worker(
                         }
                         let updated_world = world.with_execution(mode, copilot, sandbox_kind);
                         if updated_world != world {
-                            match updated_world.model_context() {
-                                Ok(context) => match model_runtime.block_on(
-                                    runtime.update_thread(ThreadUpdate::AppendContext(context)),
-                                ) {
-                                    Ok(()) => {
-                                        world = updated_world;
-                                        persist_latest_context(
-                                            &mut runtime,
-                                            &model_runtime,
-                                            &events,
-                                        );
-                                    }
-                                    Err(error) => {
-                                        let _ = events.send(ReplEvent::Warning(format!(
-                                            "error: cannot append execution mode state: {error}"
-                                        )));
-                                    }
-                                },
+                            match model_runtime.block_on(runtime.update_world(updated_world)) {
+                                Ok(true) => world = runtime.world().clone(),
+                                Ok(false) => {}
                                 Err(error) => {
                                     let _ = events.send(ReplEvent::Warning(format!(
-                                        "error: cannot render execution mode state: {error}"
+                                        "error: cannot append execution mode state: {error}"
                                     )));
                                 }
                             }
