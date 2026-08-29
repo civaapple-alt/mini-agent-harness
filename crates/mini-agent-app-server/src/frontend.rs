@@ -11,11 +11,11 @@ pub use mini_agent_app_server_protocol::WorkflowGoalStatus;
 pub use mini_agent_app_server_protocol::WorkflowState;
 pub use mini_agent_app_server_protocol::WorkflowVerdictOutcome;
 pub use mini_agent_app_server_protocol::WorkflowVerifierVerdict;
-pub use mini_agent_capabilities::sandbox::SandboxKind;
-pub use mini_agent_capabilities::security::SecurityPolicy;
-pub use mini_agent_capabilities::security::SecurityPreset;
-use mini_agent_capabilities::workspace::ApprovalController as CapabilityApprovalController;
-pub use mini_agent_capabilities::workspace::ApprovalMode;
+pub use mini_agent_capabilities::ApprovalController as CapabilityApprovalController;
+pub use mini_agent_capabilities::ApprovalMode;
+pub use mini_agent_capabilities::SandboxKind;
+pub use mini_agent_capabilities::SecurityPolicy;
+pub use mini_agent_capabilities::SecurityPreset;
 pub use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
 pub use mini_agent_core::InputQueueError;
 pub use mini_agent_core::RunControl;
@@ -252,6 +252,6 @@ pub mod observer {
 }
 
 pub mod skills {
-    pub use mini_agent_capabilities::skills::Discovery;
-    pub use mini_agent_capabilities::skills::discover;
+    pub use mini_agent_capabilities::Discovery;
+    pub use mini_agent_capabilities::discover;
 }

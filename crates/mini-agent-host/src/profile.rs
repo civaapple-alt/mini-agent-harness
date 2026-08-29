@@ -3,8 +3,8 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use mini_agent_capabilities::sandbox::SandboxKind;
-use mini_agent_capabilities::security::SecurityPreset;
+use mini_agent_capabilities::SandboxKind;
+use mini_agent_capabilities::SecurityPreset;
 
 #[path = "profile_file.rs"]
 mod profile_file;
@@ -299,23 +299,17 @@ impl RuntimeProfile {
         let mut sections = Vec::new();
         if self.agent != AgentKind::General {
             let agent = match self.agent {
-                AgentKind::Explore => mini_agent_capabilities::persona::AgentPromptKind::Explore,
-                AgentKind::Plan => mini_agent_capabilities::persona::AgentPromptKind::Plan,
+                AgentKind::Explore => mini_agent_capabilities::AgentPromptKind::Explore,
+                AgentKind::Plan => mini_agent_capabilities::AgentPromptKind::Plan,
                 AgentKind::General => unreachable!(),
             };
             sections.push(agent.prompt_template().to_string());
         }
         if self.persona != PersonaKind::None {
             let persona = match self.persona {
-                PersonaKind::Reviewer => {
-                    mini_agent_capabilities::persona::PersonaPromptKind::Reviewer
-                }
-                PersonaKind::Implementer => {
-                    mini_agent_capabilities::persona::PersonaPromptKind::Implementer
-                }
-                PersonaKind::Researcher => {
-                    mini_agent_capabilities::persona::PersonaPromptKind::Researcher
-                }
+                PersonaKind::Reviewer => mini_agent_capabilities::PersonaPromptKind::Reviewer,
+                PersonaKind::Implementer => mini_agent_capabilities::PersonaPromptKind::Implementer,
+                PersonaKind::Researcher => mini_agent_capabilities::PersonaPromptKind::Researcher,
                 PersonaKind::None => unreachable!(),
             };
             sections.push(persona.prompt_template(None, None));

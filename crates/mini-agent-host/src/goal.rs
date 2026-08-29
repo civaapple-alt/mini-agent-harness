@@ -76,6 +76,70 @@ pub struct VerifierVerdict {
     pub summary: String,
 }
 
+/// Host-owned workflow persistence used by the App Server workflow facade.
+///
+/// This type binds the low-level Goal and Plan files to one session directory.
+/// Frontends should use `mini-agent-app-server::WorkflowService`, which keeps
+/// this storage seam behind the App Server command boundary.
+#[derive(Clone, Debug)]
+pub struct HostWorkflowStore {
+    session_dir: PathBuf,
+    goal_limits: GoalLimits,
+}
+
+impl HostWorkflowStore {
+    pub fn new(session_dir: impl Into<PathBuf>, goal_limits: GoalLimits) -> Self {
+        Self {
+            session_dir: session_dir.into(),
+            goal_limits,
+        }
+    }
+
+    pub fn goal_limits(&self) -> GoalLimits {
+        self.goal_limits
+    }
+
+    pub fn init_plan_mode(&self, prompt: Option<&str>) -> io::Result<PathBuf> {
+        init_plan_mode_with_prompt(&self.session_dir, prompt)
+    }
+
+    pub fn disable_plan_mode(&self) -> io::Result<()> {
+        disable_plan_mode(&self.session_dir)
+    }
+
+    pub fn plan_active(&self) -> bool {
+        is_plan_mode_active(&self.session_dir)
+    }
+
+    pub fn init_goal(&self, objective: &str) -> io::Result<GoalState> {
+        init_goal_workspace_with_limits(&self.session_dir, objective, self.goal_limits)
+    }
+
+    pub fn load_goal_state(&self) -> io::Result<Option<GoalState>> {
+        load_goal_state(&self.session_dir)
+    }
+
+    pub fn verification_criteria(&self) -> io::Result<String> {
+        goal_verification_criteria(&self.session_dir)
+    }
+
+    pub fn record_verifier_verdict(&self, checkpoint_seq: u64, output: &str) -> io::Result<()> {
+        record_verifier_verdict(&self.session_dir, checkpoint_seq, output)
+    }
+
+    pub fn advance_goal(&self, verdict: Option<VerifierVerdict>) -> io::Result<GoalState> {
+        advance_goal_milestone(&self.session_dir, verdict)
+    }
+
+    pub fn pause_goal(&self) -> io::Result<()> {
+        pause_goal(&self.session_dir)
+    }
+
+    pub fn fail_goal(&self) -> io::Result<GoalState> {
+        fail_goal(&self.session_dir)
+    }
+}
+
 fn current_time_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -110,11 +174,12 @@ pub fn living_plan_path(session_dir: &Path) -> PathBuf {
     session_dir.join("plan.md")
 }
 
-pub use mini_agent_capabilities::path_policy::goal_relative_rest;
-pub use mini_agent_capabilities::path_policy::is_plan_md_alias;
-pub use mini_agent_capabilities::path_policy::is_under_dir;
-pub use mini_agent_capabilities::path_policy::normalize_path;
-pub use mini_agent_capabilities::path_policy::same_path;
+#[cfg(test)]
+use mini_agent_capabilities::goal_relative_rest;
+#[cfg(test)]
+use mini_agent_capabilities::is_plan_md_alias;
+use mini_agent_capabilities::normalize_path;
+use mini_agent_capabilities::same_path;
 
 fn unquote(text: &str) -> &str {
     let bytes = text.as_bytes();
@@ -141,7 +206,7 @@ Research only to inform the plan. Cite sources; do not copy full page content.
 Reply with a short summary, risks, and open questions.";
 
 pub fn with_plan_mode_overlay(base: &str) -> String {
-    let architect = mini_agent_capabilities::persona::AgentPromptKind::Plan.prompt_template();
+    let architect = mini_agent_capabilities::AgentPromptKind::Plan.prompt_template();
     if base.contains("=== LIVING PLAN MODE ===") {
         base.to_string()
     } else {
@@ -234,6 +299,7 @@ pub fn is_living_plan_whitelisted(target: &Path, session_dir: &Path) -> bool {
     same_path(target, &living_plan_path(session_dir))
 }
 
+#[allow(dead_code)]
 pub fn init_goal_workspace(
     session_dir: &Path,
     objective: &str,

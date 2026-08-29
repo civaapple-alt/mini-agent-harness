@@ -5,12 +5,12 @@
 //! provider, tool, extension, policy, and session-bound artifacts.
 
 use crate::HostRuntime;
-use crate::RuntimeBuilder;
 use crate::RuntimeConfig;
 use crate::RuntimeProfile;
+use crate::harness_builder::prepare_openai_harness_with_profile_and_result_store_and_registry;
+use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::CapabilityRegistry;
-use mini_agent_capabilities::result_store::ResultStore;
-use mini_agent_capabilities::workspace::ApprovalController;
+use mini_agent_capabilities::ResultStore;
 use mini_agent_core::HarnessConfig;
 
 /// Builds a concrete host runtime for an App Server service boundary.
@@ -53,13 +53,13 @@ impl<'a> HostRuntimeFactory<'a> {
     ) -> Result<HostRuntime, String> {
         self.approval
             .set_read_only_agent(profile.agent.is_read_only());
-        RuntimeBuilder::new(
+        prepare_openai_harness_with_profile_and_result_store_and_registry(
             self.runtime_config,
             self.approval.clone(),
             self.config.clone(),
+            profile,
+            results,
+            self.registry.clone(),
         )
-        .with_profile(profile)
-        .with_registry(self.registry.clone())
-        .build_with_result_store(results)
     }
 }

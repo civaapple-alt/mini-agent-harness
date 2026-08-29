@@ -7,10 +7,10 @@
 use crate::AppServerRuntime;
 use crate::SessionRequest;
 use crate::frontend::ApprovalController;
+use mini_agent_capabilities::ApprovalMode;
 use mini_agent_capabilities::SandboxKind;
 use mini_agent_capabilities::SecurityPreset;
-use mini_agent_capabilities::session;
-use mini_agent_capabilities::workspace::ApprovalMode;
+use mini_agent_capabilities::list_sessions as list_capability_sessions;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::RunControl;
 use mini_agent_host::RuntimeConfig;
@@ -30,7 +30,7 @@ pub struct SessionSummary {
 /// Lists durable sessions without exposing the capability session type to a
 /// frontend.
 pub fn list_sessions(workspace: &std::path::Path) -> Result<Vec<SessionSummary>, String> {
-    session::list(workspace).map(|sessions| {
+    list_capability_sessions(workspace).map(|sessions| {
         sessions
             .into_iter()
             .map(|session| SessionSummary {

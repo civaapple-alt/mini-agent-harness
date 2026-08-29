@@ -16,11 +16,11 @@ use crate::profile::{
 use crate::project_context;
 use crate::tool_outcome::classify_tools;
 use crate::world::WorldState;
+use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ImageStore;
 use mini_agent_capabilities::McpLoadResult;
 use mini_agent_capabilities::McpServerConfig;
-use mini_agent_capabilities::result_store::ResultStore;
-use mini_agent_capabilities::workspace::ApprovalController;
+use mini_agent_capabilities::ResultStore;
 
 pub const AUTO_MAX_STEPS: usize = 0;
 
@@ -65,132 +65,7 @@ where
     }
 }
 
-/// Composes provider, tools, policy, extensions, and world context outside the
-/// CLI. Frontends should depend on this builder instead of importing concrete
-/// host modules to assemble a Harness themselves.
-pub struct RuntimeBuilder<'a> {
-    runtime_config: &'a RuntimeConfig,
-    approval: ApprovalController,
-    config: HarnessConfig,
-    profile: RuntimeProfile,
-    registry: CapabilityRegistry,
-}
-
-impl<'a> RuntimeBuilder<'a> {
-    pub fn new(
-        runtime_config: &'a RuntimeConfig,
-        approval: ApprovalController,
-        config: HarnessConfig,
-    ) -> Self {
-        Self {
-            runtime_config,
-            approval,
-            config,
-            profile: RuntimeProfile::default(),
-            registry: CapabilityRegistry::builtin(),
-        }
-    }
-
-    pub fn with_profile(mut self, profile: RuntimeProfile) -> Self {
-        self.profile = profile;
-        self
-    }
-
-    /// Uses an embedding application's provider registry for this runtime.
-    pub fn with_registry(mut self, registry: CapabilityRegistry) -> Self {
-        self.registry = registry;
-        self
-    }
-
-    pub fn build(&self) -> Result<HostRuntime, String> {
-        self.approval
-            .set_read_only_agent(self.profile.agent.is_read_only());
-        prepare_openai_harness_with_profile_and_result_store_and_registry(
-            self.runtime_config,
-            self.approval.clone(),
-            self.config.clone(),
-            self.profile.clone(),
-            ResultStore::default(),
-            self.registry.clone(),
-        )
-    }
-
-    pub fn build_with_result_store(&self, results: ResultStore) -> Result<HostRuntime, String> {
-        self.approval
-            .set_read_only_agent(self.profile.agent.is_read_only());
-        prepare_openai_harness_with_profile_and_result_store_and_registry(
-            self.runtime_config,
-            self.approval.clone(),
-            self.config.clone(),
-            self.profile.clone(),
-            results,
-            self.registry.clone(),
-        )
-    }
-}
-
-pub fn prepare_openai_harness(
-    runtime_config: &RuntimeConfig,
-    approval: ApprovalController,
-    config: HarnessConfig,
-) -> Result<HarnessBuild<OpenAiModel>, String> {
-    prepare_openai_harness_with_profile_and_result_store(
-        runtime_config,
-        approval,
-        config,
-        RuntimeProfile::default(),
-        ResultStore::default(),
-    )
-}
-
-pub fn prepare_openai_harness_with_profile(
-    runtime_config: &RuntimeConfig,
-    approval: ApprovalController,
-    config: HarnessConfig,
-    profile: RuntimeProfile,
-) -> Result<HarnessBuild<OpenAiModel>, String> {
-    prepare_openai_harness_with_profile_and_result_store(
-        runtime_config,
-        approval,
-        config,
-        profile,
-        ResultStore::default(),
-    )
-}
-
-pub fn prepare_openai_harness_with_result_store(
-    runtime_config: &RuntimeConfig,
-    approval: ApprovalController,
-    config: HarnessConfig,
-    results: ResultStore,
-) -> Result<HarnessBuild<OpenAiModel>, String> {
-    prepare_openai_harness_with_profile_and_result_store(
-        runtime_config,
-        approval,
-        config,
-        RuntimeProfile::default(),
-        results,
-    )
-}
-
-pub fn prepare_openai_harness_with_profile_and_result_store(
-    runtime_config: &RuntimeConfig,
-    approval: ApprovalController,
-    config: HarnessConfig,
-    profile: RuntimeProfile,
-    results: ResultStore,
-) -> Result<HarnessBuild<OpenAiModel>, String> {
-    prepare_openai_harness_with_profile_and_result_store_and_registry(
-        runtime_config,
-        approval,
-        config,
-        profile,
-        results,
-        CapabilityRegistry::builtin(),
-    )
-}
-
-fn prepare_openai_harness_with_profile_and_result_store_and_registry(
+pub(crate) fn prepare_openai_harness_with_profile_and_result_store_and_registry(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
     config: HarnessConfig,

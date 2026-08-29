@@ -18,13 +18,13 @@ use mini_agent_app_server_protocol::RulePolicy as ProtocolRulePolicy;
 use mini_agent_app_server_protocol::RuleSourceStatus as ProtocolRuleSourceStatus;
 use mini_agent_app_server_protocol::SourceFingerprint as ProtocolSourceFingerprint;
 use mini_agent_app_server_protocol::TurnReadResult;
+use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::CapabilityRegistry;
 use mini_agent_capabilities::ImageStore;
 use mini_agent_capabilities::ModelProviderSettings;
 use mini_agent_capabilities::OpenAiModel;
 use mini_agent_capabilities::SessionStore;
 use mini_agent_capabilities::build_model;
-use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::RunControl;
 use mini_agent_core::Thread;
@@ -426,13 +426,6 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
 
     pub fn retry_mcp_servers(&self) -> Vec<mini_agent_capabilities::McpServerConfig> {
         self.management.retry_mcp_servers()
-    }
-
-    /// Returns workflow operations bound to this runtime's session directory.
-    /// A non-durable runtime uses the workspace as its local Plan directory;
-    /// Goal creation still requires a durable session at the CLI policy edge.
-    pub fn workflows(&self) -> WorkflowService {
-        self.workflow_service.clone()
     }
 
     /// Returns bounded metadata without exposing the persistence store.

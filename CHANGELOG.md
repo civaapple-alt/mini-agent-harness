@@ -5,7 +5,13 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
-No changes yet.
+- Removed the duplicate public `RuntimeBuilder` API; `HostRuntimeFactory` is
+  now the single named Host runtime construction entry point.
+- Tightened workflow ownership: App Server workflow commands are the frontend
+  boundary, while Host exposes only the wrapped `HostWorkflowStore` persistence
+  seam and no longer publishes the workflow implementation module.
+- Kept `mini-agent-capabilities` as one crate while making implementation
+  modules private behind a curated root facade.
 
 ## [0.4.0] - 2026-08-29
 

@@ -42,16 +42,18 @@ limits, failures, and observation events.
   sessions, and Result Store. `mini-agent-host` is the reusable application
   host for profile resolution, context/workflow composition, and runtime
   assembly; `HostRuntimeFactory` composes selected capabilities into a
-  provider-backed `HostRuntime`, while `RuntimeBuilder` remains a compatibility
-  API. Embedders can register an external tool provider with
-  `CapabilityRegistry::with_tool_provider`; see
+  provider-backed `HostRuntime`. Capabilities keeps its implementation modules
+  private and exposes a root facade; embedders can register an external tool
+  provider with `CapabilityRegistry::with_tool_provider`; see
   `crates/mini-agent-capabilities/examples/external_tool_provider.rs`.
 - `mini-agent-app-server` is the service boundary over a core `Thread`. Its
   host-backed `AppServerRuntime`, typed facade, and versioned
   `mini-agent-app-server-protocol` support initialization, thread lifecycle,
   turn commands, steering, interruption, settled results, approval requests,
   ordered event notifications, tool-free Mentor review turns, and local
-  Session/World/MCP/Goal/Plan management through the runtime service. The
+  Session/World/MCP/Goal/Plan management through the runtime service. The App
+  Server owns workflow commands; Host only supplies the wrapped
+  `HostWorkflowStore` persistence seam. The
   JSON-RPC surface also exposes `workflow/state`, `workflow/plan/set`, and
   typed Goal lifecycle methods; ACP maps these to `session/workflow/*`.
   `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess
@@ -83,7 +85,7 @@ CLI client
     ↓
 App Server service boundary
     ↓
-Host / Workflows application host
+Host runtime and persistence seams
     ↓
 Core / Protocol execution foundation
 ```

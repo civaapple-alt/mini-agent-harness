@@ -8,13 +8,13 @@
 
 use mini_agent_app_server::AppServerRuntime;
 use mini_agent_app_server::SessionRequest;
+use mini_agent_capabilities::ApprovalController;
+use mini_agent_capabilities::ApprovalMode;
 use mini_agent_capabilities::CapabilityDescriptor;
 use mini_agent_capabilities::CapabilityKind;
 use mini_agent_capabilities::CapabilityRegistry;
 use mini_agent_capabilities::ImageStore;
 use mini_agent_capabilities::ModelProviderSettings;
-use mini_agent_capabilities::workspace::ApprovalController;
-use mini_agent_capabilities::workspace::ApprovalMode;
 use mini_agent_core::HarnessConfig;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;

@@ -4,9 +4,10 @@ use crate::env_file::ValueSource;
 use crate::goal::GoalLimits;
 use crate::project_context;
 use crate::world::WorldState;
-use mini_agent_capabilities::session;
-use mini_agent_capabilities::skills;
-use mini_agent_capabilities::workspace::ApprovalMode;
+use mini_agent_capabilities::ApprovalMode;
+use mini_agent_capabilities::Discovery;
+use mini_agent_capabilities::discover;
+use mini_agent_capabilities::session_directory;
 use reqwest::Url;
 use serde_json::Value;
 use serde_json::json;
@@ -258,7 +259,7 @@ impl RuntimeConfig {
             "telemetry": false,
             "session_persistence": true,
             "session_persistence_available": true,
-            "session_directory": session::session_directory(&self.workspace)
+            "session_directory": session_directory(&self.workspace)
                 .ok()
                 .map(|path| json!(path.display().to_string()))
                 .unwrap_or(Value::Null),
@@ -316,7 +317,7 @@ impl RuntimeConfig {
             "session_persistence: always-on".to_string(),
             format!(
                 "session_directory: {}",
-                session::session_directory(&self.workspace).map_or_else(
+                session_directory(&self.workspace).map_or_else(
                     |_| "unavailable".to_string(),
                     |path| path.display().to_string()
                 )
@@ -425,7 +426,7 @@ impl RuntimeConfig {
             ),
             Err(error) => check("project_instructions", false, error),
         });
-        let skill_discovery = skills::discover(&self.workspace);
+        let skill_discovery = discover(&self.workspace);
         checks.push(if skill_discovery.diagnostics().is_empty() {
             check(
                 "extensions",
@@ -472,14 +473,14 @@ impl RuntimeConfig {
         }
     }
 
-    fn status_snapshot(&self) -> (skills::Discovery, WorldState) {
+    fn status_snapshot(&self) -> (Discovery, WorldState) {
         (
-            skills::discover(&self.workspace),
+            discover(&self.workspace),
             WorldState::detect(
                 &self.workspace,
                 ApprovalMode::Automatic,
                 false,
-                mini_agent_capabilities::sandbox::SandboxKind::Native,
+                mini_agent_capabilities::SandboxKind::Native,
             ),
         )
     }

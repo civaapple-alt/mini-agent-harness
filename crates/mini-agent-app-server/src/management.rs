@@ -4,14 +4,14 @@ use crate::AppServer;
 use crate::McpRetryResult;
 use crate::RuntimeSessionInfo;
 use crate::ThreadUpdate;
+use mini_agent_capabilities::ApprovalController;
+use mini_agent_capabilities::ApprovalMode;
 use mini_agent_capabilities::McpLoadResult;
 use mini_agent_capabilities::McpServerConfig;
 use mini_agent_capabilities::OpenedSession;
 use mini_agent_capabilities::TurnCommit;
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
-use mini_agent_capabilities::mcp;
-use mini_agent_capabilities::workspace::ApprovalController;
-use mini_agent_capabilities::workspace::ApprovalMode;
+use mini_agent_capabilities::load_mcp;
 use mini_agent_core::ThreadCheckpoint;
 use mini_agent_host::WorldState;
 use mini_agent_host::tool_outcome::classify_tools;
@@ -185,7 +185,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             tools,
             loaded_servers,
             diagnostics,
-        } = mcp::load(&servers, approval);
+        } = load_mcp(&servers, approval);
         let inactive_servers = servers
             .iter()
             .filter(|server| {

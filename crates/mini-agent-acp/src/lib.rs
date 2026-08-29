@@ -892,9 +892,11 @@ mod tests {
             ThreadStart::new(ThreadId::new("default")),
             Thread::new(ThreadId::new("initial"), harness),
         );
-        let connection = AppServerConnection::new(server).with_workflow_service(
-            WorkflowService::new(root.clone(), mini_agent_host::goal::GoalLimits::default()),
-        );
+        let connection =
+            AppServerConnection::new(server).with_workflow_service(WorkflowService::new(
+                root.clone(),
+                mini_agent_app_server::workflows::GoalLimits::default(),
+            ));
         (AcpBridge::new(connection), root)
     }
 

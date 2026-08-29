@@ -5,7 +5,7 @@ use super::WorkflowScope;
 use super::{
     AgentKind, ExtensionLoadDepth, ExtensionSelection, PersonaKind, RuntimeProfile, ToolScope,
 };
-use mini_agent_capabilities::security::SecurityPreset;
+use mini_agent_capabilities::SecurityPreset;
 
 const PROMPT_RULE_PRECEDENCE: [&str; 7] = [
     "core-safety",
@@ -221,11 +221,9 @@ impl RuntimeProfile {
         if self.agent != AgentKind::General {
             let agent_prompt = match self.agent {
                 AgentKind::Explore => {
-                    mini_agent_capabilities::persona::AgentPromptKind::Explore.prompt_template()
+                    mini_agent_capabilities::AgentPromptKind::Explore.prompt_template()
                 }
-                AgentKind::Plan => {
-                    mini_agent_capabilities::persona::AgentPromptKind::Plan.prompt_template()
-                }
+                AgentKind::Plan => mini_agent_capabilities::AgentPromptKind::Plan.prompt_template(),
                 AgentKind::General => unreachable!(),
             };
             prompt_source_fingerprints.push(SourceFingerprint {
@@ -236,17 +234,12 @@ impl RuntimeProfile {
         if self.persona != PersonaKind::None {
             let persona_prompt = match self.persona {
                 PersonaKind::Reviewer => {
-                    mini_agent_capabilities::persona::PersonaPromptKind::Reviewer
-                        .prompt_template(None, None)
+                    mini_agent_capabilities::PersonaPromptKind::Reviewer.prompt_template(None, None)
                 }
-                PersonaKind::Implementer => {
-                    mini_agent_capabilities::persona::PersonaPromptKind::Implementer
-                        .prompt_template(None, None)
-                }
-                PersonaKind::Researcher => {
-                    mini_agent_capabilities::persona::PersonaPromptKind::Researcher
-                        .prompt_template(None, None)
-                }
+                PersonaKind::Implementer => mini_agent_capabilities::PersonaPromptKind::Implementer
+                    .prompt_template(None, None),
+                PersonaKind::Researcher => mini_agent_capabilities::PersonaPromptKind::Researcher
+                    .prompt_template(None, None),
                 PersonaKind::None => unreachable!(),
             };
             prompt_source_fingerprints.push(SourceFingerprint {

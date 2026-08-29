@@ -2,11 +2,11 @@ use crate::AppServer;
 use crate::AppServerConnection;
 use crate::LocalAppServerClient;
 use mini_agent_app_server_protocol::TurnReadResult;
-use mini_agent_capabilities::image::ImageStore;
-use mini_agent_capabilities::openai::OpenAiModel;
-use mini_agent_capabilities::session::DerivedItem;
-use mini_agent_capabilities::session::SessionRequest;
-use mini_agent_capabilities::session::SessionStore;
+use mini_agent_capabilities::DerivedItem;
+use mini_agent_capabilities::ImageStore;
+use mini_agent_capabilities::OpenAiModel;
+use mini_agent_capabilities::SessionRequest;
+use mini_agent_capabilities::SessionStore;
 use mini_agent_core::ContextLimitBehavior;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
@@ -171,7 +171,7 @@ pub async fn verify_checkpoint(
     runtime_config: &RuntimeConfig,
     messages: &[Message],
     criteria: &str,
-) -> Result<(String, mini_agent_host::goal::VerifierVerdict), String> {
+) -> Result<(String, crate::workflows::VerifierVerdict), String> {
     let provider = runtime_config.mentor_provider_settings()?;
     let model = OpenAiModel::new(
         provider.api_key,
@@ -211,7 +211,7 @@ pub async fn verify_checkpoint(
         ));
     }
     let final_text = outcome.final_text.unwrap_or_default();
-    let verdict = mini_agent_host::goal::parse_verifier_verdict(&final_text);
+    let verdict = crate::workflows::parse_verifier_verdict(&final_text);
     Ok((final_text, verdict))
 }
 

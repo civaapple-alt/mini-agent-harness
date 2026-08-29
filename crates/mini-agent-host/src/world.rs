@@ -1,5 +1,5 @@
-use mini_agent_capabilities::sandbox::SandboxKind;
-use mini_agent_capabilities::workspace::ApprovalMode;
+use mini_agent_capabilities::ApprovalMode;
+use mini_agent_capabilities::SandboxKind;
 use serde_json::Value;
 use serde_json::json;
 use std::env;

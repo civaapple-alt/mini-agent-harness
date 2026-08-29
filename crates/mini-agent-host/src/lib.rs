@@ -7,8 +7,8 @@
 
 pub mod config;
 pub mod env_file;
-pub mod goal;
-pub mod harness_builder;
+mod goal;
+mod harness_builder;
 pub mod observer;
 pub mod profile;
 pub mod project_context;
@@ -22,16 +22,24 @@ pub fn git_sha() -> &'static str {
 }
 
 pub use config::RuntimeConfig;
+pub use goal::GoalLimits;
+pub use goal::GoalState;
+pub use goal::GoalStatus;
+pub use goal::HostWorkflowStore;
+pub use goal::PlanSlash;
+pub use goal::VerdictOutcome;
+pub use goal::VerifierVerdict;
+pub use goal::goal_turn_prompt;
+pub use goal::parse_plan_slash;
+pub use goal::parse_verifier_verdict;
+pub use goal::planning_turn_prompt;
+pub use goal::with_plan_mode_overlay;
 pub use harness_builder::HarnessBuild;
 pub use harness_builder::HostRuntime;
 pub use harness_builder::ModelProviderFactory;
-pub use harness_builder::RuntimeBuilder;
 pub use harness_builder::harness_config;
 pub use harness_builder::harness_config_auto;
 pub use harness_builder::prepare_harness_with_model_factory;
-pub use harness_builder::prepare_openai_harness;
-pub use harness_builder::prepare_openai_harness_with_profile;
-pub use harness_builder::prepare_openai_harness_with_profile_and_result_store;
 pub use harness_builder::print_auto_warning;
 pub use observer::RunObserver;
 pub use profile::AgentKind;

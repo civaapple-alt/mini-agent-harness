@@ -77,7 +77,7 @@ use mini_agent_app_server_protocol::WorldRefreshResult;
 use mini_agent_app_server_protocol::WorldSetExecutionParams;
 use mini_agent_app_server_protocol::WorldSetExecutionResult;
 use mini_agent_app_server_protocol::WorldStateResult;
-use mini_agent_capabilities::workspace::ApprovalMode;
+use mini_agent_capabilities::ApprovalMode;
 use mini_agent_core::SessionState;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::Model;
@@ -611,9 +611,7 @@ where
             Err(error) => return response_error(request.id, error),
         };
         let result = if params.active {
-            workflows
-                .init_plan_mode(params.prompt.as_deref())
-                .map(|_| ())
+            workflows.enable_plan_mode(params.prompt.as_deref())
         } else {
             workflows.disable_plan_mode()
         };
@@ -1217,15 +1215,15 @@ fn world_state_result<M: Model + Send + 'static>(
     }
 }
 
-fn workflow_goal_state(state: mini_agent_host::goal::GoalState) -> WorkflowGoalState {
+fn workflow_goal_state(state: crate::workflows::GoalState) -> WorkflowGoalState {
     WorkflowGoalState {
         schema_version: state.schema_version,
         goal_id: state.goal_id,
         status: match state.status {
-            mini_agent_host::goal::GoalStatus::Running => WorkflowGoalStatus::Running,
-            mini_agent_host::goal::GoalStatus::Converged => WorkflowGoalStatus::Converged,
-            mini_agent_host::goal::GoalStatus::Failed => WorkflowGoalStatus::Failed,
-            mini_agent_host::goal::GoalStatus::UserPaused => WorkflowGoalStatus::UserPaused,
+            crate::workflows::GoalStatus::Running => WorkflowGoalStatus::Running,
+            crate::workflows::GoalStatus::Converged => WorkflowGoalStatus::Converged,
+            crate::workflows::GoalStatus::Failed => WorkflowGoalStatus::Failed,
+            crate::workflows::GoalStatus::UserPaused => WorkflowGoalStatus::UserPaused,
         },
         current_milestone: state.current_milestone,
         total_milestones: state.total_milestones,
@@ -1239,17 +1237,15 @@ fn workflow_goal_state(state: mini_agent_host::goal::GoalState) -> WorkflowGoalS
     }
 }
 
-fn host_verifier_verdict(
-    verdict: WorkflowVerifierVerdict,
-) -> mini_agent_host::goal::VerifierVerdict {
-    mini_agent_host::goal::VerifierVerdict {
+fn host_verifier_verdict(verdict: WorkflowVerifierVerdict) -> crate::workflows::VerifierVerdict {
+    crate::workflows::VerifierVerdict {
         outcome: match verdict.outcome {
-            WorkflowVerdictOutcome::Approved => mini_agent_host::goal::VerdictOutcome::Approved,
-            WorkflowVerdictOutcome::Rejected => mini_agent_host::goal::VerdictOutcome::Rejected,
+            WorkflowVerdictOutcome::Approved => crate::workflows::VerdictOutcome::Approved,
+            WorkflowVerdictOutcome::Rejected => crate::workflows::VerdictOutcome::Rejected,
             WorkflowVerdictOutcome::NeedsClarification => {
-                mini_agent_host::goal::VerdictOutcome::NeedsClarification
+                crate::workflows::VerdictOutcome::NeedsClarification
             }
-            WorkflowVerdictOutcome::Invalid => mini_agent_host::goal::VerdictOutcome::Invalid,
+            WorkflowVerdictOutcome::Invalid => crate::workflows::VerdictOutcome::Invalid,
         },
         score: verdict.score,
         summary: verdict.summary,
@@ -1265,9 +1261,9 @@ mod tests {
     use super::*;
     use mini_agent_app_server_protocol::CapabilityProviderSelection;
     use mini_agent_app_server_protocol::ClientCapabilities;
-    use mini_agent_capabilities::sandbox::SandboxKind;
-    use mini_agent_capabilities::workspace::ApprovalController;
-    use mini_agent_capabilities::workspace::ApprovalMode;
+    use mini_agent_capabilities::ApprovalController;
+    use mini_agent_capabilities::ApprovalMode;
+    use mini_agent_capabilities::SandboxKind;
     use mini_agent_core::Harness;
     use mini_agent_core::HarnessConfig;
     use mini_agent_core::Thread;
@@ -1325,8 +1321,7 @@ mod tests {
             ThreadStart::new(ThreadId::new("thread-1")),
             Thread::new(ThreadId::new("initial"), harness),
         );
-        let workflows =
-            WorkflowService::new(root.clone(), mini_agent_host::goal::GoalLimits::default());
+        let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
         (
             AppServerConnection::new(server).with_workflow_service(workflows),
             root,
