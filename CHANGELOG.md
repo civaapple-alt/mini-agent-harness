@@ -12,6 +12,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   seam and no longer publishes the workflow implementation module.
 - Kept `mini-agent-capabilities` as one crate while making implementation
   modules private behind a curated root facade.
+- Removed the standalone paid-provider experiment crate and exploratory test
+  targets from the mainline workspace; provider evaluation is now external.
 
 ## [0.4.0] - 2026-08-29
 
@@ -21,13 +23,6 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   with bounded prompt/rule source manifests and explicit `--no-tools` scope.
 - Optional bounded `.agents/profile.json` overrides for local CLI and App
   Server profile selection, including allowlisted extension names.
-- Opt-in, budgeted real-provider scenario checks for text, tools, conversation
-  history, persistence, vision, and context compaction, with JSONL evidence and
-  no default CI or release-network calls.
-- Opt-in, budgeted real-provider scenario checks for mentor-derived insights,
-  Goal verification/milestone advancement, and production MCP stdio tool calls.
-- Explicit provider output-token caps for controlled integration checks through
-  the single Responses adapter.
 - Host-embedded external tool-provider registration through
   `CapabilityRegistry::with_tool_provider`, with a runnable echo-provider
   example.
@@ -89,9 +84,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   The CLI REPL uses that management boundary instead of direct Host world state
   or capability session access.
 - CLI no longer directly compiles against Host or Capabilities. Launch and
-  observation contracts come from the App Server frontend facade, while
-  provider-specific prompt and real-LLM experiments live in
-  `mini-agent-experiments`.
+  observation contracts come from the App Server frontend facade; provider
+  evaluation remains outside the mainline workspace.
 - Goal/Plan lifecycle, verifier evidence, and restart pause operations now use
   the same `LocalAppServerClient` workflow control plane as JSON-RPC.
 - App Server frontend profile, configuration, approval, workflow, and output

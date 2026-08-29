@@ -70,8 +70,7 @@ limits, failures, and observation events.
   profiles and launch settings for embedded frontends, keeping that setup out
   of the REPL and headless command paths. The CLI imports launch, approval,
   observation, and event contracts from `mini-agent-app-server::frontend` and
-  has no direct Host or Capabilities dependency. Provider experiments are kept
-  in `mini-agent-experiments`.
+  has no direct Host or Capabilities dependency.
 
 The mainline is the CLI over the App Server boundary. ACP is an experimental
 side adapter and compatibility probe: it exercises the same App Server
@@ -245,7 +244,6 @@ nested-agent behavior are not emulated. See the
 - [Troubleshooting](docs/troubleshooting.md) — common setup and runtime issues.
 - [Security policy](SECURITY.md) — reporting security problems.
 - [Privacy](docs/privacy.md) — local data and provider requests.
-- [Real LLM checks](docs/real-llm-testing.md) — opt-in, budgeted provider scenarios.
 - [App Server](docs/app-server.md) — versioned JSON-RPC methods and stdio usage.
 - [ACP boundary](docs/acp.md) — experimental session mapping and support scope.
 - [Release process](docs/releasing.md) — how to prepare and publish a release.

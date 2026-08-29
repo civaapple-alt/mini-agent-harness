@@ -1625,7 +1625,3 @@ mod tests {
         fs::remove_dir_all(outside).unwrap();
     }
 }
-
-#[cfg(test)]
-#[path = "workspace_edit_experiment.rs"]
-mod edit_experiment;

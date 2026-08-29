@@ -21,9 +21,9 @@ clean commit
 The workflow does not use provider credentials and does not make paid model
 requests.
 
-Optional real-provider scenarios are documented in
-[Real LLM scenario checks](real-llm-testing.md). They are manual, budgeted
-checks and are not part of the release gate by default.
+Provider calls are not part of the release gate. Use the deterministic demo and
+local fixtures for release verification; paid provider checks, if needed, belong
+in an external evaluation harness.
 
 ## Before changing the version
 
@@ -95,9 +95,8 @@ git diff --check
 git status --short
 ```
 
-For the 0.4.0 release, the runtime line budget is the hard gate. The
-`all Rust source` total remains in the report as an advisory trend metric and
-does not block this release.
+For the 0.4.0 release, both the 20,000-line runtime budget and the 30,000-line
+workspace total, including tests, are hard gates.
 
 The release archives contain only the binary, `README.md`, `LICENSE`, and
 `CHANGELOG.md`. `scripts/package_release.py` creates deterministic archives and

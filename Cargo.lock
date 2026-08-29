@@ -860,19 +860,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mini-agent-experiments"
-version = "0.4.0"
-dependencies = [
- "mini-agent-app-server",
- "mini-agent-capabilities",
- "mini-agent-core",
- "mini-agent-host",
- "mini-agent-protocol",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "mini-agent-host"
 version = "0.4.0"
 dependencies = [

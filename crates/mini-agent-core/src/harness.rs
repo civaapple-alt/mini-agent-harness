@@ -687,7 +687,3 @@ fn fail_compaction<E, O: Observer>(reason: String, observer: &mut O) -> HarnessE
 #[cfg(test)]
 #[path = "harness_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "tool_output_experiment.rs"]
-mod tool_output_experiment;
