@@ -16,6 +16,13 @@ use mini_agent_app_server_protocol::METHOD_INITIALIZE;
 use mini_agent_app_server_protocol::METHOD_THREAD_START;
 use mini_agent_app_server_protocol::METHOD_TURN_INTERRUPT;
 use mini_agent_app_server_protocol::METHOD_TURN_START;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_ADVANCE;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_CRITERIA;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_FAIL;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_PAUSE;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_START;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_PLAN_SET;
+use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
 use mini_agent_app_server_protocol::PROTOCOL_VERSION;
 use mini_agent_app_server_protocol::ThreadStartParams;
 use mini_agent_app_server_protocol::TurnEventNotification;
@@ -44,6 +51,13 @@ pub const METHOD_SESSION_RESUME: &str = "session/resume";
 pub const METHOD_SESSION_PROMPT: &str = "session/prompt";
 pub const METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const METHOD_SESSION_UPDATE: &str = "session/update";
+pub const METHOD_SESSION_WORKFLOW_STATE: &str = "session/workflow/state";
+pub const METHOD_SESSION_WORKFLOW_PLAN: &str = "session/workflow/plan";
+pub const METHOD_SESSION_WORKFLOW_GOAL_START: &str = "session/workflow/goal/start";
+pub const METHOD_SESSION_WORKFLOW_GOAL_PAUSE: &str = "session/workflow/goal/pause";
+pub const METHOD_SESSION_WORKFLOW_GOAL_FAIL: &str = "session/workflow/goal/fail";
+pub const METHOD_SESSION_WORKFLOW_GOAL_CRITERIA: &str = "session/workflow/goal/criteria";
+pub const METHOD_SESSION_WORKFLOW_GOAL_ADVANCE: &str = "session/workflow/goal/advance";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +102,8 @@ pub struct AcpAgentCapabilities {
     pub load_session: bool,
     #[serde(default)]
     pub prompt_capabilities: Value,
+    #[serde(default)]
+    pub workflows: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -154,6 +170,36 @@ pub struct SessionCancelParams {
     pub session_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWorkflowStateParams {
+    pub session_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWorkflowPlanParams {
+    pub session_id: String,
+    pub active: bool,
+    #[serde(default)]
+    pub prompt: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWorkflowGoalStartParams {
+    pub session_id: String,
+    pub objective: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWorkflowGoalParams {
+    pub session_id: String,
+    #[serde(default)]
+    pub verdict: Option<mini_agent_app_server_protocol::WorkflowVerifierVerdict>,
+}
+
 /// An ACP-like session bridge over the app-server service.
 pub struct AcpBridge<M> {
     app: AppServerConnection<M>,
@@ -209,6 +255,25 @@ where
             METHOD_SESSION_RESUME => self.resume_session(request).await,
             METHOD_SESSION_PROMPT => self.prompt(request).await,
             METHOD_SESSION_CANCEL => self.cancel(request).await,
+            METHOD_SESSION_WORKFLOW_STATE => self.workflow_state(request).await,
+            METHOD_SESSION_WORKFLOW_PLAN => self.workflow_plan(request).await,
+            METHOD_SESSION_WORKFLOW_GOAL_START => self.workflow_goal_start(request).await,
+            METHOD_SESSION_WORKFLOW_GOAL_PAUSE => {
+                self.workflow_goal_action(request, METHOD_WORKFLOW_GOAL_PAUSE)
+                    .await
+            }
+            METHOD_SESSION_WORKFLOW_GOAL_FAIL => {
+                self.workflow_goal_action(request, METHOD_WORKFLOW_GOAL_FAIL)
+                    .await
+            }
+            METHOD_SESSION_WORKFLOW_GOAL_CRITERIA => {
+                self.workflow_goal_action(request, METHOD_WORKFLOW_GOAL_CRITERIA)
+                    .await
+            }
+            METHOD_SESSION_WORKFLOW_GOAL_ADVANCE => {
+                self.workflow_goal_action(request, METHOD_WORKFLOW_GOAL_ADVANCE)
+                    .await
+            }
             _ => Some(JsonRpcResponse::error(
                 id,
                 JsonRpcError::method_not_found(request.method),
@@ -345,6 +410,11 @@ where
                 serde_json::to_value(self.profile.manifest())
                     .expect("ACP capability manifest is serializable")
             });
+        let workflows = app_response
+            .result
+            .as_ref()
+            .and_then(|result| result["capabilities"]["workflows"].as_bool())
+            .unwrap_or(false);
         self.initialized = true;
         let result = AcpInitializeResult {
             protocol_version: ACP_PROTOCOL_VERSION,
@@ -359,6 +429,7 @@ where
                     "profile": self.profile.name.clone(),
                     "capabilities": capability_manifest
                 }),
+                workflows,
             },
         };
         Some(JsonRpcResponse::result(
@@ -570,6 +641,105 @@ where
         Some(JsonRpcResponse::result(request.id, Value::Null))
     }
 
+    async fn workflow_state(&mut self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<SessionWorkflowStateParams>() {
+            Ok(params) => params,
+            Err(error) => return Some(JsonRpcResponse::error(request.id, error)),
+        };
+        if let Err(error) = self.validate_session(&params.session_id) {
+            return Some(JsonRpcResponse::error(request.id, error));
+        }
+        self.forward_workflow(request, METHOD_WORKFLOW_STATE, serde_json::json!({}))
+            .await
+    }
+
+    async fn workflow_plan(&mut self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<SessionWorkflowPlanParams>() {
+            Ok(params) => params,
+            Err(error) => return Some(JsonRpcResponse::error(request.id, error)),
+        };
+        if let Err(error) = self.validate_session(&params.session_id) {
+            return Some(JsonRpcResponse::error(request.id, error));
+        }
+        let app_params = mini_agent_app_server_protocol::WorkflowPlanSetParams {
+            active: params.active,
+            prompt: params.prompt,
+        };
+        self.forward_workflow(
+            request,
+            METHOD_WORKFLOW_PLAN_SET,
+            serde_json::to_value(app_params).expect("workflow plan params are serializable"),
+        )
+        .await
+    }
+
+    async fn workflow_goal_start(&mut self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<SessionWorkflowGoalStartParams>() {
+            Ok(params) => params,
+            Err(error) => return Some(JsonRpcResponse::error(request.id, error)),
+        };
+        if let Err(error) = self.validate_session(&params.session_id) {
+            return Some(JsonRpcResponse::error(request.id, error));
+        }
+        let app_params = mini_agent_app_server_protocol::WorkflowGoalStartParams {
+            objective: params.objective,
+        };
+        self.forward_workflow(
+            request,
+            METHOD_WORKFLOW_GOAL_START,
+            serde_json::to_value(app_params).expect("workflow goal params are serializable"),
+        )
+        .await
+    }
+
+    async fn workflow_goal_action(
+        &mut self,
+        request: JsonRpcRequest,
+        app_method: &str,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<SessionWorkflowGoalParams>() {
+            Ok(params) => params,
+            Err(error) => return Some(JsonRpcResponse::error(request.id, error)),
+        };
+        if let Err(error) = self.validate_session(&params.session_id) {
+            return Some(JsonRpcResponse::error(request.id, error));
+        }
+        let app_params = if app_method == METHOD_WORKFLOW_GOAL_ADVANCE {
+            serde_json::to_value(mini_agent_app_server_protocol::WorkflowGoalAdvanceParams {
+                verdict: params.verdict,
+            })
+            .expect("workflow verdict params are serializable")
+        } else {
+            serde_json::json!({})
+        };
+        self.forward_workflow(request, app_method, app_params).await
+    }
+
+    fn validate_session(&self, session_id: &str) -> Result<ThreadId, JsonRpcError> {
+        let Some(active) = &self.session_id else {
+            return Err(JsonRpcError::server_error("session/new is required first"));
+        };
+        if active.as_str() != session_id {
+            return Err(JsonRpcError::server_error("unknown session"));
+        }
+        Ok(active.clone())
+    }
+
+    async fn forward_workflow(
+        &mut self,
+        request: JsonRpcRequest,
+        method: &str,
+        params: Value,
+    ) -> Option<JsonRpcResponse> {
+        let app_request =
+            JsonRpcRequest::request(request.id.clone().unwrap_or(Value::Null), method, params);
+        let response = self.app.handle_request(app_request).await?;
+        if let Some(error) = response.error {
+            return Some(JsonRpcResponse::error(request.id, error));
+        }
+        Some(JsonRpcResponse::result(request.id, response.result?))
+    }
+
     async fn wait_for_turn(&mut self, turn_id: &TurnId) -> String {
         let mut stop_reason = "end_turn".to_string();
         loop {
@@ -659,6 +829,7 @@ fn acp_stop_reason(reason: StopReason) -> &'static str {
 mod tests {
     use super::*;
     use mini_agent_app_server::AppServer;
+    use mini_agent_app_server::WorkflowService;
     use mini_agent_core::Harness;
     use mini_agent_core::HarnessConfig;
     use mini_agent_core::ModelEventSink;
@@ -704,6 +875,27 @@ mod tests {
             Thread::new(ThreadId::new("initial"), harness),
         );
         AppServerConnection::new(server)
+    }
+
+    fn workflow_bridge() -> (AcpBridge<DoneModel>, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "mini-agent-acp-workflow-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let harness = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+        let server = AppServer::new(
+            ThreadStart::new(ThreadId::new("default")),
+            Thread::new(ThreadId::new("initial"), harness),
+        );
+        let connection = AppServerConnection::new(server).with_workflow_service(
+            WorkflowService::new(root.clone(), mini_agent_host::goal::GoalLimits::default()),
+        );
+        (AcpBridge::new(connection), root)
     }
 
     #[tokio::test]
@@ -778,6 +970,80 @@ mod tests {
             .unwrap();
         assert_eq!(prompt.result.unwrap()["stopReason"], "end_turn");
         assert!(bridge.next_notification().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn maps_workflow_management_to_the_app_server_service() {
+        let (mut bridge, root) = workflow_bridge();
+        let initialize = bridge
+            .handle_request(JsonRpcRequest::request(
+                1,
+                METHOD_INITIALIZE,
+                serde_json::json!(AcpInitializeParams {
+                    protocol_version: ACP_PROTOCOL_VERSION,
+                    client_capabilities: Value::Null,
+                    client_info: None,
+                    profile: None,
+                    providers: None,
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(initialize.error.is_none());
+        assert_eq!(
+            initialize.result.as_ref().unwrap()["agentCapabilities"]["workflows"],
+            true
+        );
+        let session = bridge
+            .handle_request(JsonRpcRequest::request(
+                2,
+                METHOD_SESSION_NEW,
+                serde_json::json!(SessionNewParams::default()),
+            ))
+            .await
+            .unwrap();
+        let session_id = session.result.unwrap()["sessionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let plan = bridge
+            .handle_request(JsonRpcRequest::request(
+                3,
+                METHOD_SESSION_WORKFLOW_PLAN,
+                serde_json::json!(SessionWorkflowPlanParams {
+                    session_id: session_id.clone(),
+                    active: true,
+                    prompt: Some("acp plan".to_string()),
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(plan.result.unwrap()["planActive"], true);
+
+        let goal = bridge
+            .handle_request(JsonRpcRequest::request(
+                4,
+                METHOD_SESSION_WORKFLOW_GOAL_START,
+                serde_json::json!(SessionWorkflowGoalStartParams {
+                    session_id: session_id.clone(),
+                    objective: "acp goal".to_string(),
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(goal.result.unwrap()["status"], "running");
+
+        let state = bridge
+            .handle_request(JsonRpcRequest::request(
+                5,
+                METHOD_SESSION_WORKFLOW_STATE,
+                serde_json::json!(SessionWorkflowStateParams { session_id }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(state.result.unwrap()["goal"]["status"], "running");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
