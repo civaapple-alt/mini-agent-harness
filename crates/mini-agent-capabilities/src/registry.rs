@@ -1,6 +1,7 @@
 use crate::ImageStore;
 use crate::SandboxKind;
 use crate::result_store::ResultStore;
+use crate::security::{SecurityPolicy, SecurityPreset};
 use crate::skills;
 use crate::workspace::ApprovalController;
 use mini_agent_core::Tool;
@@ -120,6 +121,17 @@ impl CapabilityRegistry {
             request.images,
             request.results,
         )
+    }
+
+    /// Builds the selected policy provider without owning the frontend's
+    /// approval callback or transport-specific interaction.
+    pub fn build_policy(
+        self,
+        provider_id: &str,
+        preset: SecurityPreset,
+    ) -> Result<SecurityPolicy, String> {
+        self.validate(CapabilityKind::Policy, provider_id)?;
+        Ok(SecurityPolicy::for_preset(preset))
     }
 
     /// Discovers the selected extension provider inputs once for a runtime.

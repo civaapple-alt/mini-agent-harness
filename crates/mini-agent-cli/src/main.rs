@@ -48,7 +48,9 @@ async fn main() -> ExitCode {
                 invocation.no_tools,
                 request,
                 invocation.security_preset,
+                invocation.security_preset_explicit,
                 invocation.sandbox_kind,
+                invocation.sandbox_kind_explicit,
                 invocation.web_search,
             )
             .await
@@ -65,7 +67,9 @@ async fn main() -> ExitCode {
                 invocation.automatic,
                 invocation.no_tools,
                 invocation.security_preset,
+                invocation.security_preset_explicit,
                 invocation.sandbox_kind,
+                invocation.sandbox_kind_explicit,
                 invocation.web_search,
                 request,
                 invocation.max_steps,
@@ -84,7 +88,9 @@ async fn main() -> ExitCode {
                 invocation.no_tools,
                 request,
                 invocation.security_preset,
+                invocation.security_preset_explicit,
                 invocation.sandbox_kind,
+                invocation.sandbox_kind_explicit,
                 invocation.web_search,
             )
             .await
@@ -98,7 +104,9 @@ async fn main() -> ExitCode {
             run_auto(
                 invocation.prompt,
                 invocation.security_preset,
+                invocation.security_preset_explicit,
                 invocation.sandbox_kind,
+                invocation.sandbox_kind_explicit,
                 invocation.web_search,
                 request,
                 invocation.no_tools,
@@ -122,7 +130,9 @@ async fn main() -> ExitCode {
                 invocation.no_tools,
                 SessionRequest::Resume(invocation.prompt),
                 invocation.security_preset,
+                invocation.security_preset_explicit,
                 invocation.sandbox_kind,
+                invocation.sandbox_kind_explicit,
                 invocation.web_search,
             )
             .await
@@ -134,7 +144,9 @@ async fn main() -> ExitCode {
                 invocation.no_tools,
                 SessionRequest::Fork(invocation.prompt),
                 invocation.security_preset,
+                invocation.security_preset_explicit,
                 invocation.sandbox_kind,
+                invocation.sandbox_kind_explicit,
                 invocation.web_search,
             )
             .await
@@ -255,10 +267,13 @@ async fn run_demo(prompt: String) -> ExitCode {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_auto(
     prompt: String,
     preset: SecurityPreset,
+    security_preset_explicit: bool,
     sandbox: SandboxKind,
+    sandbox_kind_explicit: bool,
     web_search_override: Option<bool>,
     session_request: SessionRequest,
     no_tools: bool,
@@ -269,7 +284,9 @@ async fn run_auto(
         true,
         no_tools,
         preset,
+        security_preset_explicit,
         sandbox,
+        sandbox_kind_explicit,
         web_search_override,
         session_request,
         None,

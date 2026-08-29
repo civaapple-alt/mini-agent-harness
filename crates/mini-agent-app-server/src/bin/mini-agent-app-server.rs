@@ -3,7 +3,6 @@ use mini_agent_app_server::ApprovalBroker;
 use mini_agent_app_server::capability_manifest_to_protocol;
 use mini_agent_app_server::serve_stdio_with_startup;
 use mini_agent_app_server_protocol::CapabilityProviderSelection;
-use mini_agent_capabilities::SandboxKind;
 use mini_agent_capabilities::SecurityPreset;
 use mini_agent_capabilities::security::SecurityPolicy;
 use mini_agent_capabilities::workspace::ApprovalController;
@@ -44,13 +43,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         apply_provider_selection(&mut profile, params.providers.as_ref())?;
         let factory_profile = profile.clone();
         let approval = approval_for(startup_broker.clone());
-        let runtime = HostRuntimeFactory::new(
-            &startup_config,
-            approval,
-            HarnessConfig::default(),
-            SandboxKind::Native,
-        )
-        .build(profile, Default::default())?;
+        let runtime = HostRuntimeFactory::new(&startup_config, approval, HarnessConfig::default())
+            .build(profile, Default::default())?;
         let capability_manifest = capability_manifest_to_protocol(&runtime.capability_manifest);
         let thread_id = ThreadId::new("default");
         let thread = Thread::new(thread_id.clone(), runtime.harness);
@@ -61,14 +55,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             vec![thread],
             move |thread_id| {
                 let approval = approval_for(factory_broker.clone());
-                let runtime = HostRuntimeFactory::new(
-                    &factory_config,
-                    approval,
-                    HarnessConfig::default(),
-                    SandboxKind::Native,
-                )
-                .build(factory_profile.clone(), Default::default())
-                .map_err(AppServerError::Checkpoint)?;
+                let runtime =
+                    HostRuntimeFactory::new(&factory_config, approval, HarnessConfig::default())
+                        .build(factory_profile.clone(), Default::default())
+                        .map_err(AppServerError::Checkpoint)?;
                 Ok(Thread::new(thread_id, runtime.harness))
             },
         );

@@ -89,7 +89,9 @@ pub async fn run(
     no_tools: bool,
     session_request: SessionRequest,
     preset: SecurityPreset,
+    security_preset_explicit: bool,
     sandbox_kind: SandboxKind,
+    sandbox_kind_explicit: bool,
     web_search_override: Option<bool>,
 ) -> ExitCode {
     let (event_tx, event_rx) = mpsc::sync_channel(EVENT_BUFFER);
@@ -114,9 +116,6 @@ pub async fn run(
         .as_ref()
         .filter(|_| !no_tools)
         .map(|workspace| skills::discover(workspace));
-    let startup_world = workspace
-        .as_ref()
-        .map(|workspace| WorldState::detect(workspace, initial_approval, copilot, sandbox_kind));
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
     let run_control = RunControl::new();
@@ -126,7 +125,9 @@ pub async fn run(
         approval,
         session_request,
         preset,
+        security_preset_explicit,
         sandbox_kind,
+        sandbox_kind_explicit,
         web_search_override,
         worker_rx,
         event_tx,
@@ -159,9 +160,24 @@ pub async fn run(
     } else {
         startup_profile
     };
-    let startup_profile = startup_profile
-        .with_sandbox(sandbox_kind)
-        .with_security(preset);
+    let startup_profile = if sandbox_kind_explicit {
+        startup_profile.with_sandbox(sandbox_kind)
+    } else {
+        startup_profile
+    };
+    let startup_profile = if security_preset_explicit {
+        startup_profile.with_security(preset)
+    } else {
+        startup_profile
+    };
+    let startup_world = workspace.as_ref().map(|workspace| {
+        WorldState::detect(
+            workspace,
+            initial_approval,
+            copilot,
+            startup_profile.sandbox,
+        )
+    });
     let manifest = startup_profile.manifest();
     let disabled = manifest
         .disabled
@@ -432,7 +448,9 @@ fn spawn_worker(
     approval: ApprovalController,
     session_request: SessionRequest,
     preset: SecurityPreset,
+    security_preset_explicit: bool,
     sandbox_kind: SandboxKind,
+    sandbox_kind_explicit: bool,
     web_search_override: Option<bool>,
     commands: mpsc::Receiver<WorkerCommand>,
     events: mpsc::SyncSender<ReplEvent>,
@@ -483,14 +501,22 @@ fn spawn_worker(
         if no_tools {
             profile = profile.without_tools();
         }
-        let profile = profile.with_sandbox(sandbox_kind).with_security(preset);
+        let profile = if sandbox_kind_explicit {
+            profile.with_sandbox(sandbox_kind)
+        } else {
+            profile
+        };
+        let profile = if security_preset_explicit {
+            profile.with_security(preset)
+        } else {
+            profile
+        };
         let workflow_scope = profile.workflows;
         let mut runtime =
             match model_runtime.block_on(AppServerRuntime::start_with_control_and_profile(
                 runtime_config.clone(),
                 approval.clone(),
                 harness_config_auto(copilot, auto_max_steps),
-                sandbox_kind,
                 session_request,
                 std::sync::Arc::new(run_control.clone()),
                 profile,

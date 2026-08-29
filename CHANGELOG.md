@@ -21,6 +21,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- Host runtime construction now derives policy and sandbox settings from the
+  resolved profile. Frontend approval callbacks remain transport adapters, and
+  explicit CLI flags are tracked separately so workspace profile values are
+  preserved when no override was requested.
 - CLI README and subcommand help now document session, run, safety, sandbox,
   web-search, max-step, and JSON options consistently. Interactive
   `--session-id` resumes the requested durable session.

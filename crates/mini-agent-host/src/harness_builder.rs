@@ -19,7 +19,6 @@ use mini_agent_capabilities::ImageStore;
 use mini_agent_capabilities::McpLoadResult;
 use mini_agent_capabilities::McpServerConfig;
 use mini_agent_capabilities::result_store::ResultStore;
-use mini_agent_capabilities::sandbox::SandboxKind;
 use mini_agent_capabilities::workspace::ApprovalController;
 
 pub const AUTO_MAX_STEPS: usize = 0;
@@ -47,7 +46,6 @@ pub struct RuntimeBuilder<'a> {
     runtime_config: &'a RuntimeConfig,
     approval: ApprovalController,
     config: HarnessConfig,
-    sandbox: SandboxKind,
     profile: RuntimeProfile,
 }
 
@@ -56,13 +54,11 @@ impl<'a> RuntimeBuilder<'a> {
         runtime_config: &'a RuntimeConfig,
         approval: ApprovalController,
         config: HarnessConfig,
-        sandbox: SandboxKind,
     ) -> Self {
         Self {
             runtime_config,
             approval,
             config,
-            sandbox,
             profile: RuntimeProfile::default(),
         }
     }
@@ -79,7 +75,6 @@ impl<'a> RuntimeBuilder<'a> {
             self.runtime_config,
             self.approval.clone(),
             self.config.clone(),
-            self.sandbox,
             self.profile.clone(),
         )
     }
@@ -91,7 +86,6 @@ impl<'a> RuntimeBuilder<'a> {
             self.runtime_config,
             self.approval.clone(),
             self.config.clone(),
-            self.sandbox,
             self.profile.clone(),
             results,
         )
@@ -102,13 +96,11 @@ pub fn prepare_openai_harness(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
     config: HarnessConfig,
-    sandbox: SandboxKind,
 ) -> Result<HarnessBuild, String> {
     prepare_openai_harness_with_profile_and_result_store(
         runtime_config,
         approval,
         config,
-        sandbox,
         RuntimeProfile::default(),
         ResultStore::default(),
     )
@@ -118,14 +110,12 @@ pub fn prepare_openai_harness_with_profile(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
     config: HarnessConfig,
-    sandbox: SandboxKind,
     profile: RuntimeProfile,
 ) -> Result<HarnessBuild, String> {
     prepare_openai_harness_with_profile_and_result_store(
         runtime_config,
         approval,
         config,
-        sandbox,
         profile,
         ResultStore::default(),
     )
@@ -135,14 +125,12 @@ pub fn prepare_openai_harness_with_result_store(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
     config: HarnessConfig,
-    sandbox: SandboxKind,
     results: ResultStore,
 ) -> Result<HarnessBuild, String> {
     prepare_openai_harness_with_profile_and_result_store(
         runtime_config,
         approval,
         config,
-        sandbox,
         RuntimeProfile::default(),
         results,
     )
@@ -152,11 +140,12 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
     mut config: HarnessConfig,
-    sandbox: SandboxKind,
     profile: RuntimeProfile,
     results: ResultStore,
 ) -> Result<HarnessBuild, String> {
     let registry = CapabilityRegistry::builtin();
+    let policy = registry.build_policy(&profile.policy_provider, profile.security)?;
+    approval.set_policy(policy);
     registry.validate(
         mini_agent_capabilities::CapabilityKind::Model,
         &profile.model_provider,
@@ -168,10 +157,6 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
     registry.validate(
         mini_agent_capabilities::CapabilityKind::Extension,
         &profile.extension_provider,
-    )?;
-    registry.validate(
-        mini_agent_capabilities::CapabilityKind::Policy,
-        &profile.policy_provider,
     )?;
     let provider = runtime_config.provider_settings()?;
     let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
@@ -270,7 +255,7 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
             workspace: workspace.clone(),
             approval: approval.clone(),
             extra_read_roots,
-            sandbox,
+            sandbox: profile.sandbox,
             images: images.clone(),
             results,
         }) {
@@ -322,7 +307,7 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
         })
         .collect();
     let stable_system_prompt = config.system_prompt.clone();
-    let world = WorldState::detect(&workspace, approval_mode, copilot, sandbox);
+    let world = WorldState::detect(&workspace, approval_mode, copilot, profile.sandbox);
     let world_context = world.model_context()?;
     let mut harness = Harness::new(model, ToolRegistry::new(tools), config);
     harness

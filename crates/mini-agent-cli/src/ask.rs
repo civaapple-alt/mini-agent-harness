@@ -25,7 +25,9 @@ pub async fn run(
     automatic: bool,
     no_tools: bool,
     preset: SecurityPreset,
+    security_preset_explicit: bool,
     sandbox: SandboxKind,
+    sandbox_kind_explicit: bool,
     web_search_override: Option<bool>,
     session_request: SessionRequest,
     max_steps: Option<usize>,
@@ -48,7 +50,6 @@ pub async fn run(
     } else {
         ApprovalMode::Interactive
     };
-    let approval = ApprovalController::with_preset(mode, preset);
     let config = match (automatic, max_steps) {
         (true, steps) => mini_agent_host::harness_config_auto(
             true,
@@ -70,12 +71,17 @@ pub async fn run(
     if no_tools {
         profile = profile.without_tools();
     }
-    let profile = profile.with_sandbox(sandbox).with_security(preset);
+    if sandbox_kind_explicit {
+        profile = profile.with_sandbox(sandbox);
+    }
+    if security_preset_explicit {
+        profile = profile.with_security(preset);
+    }
+    let approval = ApprovalController::with_preset(mode, profile.security);
     let mut runtime = match AppServerRuntime::start_with_profile(
         runtime_config,
         approval,
         config,
-        sandbox,
         session_request,
         profile,
     )

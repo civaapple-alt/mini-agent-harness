@@ -1,6 +1,8 @@
 # Host Capability Profiles and Runtime Seams
 
-Status: Stage 3 frontend routing and provider selection implemented; Stage 4 workspace-budget reduction pending (Windows scope)
+Status: Stage 3 frontend routing, provider selection, and policy/sandbox
+boundary cleanup implemented; Stage 4 workspace-budget reduction pending
+(Windows scope)
 Date: 2026-08-28
 
 ## Implementation update (2026-08-28)
@@ -106,6 +108,30 @@ selector before constructing its first Thread, while in-process clients and ACP
 verify that their request matches the already assembled profile. Only the
 built-in provider IDs are available today; adding a new implementation requires
 registering it in `mini-agent-capabilities` before it can be selected.
+
+## Boundary cleanup (2026-08-29)
+
+Host construction now consumes the resolved profile as the source of truth for
+policy and sandbox selection. `CapabilityRegistry::build_policy` constructs
+the selected policy implementation, and `ApprovalController` replaces its
+policy without replacing the frontend callback or cached approvals. The
+`RuntimeBuilder`, `HostRuntimeFactory`, and `AppServerRuntime` APIs no longer
+carry a second sandbox argument; tool construction and world-state detection
+use `RuntimeProfile.sandbox` directly. CLI parsing records whether sandbox or
+security flags were explicitly supplied, so a workspace profile is retained
+when the invocation did not request an override.
+
+The remaining boundary work is intentionally staged. The registry still has
+only built-in implementations; external provider registration would require a
+model-provider abstraction in the App Server runtime. `RuntimeProfile` stays a
+Host-owned application configuration rather than entering Core, while the
+protocol receives only bounded profile/provider selectors and a read-only
+`CapabilityManifest` projection. Those choices keep credentials, live
+callbacks, tools, and filesystem handles out of the service contract.
+
+The post-cleanup line report is runtime `14,347/20,000` lines, capabilities
+`13,905` lines, and all Rust source `36,947/30,000` lines. The runtime gate
+still passes; the workspace gate remains the active reduction task.
 
 ## Problem
 

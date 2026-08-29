@@ -196,7 +196,7 @@ fn ask_applies_workspace_profile_file_before_running_a_turn() {
     fs::create_dir_all(root.join(".agents")).unwrap();
     fs::write(
         root.join(".agents/profile.json"),
-        r#"{"name":"repo-review","tools":"none","extensionDepth":"none","agent":"plan","persona":"reviewer","workflows":"disabled"}"#,
+        r#"{"name":"repo-review","tools":"none","extensionDepth":"none","agent":"plan","persona":"reviewer","workflows":"disabled","sandbox":"none","security":"full-machine"}"#,
     )
     .unwrap();
     let mut child = mini_agent(&root)
@@ -230,6 +230,8 @@ fn ask_applies_workspace_profile_file_before_running_a_turn() {
     let output: Value = serde_json::from_str(stdout.trim()).unwrap();
     assert_eq!(output["output"], "profile answer");
     assert_eq!(output["capabilities"]["profile"], "repo-review");
+    assert_eq!(output["capabilities"]["sandbox"], "none");
+    assert_eq!(output["capabilities"]["security"], "full-machine");
     assert!(
         output["capabilities"]["disabled"]
             .to_string()

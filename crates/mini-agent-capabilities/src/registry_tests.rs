@@ -35,3 +35,15 @@ fn builtin_registry_exposes_allowlisted_provider_categories() {
         ]
     );
 }
+
+#[test]
+fn policy_provider_builds_the_profile_selected_preset() {
+    let policy = CapabilityRegistry::builtin()
+        .build_policy(
+            crate::BUILTIN_POLICY_PROVIDER,
+            crate::security::SecurityPreset::Turbomode,
+        )
+        .unwrap();
+
+    assert_eq!(policy.preset, crate::security::SecurityPreset::Turbomode);
+}

@@ -205,7 +205,9 @@ pub struct Invocation {
     #[allow(dead_code)]
     pub session_id: Option<String>,
     pub security_preset: SecurityPreset,
+    pub security_preset_explicit: bool,
     pub sandbox_kind: SandboxKind,
+    pub sandbox_kind_explicit: bool,
     pub web_search: Option<bool>,
     pub max_steps: Option<usize>,
     pub help_topic: HelpTopic,
@@ -321,7 +323,9 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             no_tools: false,
             session_id: None,
             security_preset: SecurityPreset::Default,
+            security_preset_explicit: false,
             sandbox_kind: SandboxKind::Native,
+            sandbox_kind_explicit: false,
             web_search: None,
             max_steps: None,
             help_topic: HelpTopic::Root,
@@ -335,7 +339,9 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut no_tools = false;
     let mut session_id = None;
     let mut security_preset = SecurityPreset::Default;
+    let mut security_preset_explicit = false;
     let mut sandbox_kind = SandboxKind::Native;
+    let mut sandbox_kind_explicit = false;
     let mut web_search = None;
     let mut max_steps = None;
     let mut options = true;
@@ -375,11 +381,13 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 .next()
                 .ok_or_else(|| "--security-preset requires a preset name".to_string())?;
             security_preset = SecurityPreset::parse(&value)?;
+            security_preset_explicit = true;
         } else if options && argument == "--sandbox" {
             let value = args
                 .next()
                 .ok_or_else(|| "--sandbox requires a sandbox kind".to_string())?;
             sandbox_kind = SandboxKind::parse(&value)?;
+            sandbox_kind_explicit = true;
         } else if options && (argument == "--web-search" || argument == "--search") {
             if web_search.is_some() {
                 return Err(format!("{argument} may be provided only once"));
@@ -483,7 +491,9 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         no_tools,
         session_id,
         security_preset,
+        security_preset_explicit,
         sandbox_kind,
+        sandbox_kind_explicit,
         web_search,
         max_steps,
         help_topic: HelpTopic::Root,
@@ -499,7 +509,9 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         no_tools: false,
         session_id: None,
         security_preset: SecurityPreset::Default,
+        security_preset_explicit: false,
         sandbox_kind: SandboxKind::Native,
+        sandbox_kind_explicit: false,
         web_search: None,
         max_steps: None,
         help_topic,
@@ -573,7 +585,9 @@ mod tests {
         assert!(!invocation.json);
         assert!(!invocation.automatic);
         assert_eq!(invocation.security_preset, SecurityPreset::Default);
+        assert!(!invocation.security_preset_explicit);
         assert_eq!(invocation.sandbox_kind, SandboxKind::Native);
+        assert!(!invocation.sandbox_kind_explicit);
         assert_eq!(invocation.web_search, None);
     }
 
@@ -807,7 +821,9 @@ mod tests {
 
         assert_eq!(ask_inv.command, Command::Ask);
         assert_eq!(ask_inv.security_preset, SecurityPreset::Turbomode);
+        assert!(ask_inv.security_preset_explicit);
         assert_eq!(ask_inv.sandbox_kind, SandboxKind::Native);
+        assert!(ask_inv.sandbox_kind_explicit);
         assert_eq!(ask_inv.prompt, "list files");
 
         let interactive_inv = parse_args(vec![
@@ -820,7 +836,9 @@ mod tests {
 
         assert_eq!(interactive_inv.command, Command::Interactive);
         assert_eq!(interactive_inv.security_preset, SecurityPreset::Turbomode);
+        assert!(interactive_inv.security_preset_explicit);
         assert_eq!(interactive_inv.sandbox_kind, SandboxKind::Native);
+        assert!(interactive_inv.sandbox_kind_explicit);
     }
 
     #[test]

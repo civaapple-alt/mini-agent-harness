@@ -27,6 +27,7 @@ use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::thread;
@@ -51,7 +52,7 @@ type ApprovalCallback = dyn Fn(&str) -> Result<bool, ToolError> + Send + Sync;
 #[derive(Clone)]
 pub struct ApprovalController {
     automatic: Arc<AtomicBool>,
-    policy: Arc<SecurityPolicy>,
+    policy: Arc<RwLock<SecurityPolicy>>,
     store: ApprovalStore,
     callback: Arc<ApprovalCallback>,
     living_plan: Arc<Mutex<Option<PathBuf>>>,
@@ -93,7 +94,7 @@ impl ApprovalController {
     ) -> Self {
         Self {
             automatic: Arc::new(AtomicBool::new(matches!(mode, ApprovalMode::Automatic))),
-            policy: Arc::new(policy),
+            policy: Arc::new(RwLock::new(policy)),
             store: ApprovalStore::new(),
             callback: Arc::new(callback),
             living_plan: Arc::new(Mutex::new(None)),
@@ -104,7 +105,13 @@ impl ApprovalController {
     }
 
     pub fn preset(&self) -> SecurityPreset {
-        self.policy.preset
+        self.policy.read().unwrap().preset
+    }
+
+    /// Replaces the policy selected by the resolved runtime profile while
+    /// preserving the frontend approval callback and cached approvals.
+    pub fn set_policy(&self, policy: SecurityPolicy) {
+        *self.policy.write().unwrap() = policy;
     }
 
     pub fn mode(&self) -> ApprovalMode {
@@ -176,7 +183,7 @@ impl ApprovalController {
     }
 
     pub fn approve(&self, action: &str) -> Result<(), ToolError> {
-        match self.policy.evaluate(action) {
+        match self.policy.read().unwrap().evaluate(action) {
             SecurityDecision::Deny => {
                 return Err(ToolError(format!("forbidden by security policy: {action}")));
             }
@@ -999,6 +1006,17 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
+
+    #[test]
+    fn policy_can_be_replaced_after_frontend_callback_creation() {
+        let approval = ApprovalController::with_callback(ApprovalMode::Interactive, |_| {
+            panic!("profile-selected allow should not ask the frontend")
+        });
+        approval.set_policy(SecurityPolicy::for_preset(SecurityPreset::Turbomode));
+
+        assert_eq!(approval.preset(), SecurityPreset::Turbomode);
+        approval.approve("shell:echo profile").unwrap();
+    }
 
     pub(super) fn test_root() -> PathBuf {
         static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);

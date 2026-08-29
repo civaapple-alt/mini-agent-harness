@@ -9,20 +9,19 @@ use crate::RuntimeBuilder;
 use crate::RuntimeConfig;
 use crate::RuntimeProfile;
 use mini_agent_capabilities::result_store::ResultStore;
-use mini_agent_capabilities::sandbox::SandboxKind;
 use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_core::HarnessConfig;
 
 /// Builds a concrete host runtime for an App Server service boundary.
 ///
-/// The factory carries edge configuration and approval policy, but profile
-/// selection remains an explicit argument so each frontend can choose an
-/// allowlisted capability scope without creating a second execution loop.
+/// The factory carries edge configuration and the frontend approval callback,
+/// while the profile selects the concrete policy provider and sandbox. Profile
+/// selection remains explicit so each frontend can choose an allowlisted
+/// capability scope without creating a second execution loop.
 pub struct HostRuntimeFactory<'a> {
     runtime_config: &'a RuntimeConfig,
     approval: ApprovalController,
     config: HarnessConfig,
-    sandbox: SandboxKind,
 }
 
 impl<'a> HostRuntimeFactory<'a> {
@@ -30,13 +29,11 @@ impl<'a> HostRuntimeFactory<'a> {
         runtime_config: &'a RuntimeConfig,
         approval: ApprovalController,
         config: HarnessConfig,
-        sandbox: SandboxKind,
     ) -> Self {
         Self {
             runtime_config,
             approval,
             config,
-            sandbox,
         }
     }
 
@@ -51,7 +48,6 @@ impl<'a> HostRuntimeFactory<'a> {
             self.runtime_config,
             self.approval.clone(),
             self.config.clone(),
-            self.sandbox,
         )
         .with_profile(profile)
         .build_with_result_store(results)

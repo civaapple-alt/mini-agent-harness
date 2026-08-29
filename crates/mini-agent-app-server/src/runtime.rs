@@ -23,7 +23,6 @@ use mini_agent_capabilities::SessionRequest;
 use mini_agent_capabilities::SessionStore;
 use mini_agent_capabilities::TurnCommit;
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
-use mini_agent_capabilities::sandbox::SandboxKind;
 use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_core::Event;
 use mini_agent_core::EventSink;
@@ -75,14 +74,12 @@ impl AppServerRuntime {
         runtime_config: RuntimeConfig,
         approval: ApprovalController,
         config: HarnessConfig,
-        sandbox: SandboxKind,
         session_request: SessionRequest,
     ) -> Result<Self, String> {
         Self::start_with_control_and_profile(
             runtime_config,
             approval,
             config,
-            sandbox,
             session_request,
             std::sync::Arc::new(RunControl::new()),
             RuntimeProfile::default(),
@@ -95,7 +92,6 @@ impl AppServerRuntime {
         runtime_config: RuntimeConfig,
         approval: ApprovalController,
         config: HarnessConfig,
-        sandbox: SandboxKind,
         session_request: SessionRequest,
         control: std::sync::Arc<RunControl>,
     ) -> Result<Self, String> {
@@ -103,7 +99,6 @@ impl AppServerRuntime {
             runtime_config,
             approval,
             config,
-            sandbox,
             session_request,
             control,
             RuntimeProfile::default(),
@@ -115,7 +110,6 @@ impl AppServerRuntime {
         runtime_config: RuntimeConfig,
         approval: ApprovalController,
         config: HarnessConfig,
-        sandbox: SandboxKind,
         session_request: SessionRequest,
         profile: RuntimeProfile,
     ) -> Result<Self, String> {
@@ -123,7 +117,6 @@ impl AppServerRuntime {
             runtime_config,
             approval,
             config,
-            sandbox,
             session_request,
             std::sync::Arc::new(RunControl::new()),
             profile,
@@ -135,7 +128,6 @@ impl AppServerRuntime {
         runtime_config: RuntimeConfig,
         approval: ApprovalController,
         config: HarnessConfig,
-        sandbox: SandboxKind,
         session_request: SessionRequest,
         control: std::sync::Arc<RunControl>,
         profile: RuntimeProfile,
@@ -164,7 +156,7 @@ impl AppServerRuntime {
             mcp_tool_count,
             retry_mcp_servers,
             capability_manifest,
-        } = HostRuntimeFactory::new(&runtime_config, approval.clone(), config, sandbox)
+        } = HostRuntimeFactory::new(&runtime_config, approval.clone(), config)
             .build(profile, results)?;
         let mut harness = harness;
         if let Some(opened) = &session {
