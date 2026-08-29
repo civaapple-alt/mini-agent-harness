@@ -100,6 +100,30 @@ class LineBudgetTests(unittest.TestCase):
                 output.getvalue(),
             )
 
+    def test_capabilities_are_reported_but_excluded_from_runtime_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            core_root = root / "crates" / "mini-agent-core" / "src"
+            core_root.mkdir(parents=True)
+            (core_root / "lib.rs").write_text("fn core() {}\n", encoding="utf-8")
+            capabilities_root = (
+                root / "crates" / "mini-agent-capabilities" / "src"
+            )
+            capabilities_root.mkdir(parents=True)
+            (capabilities_root / "lib.rs").write_text(
+                "fn tool() {}\nfn model() {}\nfn policy() {}\n", encoding="utf-8"
+            )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(line_budget.check(root), 0)
+
+            self.assertIn("capabilities: 3 lines", output.getvalue())
+            self.assertIn(
+                "runtime (core + protocol + host + app-server): 1/20000 lines",
+                output.getvalue(),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

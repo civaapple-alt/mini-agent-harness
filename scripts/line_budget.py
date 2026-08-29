@@ -11,10 +11,12 @@ PROJECT_LIMIT = 30_000
 # reported separately because they are provider implementations behind Host;
 # protocol and ACP are also reported separately so each external boundary stays
 # visible.
+CAPABILITY_PACKAGES = ("mini-agent-capabilities",)
+
 LAYERS = (
     ("core", ("mini-agent-core",)),
     ("protocol", ("mini-agent-protocol",)),
-    ("capabilities", ("mini-agent-capabilities",)),
+    ("capabilities", CAPABILITY_PACKAGES),
     ("host", ("mini-agent-host",)),
     (
         "app-server",
@@ -30,6 +32,8 @@ RUNTIME_PACKAGES = (
     "mini-agent-app-server",
     "mini-agent-app-server-protocol",
 )
+# Keep provider implementations outside the runtime gate even though they are
+# included in the all-Rust workspace total and shown as their own layer.
 
 
 def rust_lines(path: Path) -> int:
