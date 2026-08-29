@@ -21,6 +21,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Host-embedded external tool-provider registration through
   `CapabilityRegistry::with_tool_provider`, with a runnable echo-provider
   example.
+- Generic external model-provider registration through
+  `CapabilityRegistry::with_model_provider` and
+  `AppServerRuntime::<M>::start_with_model_factory`, with a compile-checked
+  example in `mini-agent-app-server/examples/external_model_provider.rs`.
 
 ### Changed
 
@@ -71,6 +75,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   observation contracts come from the App Server frontend facade, while
   provider-specific prompt and real-LLM experiments live in
   `mini-agent-experiments`.
+- Goal/Plan lifecycle, verifier evidence, and restart pause operations now use
+  the same `LocalAppServerClient` workflow control plane as JSON-RPC.
+- App Server frontend profile, configuration, approval, workflow, and output
+  observer contracts no longer expose Host implementation types. The REPL
+  presentation loop and App Server worker are maintained in separate modules.
 
 ### Fixed
 
