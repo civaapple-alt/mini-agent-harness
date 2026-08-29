@@ -50,6 +50,8 @@ No changes yet.
   run-control, context compaction, tool-batch execution, and model-event
   forwarding now live in focused private modules while the public turn API is
   unchanged.
+- The workspace-wide Rust line total remains visible as an advisory metric for
+  0.4.0; only the 20,000-line runtime budget blocks the release gate.
 - Host responsibilities are separated from App Server transport and worker
   orchestration. Runtime configuration, provider setup, tools, workspace
   policy, persistence, Goal state, and Plan state remain in the Host layer.

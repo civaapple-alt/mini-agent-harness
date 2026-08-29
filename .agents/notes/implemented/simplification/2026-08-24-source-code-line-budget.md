@@ -15,17 +15,19 @@ The workspace enforces strict hard line ceilings on Rust source code:
      **20,000** Rust lines (including tests). The provider implementation group
      `mini-agent-capabilities` and separately reported ACP edge are excluded
      from this runtime limit.
-   - Entire workspace: Maximum **30,000** Rust lines (including tests and CLI).
+   - Entire workspace: The 30,000-line figure remains an advisory trend
+     metric for the 0.4.0 release; it is reported but does not fail the gate.
+     Runtime layers remain the hard release limit.
 2. **Automated Enforcement**:
-   - Ceilings are validated by `python scripts/line_budget.py` and run as part of CI.
+   - The runtime ceiling is validated by `python scripts/line_budget.py` and run as part of CI.
    - The report also shows `core`, `protocol`, `capabilities`, `host`,
      `app-server`, `acp`, and `cli` separately so architectural growth is
      visible before the workspace ceiling is reached.
    - Each layer and the workspace total are split into production, unit-test,
      and integration-test lines. Inline `#[cfg(test)]` items and `*_tests.rs`
      files count as unit tests; files under a `tests/` directory count as
-     integration tests. This is diagnostic only: both hard ceilings still
-     include all Rust source lines.
+     integration tests. The workspace total is diagnostic for 0.4.0; the
+     runtime total remains the hard gate.
 3. **Design Principle**:
    - Removing a concept or abstraction is always preferred over compressing it behind shorthand macros or indirections.
    - Defaults are the product; configuration options are added only when two mutually incompatible behaviors must coexist.

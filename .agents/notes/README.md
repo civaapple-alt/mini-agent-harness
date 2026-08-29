@@ -146,7 +146,7 @@ If a proposed approach is rejected during review:
 #### Simplification (`implemented/simplification/`)
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-24 | [Source Code Line Budget](implemented/simplification/2026-08-24-source-code-line-budget.md) | Strict line budgets (20k runtime layers / 30k workspace) to prevent abstraction bloat |
+| 2026-08-24 | [Source Code Line Budget](implemented/simplification/2026-08-24-source-code-line-budget.md) | 20k runtime hard gate with advisory workspace trend reporting for 0.4.0 |
 
 #### Testing (`implemented/testing/`)
 | Date | Title | Focus |

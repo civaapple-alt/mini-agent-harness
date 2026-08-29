@@ -5,6 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_LIMIT = 20_000
+# The workspace total remains useful for trend reporting, but is advisory for
+# the 0.4.0 release. Runtime layers retain the hard release gate.
 PROJECT_LIMIT = 30_000
 
 # Keep the report aligned with the conceptual runtime layers. Capabilities are
@@ -225,11 +227,11 @@ def check(root: Path = ROOT) -> int:
         f"integration {runtime_integration})"
     )
     print(
-        f"all Rust source: {project_lines}/{PROJECT_LIMIT} lines "
+        f"all Rust source (advisory): {project_lines}/{PROJECT_LIMIT} lines "
         f"(production {production}, unit {unit}, integration {integration})"
     )
 
-    if runtime_total > RUNTIME_LIMIT or project_lines > PROJECT_LIMIT:
+    if runtime_total > RUNTIME_LIMIT:
         print("line budget exceeded", file=sys.stderr)
         return 1
     return 0

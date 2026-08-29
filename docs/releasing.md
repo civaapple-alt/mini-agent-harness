@@ -95,6 +95,10 @@ git diff --check
 git status --short
 ```
 
+For the 0.4.0 release, the runtime line budget is the hard gate. The
+`all Rust source` total remains in the report as an advisory trend metric and
+does not block this release.
+
 The release archives contain only the binary, `README.md`, `LICENSE`, and
 `CHANGELOG.md`. `scripts/package_release.py` creates deterministic archives and
 their `.sha256` files.
