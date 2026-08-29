@@ -168,17 +168,17 @@ fn run_status(json: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let profile =
-        match load_workspace_profile(&config.workspace(), RuntimeProfile::interactive_default()) {
-            Ok(profile) => profile,
-            Err(error) => {
-                eprintln!("error: {error}");
-                if json {
-                    println!("{}", json!({"error": error}));
-                }
-                return ExitCode::from(2);
+    let workspace = config.workspace();
+    let profile = match load_workspace_profile(&workspace, RuntimeProfile::interactive_default()) {
+        Ok(profile) => profile,
+        Err(error) => {
+            eprintln!("error: {error}");
+            if json {
+                println!("{}", json!({"error": error}));
             }
-        };
+            return ExitCode::from(2);
+        }
+    };
     let manifest = profile.manifest();
     if json {
         let mut status = config.status_json();
