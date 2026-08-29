@@ -27,7 +27,6 @@ pub use derived::DerivedItem;
 const SCHEMA_VERSION: u64 = 1;
 const MAX_SESSION_BYTES: u64 = 32 * 1024 * 1024;
 pub(crate) const MAX_RECORD_BYTES: usize = 512 * 1024;
-const MAX_SESSIONS: usize = 128;
 const MAX_WORKSPACE_KEY: usize = 240;
 const SESSION_FILE_NAME: &str = "session.jsonl";
 const SESSION_LOCK_NAME: &str = "session";
@@ -83,11 +82,6 @@ pub struct TurnCommit<'a> {
     pub error: Option<&'a str>,
     pub messages: &'a [Message],
     pub checkpoint: &'a [Message],
-}
-
-pub struct SessionSummary {
-    pub id: String,
-    pub bytes: u64,
 }
 
 struct SessionLock(PathBuf);
@@ -630,100 +624,6 @@ fn write_prompt_context(session_dir: &Path, workspace: &Path, session_id: &str) 
     let _ = write_json_atomic(&session_dir.join(PROMPT_CONTEXT_FILE_NAME), &value);
 }
 
-pub fn list(workspace: &Path) -> Result<Vec<SessionSummary>, String> {
-    let mut sessions_map = std::collections::HashMap::new();
-
-    if let Ok(directory) = session_directory(workspace)
-        && let Ok(entries) = fs::read_dir(&directory)
-    {
-        for entry in entries.filter_map(Result::ok) {
-            let path = entry.path();
-            if path.is_dir()
-                && let Some(id) = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(ToString::to_string)
-                && validate_session_id(&id).is_ok()
-            {
-                let summary_file = path.join(SUMMARY_FILE_NAME);
-                if let Ok(data) = fs::read_to_string(&summary_file)
-                    && let Ok(meta) = serde_json::from_str::<Value>(&data)
-                {
-                    let bytes = meta.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0);
-                    sessions_map.insert(id.clone(), SessionSummary { id, bytes });
-                    continue;
-                }
-                let file = path.join(SESSION_FILE_NAME);
-                if let Ok(meta) = fs::metadata(&file) {
-                    sessions_map.insert(
-                        id.clone(),
-                        SessionSummary {
-                            id,
-                            bytes: meta.len(),
-                        },
-                    );
-                }
-            }
-        }
-    }
-
-    let legacy_dir = workspace.join(".agents/sessions");
-    if let Ok(entries) = fs::read_dir(&legacy_dir) {
-        for entry in entries.filter_map(Result::ok) {
-            let path = entry.path();
-            if path.is_dir()
-                && let Some(id) = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(ToString::to_string)
-                && validate_session_id(&id).is_ok()
-            {
-                let summary_file = path.join(SUMMARY_FILE_NAME);
-                if let Ok(data) = fs::read_to_string(&summary_file)
-                    && let Ok(meta) = serde_json::from_str::<Value>(&data)
-                {
-                    let bytes = meta.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0);
-                    sessions_map
-                        .entry(id.clone())
-                        .or_insert_with(|| SessionSummary { id, bytes });
-                    continue;
-                }
-                let file = path.join(SESSION_FILE_NAME);
-                if let Ok(meta) = fs::metadata(&file) {
-                    sessions_map
-                        .entry(id.clone())
-                        .or_insert_with(|| SessionSummary {
-                            id,
-                            bytes: meta.len(),
-                        });
-                }
-            } else if path.is_file()
-                && path.extension().is_some_and(|ext| ext == "jsonl")
-                && let Some(stem) = path
-                    .file_stem()
-                    .and_then(|n| n.to_str())
-                    .map(ToString::to_string)
-                && validate_session_id(&stem).is_ok()
-                && let Ok(meta) = fs::metadata(&path)
-            {
-                sessions_map
-                    .entry(stem.clone())
-                    .or_insert_with(|| SessionSummary {
-                        id: stem,
-                        bytes: meta.len(),
-                    });
-            }
-        }
-    }
-
-    let mut sessions: Vec<_> = sessions_map.into_values().collect();
-    if sessions.len() > MAX_SESSIONS {
-        return Err(format!("session count exceeds {MAX_SESSIONS} limit"));
-    }
-    sessions.sort_by(|left, right| right.id.cmp(&left.id));
-    Ok(sessions)
-}
-
 struct LoadedRecords {
     thread_id: String,
     messages: Vec<Message>,
@@ -939,22 +839,6 @@ pub fn resolve_session_file(
 ) -> Result<(PathBuf, PathBuf), String> {
     let session_dir = session_directory(workspace)?.join(session_id);
     let path = session_dir.join(SESSION_FILE_NAME);
-    if path.exists() {
-        return Ok((session_dir, path));
-    }
-    let legacy1 = workspace
-        .join(".agents/sessions")
-        .join(session_id)
-        .join(SESSION_FILE_NAME);
-    if legacy1.exists() {
-        return Ok((workspace.join(".agents/sessions").join(session_id), legacy1));
-    }
-    let legacy2 = workspace
-        .join(".agents/sessions")
-        .join(format!("{session_id}.jsonl"));
-    if legacy2.exists() {
-        return Ok((workspace.join(".agents/sessions"), legacy2));
-    }
     Ok((session_dir, path))
 }
 

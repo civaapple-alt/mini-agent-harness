@@ -34,44 +34,6 @@ pub fn print_auto_warning() {
     mini_agent_host::print_auto_warning();
 }
 
-/// App Server owned, secret-safe configuration view used by frontend
-/// diagnostics. Runtime assembly keeps the Host configuration private.
-#[derive(Clone)]
-pub struct RuntimeConfig(mini_agent_host::RuntimeConfig);
-
-pub struct DoctorReport {
-    pub ok: bool,
-    pub lines: Vec<String>,
-    pub json: serde_json::Value,
-}
-
-impl RuntimeConfig {
-    pub fn load() -> Result<Self, String> {
-        mini_agent_host::RuntimeConfig::load().map(Self)
-    }
-
-    pub fn workspace(&self) -> std::path::PathBuf {
-        self.0.workspace().to_path_buf()
-    }
-
-    pub fn status_json(&self) -> serde_json::Value {
-        self.0.status_json()
-    }
-
-    pub fn status_lines(&self) -> Vec<String> {
-        self.0.status_lines()
-    }
-
-    pub fn doctor(&self) -> DoctorReport {
-        let report = self.0.doctor();
-        DoctorReport {
-            ok: report.ok,
-            lines: report.lines,
-            json: report.json,
-        }
-    }
-}
-
 /// Workflow capabilities selected by an App Server launch profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorkflowScope {

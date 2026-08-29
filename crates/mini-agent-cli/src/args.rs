@@ -10,16 +10,12 @@ USAGE:
     mini-agent <COMMAND> --help         Detailed command help
 
 QUICK START:
-    mini-agent doctor                  Check local setup (no provider call)
-    mini-agent demo \"make this loud\"  Run the offline demo (no credentials)
     mini-agent ask \"summarize repo\"    Run one provider-backed turn
     mini-agent auto                     Start the interactive copilot
 
 COMMANDS:
-    resume, fork, sessions              Durable session management
-    status, doctor                      Configuration and prerequisite checks
+    resume, fork                        Durable session management
     mentor                              Review settled runs
-    demo                                Deterministic offline run
 
 COMMON OPTIONS:
     --security-preset PRESET            default | turbomode | full-machine
@@ -74,13 +70,6 @@ USAGE:
 
 Forks a new independent session from the latest settled checkpoint of an existing session.";
 
-pub const SESSIONS_HELP: &str = "mini-agent sessions
-
-USAGE:
-    mini-agent sessions
-
-Lists bounded durable sessions for the current workspace under ~/.mini-agent/sessions.";
-
 pub const MENTOR_HELP: &str = "mini-agent mentor
 
 USAGE:
@@ -115,24 +104,6 @@ OPTIONS:
     --json                       Emit a machine-readable final result
 ";
 
-pub const RUN_HELP: &str = "mini-agent run
-
-USAGE:
-    mini-agent run [--session-id SESSION_ID] [--auto-approve|-y] [--max-steps N] [--json] [--no-tools] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] <PROMPT>
-
-Alias of `ask`. Prefer `ask` in scripts and docs.
-
-OPTIONS:
-    --session-id SESSION_ID      Resume this durable session instead of opening a new one
-    --auto-approve, -y            Permit sensitive tools non-interactively (aliases: --yes, --auto)
-    --max-steps N                 Cap model steps for this turn (default: 8; 0 means unlimited)
-    --security-preset PRESET      Security policy preset: default, turbomode, full-machine [default: default]
-    --sandbox KIND                Execution sandbox: native (JobObject/process groups), docker [default: native]
-    --web-search, --search        Enable built-in Responses web_search [default: enabled]
-    --no-web-search, --no-search  Disable built-in Responses web_search
-    --no-tools                    Disable all host tools and extension loading
-    --json                        Emit a machine-readable final result";
-
 pub const AUTO_HELP: &str = "mini-agent auto
 
 USAGE:
@@ -151,27 +122,6 @@ OPTIONS:
     --no-tools                   Disable all host tools and extension loading
 ";
 
-pub const DEMO_HELP: &str = "mini-agent demo
-
-USAGE:
-    mini-agent demo [--] <PROMPT>
-
-Runs the deterministic local demo without provider credentials.";
-
-pub const STATUS_HELP: &str = "mini-agent status
-
-USAGE:
-    mini-agent status [--json]
-
-Prints effective non-secret startup configuration, active preset, sandbox, and world state.";
-
-pub const DOCTOR_HELP: &str = "mini-agent doctor
-
-USAGE:
-    mini-agent doctor [--json]
-
-Checks local configuration and environment prerequisites without contacting the model provider.";
-
 pub const VERSION_HELP: &str = "mini-agent version
 
 USAGE:
@@ -181,16 +131,11 @@ USAGE:
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Interactive,
-    Demo,
-    Run,
     Ask,
     Auto,
     Resume,
     Fork,
-    Sessions,
     Mentor,
-    Status,
-    Doctor,
     Help,
     Version,
 }
@@ -218,15 +163,10 @@ pub enum HelpTopic {
     Root,
     Interactive,
     Ask,
-    Run,
     Auto,
     Resume,
     Fork,
-    Sessions,
     Mentor,
-    Demo,
-    Status,
-    Doctor,
     Version,
 }
 
@@ -255,14 +195,6 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             args.next();
             Command::Version
         }
-        Some("demo") => {
-            args.next();
-            Command::Demo
-        }
-        Some("run") => {
-            args.next();
-            Command::Run
-        }
         Some("ask") => {
             args.next();
             Command::Ask
@@ -279,21 +211,9 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             args.next();
             Command::Fork
         }
-        Some("sessions") => {
-            args.next();
-            Command::Sessions
-        }
         Some("mentor") => {
             args.next();
             Command::Mentor
-        }
-        Some("status") => {
-            args.next();
-            Command::Status
-        }
-        Some("doctor") => {
-            args.next();
-            Command::Doctor
         }
         None => Command::Interactive,
         Some(other) if other.starts_with('-') => Command::Interactive,
@@ -419,16 +339,6 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if matches!(command, Command::Interactive) && !prompt.is_empty() {
         return Err("interactive mode does not accept a prompt; use `ask`".to_string());
     }
-    if matches!(command, Command::Demo | Command::Run) && prompt.is_empty() {
-        return Err("prompt is required".to_string());
-    }
-    if matches!(
-        command,
-        Command::Status | Command::Doctor | Command::Sessions
-    ) && !prompt.is_empty()
-    {
-        return Err("this command does not accept positional arguments".to_string());
-    }
     if command == Command::Resume && prompt.len() != 1 {
         return Err("resume requires exactly one SESSION_ID".to_string());
     }
@@ -451,37 +361,22 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             None => return Ok(help_invocation(HelpTopic::Mentor)),
         }
     }
-    if json
-        && !matches!(
-            command,
-            Command::Ask | Command::Run | Command::Mentor | Command::Status | Command::Doctor
-        )
-    {
-        return Err("--json is supported only by ask, run, mentor, status, and doctor".to_string());
+    if json && !matches!(command, Command::Ask | Command::Mentor) {
+        return Err("--json is supported only by ask and mentor".to_string());
     }
-    if automatic && !matches!(command, Command::Ask | Command::Run) {
-        return Err("--auto-approve is supported only by ask and run".to_string());
+    if automatic && !matches!(command, Command::Ask) {
+        return Err("--auto-approve is supported only by ask".to_string());
     }
     if session_id.is_some()
-        && !matches!(
-            command,
-            Command::Ask | Command::Run | Command::Interactive | Command::Auto
-        )
+        && !matches!(command, Command::Ask | Command::Interactive | Command::Auto)
     {
-        return Err(
-            "--session-id is supported only by ask, run, auto, and interactive".to_string(),
-        );
+        return Err("--session-id is supported only by ask, auto, and interactive".to_string());
     }
-    if max_steps.is_some() && !matches!(command, Command::Ask | Command::Run) {
-        return Err("--max-steps is supported only by ask and run".to_string());
+    if max_steps.is_some() && !matches!(command, Command::Ask) {
+        return Err("--max-steps is supported only by ask".to_string());
     }
-    if no_tools
-        && !matches!(
-            command,
-            Command::Interactive | Command::Ask | Command::Run | Command::Auto
-        )
-    {
-        return Err("--no-tools is supported only by interactive, ask, run, and auto".to_string());
+    if no_tools && !matches!(command, Command::Interactive | Command::Ask | Command::Auto) {
+        return Err("--no-tools is supported only by interactive, ask, and auto".to_string());
     }
     Ok(Invocation {
         command,
@@ -522,15 +417,10 @@ fn help_topic(name: &str) -> Result<HelpTopic, String> {
     match name {
         "interactive" | "repl" => Ok(HelpTopic::Interactive),
         "ask" => Ok(HelpTopic::Ask),
-        "run" => Ok(HelpTopic::Run),
         "auto" => Ok(HelpTopic::Auto),
         "resume" => Ok(HelpTopic::Resume),
         "fork" => Ok(HelpTopic::Fork),
-        "sessions" => Ok(HelpTopic::Sessions),
         "mentor" => Ok(HelpTopic::Mentor),
-        "demo" => Ok(HelpTopic::Demo),
-        "status" => Ok(HelpTopic::Status),
-        "doctor" => Ok(HelpTopic::Doctor),
         "version" => Ok(HelpTopic::Version),
         _ => Err(format!("unknown help topic: {name}")),
     }
@@ -540,15 +430,10 @@ fn help_topic_for(command: Command) -> HelpTopic {
     match command {
         Command::Interactive => HelpTopic::Interactive,
         Command::Ask => HelpTopic::Ask,
-        Command::Run => HelpTopic::Run,
         Command::Auto => HelpTopic::Auto,
         Command::Resume => HelpTopic::Resume,
         Command::Fork => HelpTopic::Fork,
-        Command::Sessions => HelpTopic::Sessions,
         Command::Mentor => HelpTopic::Mentor,
-        Command::Demo => HelpTopic::Demo,
-        Command::Status => HelpTopic::Status,
-        Command::Doctor => HelpTopic::Doctor,
         Command::Version => HelpTopic::Version,
         Command::Help => HelpTopic::Root,
     }
@@ -559,15 +444,10 @@ pub fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::Root => HELP,
         HelpTopic::Interactive => INTERACTIVE_HELP,
         HelpTopic::Ask => ASK_HELP,
-        HelpTopic::Run => RUN_HELP,
         HelpTopic::Auto => AUTO_HELP,
         HelpTopic::Resume => RESUME_HELP,
         HelpTopic::Fork => FORK_HELP,
-        HelpTopic::Sessions => SESSIONS_HELP,
         HelpTopic::Mentor => MENTOR_HELP,
-        HelpTopic::Demo => DEMO_HELP,
-        HelpTopic::Status => STATUS_HELP,
-        HelpTopic::Doctor => DOCTOR_HELP,
         HelpTopic::Version => VERSION_HELP,
     }
 }
@@ -608,14 +488,6 @@ mod tests {
     }
 
     #[test]
-    fn one_shot_mode_requires_prompt() {
-        assert_eq!(
-            parse_args(vec!["demo".to_string()]).unwrap_err(),
-            "prompt is required"
-        );
-    }
-
-    #[test]
     fn option_delimiter_allows_prompt_starting_with_dash() {
         let invocation = parse_args(vec![
             "ask".to_string(),
@@ -633,9 +505,6 @@ mod tests {
 
     #[test]
     fn parses_durable_session_commands() {
-        let sessions = parse_args(vec!["sessions".to_string()]).unwrap();
-        assert_eq!(sessions.command, Command::Sessions);
-
         let resume = parse_args(vec!["resume".to_string(), "s-12345678".to_string()]).unwrap();
         assert_eq!(resume.command, Command::Resume);
         assert_eq!(resume.prompt, "s-12345678");
@@ -650,10 +519,6 @@ mod tests {
         assert_eq!(
             parse_args(vec!["resume".to_string()]).unwrap_err(),
             "resume requires exactly one SESSION_ID"
-        );
-        assert_eq!(
-            parse_args(vec!["sessions".to_string(), "extra".to_string()]).unwrap_err(),
-            "this command does not accept positional arguments"
         );
     }
 
@@ -866,31 +731,8 @@ mod tests {
     #[test]
     fn rejects_options_unsupported_by_a_command() {
         assert_eq!(
-            parse_args(vec![
-                "status".to_string(),
-                "--trace".to_string(),
-                "trace.jsonl".to_string(),
-            ])
-            .unwrap_err(),
-            "unknown option: --trace"
-        );
-        assert_eq!(
-            parse_args(vec![
-                "doctor".to_string(),
-                "--trace".to_string(),
-                "trace.jsonl".to_string(),
-            ])
-            .unwrap_err(),
-            "unknown option: --trace"
-        );
-        assert_eq!(
-            parse_args(vec![
-                "demo".to_string(),
-                "--json".to_string(),
-                "prompt".to_string()
-            ])
-            .unwrap_err(),
-            "--json is supported only by ask, run, mentor, status, and doctor"
+            parse_args(vec!["--json".to_string()]).unwrap_err(),
+            "--json is supported only by ask and mentor"
         );
         let auto_inv = parse_args(vec![
             "ask".to_string(),

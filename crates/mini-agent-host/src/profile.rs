@@ -167,7 +167,6 @@ impl RuntimeProfile {
             "interactive" => Some(Self::interactive_default()),
             "ask" => Some(Self::ask_default()),
             "auto" => Some(Self::auto_default()),
-            "demo" => Some(Self::demo()),
             _ => None,
         }
     }
@@ -182,14 +181,6 @@ impl RuntimeProfile {
 
     pub fn auto_default() -> Self {
         Self::named("auto", ToolScope::All, ExtensionLoadDepth::Enabled)
-    }
-
-    pub fn demo() -> Self {
-        let mut profile = Self::named("demo", ToolScope::All, ExtensionLoadDepth::None);
-        profile.workflows = WorkflowScope::Disabled;
-        profile.regular_agent.prompts.workflows = false;
-        profile.regular_agent.rules.workflows = false;
-        profile
     }
 
     pub fn without_tools(mut self) -> Self {

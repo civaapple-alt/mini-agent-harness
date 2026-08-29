@@ -10,7 +10,6 @@ use crate::frontend::ApprovalController;
 use mini_agent_capabilities::ApprovalMode;
 use mini_agent_capabilities::SandboxKind;
 use mini_agent_capabilities::SecurityPreset;
-use mini_agent_capabilities::list_sessions as list_capability_sessions;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::RunControl;
 use mini_agent_host::RuntimeConfig;
@@ -19,27 +18,6 @@ use mini_agent_host::WorldState;
 use mini_agent_host::harness_config;
 use mini_agent_host::harness_config_auto;
 use std::sync::Arc;
-
-/// Bounded session listing data exposed to frontend commands.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SessionSummary {
-    pub id: String,
-    pub bytes: u64,
-}
-
-/// Lists durable sessions without exposing the capability session type to a
-/// frontend.
-pub fn list_sessions(workspace: &std::path::Path) -> Result<Vec<SessionSummary>, String> {
-    list_capability_sessions(workspace).map(|sessions| {
-        sessions
-            .into_iter()
-            .map(|session| SessionSummary {
-                id: session.id,
-                bytes: session.bytes,
-            })
-            .collect()
-    })
-}
 
 /// Inputs used by an embedded local frontend to resolve one runtime.
 pub struct LocalRuntimeRequest {
