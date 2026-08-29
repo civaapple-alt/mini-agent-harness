@@ -142,8 +142,25 @@ registry seam, so CLI and App Server defaults remain unchanged while trusted
 embedders can opt into the external provider example without creating a second
 execution loop.
 
-The post-cleanup line report is runtime `14,409/20,000` lines, capabilities
-`14,077` lines, and all Rust source `37,181/30,000` lines. The runtime gate
+## CLI shrink stage (2026-08-29)
+
+The App Server now exposes a `local` bootstrap adapter. `LocalRuntimeRequest`
+and `LocalRuntimeLaunch` own local configuration loading, workspace profile
+resolution, explicit sandbox/security overrides, web-search overrides, and
+Harness step-limit selection. Both headless `ask` and the interactive REPL
+worker use this adapter before starting `AppServerRuntime`; the CLI retains
+the terminal approval callback, input worker, event rendering, and frontend
+workflow commands.
+
+This is an incremental boundary: Goal/Plan commands and presentation-specific
+status/session output still live in the CLI, while turn execution and runtime
+assembly stay behind App Server. The next CLI reduction should expose those
+management operations as App Server service methods before removing the
+remaining direct Host/Capabilities imports.
+
+The post-cleanup line report is runtime `14,515/20,000` lines, capabilities
+`14,077` lines, CLI `7,716` lines, and all Rust source `37,230/30,000` lines.
+The runtime gate
 still passes; the workspace gate remains the active reduction task.
 
 ## Problem

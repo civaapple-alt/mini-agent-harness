@@ -1,5 +1,6 @@
 use mini_agent_app_server::AppServerRuntime;
 use mini_agent_app_server::ThreadUpdate;
+use mini_agent_app_server::local::LocalRuntimeRequest;
 use mini_agent_app_server::mentor;
 use mini_agent_capabilities::mcp;
 use mini_agent_capabilities::sandbox::SandboxKind;
@@ -18,7 +19,6 @@ use mini_agent_core::TurnInput;
 use mini_agent_core::TurnInputMode;
 use mini_agent_host::RuntimeProfile;
 use mini_agent_host::WorkflowScope;
-use mini_agent_host::config::RuntimeConfig;
 use mini_agent_host::harness_config_auto;
 use mini_agent_host::observer::RunObserver;
 use mini_agent_host::print_auto_warning;
@@ -457,20 +457,6 @@ fn spawn_worker(
     run_control: RunControl,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let (auto_max_steps, web_search_enabled, runtime_config) =
-            match RuntimeConfig::load().map(|mut runtime| {
-                if let Some(enabled) = web_search_override {
-                    runtime = runtime.with_web_search(enabled);
-                }
-                (runtime.copilot_max_steps(), runtime.web_search(), runtime)
-            }) {
-                Ok(loaded) => loaded,
-                Err(error) => {
-                    let _ = events.send(ReplEvent::InitializationFailed(error));
-                    let _ = events.send(ReplEvent::Exited);
-                    return;
-                }
-            };
         let model_runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -484,50 +470,38 @@ fn spawn_worker(
                 return;
             }
         };
-        let profile = if copilot {
-            RuntimeProfile::auto_default()
-        } else {
-            RuntimeProfile::interactive_default()
+        let launch = match mini_agent_app_server::local::prepare(LocalRuntimeRequest {
+            automatic: copilot,
+            no_tools,
+            security_preset: preset,
+            security_preset_explicit,
+            sandbox_kind,
+            sandbox_kind_explicit,
+            web_search_override,
+            session_request,
+            max_steps: None,
+        }) {
+            Ok(launch) => launch,
+            Err(error) => {
+                let _ = events.send(ReplEvent::InitializationFailed(error));
+                let _ = events.send(ReplEvent::Exited);
+                return;
+            }
         };
-        let mut profile =
-            match mini_agent_host::load_workspace_profile(&runtime_config.workspace(), profile) {
-                Ok(profile) => profile,
-                Err(error) => {
-                    let _ = events.send(ReplEvent::InitializationFailed(error));
-                    let _ = events.send(ReplEvent::Exited);
-                    return;
-                }
-            };
-        if no_tools {
-            profile = profile.without_tools();
-        }
-        let profile = if sandbox_kind_explicit {
-            profile.with_sandbox(sandbox_kind)
-        } else {
-            profile
+        let auto_max_steps = launch.runtime_config.copilot_max_steps();
+        let web_search_enabled = launch.runtime_config.web_search();
+        let runtime_config = launch.runtime_config.clone();
+        let workflow_scope = launch.profile.workflows;
+        let mut runtime = match model_runtime.block_on(
+            launch.start_with_control(approval.clone(), std::sync::Arc::new(run_control.clone())),
+        ) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = events.send(ReplEvent::InitializationFailed(error));
+                let _ = events.send(ReplEvent::Exited);
+                return;
+            }
         };
-        let profile = if security_preset_explicit {
-            profile.with_security(preset)
-        } else {
-            profile
-        };
-        let workflow_scope = profile.workflows;
-        let mut runtime =
-            match model_runtime.block_on(AppServerRuntime::start_with_control_and_profile(
-                runtime_config.clone(),
-                approval.clone(),
-                harness_config_auto(copilot, auto_max_steps),
-                session_request,
-                std::sync::Arc::new(run_control.clone()),
-                profile,
-            )) {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    let _ = events.send(ReplEvent::InitializationFailed(error));
-                    let _ = events.send(ReplEvent::Exited);
-                    return;
-                }
-            };
         let mut copilot = copilot;
         let mut goal_objective: Option<String> = None;
         let mut world = runtime.world().clone();

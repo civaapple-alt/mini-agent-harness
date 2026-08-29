@@ -1,11 +1,8 @@
-use mini_agent_app_server::AppServerRuntime;
+use mini_agent_app_server::local::LocalRuntimeRequest;
 use mini_agent_capabilities::sandbox::SandboxKind;
 use mini_agent_capabilities::security::SecurityPreset;
 use mini_agent_capabilities::session::SessionRequest;
 use mini_agent_capabilities::workspace::{ApprovalController, ApprovalMode};
-use mini_agent_host::RuntimeProfile;
-use mini_agent_host::config::RuntimeConfig;
-use mini_agent_host::harness_config;
 use mini_agent_host::observer::RunObserver;
 use mini_agent_host::observer::ScriptFormat;
 use mini_agent_host::observer::print_final_answer;
@@ -36,13 +33,6 @@ pub async fn run(
         Ok(prompt) => prompt,
         Err(error) => return preflight_error(json_output, &error),
     };
-    let mut runtime_config = match RuntimeConfig::load() {
-        Ok(config) => config,
-        Err(error) => return preflight_error(json_output, &error),
-    };
-    if let Some(enabled) = web_search_override {
-        runtime_config = runtime_config.with_web_search(enabled);
-    }
     let tty = io::stdin().is_terminal();
     let mode = if automatic || tty {
         print_auto_warning();
@@ -50,43 +40,22 @@ pub async fn run(
     } else {
         ApprovalMode::Interactive
     };
-    let config = match (automatic, max_steps) {
-        (true, steps) => mini_agent_host::harness_config_auto(
-            true,
-            steps.unwrap_or_else(|| runtime_config.copilot_max_steps()),
-        ),
-        (false, Some(steps)) => mini_agent_host::harness_config_auto(true, steps),
-        (false, None) => harness_config(false),
-    };
-    let profile = if automatic {
-        RuntimeProfile::auto_default()
-    } else {
-        RuntimeProfile::ask_default()
-    };
-    let mut profile =
-        match mini_agent_host::load_workspace_profile(&runtime_config.workspace(), profile) {
-            Ok(profile) => profile,
-            Err(error) => return preflight_error(json_output, &error),
-        };
-    if no_tools {
-        profile = profile.without_tools();
-    }
-    if sandbox_kind_explicit {
-        profile = profile.with_sandbox(sandbox);
-    }
-    if security_preset_explicit {
-        profile = profile.with_security(preset);
-    }
-    let approval = ApprovalController::with_preset(mode, profile.security);
-    let mut runtime = match AppServerRuntime::start_with_profile(
-        runtime_config,
-        approval,
-        config,
+    let launch = match mini_agent_app_server::local::prepare(LocalRuntimeRequest {
+        automatic,
+        no_tools,
+        security_preset: preset,
+        security_preset_explicit,
+        sandbox_kind: sandbox,
+        sandbox_kind_explicit,
+        web_search_override,
         session_request,
-        profile,
-    )
-    .await
-    {
+        max_steps,
+    }) {
+        Ok(launch) => launch,
+        Err(error) => return preflight_error(json_output, &error),
+    };
+    let approval = ApprovalController::with_preset(mode, launch.profile.security);
+    let mut runtime = match launch.start(approval).await {
         Ok(runtime) => runtime,
         Err(error) => return preflight_error(json_output, &error),
     };

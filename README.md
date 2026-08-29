@@ -60,7 +60,9 @@ limits, failures, and observation events.
 - `mini-agent-cli` is the frontend: REPL input, headless commands, output
   rendering, and local session interaction. Agent turns go through the local
   App Server runtime; the CLI does not own provider, tool, Thread, or Harness
-  assembly.
+  assembly. The App Server's `local` bootstrap adapter resolves runtime
+  profiles and launch settings for embedded frontends, keeping that setup out
+  of the REPL and headless command paths.
 
 The conceptual runtime direction is:
 

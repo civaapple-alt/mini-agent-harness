@@ -55,6 +55,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   startup paths retain their existing defaults.
 - HostRuntimeFactory and RuntimeBuilder accept an optional capability registry;
   the default registry and all existing CLI/App Server paths remain built-in.
+- Local App Server bootstrap now resolves runtime configuration, workspace
+  profiles, overrides, and Harness limits for both `ask` and the REPL worker;
+  CLI code remains focused on input, approval, and rendering.
 
 ### Fixed
 

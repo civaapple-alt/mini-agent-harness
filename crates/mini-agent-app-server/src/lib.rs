@@ -125,6 +125,7 @@ impl Default for ApprovalBroker {
 pub mod client;
 pub mod demo;
 pub mod json_rpc;
+pub mod local;
 pub mod mentor;
 pub mod runtime;
 
