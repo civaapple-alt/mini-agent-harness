@@ -171,8 +171,21 @@ Goal/Plan state transitions and JSON-RPC wire methods remain the next part of
 this stage. They still require a workflow service API so ACP and remote JSON-RPC
 clients can use the same operations without exposing Host filesystem types.
 
-The post-cleanup line report is runtime `14,625/20,000` lines, capabilities
-`14,077` lines, CLI `7,657` lines, and all Rust source `37,281/30,000` lines.
+## Workflow management service stage (2026-08-29)
+
+`mini-agent-app-server::workflows::WorkflowService` now binds Goal/Plan
+operations to the App Server runtime's session directory and goal limits. The
+REPL uses this service for plan initialization/toggle, goal initialization,
+pause/fail, verifier criteria and verdict persistence, milestone advancement,
+restart recovery, and bounded prompt construction. Direct
+`mini-agent-host::goal` calls have been removed from the CLI.
+
+The service is currently an in-process management seam. Goal/Plan JSON-RPC
+methods and ACP mapping are intentionally separate follow-up work; they should
+expose typed state and diagnostics rather than Host paths or filesystem handles.
+
+The post-cleanup line report is runtime `14,726/20,000` lines, capabilities
+`14,077` lines, CLI `7,617` lines, and all Rust source `37,342/30,000` lines.
 The runtime gate
 still passes; the workspace gate remains the active reduction task.
 

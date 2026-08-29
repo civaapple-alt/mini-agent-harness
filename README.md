@@ -50,7 +50,8 @@ limits, failures, and observation events.
   host-backed `AppServerRuntime`, typed facade, and versioned
   `mini-agent-app-server-protocol` support initialization, thread lifecycle,
   turn commands, steering, interruption, settled results, approval requests,
-  ordered event notifications, and tool-free Mentor review turns.
+  ordered event notifications, tool-free Mentor review turns, and local
+  Session/World/MCP/Goal/Plan management through the runtime service.
   `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess
   clients.
 - `mini-agent-acp` is an experimental edge adapter that maps ACP-style

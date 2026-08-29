@@ -128,6 +128,7 @@ pub mod json_rpc;
 pub mod local;
 pub mod mentor;
 pub mod runtime;
+pub mod workflows;
 
 pub use client::LocalAppServerClient;
 pub use json_rpc::AppServerConnection;
@@ -139,6 +140,7 @@ pub use runtime::capability_manifest_to_protocol;
 pub use runtime::{
     AppServerRuntime, McpRetryResult, RuntimeSessionInfo, RuntimeTurnBatch, RuntimeTurnResult,
 };
+pub use workflows::WorkflowService;
 
 mod worker;
 use worker::{Command, worker_loop};

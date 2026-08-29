@@ -58,6 +58,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Local App Server bootstrap now resolves runtime configuration, workspace
   profiles, overrides, and Harness limits for both `ask` and the REPL worker;
   CLI code remains focused on input, approval, and rendering.
+- App Server workflow management now binds Goal/Plan persistence, verifier
+  state, milestone transitions, and prompt construction to the runtime session;
+  the REPL no longer calls the Host Goal module directly.
 
 ### Fixed
 

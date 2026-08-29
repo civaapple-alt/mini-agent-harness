@@ -9,6 +9,7 @@ use crate::AppServer;
 use crate::AppServerConnection;
 use crate::LocalAppServerClient;
 use crate::ThreadUpdate;
+use crate::workflows::WorkflowService;
 use mini_agent_app_server_protocol::CapabilityManifest as ProtocolCapabilityManifest;
 use mini_agent_app_server_protocol::ContextLimits as ProtocolContextLimits;
 use mini_agent_app_server_protocol::DisabledCapability;
@@ -41,7 +42,9 @@ use mini_agent_host::HostRuntimeFactory;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
 use mini_agent_host::WorldState;
+use mini_agent_host::goal::GoalLimits;
 use mini_agent_host::tool_outcome::classify_tools;
+use std::path::PathBuf;
 
 /// The settled result projected by the local App Server runtime.
 pub type RuntimeTurnResult = TurnReadResult;
@@ -88,6 +91,7 @@ pub struct AppServerRuntime {
     retry_mcp_servers: Vec<mini_agent_capabilities::McpServerConfig>,
     capability_manifest: CapabilityManifest,
     approval: ApprovalController,
+    goal_limits: GoalLimits,
 }
 
 impl AppServerRuntime {
@@ -178,6 +182,7 @@ impl AppServerRuntime {
         registry: CapabilityRegistry,
     ) -> Result<Self, String> {
         let workspace = runtime_config.workspace();
+        let goal_limits = runtime_config.goal_limits();
         let model_name = runtime_config.model().unwrap_or_default().to_string();
         let session = match session_request {
             SessionRequest::Disabled => None,
@@ -254,6 +259,7 @@ impl AppServerRuntime {
             retry_mcp_servers,
             capability_manifest,
             approval,
+            goal_limits,
         })
     }
 
@@ -318,6 +324,18 @@ impl AppServerRuntime {
 
     pub fn retry_mcp_servers(&self) -> &[mini_agent_capabilities::McpServerConfig] {
         &self.retry_mcp_servers
+    }
+
+    /// Returns workflow operations bound to this runtime's session directory.
+    /// A non-durable runtime uses the workspace as its local Plan directory;
+    /// Goal creation still requires a durable session at the CLI policy edge.
+    pub fn workflows(&self) -> WorkflowService {
+        let session_dir = self
+            .session
+            .as_ref()
+            .and_then(|opened| opened.store.path().parent().map(PathBuf::from))
+            .unwrap_or_else(|| self.world.workspace().to_path_buf());
+        WorkflowService::new(session_dir, self.goal_limits)
     }
 
     /// Returns bounded metadata without exposing the persistence store.
