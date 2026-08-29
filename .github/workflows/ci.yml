@@ -12,9 +12,6 @@ concurrency:
 
 jobs:
   quality:
-    # Temporary 0.4.0 release exception: keep quality visible, but do not let
-    # the advisory workspace line total block the release workflow.
-    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
