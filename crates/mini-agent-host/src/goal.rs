@@ -335,7 +335,7 @@ pub fn init_goal_workspace_with_limits(
 
 ## Acceptance Criteria
 - Full workspace tests and linting pass with zero warnings.
-- Independent mentor verifier gives APPROVED verdict.
+- Independent Goal verifier gives APPROVED verdict.
 
 ## Milestones
 - [ ] Milestone 1: Workspace inspection and baseline test verification.

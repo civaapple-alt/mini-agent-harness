@@ -148,7 +148,7 @@ impl RuntimeConfig {
             .mentor_model
             .as_ref()
             .ok_or_else(|| {
-                "MENTOR_OPENAI_MODEL is required for mentor commands (process, .env, or ~/.mini-agent/.env)"
+                "MENTOR_OPENAI_MODEL is required for Goal verification (process, .env, or ~/.mini-agent/.env)"
                     .to_string()
             })?
             .value
@@ -158,7 +158,7 @@ impl RuntimeConfig {
             .as_ref()
             .or(self.api_key.as_ref())
             .ok_or_else(|| {
-                "MENTOR_OPENAI_API_KEY or OPENAI_API_KEY is required for mentor commands"
+                "MENTOR_OPENAI_API_KEY or OPENAI_API_KEY is required for Goal verification"
                     .to_string()
             })?
             .value

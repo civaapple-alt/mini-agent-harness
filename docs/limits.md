@@ -76,7 +76,6 @@ Host tools add their own effect-side bounds before results reach core:
 | file read | 128 KiB |
 | `read_image` file | 4 MiB; JPEG/PNG/GIF/WebP by magic; 4 images / request; Files API 60s, 7-day expiry; session `attachments/` reloaded on resume and copied on fork |
 | `web_fetch` body / extracted text | 128 KiB / 50k characters; 15s; 5 same-class redirects |
-| `open_file` | workspace file, or approved absolute local file; OS default app; Windows images use a MOTW-free temp copy |
 | new file or edited file | 1 MiB |
 | shell command text | 16 KiB |
 | shell runtime | 120 seconds |
@@ -91,8 +90,8 @@ Host tools add their own effect-side bounds before results reach core:
 | rendered world-state snapshot | 8 KiB; fixed command catalog and capped path |
 | durable session file / JSONL record | 32 MiB / 512 KiB |
 | listed durable sessions | 128 per workspace under `~/.mini-agent/sessions/` |
-| mentor verification criteria | 32 KiB |
-| mentor execution | 1 model step, 0 tool calls |
+| Goal verifier criteria | 32 KiB |
+| Goal verifier execution | 1 model step, 0 tool calls |
 | discovered skill or compatible plugin instructions | 64; 16 KiB combined metadata catalog |
 | skill, plugin, or MCP metadata file | 64 KiB |
 | MCP servers | 8 configured stdio or streamable HTTP servers |
@@ -110,8 +109,9 @@ projected to the model as a bounded preview plus a handle. Managed process logs
 retain bounded head and tail while their pipes continue to drain; at most eight
 process records exist, and dropping the host stops any remaining process trees.
 On foreground timeout the host terminates the shell process tree. Process
-execution is still not an isolation boundary. Interactive and `run` modes
-require approval; the explicitly selected `auto` mode does not.
+execution is still not an isolation boundary. Non-interactive `ask` requires
+explicit approval for sensitive tools; the explicitly selected `auto` mode does
+not.
 
 Project extension discovery scans only immediate children at fixed locations
 and at most 128 directory entries per location. Installed skills, plugins, and

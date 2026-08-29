@@ -9,22 +9,22 @@ mini-agent resolves provider settings in this order:
 
 A PATH-installed binary should keep credentials in the user file so they are
 not copied into every workspace. A workspace `.env` still overrides the user
-file when a project needs a different key or model. `status` reports the
-non-secret source of each value.
+file when a project needs a different key or model. The App Server initialize
+response reports the bounded non-secret capability manifest.
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | for primary commands | Bearer credential for the Responses endpoint |
 | `OPENAI_MODEL` | for primary commands | Provider model identifier. DeepSeek flash/pro image-bearing requests use `deepseek-v4-flash-vision-exp` |
 | `OPENAI_BASE_URL` | no | Responses API root; defaults to `https://api.openai.com/v1`. Files API is `{base}/files` |
-| `MENTOR_OPENAI_MODEL` | for mentor commands | Independent mentor model identifier |
-| `MENTOR_OPENAI_API_KEY` | no | Mentor credential override; otherwise inherits `OPENAI_API_KEY` |
-| `MENTOR_OPENAI_BASE_URL` | no | Mentor API root override; otherwise inherits `OPENAI_BASE_URL` |
+| `MENTOR_OPENAI_MODEL` | for Goal verification | Independent verifier model identifier |
+| `MENTOR_OPENAI_API_KEY` | no | Verifier credential override; otherwise inherits `OPENAI_API_KEY` |
+| `MENTOR_OPENAI_BASE_URL` | no | Verifier API root override; otherwise inherits `OPENAI_BASE_URL` |
 | `MINI_AGENT_MAX_STEPS` | no | Copilot/auto model-step cap; `0` means unlimited (the default) |
 | `MINI_AGENT_GOAL_MAX_LOOPS` | no | Maximum Goal milestone attempts; defaults to `20` |
 | `MINI_AGENT_GOAL_STEP_BUDGET` | no | Maximum model steps per Goal milestone; defaults to `50` |
 | `MINI_AGENT_GOAL_TIMEOUT_SECS` | no | Wall-clock timeout for one Goal milestone; defaults to `600` seconds |
-| `MINI_AGENT_PROFILE` | standalone App Server only | Startup profile name: `interactive`, `ask`, `auto`, or `demo` |
+| `MINI_AGENT_PROFILE` | standalone App Server only | Startup profile name: `interactive`, `ask`, or `auto` |
 
 ## Runtime profiles and prompt/rule sources
 
@@ -47,10 +47,10 @@ regular-agent base prompt, output contract, and context policy are reserved for
 the next profile stage. Neither interface can carry arbitrary prompt bodies,
 commands, paths, or credentials.
 
-Use `--no-tools` with `interactive`, `ask`, `run`, or `auto` to resolve the
+Use `--no-tools` with `interactive`, `ask`, or `auto` to resolve the
 same profile into a model-only runtime. Tool and extension construction is
 skipped, while sessions, App Server turns, events, and persistence remain the
-same. Startup output and `status --json` expose the bounded capability
+same. Startup output and the App Server initialize response expose the bounded capability
 manifest, including enabled/disabled groups and prompt/rule source names.
 The host keeps prompt admission and rule admission as separate profile
 settings. Their source names are visible independently in the manifest, along
@@ -159,12 +159,10 @@ All provider requests use `{OPENAI_BASE_URL}/responses`. DeepSeek image turns
 use `function_call_output` `input_image.file_id`; mini-agent does not select a
 second provider protocol or rewrite the endpoint based on the model name.
 
-Run `mini-agent status` to inspect the effective non-secret configuration and
-its source and detected world state. `status` never prints the credential and
-succeeds even when the provider is unconfigured. Run `mini-agent doctor` to
-validate provider configuration and the host shell without starting an agent
-turn. `doctor` exits non-zero while `OPENAI_API_KEY` or `OPENAI_MODEL` is
-missing. Both commands accept `--json`. `mini-agent demo` needs no credentials.
+Use `/status` in the interactive session to inspect the effective runtime
+status, and use the App Server `initialize` response to inspect the bounded
+non-secret capability manifest. Neither output contains credentials. Provider
+configuration is validated when a provider-backed turn starts.
 
 If the startup workspace contains `AGENTS.md`, mini-agent appends its UTF-8
 contents once to the stable system prompt. The file has a 16 KiB hard limit.
@@ -183,8 +181,7 @@ environment values or command output.
 ## Durable sessions
 
 Interactive, one-shot `ask`, and `auto` sessions always persist; there is no
-persistence opt-out setting. List known IDs
-with `mini-agent sessions`, and restore one with
+persistence opt-out setting. Restore a known session with
 `mini-agent resume SESSION_ID`.
 Settled records live under `~/.mini-agent/sessions/<workspace>/<session-id>/`,
 where `<workspace>` is the percent-encoded absolute project path.
@@ -205,23 +202,17 @@ Goal limits can be shortened in a workspace `.env` for deterministic local
 fixtures. A timeout stops the current milestone cooperatively, persists a
 failed Goal state, and leaves the REPL available for another command; it does
 not forcibly interrupt synchronous tool effects.
-- **Built-in Foundations & Personas**: Supports 3 core agent roles (`explore`, `plan`, `general`) and 7 specialized personas (`reviewer`, `implementer`, `security-auditor`, `test-writer`, `researcher`, `design-doc-writer`, `design-doc-reviewer`) with dual-mode file contracts (`review_file`, `summary_file`).
+- **Built-in Foundations & Personas**: Supports 3 core agent roles (`explore`, `plan`, `general`) and 3 bounded personas (`reviewer`, `implementer`, `researcher`).
 
-## Mentor insight and verification
+## Goal verification
 
-Set `MENTOR_OPENAI_MODEL`, then analyze the latest settled checkpoint of a
-durable session:
+When Goal Mode has a verifier gate, set `MENTOR_OPENAI_MODEL` to run a separate,
+tool-free check against the latest settled checkpoint:
 
-```sh
-mini-agent mentor insight SESSION_ID
-mini-agent mentor verify SESSION_ID -- "the requested tests passed and the diff is clean"
-```
-
-Both commands accept `--json`. The mentor inherits the
-primary credential and endpoint unless the mentor-specific overrides are set.
-It has a separate system role, exactly one model step, and an empty tool
-catalog. Its output is appended as a derived item linked to the immutable source
-checkpoint; it is not inserted into the primary thread's replay history.
+The verifier inherits the primary credential and endpoint unless the
+verifier-specific overrides are set. It has a separate system role, exactly one
+model step, and an empty tool catalog. Its bounded verdict is stored in the
+Goal workspace and is not replayed as primary conversation history.
 
 ## Project extensions
 
@@ -242,17 +233,13 @@ shapes are:
 | Ecosystem | Manifest | Skills | MCP | Additional instructions |
 | --- | --- | --- | --- | --- |
 | Agent Plugins v1 | `plugin.json` | `skills/` | `mcp.json` | none |
-| Claude | `.claude-plugin/plugin.json` | `skills/` | `.mcp.json` | `agents/*.md` |
-| Grok | `.grok-plugin/plugin.json` | `skills/` | `.mcp.json` | `agents/*.md` |
 
-Claude/Grok commands, hooks, LSP, UI metadata, model selection, and subagent
-isolation remain client-specific and are not executed by mini-agent.
+Client-specific commands, hooks, LSP, UI metadata, model selection, and
+subagent isolation are not executed by mini-agent.
 
 ### Standalone MCP
 
-An aggregate `.agents/mcp.json` accepts either `{"mcpServers": {...}}` or the
-legacy direct server map. One-server files under `.agents/mcp/*.json` use this
-native shape:
+One-server files under `.agents/mcp/*.json` use this native shape:
 
 ```json
 {
@@ -268,15 +255,15 @@ native shape:
 ```
 
 Supported transports are `stdio`, `http`, and `streamable-http`. The `http`
-name is the Claude/Grok alias for streamable HTTP. `connect_timeout_ms`
+name is accepted as an alias for streamable HTTP. `connect_timeout_ms`
 defaults to 20 seconds and is capped at 120 seconds. Header placeholders use
 `${NAME}`, `${env:NAME}`, or `${NAME:-default}`; missing variables without a
 default fail before connecting. Mini-agent does not run an interactive OAuth
 browser flow; choose an anonymous endpoint or configure an existing credential.
 
 Stdio configurations accept `command`, `args`, `env`, and `cwd`. Portable
-`${PLUGIN_ROOT}` / `${PLUGIN_DATA}` and legacy `${CLAUDE_PLUGIN_ROOT}` package
-placeholders are supported without invoking a shell.
+`${PLUGIN_ROOT}` / `${PLUGIN_DATA}` package placeholders are supported without
+invoking a shell.
 
 Copyable skill, plugin, HTTP MCP, and stdio MCP examples live in
 [`examples/extensions`](../examples/extensions/README.md).

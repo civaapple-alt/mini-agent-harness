@@ -27,10 +27,8 @@ entries are discovered.
 Copy `plugin/context7` to `.agents/plugins/context7`. It is a portable Agent
 Plugins v1 package containing one skill and one remote HTTP MCP server.
 
-Claude and Grok plugin layouts are also accepted under
-`.agents/plugins/<name>`. Their skills, agent instructions, and MCP
-configuration are adapted; client-specific commands, hooks, LSP, and UI
-metadata are not executed by mini-agent.
+Only the portable Agent Plugins v1 layout is accepted. Client-specific
+commands, hooks, LSP, and UI metadata are not executed by mini-agent.
 
 ## Standalone MCP
 
@@ -38,5 +36,5 @@ Copy one file from `mcp/` to `.agents/mcp/<server>.json`. The HTTP example uses
 an optional `CONTEXT7_API_KEY`; the stdio example launches the configured
 process. Connection and tool-call approval follow the active runtime profile.
 
-Run `mini-agent status --json` after changing extensions to inspect the
-non-secret discovery summary.
+Use `/status` in an interactive session after changing extensions to inspect the
+non-secret runtime and MCP summary.

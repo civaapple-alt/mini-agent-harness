@@ -148,6 +148,7 @@ If a proposed approach is rejected during review:
 |---|---|---|
 | 2026-08-24 | [Source Code Line Budget](implemented/simplification/2026-08-24-source-code-line-budget.md) | 20k runtime and 30k total Rust-source hard gates for 0.4.0 |
 | 2026-08-29 | [Mainline Simplification: 39k to 29k Rust Lines](implemented/simplification/2026-08-29-mainline-simplification-39000-to-29000.md) | Removal of non-mainline edges, duplicate seams, and redundant test layers while preserving the canonical CLI → App Server → Host → Core path |
+| 2026-08-29 | [Mainline Simplification: 29k to 26k Rust Lines](implemented/simplification/2026-08-29-mainline-simplification-29k-to-26k.md) | Follow-up removal of stale replay, persona, profile, capability, and App Server compatibility seams; establishes the safer 26,984-line baseline |
 
 #### Testing (`implemented/testing/`)
 | Date | Title | Focus |

@@ -57,9 +57,8 @@ runtime, the request must match the active profile. The initialize result includ
 selected `profile` and structured `capabilityManifest` with enabled,
 disabled, extension depth, selected extension names, prompt, and rule source
 metadata, precedence, typed rule policy, per-source rule status, resolver
-state, bounded source fingerprints, conflicts, and context limits. Host
-embedders can use `with_selected_extensions` for metadata-only
-selection or `with_enabled_extensions` for an allowlisted enabled set.
+state, bounded source fingerprints, conflicts, and context limits. The
+manifest reports the selected bounded extension names and load depth.
 For the regular `general` agent, this manifest describes the selected base
 prompt fingerprint, independent prompt/rule source admission, and bounded
 context limits. A typed base-prompt/output/context preset is a follow-up wire
@@ -68,7 +67,7 @@ The standalone server resolves its workspace profile before creating the
 thread factory and reuses that frozen selection for new threads, keeping the
 advertised manifest consistent for the lifetime of the process.
 Set `MINI_AGENT_PROFILE` before starting the standalone binary to select one
-of the six builtin profiles; unknown names fail closed before a provider or
+of the three builtin profiles (`interactive`, `ask`, or `auto`); unknown names fail closed before a provider or
 thread is created.
 
 `initialize.params.providers` is an optional selector for the four local

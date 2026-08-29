@@ -14,11 +14,11 @@ the [MIT License](LICENSE).
 ## What you get
 
 - Interactive agent sessions and one-shot `ask` commands.
-- A credential-free deterministic `demo` for checking the complete loop.
+- An autonomous `auto` mode with bounded context compaction.
 - Bounded workspace file tools, shell commands, web fetches, images, and MCP.
 - Explicit Plan Mode and autonomous Goal Mode.
 - Durable sessions with resume, fork, live events, and result continuation.
-- Independent, tool-free mentor insight and verification.
+- Tool-free Goal verification against settled checkpoints.
 - Native process handling on macOS, Linux, and Windows, with optional Docker
   isolation.
 
@@ -50,7 +50,7 @@ limits, failures, and observation events.
   host-backed `AppServerRuntime`, typed facade, and versioned
   `mini-agent-app-server-protocol` support initialization, thread lifecycle,
   turn commands, steering, interruption, settled results, approval requests,
-  ordered event notifications, tool-free Mentor review turns, and local
+  ordered event notifications, tool-free Goal verification turns, and local
   Session/World/MCP/Goal/Plan management through the runtime service. The App
   Server owns workflow commands; Host only supplies the wrapped
   `HostWorkflowStore` persistence seam. The
@@ -122,19 +122,11 @@ Unix-like systems and require PowerShell 7 (`pwsh`) on Windows.
 
 ## Quick start
 
-These commands do not need provider credentials:
+Check the installed binary first:
 
 ```sh
 mini-agent --version
-mini-agent doctor
-mini-agent status
-mini-agent demo "make this loud"
 ```
-
-`demo` runs a deterministic model → tool → model → answer flow locally.
-`status` shows non-secret configuration and detected environment. `doctor`
-checks startup requirements and returns a non-zero status while the provider is
-not configured.
 
 To use `ask`, the interactive terminal, or `auto`, configure a provider. The
 recommended location is the user file below, which keeps credentials out of
@@ -149,7 +141,7 @@ OPENAI_BASE_URL=https://api.deepseek.com
 Use `~/.mini-agent/.env` on macOS/Linux and
 `%USERPROFILE%\.mini-agent\.env` on Windows. Process environment values take
 precedence over a workspace `.env`, which takes precedence over the user file.
-See [configuration](docs/configuration.md) for provider, mentor, web search, and
+See [configuration](docs/configuration.md) for provider, Goal verifier, web search, and
 extension settings.
 
 ## Common commands
@@ -159,11 +151,8 @@ mini-agent                         # interactive session
 mini-agent ask "summarize this repo"
 mini-agent ask --json "review the current changes"
 mini-agent auto "inspect the repo and run the tests"
-mini-agent sessions
 mini-agent resume SESSION_ID
 mini-agent fork SESSION_ID
-mini-agent mentor insight SESSION_ID
-mini-agent mentor verify SESSION_ID -- "tests pass and the diff is clean"
 ```
 
 Use `--` before a prompt that begins with `-`. Run `mini-agent help` or
@@ -175,22 +164,21 @@ Turn commands accept the following options:
 
 | Option | Applies to | Meaning |
 | --- | --- | --- |
-| `--session-id ID` (also `--session ID`) | interactive, `ask`, `run`, `auto` | Resume a durable session instead of opening a new one. |
-| `--auto-approve`, `-y` (also `--yes`, `--auto`) | `ask`, `run` | Allow sensitive tools without an interactive approval prompt. |
-| `--max-steps N` | `ask`, `run` | Limit model steps; default is 8 for `ask`, and `0` means unlimited. |
-| `--no-tools` | interactive, `ask`, `run`, `auto` | Disable workspace, shell, web, image, process, subagent, and MCP tools. |
-| `--security-preset PRESET` | interactive, `ask`, `run`, `auto` | Choose `default`, `turbomode`, or `full-machine`; default is `default`. |
-| `--sandbox KIND` | interactive, `ask`, `run`, `auto` | Choose `native` or `docker`; default is `native`. |
-| `--web-search` / `--search` | interactive, `ask`, `run`, `auto` | Enable built-in Responses `web_search`. |
-| `--no-web-search` / `--no-search` | interactive, `ask`, `run`, `auto` | Disable built-in Responses `web_search`. |
-| `--json` | `ask`, `run`, `mentor`, `status`, `doctor` | Emit machine-readable output. |
+| `--session-id ID` (also `--session ID`) | interactive, `ask`, `auto` | Resume a durable session instead of opening a new one. |
+| `--auto-approve`, `-y` (also `--yes`, `--auto`) | `ask` | Allow sensitive tools without an interactive approval prompt. |
+| `--max-steps N` | `ask` | Limit model steps; default is 8 for `ask`, and `0` means unlimited. |
+| `--no-tools` | interactive, `ask`, `auto` | Disable workspace, shell, web, image, process, and MCP tools. |
+| `--security-preset PRESET` | interactive, `ask`, `auto` | Choose `default`, `turbomode`, or `full-machine`; default is `default`. |
+| `--sandbox KIND` | interactive, `ask`, `auto` | Choose `native` or `docker`; default is `native`. |
+| `--web-search` / `--search` | interactive, `ask`, `auto` | Enable built-in Responses `web_search`. |
+| `--no-web-search` / `--no-search` | interactive, `ask`, `auto` | Disable built-in Responses `web_search`. |
+| `--json` | `ask` | Emit machine-readable output. |
 
-`ask` reads at most 32 KiB from stdin when no prompt is supplied. `run` is an
-alias of `ask` and requires a prompt. `auto PROMPT` runs one autonomous turn;
-bare `auto` opens an interactive copilot. `resume SESSION_ID` resumes a
-session directly, while `fork SESSION_ID` creates an independent session.
-`mentor insight SESSION_ID` performs an open-ended review; `mentor verify
-SESSION_ID -- CRITERIA` checks explicit acceptance criteria.
+`ask` reads at most 32 KiB from stdin when no prompt is supplied. `auto PROMPT`
+runs one autonomous turn; bare `auto` opens an interactive copilot.
+`resume SESSION_ID` resumes a session directly, while `fork SESSION_ID` creates
+an independent session. Goal verification is initiated by Goal Mode and is not
+a standalone CLI command.
 
 Interactive, one-shot, and auto sessions always append their settled history and
 stored result handles to `~/.mini-agent/sessions/`. Running processes, queued input, and
@@ -221,7 +209,7 @@ Project-scoped extensions live under `.agents/`:
 | --- | --- |
 | Agent Skill | `.agents/skills/<skill>/SKILL.md` |
 | Plugin | `.agents/plugins/<plugin>/` |
-| MCP | `.agents/mcp.json` or `.agents/mcp/<server>.json` |
+| MCP | `.agents/mcp/<server>.json` |
 
 Discovery is bounded and approval-aware. Client-specific UI, hooks, LSP, and
 nested-agent behavior are not emulated. See the
@@ -257,13 +245,13 @@ python3 scripts/line_budget.py
   `protocol`, `capabilities`, `host`, `app-server`, and `cli`, followed by the enforced
   workspace total. `capabilities` is the separately reported provider
   implementation group behind Host and is not part of the runtime-layer gate.
-  Each layer and the
-  workspace total also show `production`, `unit`, and `integration` lines:
+  Each layer and the workspace total also show `production`, `unit`, and
+  `integration` lines:
   inline `#[cfg(test)]` modules and `*_tests.rs` files are counted as unit
   tests, while Rust files below a `tests/` directory are counted as
   integration tests. The enforced ceilings are 20,000 lines for the runtime
-  layers (`core` + `protocol` + `host` + `app-server`); the separately
-  20,000-line runtime limit. The 30,000-line workspace total is enforced for
+  layers (`core` + `protocol` + `host` + `app-server`). The 30,000-line
+  workspace total is enforced for
   the 0.4.0 release, including tests. Both ceilings block the release gate.
   The report still includes all Rust source, including the CLI, so cleanup
   remains measurable.

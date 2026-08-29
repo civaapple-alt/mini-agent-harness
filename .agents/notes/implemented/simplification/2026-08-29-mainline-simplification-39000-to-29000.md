@@ -2,6 +2,10 @@
 
 Status: implemented
 
+This note records the first simplification stage. The follow-up reduction and
+current safer baseline are recorded in [Mainline Simplification: 29k to 26k
+Rust Lines](2026-08-29-mainline-simplification-29k-to-26k.md).
+
 ## Context
 
 The 0.4.0 `mini-agent-harness` codebase had reached more than 39,000 Rust
@@ -41,8 +45,9 @@ The measured result is:
 | Integration-test code | 2,975 | 1,288 | -1,687 |
 | Runtime layers | 16,458 | 15,050 | -1,408 |
 
-The current workspace is only 66 lines below the total gate. The budget is
-therefore a design constraint, not merely a reporting metric.
+At the end of this first stage the workspace was only 66 lines below the total
+gate. The budget was therefore a design constraint, not merely a reporting
+metric, and the follow-up stage was required before adding more features.
 
 ## Simplification process
 
@@ -200,7 +205,7 @@ The implementation was landed in small, reviewable commits:
 - New extension discovery must stay bounded and workspace-local or explicitly
   configured; marketplace/skillset clone traversal is not part of the product
   surface.
-- If a feature cannot fit under the remaining 66-line margin, it must be
+- If a feature cannot fit under the current line-budget margin, it must be
   split, replace an existing concept, or be proposed as a separately scoped
   experiment.
 - The older notes describing ACP, delegated subagents, or marketplace

@@ -21,9 +21,9 @@ clean commit
 The workflow does not use provider credentials and does not make paid model
 requests.
 
-Provider calls are not part of the release gate. Use the deterministic demo and
-local fixtures for release verification; paid provider checks, if needed, belong
-in an external evaluation harness.
+Provider calls are not part of the release gate. Use local tests and build
+verification; paid provider checks, if needed, belong in an external evaluation
+harness.
 
 ## Before changing the version
 
@@ -77,14 +77,12 @@ Exercise the built binary without contacting a provider:
 
 ```sh
 ./target/release/mini-agent --version
-./target/release/mini-agent status --json
-./target/release/mini-agent demo "make this loud"
 ```
 
 On Windows, use the equivalent `target\\release\\mini-agent.exe` commands.
 The Windows environment also needs PowerShell 7 (`pwsh`) for shell-tool
 coverage. Do not use a paid provider call as a release gate unless it has been
-explicitly authorized; the deterministic demo and CI smoke tests are the
+explicitly authorized; the workspace tests and binary version check are the
 default release checks.
 
 Review the package inputs before tagging:
@@ -154,8 +152,6 @@ On macOS/Linux:
 shasum -a 256 -c mini-agent-v0.4.0-<target>.tar.gz.sha256
 tar -xzf mini-agent-v0.4.0-<target>.tar.gz
 ./mini-agent-v0.4.0-<target>/mini-agent --version
-./mini-agent-v0.4.0-<target>/mini-agent doctor
-./mini-agent-v0.4.0-<target>/mini-agent demo "make this loud"
 ```
 
 On Windows PowerShell:
@@ -164,12 +160,9 @@ On Windows PowerShell:
 Get-FileHash .\\mini-agent-v0.4.0-x86_64-pc-windows-msvc.zip -Algorithm SHA256
 Expand-Archive .\\mini-agent-v0.4.0-x86_64-pc-windows-msvc.zip .\\mini-agent-v0.4.0
 .\\mini-agent-v0.4.0\\mini-agent.exe --version
-.\\mini-agent-v0.4.0\\mini-agent.exe doctor
-.\\mini-agent-v0.4.0\\mini-agent.exe demo "make this loud"
 ```
 
-Confirm that `--version` reports `0.4.0`, `doctor` does not leak credentials,
-and `demo` completes without a provider key. Then announce the release with a
+Confirm that `--version` reports `0.4.0`. Then announce the release with a
 short summary, supported platforms, upgrade instructions, and known
 limitations. Link to the GitHub Release rather than attaching unverified
 builds elsewhere.

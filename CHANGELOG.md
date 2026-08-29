@@ -17,6 +17,14 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Reduced extension discovery to workspace-local skills, installed plugins, and
   MCP configuration; marketplace and skillset clone traversal is no longer in
   the mainline path.
+- Removed the remaining standalone `demo`, `doctor`, `status`, `sessions`, and
+  `mentor` CLI command paths; runtime status is available through the
+  interactive `/status` command and Goal verification remains an internal
+  tool-free workflow gate.
+- Removed stale session replay/derived-state adapters, unused persona and
+  profile variants, duplicate capability/discovery/security accessors, and
+  redundant App Server runtime proxies. The new baseline is 26,984 Rust source
+  lines, including tests, with 13,846 lines in the runtime layers.
 
 ## [0.4.0] - 2026-08-29
 

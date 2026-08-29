@@ -1,36 +1,29 @@
 # Troubleshooting
 
-Start with:
-
-```sh
-mini-agent doctor
-mini-agent status
-```
-
-`doctor --json` and `status --json` provide the same information for scripts.
+Start with `mini-agent --version`, then configure the provider environment before
+running `ask`, `auto`, or the interactive session. Inside the interactive
+session, `/status` shows the effective runtime state.
 
 ## Missing provider configuration
 
-`mini-agent --version`, `status`, and `demo` work without credentials. `doctor`
-prints a structured report and exits non-zero until `OPENAI_API_KEY` and
-`OPENAI_MODEL` are set. For a downloaded binary, create
+`mini-agent --version` works without credentials. Provider-backed turns require
+`OPENAI_API_KEY` and `OPENAI_MODEL`. For a downloaded binary, create
 `~/.mini-agent/.env` (`%USERPROFILE%\.mini-agent\.env` on Windows), copy
-`.env.demo` into it, and fill `OPENAI_API_KEY`. A workspace `.env` overrides
-the user file; process environment values override both. `status` shows the
-source without printing the secret.
+the provider settings into it, and fill `OPENAI_API_KEY`. A workspace `.env`
+overrides the user file; process environment values override both.
 
 ## AGENTS.md is too large
 
 `ask` and the interactive terminal still start. Mini-agent keeps a 16 KiB head
 and tail of root `AGENTS.md`, marks the gap with `[truncated]`, and prints a
-warning. `doctor` reports the oversize check as an error. Trim the file if the
-omitted middle contains rules the model must see. Invalid UTF-8 still prevents
+warning. Trim the file if the omitted middle contains rules the model must see.
+Invalid UTF-8 still prevents
 startup.
 
 ## PowerShell commands fail on Windows
 
 mini-agent intentionally uses `pwsh`, not Windows PowerShell. Install
-PowerShell 7 and confirm `pwsh` is on `PATH`; `mini-agent doctor` checks this.
+PowerShell 7 and confirm `pwsh` is on `PATH` before using shell tools.
 
 ## A noninteractive tool call is denied
 
@@ -53,30 +46,29 @@ crash can be removed from
 `~/.mini-agent/sessions/<workspace>/<SESSION_ID>/session.lock`; the JSONL data
 file remains untouched. Mini-agent never removes a stale lock automatically.
 
-Mentor commands acquire this same lock so they cannot derive from a checkpoint
+Goal verification uses the same session lock so it cannot inspect a checkpoint
 while another process mutates the session. Exit the interactive owner before
-running `mentor insight` or `mentor verify`.
+starting a Goal verifier.
 
-## A mentor command reports missing configuration
+## Goal verification reports missing configuration
 
-Set `MENTOR_OPENAI_MODEL`. The mentor uses `OPENAI_API_KEY` and
+Set `MENTOR_OPENAI_MODEL`. The verifier uses `OPENAI_API_KEY` and
 `OPENAI_BASE_URL` unless `MENTOR_OPENAI_API_KEY` or
-`MENTOR_OPENAI_BASE_URL` overrides them. `mini-agent status` reports whether
-the mentor is enabled without printing credentials; `doctor` validates the
-effective mentor endpoint when the model is configured.
+`MENTOR_OPENAI_BASE_URL` overrides them. It runs with one model step and no
+tools, and stores only its bounded verdict in the Goal workspace.
 
 ## A workspace skill or plugin is missing
 
 Only workspace-local `.agents/skills/<skill>/SKILL.md` entries and installed
-`.agents/plugins/<plugin>` packages are discovered. Run `mini-agent doctor` and
-check the bounded YAML name, plugin manifest, and workspace path.
+`.agents/plugins/<plugin>` packages are discovered. Check the bounded YAML name,
+plugin manifest, and workspace path.
 
 ## An MCP server is not discovered
 
-Use plugin-root `mcp.json` for Agent Plugins v1, plugin-root `.mcp.json` for a
-Claude/Grok plugin, or `.agents/mcp.json` / `.agents/mcp/<server>.json` for a
-standalone server. `status --json` separates `mcp_stdio_servers` and
-`mcp_http_servers`. Legacy SSE is unsupported; use streamable HTTP or stdio.
+Use plugin-root `mcp.json` for Agent Plugins v1, or
+`.agents/mcp/<server>.json` for a standalone server. `/status` reports the
+currently loaded MCP summary. Legacy SSE is unsupported; use streamable HTTP
+or stdio.
 
 An HTTP server can also fail because a referenced header environment variable
 is missing. Use `${NAME:-}` only when an empty value is valid for that server.
@@ -103,7 +95,7 @@ public `http`/`https` URLs and loopback (`localhost`, `127.0.0.1`, `[::1]`). It 
 credentials, LAN/private IPs, cloud metadata (`169.254.169.254`), and `file:` paths, and it
 does not run JavaScript. A public page cannot redirect onto loopback. Client-only SPAs may
 come back as a thin shell with a warning; SSR HTML is returned as markdown. `read_file` is for
-source, `open_file` opens the OS default app (browser for HTML, viewer for images; absolute Pictures paths need the same approval as `read_image`). There is no screenshot, vision,
+source. There is no screenshot, vision,
 or headless-browser tool.
 
 ## Image understanding
@@ -121,10 +113,6 @@ DeepSeek text models ignore `input_image` (they replace it with a placeholder). 
 that one request is sent as `deepseek-v4-flash-vision-exp`. All requests use the Responses endpoint;
 DeepSeek keeps using `file_id` from the envelope when present. Resume and fork reload session
 `attachments/` so image turns can be retried without losing the local bytes.
-
-If Windows Photos asks whether an `open_file` image came from an untrusted location, that is
-Mark of the Web on a browser-downloaded file. `open_file` now launches a temp copy of images
-without that zone stamp; HTML still opens in place.
 
 `read_file` still refuses binary images; use `read_image`. There is no screenshot or browser-capture
 tool.

@@ -56,12 +56,12 @@ session
 A session identifies one append-only project log. A thread identifies one
 conversation lineage. A turn owns one user-initiated run and its settled
 status. Message items preserve user input, context snapshots, reasoning,
-assistant output, tool proposals, and tool settlements. Derived mentor items
-share the ordered log but are not replayable conversation messages.
+assistant output, tool proposals, and tool settlements. Goal verifier verdicts
+are kept in the Goal workspace and are not replayable conversation messages.
 
-Records have a strictly increasing sequence and bounded payload. Message and
-derived items also have stable item IDs, thread identity, kind, and timestamp;
-turn-owned messages carry a turn ID. A full bounded checkpoint is appended only
+Records have a strictly increasing sequence and bounded payload. Message items
+have stable item IDs, thread identity, kind, and timestamp; turn-owned messages
+carry a turn ID. A full bounded checkpoint is appended only
 after a turn settles and is the sole resume authority. Torn final writes fall
 back to the previous checkpoint.
 
@@ -72,26 +72,26 @@ state explicit before safe/unsafe replay policies are introduced. Compaction
 lineage, branch indexes, and live operation recovery are not
 implemented.
 
-## Mentor and verifier boundary
+## Goal verifier boundary
 
-A mentor is a separately configured model profile, not a hidden second voice
-inside the primary turn. It reads the latest settled checkpoint and writes a
-derived `mentor_insight` or `mentor_verification` item linked to:
+A Goal verifier is a separately configured model profile, not a hidden second
+voice inside the primary turn. It reads the latest settled checkpoint and
+writes a bounded verdict linked to:
 
 - the source session, thread, and authoritative checkpoint sequence;
 - a deterministic fingerprint of the exact checkpoint messages;
-- the mentor provider and model;
-- bounded criteria, insight or verification output.
+- the verifier provider and model;
+- bounded acceptance criteria and verification output.
 
-The mentor uses a separate harness with an empty tool catalog, a zero tool-call
-limit, and one model step. It cannot edit the primary transcript, approve
-effects, or make tool calls. Insight may advise a later turn;
-verification evaluates arrival criteria against immutable evidence. This
-keeps mentor output reproducible and makes disagreement inspectable rather
-than allowing an auxiliary model to mutate live state invisibly.
+The verifier uses a separate harness with an empty tool catalog, a zero
+tool-call limit, and one model step. It cannot edit the primary transcript,
+approve effects, or make tool calls. Verification evaluates arrival criteria
+against immutable evidence. This keeps verifier output reproducible and makes
+disagreement inspectable rather than allowing an auxiliary model to mutate
+live state invisibly.
 
-The derived record is intentionally ignored by normal resume, so repeated
-mentor runs do not contaminate the evidence seen by later primary turns. World
-state is already part of the checkpoint and therefore covered by its
-fingerprint. The FNV-1a fingerprint is non-cryptographic change detection; the
-checkpoint sequence remains the authoritative immutable reference.
+The verdict is intentionally ignored by normal resume, so repeated verifier
+runs do not contaminate the evidence seen by later primary turns. World state
+is already part of the checkpoint and therefore covered by its fingerprint.
+The FNV-1a fingerprint is non-cryptographic change detection; the checkpoint
+sequence remains the authoritative immutable reference.

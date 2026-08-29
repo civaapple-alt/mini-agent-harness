@@ -21,12 +21,12 @@ errors, and complete settled checkpoints. They can contain source code or
 secrets exposed during a turn. Review those files before sharing them. Session
 files are neither encrypted nor uploaded by mini-agent.
 
-Mentor commands send the complete latest settled checkpoint to the effective
-mentor endpoint, which may differ from `OPENAI_BASE_URL`. This can include all
-of the durable content described above. The bounded mentor criteria, model
-output, producer model, and source checkpoint fingerprint are appended to the
-session as a derived item. Mentor output is not sent to later primary turns
-unless a user explicitly copies it into the conversation.
+Goal verification can send the complete latest settled checkpoint to the
+effective verifier endpoint, which may differ from `OPENAI_BASE_URL`. This can
+include all of the durable content described above. The verifier runs with one
+model step and no tools, and stores only a bounded verdict in the Goal
+workspace. The verdict is not sent to later primary turns unless a user
+explicitly copies it into the conversation.
 
 Result handles are appended to the same `session.jsonl` log and are restored when
 the session is resumed. The input queue, in-flight turns, and managed-process
