@@ -179,7 +179,6 @@ use mini_agent_capabilities::goal_relative_rest;
 #[cfg(test)]
 use mini_agent_capabilities::is_plan_md_alias;
 use mini_agent_capabilities::normalize_path;
-use mini_agent_capabilities::same_path;
 
 fn unquote(text: &str) -> &str {
     let bytes = text.as_bytes();
@@ -292,27 +291,6 @@ pub fn is_plan_mode_active(session_dir: &Path) -> bool {
         return state.active;
     }
     false
-}
-
-#[allow(dead_code)]
-pub fn is_living_plan_whitelisted(target: &Path, session_dir: &Path) -> bool {
-    same_path(target, &living_plan_path(session_dir))
-}
-
-#[allow(dead_code)]
-pub fn init_goal_workspace(
-    session_dir: &Path,
-    objective: &str,
-    max_loops: usize,
-) -> io::Result<GoalState> {
-    init_goal_workspace_with_limits(
-        session_dir,
-        objective,
-        GoalLimits {
-            max_loops,
-            ..GoalLimits::default()
-        },
-    )
 }
 
 pub fn init_goal_workspace_with_limits(
@@ -587,7 +565,6 @@ mod tests {
         let plan_file = init_plan_mode_with_prompt(&dir, None).unwrap();
         assert!(plan_file.is_file());
         assert!(is_plan_mode_active(&dir));
-        assert!(is_living_plan_whitelisted(&plan_file, &dir));
         assert!(is_plan_md_alias(Path::new("plan.md")));
         assert!(is_plan_md_alias(Path::new("./plan.md")));
         assert!(!is_plan_md_alias(Path::new("docs/plan.md")));
@@ -626,7 +603,15 @@ mod tests {
     #[test]
     fn goal_workspace_lifecycle_and_milestones() {
         let dir = test_dir();
-        let state = init_goal_workspace(&dir, "Refactor auth", 10).unwrap();
+        let state = init_goal_workspace_with_limits(
+            &dir,
+            "Refactor auth",
+            GoalLimits {
+                max_loops: 10,
+                ..GoalLimits::default()
+            },
+        )
+        .unwrap();
         assert_eq!(state.schema_version, 1);
         assert_eq!(state.status, GoalStatus::Running);
         assert_eq!(state.current_milestone, 1);
@@ -676,7 +661,15 @@ mod tests {
     #[test]
     fn rejected_verdict_does_not_advance_milestone() {
         let dir = test_dir();
-        let state = init_goal_workspace(&dir, "Investigate", 2).unwrap();
+        let state = init_goal_workspace_with_limits(
+            &dir,
+            "Investigate",
+            GoalLimits {
+                max_loops: 2,
+                ..GoalLimits::default()
+            },
+        )
+        .unwrap();
         let next = advance_goal_milestone(
             &dir,
             Some(VerifierVerdict {
@@ -720,7 +713,15 @@ summary: All tests pass and architecture is clean.
     #[test]
     fn terminal_goal_state_does_not_advance_again() {
         let dir = test_dir();
-        init_goal_workspace(&dir, "Finish", 5).unwrap();
+        init_goal_workspace_with_limits(
+            &dir,
+            "Finish",
+            GoalLimits {
+                max_loops: 5,
+                ..GoalLimits::default()
+            },
+        )
+        .unwrap();
         advance_goal_milestone(
             &dir,
             Some(VerifierVerdict {
@@ -765,7 +766,15 @@ summary: All tests pass and architecture is clean.
     #[test]
     fn rejected_verdict_exhausts_retry_budget_without_advancing() {
         let dir = test_dir();
-        init_goal_workspace(&dir, "Exhaust", 1).unwrap();
+        init_goal_workspace_with_limits(
+            &dir,
+            "Exhaust",
+            GoalLimits {
+                max_loops: 1,
+                ..GoalLimits::default()
+            },
+        )
+        .unwrap();
         let failed = advance_goal_milestone(
             &dir,
             Some(VerifierVerdict {

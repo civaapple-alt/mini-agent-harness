@@ -386,9 +386,6 @@ fn build_command(config: &McpServerConfig) -> Result<Command, String> {
     let mut command = if let Some(relative) = command_name.strip_prefix("./") {
         let path = contained_existing_path(&config.plugin_root, relative, false)?;
         Command::new(path)
-    } else if let Some(relative) = command_name.strip_prefix("${CLAUDE_PLUGIN_ROOT}/") {
-        let path = contained_existing_path(&config.plugin_root, relative, false)?;
-        Command::new(path)
     } else {
         if Path::new(command_name).components().count() != 1 {
             return Err("bare MCP command must be a single executable name".to_string());
@@ -409,7 +406,6 @@ fn build_command(config: &McpServerConfig) -> Result<Command, String> {
     }
     command.env("PLUGIN_ROOT", &config.plugin_root);
     command.env("PLUGIN_DATA", &plugin_data);
-    command.env("CLAUDE_PLUGIN_ROOT", &config.plugin_root);
     let cwd = match cwd {
         None => config.plugin_root.clone(),
         Some(cwd) => resolve_cwd(cwd, &config.plugin_root, &plugin_data)?,
@@ -491,10 +487,6 @@ fn resolve_cwd(value: &str, plugin_root: &Path, plugin_data: &Path) -> Result<Pa
         (plugin_data, "")
     } else if let Some(relative) = value.strip_prefix("${PLUGIN_DATA}/") {
         (plugin_data, relative)
-    } else if value == "${CLAUDE_PLUGIN_ROOT}" {
-        (plugin_root, "")
-    } else if let Some(relative) = value.strip_prefix("${CLAUDE_PLUGIN_ROOT}/") {
-        (plugin_root, relative)
     } else {
         return Err("invalid MCP cwd".to_string());
     };
@@ -574,7 +566,6 @@ fn bounded_result(result: &rmcp::model::CallToolResult) -> Result<String, String
 fn expand_placeholders(value: &str, plugin_root: &str, plugin_data: &str) -> String {
     const ROOT: &str = "${PLUGIN_ROOT}";
     const DATA: &str = "${PLUGIN_DATA}";
-    const CLAUDE_ROOT: &str = "${CLAUDE_PLUGIN_ROOT}";
     let mut expanded = String::with_capacity(value.len());
     let mut remaining = value;
     while !remaining.is_empty() {
@@ -583,9 +574,6 @@ fn expand_placeholders(value: &str, plugin_root: &str, plugin_data: &str) -> Str
             remaining = rest;
         } else if let Some(rest) = remaining.strip_prefix(DATA) {
             expanded.push_str(plugin_data);
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(CLAUDE_ROOT) {
-            expanded.push_str(plugin_root);
             remaining = rest;
         } else {
             let character = remaining.chars().next().expect("remaining is non-empty");

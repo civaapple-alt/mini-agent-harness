@@ -226,23 +226,6 @@ fn terminal_approval(action: &str) -> Result<bool, ToolError> {
     ))
 }
 
-pub fn workspace_tools_with_read_roots(
-    root: PathBuf,
-    approval: ApprovalController,
-    extra_read_roots: Vec<PathBuf>,
-    sandbox: SandboxKind,
-    images: crate::image::ImageStore,
-) -> Result<Vec<Box<dyn Tool>>, ToolError> {
-    workspace_tools_with_read_roots_and_results(
-        root,
-        approval,
-        extra_read_roots,
-        sandbox,
-        images,
-        ResultStore::default(),
-    )
-}
-
 pub fn workspace_tools_with_read_roots_and_results(
     root: PathBuf,
     approval: ApprovalController,

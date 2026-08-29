@@ -86,7 +86,6 @@ pub use workspace::Workspace;
 pub use workspace::run_sandboxed_command;
 pub use workspace::shell_command;
 pub use workspace::string_arg;
-pub use workspace::workspace_tools_with_read_roots;
 pub use workspace::workspace_tools_with_read_roots_and_results;
 
 /// Stable identifier for the built-in OpenAI-compatible model provider.
