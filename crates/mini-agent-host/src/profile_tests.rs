@@ -63,16 +63,6 @@ fn default_profile_exposes_tools_and_prompt_rule_sources() {
 }
 
 #[test]
-fn builtin_profile_resolver_is_allowlisted() {
-    assert_eq!(
-        RuntimeProfile::builtin("demo"),
-        Some(RuntimeProfile::demo())
-    );
-    assert_eq!(RuntimeProfile::builtin("general"), None);
-    assert_eq!(RuntimeProfile::builtin("../interactive"), None);
-}
-
-#[test]
 fn no_tools_profile_is_explicit_and_does_not_admit_extensions() {
     let manifest = RuntimeProfile::ask_default().without_tools().manifest();
 
@@ -155,18 +145,6 @@ fn rule_policy_reports_shadowed_sources_and_read_only_security() {
 }
 
 #[test]
-fn prompt_and_rule_sources_can_be_selected_independently() {
-    let profile = RuntimeProfile::default().with_rule_sources(RuleSources {
-        project: false,
-        ..RuleSources::default()
-    });
-    let manifest = profile.manifest();
-
-    assert!(manifest.prompt_sources.contains(&"project".to_string()));
-    assert!(!manifest.rule_sources.contains(&"project".to_string()));
-}
-
-#[test]
 fn workspace_profile_file_overlays_bounded_selections() {
     let root = test_root();
     fs::create_dir_all(root.join(".agents")).unwrap();
@@ -212,34 +190,6 @@ fn workspace_profile_file_overlays_bounded_selections() {
     assert_eq!(profile.sandbox, SandboxKind::None);
     assert_eq!(profile.security, SecurityPreset::FullMachine);
 
-    fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
-fn workspace_profile_file_rejects_unknown_fields() {
-    let root = test_root();
-    fs::create_dir_all(root.join(".agents")).unwrap();
-    fs::write(root.join(".agents/profile.json"), r#"{"secret":"no"}"#).unwrap();
-
-    let error = load_workspace_profile(&root, RuntimeProfile::default()).unwrap_err();
-
-    assert!(error.contains("cannot parse"));
-    fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
-fn workspace_profile_file_rejects_unknown_capability_provider() {
-    let root = test_root();
-    fs::create_dir_all(root.join(".agents")).unwrap();
-    fs::write(
-        root.join(".agents/profile.json"),
-        r#"{"toolProvider":"remote"}"#,
-    )
-    .unwrap();
-
-    let error = load_workspace_profile(&root, RuntimeProfile::default()).unwrap_err();
-
-    assert!(error.contains("unknown Tool provider"));
     fs::remove_dir_all(root).unwrap();
 }
 

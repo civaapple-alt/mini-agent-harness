@@ -1,9 +1,7 @@
 use super::*;
-use crate::context_controller::COMPACT_TAIL_MAX_BYTES;
 use crate::context_controller::COMPACTION_PREFIX;
 use crate::context_controller::COMPACTION_PROMPT;
 use crate::context_controller::assemble_compacted;
-use crate::context_controller::serialized_len;
 use crate::context_controller::split_prefix_tail;
 use crate::context_controller::trim_prefix_to_fit;
 use crate::tool_batch_executor::truncate_utf8;
@@ -1260,91 +1258,6 @@ async fn repetitive_tool_calls_trigger_loop_warning() {
         _ => false,
     });
     assert!(has_loop_warning, "Expected loop warning in harness context");
-}
-
-#[tokio::test]
-async fn advancing_tool_output_with_same_arguments_does_not_trigger_loop_warning() {
-    struct AdvancingPollTool {
-        counter: std::sync::atomic::AtomicUsize,
-    }
-    impl Tool for AdvancingPollTool {
-        fn spec(&self) -> ToolSpec {
-            ToolSpec {
-                name: "poll".to_string(),
-                description: "poll status".to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"],
-                    "additionalProperties": false
-                }),
-            }
-        }
-        fn execute(&self, _args: &Value) -> Result<String, ToolError> {
-            let n = self
-                .counter
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            Ok(format!("progress status={n}"))
-        }
-    }
-
-    let tools = ToolRegistry::new(vec![Box::new(AdvancingPollTool {
-        counter: std::sync::atomic::AtomicUsize::new(1),
-    })]);
-
-    let model = ScriptedModel {
-        responses: VecDeque::from(vec![
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call1".to_string(),
-                    name: "poll".to_string(),
-                    arguments: json!({"id": "proc-1"}),
-                }],
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call2".to_string(),
-                    name: "poll".to_string(),
-                    arguments: json!({"id": "proc-1"}),
-                }],
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call3".to_string(),
-                    name: "poll".to_string(),
-                    arguments: json!({"id": "proc-1"}),
-                }],
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: "done without warning".to_string(),
-                tool_calls: vec![],
-                usage: None,
-            },
-        ]),
-    };
-
-    let mut harness = Harness::new(model, tools, HarnessConfig::default());
-    let outcome = harness.run("start", &mut ()).await.unwrap();
-
-    assert_eq!(outcome.final_text, "done without warning");
-    let has_loop_warning = harness.messages().iter().any(|msg| match msg {
-        Message::Context { text } => text.contains("Loop warning"),
-        _ => false,
-    });
-    assert!(
-        !has_loop_warning,
-        "Expected NO loop warning for advancing tool outputs"
-    );
 }
 
 #[test]

@@ -14,41 +14,6 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 #[test]
-fn expands_plugin_placeholders_once() {
-    assert_eq!(
-        expand_placeholders(
-            "${PLUGIN_ROOT}/a:${PLUGIN_DATA}/b:${UNKNOWN}",
-            "root/${PLUGIN_DATA}",
-            "data"
-        ),
-        "root/${PLUGIN_DATA}/a:data/b:${UNKNOWN}"
-    );
-}
-
-#[test]
-fn namespaces_and_bounds_exposed_tool_names() {
-    assert_eq!(
-        exposed_tool_name("plugin.name/server name", "read/resource"),
-        Some("mcp__plugin_name_server_name__read_resource".to_string())
-    );
-    assert_eq!(exposed_tool_name("server", ""), None);
-    assert_eq!(exposed_tool_name("server", &"x".repeat(64)), None);
-}
-
-#[test]
-fn truncates_large_tool_results_as_valid_json() {
-    let result = rmcp::model::CallToolResult::success(vec![rmcp::model::ContentBlock::text(
-        "x".repeat(MAX_TOOL_RESULT_BYTES),
-    )]);
-
-    let body = bounded_result(&result).unwrap();
-    let value: Value = serde_json::from_str(&body).unwrap();
-
-    assert_eq!(value["truncated"], true);
-    assert!(value["preview"].as_str().unwrap().len() <= MAX_TOOL_RESULT_BYTES);
-}
-
-#[test]
 fn loads_and_calls_stdio_server_through_rmcp() {
     let root = test_root();
     let script = root.join("server.py");

@@ -104,62 +104,6 @@ pub struct AppServerRuntime<M: Model = OpenAiModel> {
 }
 
 impl AppServerRuntime<OpenAiModel> {
-    /// Builds a Host runtime and starts the same App Server protocol used by
-    /// external clients. The returned client is initialized before use.
-    pub async fn start(
-        runtime_config: RuntimeConfig,
-        approval: ApprovalController,
-        config: HarnessConfig,
-        session_request: SessionRequest,
-    ) -> Result<Self, String> {
-        Self::start_with_control_and_profile(
-            runtime_config,
-            approval,
-            config,
-            session_request,
-            std::sync::Arc::new(RunControl::new()),
-            RuntimeProfile::default(),
-        )
-        .await
-    }
-
-    /// Builds a runtime with a control handle shared by the local input loop.
-    pub async fn start_with_control(
-        runtime_config: RuntimeConfig,
-        approval: ApprovalController,
-        config: HarnessConfig,
-        session_request: SessionRequest,
-        control: std::sync::Arc<RunControl>,
-    ) -> Result<Self, String> {
-        Self::start_with_control_and_profile(
-            runtime_config,
-            approval,
-            config,
-            session_request,
-            control,
-            RuntimeProfile::default(),
-        )
-        .await
-    }
-
-    pub async fn start_with_profile(
-        runtime_config: RuntimeConfig,
-        approval: ApprovalController,
-        config: HarnessConfig,
-        session_request: SessionRequest,
-        profile: RuntimeProfile,
-    ) -> Result<Self, String> {
-        Self::start_with_control_and_profile(
-            runtime_config,
-            approval,
-            config,
-            session_request,
-            std::sync::Arc::new(RunControl::new()),
-            profile,
-        )
-        .await
-    }
-
     pub async fn start_with_control_and_profile(
         runtime_config: RuntimeConfig,
         approval: ApprovalController,
@@ -168,28 +112,6 @@ impl AppServerRuntime<OpenAiModel> {
         control: std::sync::Arc<RunControl>,
         profile: RuntimeProfile,
     ) -> Result<Self, String> {
-        Self::start_with_control_and_profile_and_registry(
-            runtime_config,
-            approval,
-            config,
-            session_request,
-            control,
-            profile,
-            CapabilityRegistry::builtin(),
-        )
-        .await
-    }
-
-    /// Builds a runtime with a host-embedded capability registry.
-    pub async fn start_with_control_and_profile_and_registry(
-        runtime_config: RuntimeConfig,
-        approval: ApprovalController,
-        config: HarnessConfig,
-        session_request: SessionRequest,
-        control: std::sync::Arc<RunControl>,
-        profile: RuntimeProfile,
-        registry: CapabilityRegistry,
-    ) -> Result<Self, String> {
         Self::start_with_control_and_profile_and_registry_with_model_factory(
             runtime_config,
             approval,
@@ -197,7 +119,7 @@ impl AppServerRuntime<OpenAiModel> {
             session_request,
             control,
             profile,
-            registry,
+            CapabilityRegistry::builtin(),
             openai_model_factory,
         )
         .await

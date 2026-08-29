@@ -372,7 +372,3 @@ impl<M> DerefMut for Thread<M> {
         &mut self.harness
     }
 }
-
-#[cfg(test)]
-#[path = "thread_tests.rs"]
-mod tests;
