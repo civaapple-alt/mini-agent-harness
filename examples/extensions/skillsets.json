@@ -1,8 +1,0 @@
-{
-  "skillsets": {
-    "agent-skills": {
-      "path": "../shared-skills/agent-skills",
-      "skills": ["react-best-practices"]
-    }
-  }
-}

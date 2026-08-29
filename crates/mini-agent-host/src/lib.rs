@@ -1,6 +1,6 @@
 //! Application-host profile resolution and runtime composition for mini-agent.
 //!
-//! Concrete model, policy, marketplace, and persistence providers live in
+//! Concrete model, policy, and persistence providers live in
 //! `mini-agent-capabilities`. This crate owns profile resolution, runtime
 //! composition, and product workflows. It deliberately does not own terminal
 //! input or command-line dispatch; those belong to `mini-agent-cli`.

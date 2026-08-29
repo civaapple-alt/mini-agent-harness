@@ -24,7 +24,6 @@ LAYERS = (
         ("mini-agent-app-server", "mini-agent-app-server-protocol"),
     ),
     ("cli", ("mini-agent-cli",)),
-    ("experiments", ("mini-agent-experiments",)),
 )
 RUNTIME_PACKAGES = (
     "mini-agent-core",

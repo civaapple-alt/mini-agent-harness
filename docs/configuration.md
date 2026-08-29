@@ -226,7 +226,6 @@ checkpoint; it is not inserted into the primary thread's replay history.
 ## Project extensions
 
 Installed skills, plugins, and MCP configs stay inside the startup workspace.
-The mainline does not traverse external marketplace or skillset clones;
 `read_file`, `edit_file`, and `write_file` remain workspace-scoped.
 
 ### Skills
@@ -279,5 +278,5 @@ Stdio configurations accept `command`, `args`, `env`, and `cwd`. Portable
 `${PLUGIN_ROOT}` / `${PLUGIN_DATA}` and legacy `${CLAUDE_PLUGIN_ROOT}` package
 placeholders are supported without invoking a shell.
 
-Copyable skill, plugin, marketplace, HTTP MCP, and stdio MCP examples live in
+Copyable skill, plugin, HTTP MCP, and stdio MCP examples live in
 [`examples/extensions`](../examples/extensions/README.md).

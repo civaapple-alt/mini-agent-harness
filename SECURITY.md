@@ -20,18 +20,18 @@ prompts. Noninteractive `ask` fails closed on those tools unless `ask --auto-app
 Unattended `auto` (unlimited steps unless `MINI_AGENT_MAX_STEPS`, compact) also skips prompts. Use `/auto off` when
 you want to review each effect; use auto-approval only in a workspace you trust.
 
-Project `.agents` content is repository-controlled input. Skill, collection,
-plugin, and marketplace instructions can influence model behavior. Stdio MCP
+Project `.agents` content is repository-controlled input. Skill and plugin
+instructions can influence model behavior. Stdio MCP
 servers execute third-party code, while HTTP MCP sends arguments to a remote
-service. Mini Agent Harness validates package boundaries, requires explicit
-marketplace selection, sanitizes the inherited stdio environment, and asks
+service. Mini Agent Harness validates package boundaries, sanitizes the
+inherited stdio environment, and asks
 before MCP connection and each tool call. These are guardrails, not a sandbox;
 review extension code and endpoints before approval and use auto mode only with
 trusted extensions.
 
 Direct file writes stay in the startup workspace and reject `.git` paths.
-`read_file` may also open files inside local marketplace or skillset roots
-named by `path` in `.agents/marketplaces.json` or `.agents/skillsets.json`.
+`read_file` may open files only inside the startup workspace, subject to the
+same path policy as other workspace tools.
 Shell commands are operating-system processes and can access anything
 the current user can access. Provider requests can contain prompts,
 conversation history, and tool or file content selected during the run.
