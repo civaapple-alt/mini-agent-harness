@@ -167,9 +167,9 @@ execution-mode world updates through these methods. This keeps Thread context
 updates, persistence checkpoints, MCP tool installation, and runtime metadata
 serialized behind the service runtime rather than reimplemented in the CLI.
 
-Goal/Plan state transitions and JSON-RPC wire methods remain the next part of
-this stage. They still require a workflow service API so ACP and remote JSON-RPC
-clients can use the same operations without exposing Host filesystem types.
+Goal/Plan state transitions and JSON-RPC wire methods are now routed through the
+workflow service described below. The CLI and App Server remain the product
+path; ACP consumes the same boundary as a compatibility and generality check.
 
 ## Workflow management service stage (2026-08-29)
 
@@ -205,9 +205,18 @@ The wire projection deliberately omits `plan_file` and other filesystem
 handles. The remaining follow-up is event notifications for workflow state
 changes and a versioned ACP schema once the management vocabulary stabilizes.
 
+## Mainline priority (2026-08-29)
+
+The supported product path is **CLI + App Server**. App Server owns the
+runtime management contract, JSON-RPC transport, event stream, and workflow
+operations consumed by the CLI. ACP is an experimental side adapter used to
+validate that the App Server boundary is transport-neutral and reusable; ACP
+specific vocabulary or compatibility behavior must not drive Core, Protocol,
+Host, or the main CLI design.
+
 The post-cleanup line report is runtime `15,210/20,000` lines, capabilities
-`14,077` lines, ACP `1,176` lines, CLI `7,617` lines, and all Rust source
-`38,080/30,000` lines.
+`14,077` lines, ACP `1,188` lines, CLI `7,617` lines, and all Rust source
+`38,092/30,000` lines.
 The runtime gate
 still passes; the workspace gate remains the active reduction task.
 

@@ -68,6 +68,11 @@ limits, failures, and observation events.
   profiles and launch settings for embedded frontends, keeping that setup out
   of the REPL and headless command paths.
 
+The mainline is the CLI over the App Server boundary. ACP is an experimental
+side adapter and compatibility probe: it exercises the same App Server
+management and event contracts, but ACP-specific behavior does not become a
+constraint on Core, Host, or the CLI.
+
 The conceptual runtime direction is:
 
 ```text
