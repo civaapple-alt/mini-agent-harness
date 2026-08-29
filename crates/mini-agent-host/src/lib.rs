@@ -24,9 +24,11 @@ pub fn git_sha() -> &'static str {
 pub use config::RuntimeConfig;
 pub use harness_builder::HarnessBuild;
 pub use harness_builder::HostRuntime;
+pub use harness_builder::ModelProviderFactory;
 pub use harness_builder::RuntimeBuilder;
 pub use harness_builder::harness_config;
 pub use harness_builder::harness_config_auto;
+pub use harness_builder::prepare_harness_with_model_factory;
 pub use harness_builder::prepare_openai_harness;
 pub use harness_builder::prepare_openai_harness_with_profile;
 pub use harness_builder::prepare_openai_harness_with_profile_and_result_store;

@@ -114,6 +114,7 @@ impl ToolProvider for BuiltinToolProvider {
 #[derive(Clone)]
 pub struct CapabilityRegistry {
     tool_providers: Arc<Vec<Arc<dyn ToolProvider>>>,
+    model_providers: Arc<Vec<CapabilityDescriptor>>,
 }
 
 impl Default for CapabilityRegistry {
@@ -126,6 +127,7 @@ impl CapabilityRegistry {
     pub fn builtin() -> Self {
         Self {
             tool_providers: Arc::new(vec![Arc::new(BuiltinToolProvider)]),
+            model_providers: Arc::new(Vec::new()),
         }
     }
 
@@ -138,11 +140,30 @@ impl CapabilityRegistry {
         providers.push(provider);
         Self {
             tool_providers: Arc::new(providers),
+            model_providers: self.model_providers,
         }
+    }
+
+    /// Returns a registry with an embedding application's model descriptor.
+    ///
+    /// Construction is supplied separately through the Host model factory;
+    /// the registry only makes the stable provider ID selectable by a profile.
+    pub fn with_model_provider(mut self, descriptor: CapabilityDescriptor) -> Self {
+        assert_eq!(descriptor.kind, CapabilityKind::Model);
+        let mut providers = (*self.model_providers).clone();
+        if !providers
+            .iter()
+            .any(|registered| registered.id == descriptor.id)
+        {
+            providers.push(descriptor);
+        }
+        self.model_providers = Arc::new(providers);
+        self
     }
 
     pub fn descriptors(&self) -> Vec<CapabilityDescriptor> {
         let mut descriptors = BUILTIN_DESCRIPTORS.to_vec();
+        descriptors.extend(self.model_providers.iter().copied());
         for descriptor in self
             .tool_providers
             .iter()

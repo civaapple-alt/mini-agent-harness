@@ -5,6 +5,7 @@ use mini_agent_capabilities::build_model;
 use mini_agent_core::ContextLimitBehavior;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
+use mini_agent_core::Model;
 use mini_agent_core::ToolRegistry;
 
 use crate::config::RuntimeConfig;
@@ -23,8 +24,8 @@ use mini_agent_capabilities::workspace::ApprovalController;
 
 pub const AUTO_MAX_STEPS: usize = 0;
 
-pub struct HarnessBuild {
-    pub harness: Harness<OpenAiModel>,
+pub struct HarnessBuild<M: Model> {
+    pub harness: Harness<M>,
     pub images: ImageStore,
     pub stable_system_prompt: String,
     pub world: WorldState,
@@ -37,7 +38,32 @@ pub struct HarnessBuild {
 /// The fully assembled application-host runtime handed to a frontend or
 /// service boundary. It owns the concrete provider-backed Harness together
 /// with host state needed by persistence, extensions, and workflow adapters.
-pub type HostRuntime = HarnessBuild;
+pub type HostRuntime = HarnessBuild<OpenAiModel>;
+
+/// Provider seam used by the Host composition root to construct a model
+/// without coupling the runtime assembly to one concrete HTTP provider.
+pub trait ModelProviderFactory<M>: Send + Sync {
+    fn build(
+        &self,
+        provider_id: &str,
+        settings: ModelProviderSettings,
+        images: ImageStore,
+    ) -> Result<M, String>;
+}
+
+impl<M, F> ModelProviderFactory<M> for F
+where
+    F: Fn(&str, ModelProviderSettings, ImageStore) -> Result<M, String> + Send + Sync,
+{
+    fn build(
+        &self,
+        provider_id: &str,
+        settings: ModelProviderSettings,
+        images: ImageStore,
+    ) -> Result<M, String> {
+        self(provider_id, settings, images)
+    }
+}
 
 /// Composes provider, tools, policy, extensions, and world context outside the
 /// CLI. Frontends should depend on this builder instead of importing concrete
@@ -107,7 +133,7 @@ pub fn prepare_openai_harness(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
     config: HarnessConfig,
-) -> Result<HarnessBuild, String> {
+) -> Result<HarnessBuild<OpenAiModel>, String> {
     prepare_openai_harness_with_profile_and_result_store(
         runtime_config,
         approval,
@@ -122,7 +148,7 @@ pub fn prepare_openai_harness_with_profile(
     approval: ApprovalController,
     config: HarnessConfig,
     profile: RuntimeProfile,
-) -> Result<HarnessBuild, String> {
+) -> Result<HarnessBuild<OpenAiModel>, String> {
     prepare_openai_harness_with_profile_and_result_store(
         runtime_config,
         approval,
@@ -137,7 +163,7 @@ pub fn prepare_openai_harness_with_result_store(
     approval: ApprovalController,
     config: HarnessConfig,
     results: ResultStore,
-) -> Result<HarnessBuild, String> {
+) -> Result<HarnessBuild<OpenAiModel>, String> {
     prepare_openai_harness_with_profile_and_result_store(
         runtime_config,
         approval,
@@ -153,7 +179,7 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
     config: HarnessConfig,
     profile: RuntimeProfile,
     results: ResultStore,
-) -> Result<HarnessBuild, String> {
+) -> Result<HarnessBuild<OpenAiModel>, String> {
     prepare_openai_harness_with_profile_and_result_store_and_registry(
         runtime_config,
         approval,
@@ -167,11 +193,71 @@ pub fn prepare_openai_harness_with_profile_and_result_store(
 fn prepare_openai_harness_with_profile_and_result_store_and_registry(
     runtime_config: &RuntimeConfig,
     approval: ApprovalController,
+    config: HarnessConfig,
+    profile: RuntimeProfile,
+    results: ResultStore,
+    registry: CapabilityRegistry,
+) -> Result<HarnessBuild<OpenAiModel>, String> {
+    prepare_harness_with_profile_and_result_store_and_registry(
+        runtime_config,
+        approval,
+        config,
+        profile,
+        results,
+        registry,
+        openai_model_factory,
+    )
+}
+
+fn openai_model_factory(
+    provider_id: &str,
+    settings: ModelProviderSettings,
+    images: ImageStore,
+) -> Result<OpenAiModel, String> {
+    build_model(provider_id, settings, images).map_err(|error| error.to_string())
+}
+
+/// Builds a Host runtime with an embedding application's model provider.
+///
+/// Tool, policy, extension, world, and prompt assembly remain identical to
+/// the built-in path; only model construction crosses this explicit seam.
+pub fn prepare_harness_with_model_factory<M, F>(
+    runtime_config: &RuntimeConfig,
+    approval: ApprovalController,
+    config: HarnessConfig,
+    profile: RuntimeProfile,
+    results: ResultStore,
+    registry: CapabilityRegistry,
+    model_factory: F,
+) -> Result<HarnessBuild<M>, String>
+where
+    M: Model,
+    F: ModelProviderFactory<M>,
+{
+    prepare_harness_with_profile_and_result_store_and_registry(
+        runtime_config,
+        approval,
+        config,
+        profile,
+        results,
+        registry,
+        model_factory,
+    )
+}
+
+fn prepare_harness_with_profile_and_result_store_and_registry<M, F>(
+    runtime_config: &RuntimeConfig,
+    approval: ApprovalController,
     mut config: HarnessConfig,
     profile: RuntimeProfile,
     results: ResultStore,
     registry: CapabilityRegistry,
-) -> Result<HarnessBuild, String> {
+    model_factory: F,
+) -> Result<HarnessBuild<M>, String>
+where
+    M: Model,
+    F: ModelProviderFactory<M>,
+{
     let policy = registry.build_policy(&profile.policy_provider, profile.security)?;
     approval.set_policy(policy);
     registry.validate(
@@ -189,7 +275,7 @@ fn prepare_openai_harness_with_profile_and_result_store_and_registry(
     let provider = runtime_config.provider_settings()?;
     let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
     let images = ImageStore::for_provider(provider.api_key.clone(), &provider.base_url);
-    let model = match build_model(
+    let model = match model_factory.build(
         &profile.model_provider,
         ModelProviderSettings {
             api_key: provider.api_key,
@@ -200,7 +286,7 @@ fn prepare_openai_harness_with_profile_and_result_store_and_registry(
         images.clone(),
     ) {
         Ok(model) => model,
-        Err(error) => return Err(error.to_string()),
+        Err(error) => return Err(error),
     };
     let workspace = runtime_config.workspace();
     let mut capability_manifest = profile.manifest_with_config(&config);

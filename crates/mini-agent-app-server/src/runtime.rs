@@ -20,12 +20,15 @@ use mini_agent_app_server_protocol::SourceFingerprint as ProtocolSourceFingerpri
 use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_capabilities::CapabilityRegistry;
 use mini_agent_capabilities::ImageStore;
+use mini_agent_capabilities::ModelProviderSettings;
 use mini_agent_capabilities::OpenAiModel;
 use mini_agent_capabilities::SessionStore;
+use mini_agent_capabilities::build_model;
 use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_core::Event;
 use mini_agent_core::EventSink;
 use mini_agent_core::HarnessConfig;
+use mini_agent_core::Model;
 use mini_agent_core::RunControl;
 use mini_agent_core::Thread;
 use mini_agent_core::ThreadId;
@@ -33,11 +36,20 @@ use mini_agent_core::ThreadStart;
 use mini_agent_core::TurnInput;
 use mini_agent_core::TurnInputMode;
 use mini_agent_host::CapabilityManifest;
-use mini_agent_host::HostRuntimeFactory;
+use mini_agent_host::ModelProviderFactory;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
 use mini_agent_host::WorldState;
+use mini_agent_host::prepare_harness_with_model_factory;
 use std::path::PathBuf;
+
+fn openai_model_factory(
+    provider_id: &str,
+    settings: ModelProviderSettings,
+    images: ImageStore,
+) -> Result<OpenAiModel, String> {
+    build_model(provider_id, settings, images).map_err(|error| error.to_string())
+}
 
 /// The settled result projected by the local App Server runtime.
 pub type RuntimeTurnResult = TurnReadResult;
@@ -79,19 +91,19 @@ pub struct McpRetryResult {
 }
 
 /// A provider-backed App Server plus the host state needed by local clients.
-pub struct AppServerRuntime {
-    server: AppServer<OpenAiModel>,
+pub struct AppServerRuntime<M: Model = OpenAiModel> {
+    server: AppServer<M>,
     control: std::sync::Arc<RunControl>,
-    client: LocalAppServerClient<OpenAiModel>,
+    client: LocalAppServerClient<M>,
     images: ImageStore,
     model_name: String,
     stable_system_prompt: String,
     capability_manifest: CapabilityManifest,
     workflow_service: WorkflowService,
-    management: RuntimeManagementService<OpenAiModel>,
+    management: RuntimeManagementService<M>,
 }
 
-impl AppServerRuntime {
+impl AppServerRuntime<OpenAiModel> {
     /// Builds a Host runtime and starts the same App Server protocol used by
     /// external clients. The returned client is initialized before use.
     pub async fn start(
@@ -178,6 +190,36 @@ impl AppServerRuntime {
         profile: RuntimeProfile,
         registry: CapabilityRegistry,
     ) -> Result<Self, String> {
+        Self::start_with_control_and_profile_and_registry_with_model_factory(
+            runtime_config,
+            approval,
+            config,
+            session_request,
+            control,
+            profile,
+            registry,
+            openai_model_factory,
+        )
+        .await
+    }
+
+    /// Builds a runtime with an embedding application's model provider and
+    /// capability registry. The Host still owns tool, policy, extension, and
+    /// world assembly; only model construction crosses this seam.
+    pub async fn start_with_control_and_profile_and_registry_with_model_factory<M, F>(
+        runtime_config: RuntimeConfig,
+        approval: ApprovalController,
+        config: HarnessConfig,
+        session_request: SessionRequest,
+        control: std::sync::Arc<RunControl>,
+        profile: RuntimeProfile,
+        registry: CapabilityRegistry,
+        model_factory: F,
+    ) -> Result<AppServerRuntime<M>, String>
+    where
+        M: Model + Send + 'static,
+        F: ModelProviderFactory<M>,
+    {
         let workspace = runtime_config.workspace();
         let goal_limits = runtime_config.goal_limits();
         let model_name = runtime_config.model().unwrap_or_default().to_string();
@@ -212,9 +254,15 @@ impl AppServerRuntime {
             mcp_tool_count,
             retry_mcp_servers,
             capability_manifest,
-        } = HostRuntimeFactory::new(&runtime_config, approval.clone(), config)
-            .with_registry(registry)
-            .build(profile, results)?;
+        } = prepare_harness_with_model_factory(
+            &runtime_config,
+            approval.clone(),
+            config,
+            profile,
+            results,
+            registry,
+            model_factory,
+        )?;
         let mut harness = harness;
         if let Some(opened) = &session {
             images.bind_session_file(opened.store.path());
@@ -269,7 +317,7 @@ impl AppServerRuntime {
             )
             .await
             .map_err(|error| format!("cannot initialize app server: {}", error.message))?;
-        Ok(Self {
+        Ok(AppServerRuntime {
             server,
             control,
             client,
@@ -281,8 +329,39 @@ impl AppServerRuntime {
             management,
         })
     }
+}
 
-    pub fn client_mut(&mut self) -> &mut LocalAppServerClient<OpenAiModel> {
+impl<M: Model + Send + 'static> AppServerRuntime<M> {
+    /// Starts an App Server runtime with an embedding application's model
+    /// provider. This is the provider-neutral entry point for hosts that do
+    /// not use the built-in OpenAI-compatible model.
+    pub async fn start_with_model_factory<F>(
+        runtime_config: RuntimeConfig,
+        approval: ApprovalController,
+        config: HarnessConfig,
+        session_request: SessionRequest,
+        control: std::sync::Arc<RunControl>,
+        profile: RuntimeProfile,
+        registry: CapabilityRegistry,
+        model_factory: F,
+    ) -> Result<Self, String>
+    where
+        F: ModelProviderFactory<M>,
+    {
+        AppServerRuntime::<OpenAiModel>::start_with_control_and_profile_and_registry_with_model_factory(
+            runtime_config,
+            approval,
+            config,
+            session_request,
+            control,
+            profile,
+            registry,
+            model_factory,
+        )
+        .await
+    }
+
+    pub fn client_mut(&mut self) -> &mut LocalAppServerClient<M> {
         &mut self.client
     }
 
@@ -290,13 +369,13 @@ impl AppServerRuntime {
     ///
     /// The local client and host bookkeeping are dropped; the App Server
     /// remains the single owner of the Thread execution loop.
-    pub fn into_server(self) -> AppServer<OpenAiModel> {
+    pub fn into_server(self) -> AppServer<M> {
         self.server
     }
 
     /// Transfers the host-built service and its capability manifest into a
     /// protocol connection for an external adapter such as ACP.
-    pub fn into_connection(self) -> AppServerConnection<OpenAiModel> {
+    pub fn into_connection(self) -> AppServerConnection<M> {
         let manifest = capability_manifest_to_protocol(&self.capability_manifest);
         AppServerConnection::with_capability_manifest(self.server, manifest)
             .with_runtime_management(self.management)

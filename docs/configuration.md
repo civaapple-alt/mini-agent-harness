@@ -119,9 +119,29 @@ An in-process App Server embedder can pass the same registry through
 `ExampleToolProvider` publishes the stable ID `example-echo` and constructs an
 `external_echo` tool. The provider receives runtime-scoped workspace, sandbox,
 approval, image, and result-store inputs through `ToolBuildRequest`; it does
-not own the execution loop. External model, extension, and policy providers
-remain a follow-up stage because the current App Server runtime is concrete
-over the built-in OpenAI-compatible model and policy/extension implementations.
+not own the execution loop.
+
+External model providers use a separate factory seam. The compile-checked
+example at `crates/mini-agent-app-server/examples/external_model_provider.rs`
+registers a stable model ID and starts `AppServerRuntime<EchoModel>` with:
+
+```rust
+AppServerRuntime::<EchoModel>::start_with_model_factory(
+    runtime_config,
+    approval,
+    harness_config,
+    SessionRequest::Disabled,
+    Arc::new(RunControl::new()),
+    profile,
+    registry,
+    echo_factory,
+).await?;
+```
+
+The factory receives resolved `ModelProviderSettings` and an `ImageStore`; it
+returns a type implementing the Core `Model` contract. External extension and
+policy providers remain Host capability seams, while the App Server keeps the
+same protocol and workflow control plane for every model implementation.
 
 `read_image` bytes stay in the session `attachments/` directory (not `session.jsonl`). Resume reloads
 them; fork copies them. Compaction does not attach images.

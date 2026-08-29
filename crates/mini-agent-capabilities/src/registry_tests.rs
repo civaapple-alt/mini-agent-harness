@@ -78,3 +78,20 @@ fn external_tool_provider_is_registered_without_changing_builtin_order() {
     assert_eq!(registry.descriptors()[4].id, "example-test");
     assert_eq!(registry.descriptors()[4].kind, CapabilityKind::Tool);
 }
+
+#[test]
+fn external_model_provider_is_selectable_by_stable_id() {
+    let registry = CapabilityRegistry::builtin().with_model_provider(CapabilityDescriptor {
+        id: "example-model",
+        kind: CapabilityKind::Model,
+        description: "test external model provider",
+    });
+
+    assert!(
+        registry
+            .validate(CapabilityKind::Model, "example-model")
+            .is_ok()
+    );
+    assert_eq!(registry.descriptors()[4].id, "example-model");
+    assert_eq!(registry.descriptors()[4].kind, CapabilityKind::Model);
+}
