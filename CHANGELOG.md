@@ -5,6 +5,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.4.0] - 2026-08-29
+
 ### Added
 
 - Runtime capability profiles for interactive, ask, auto, and ACP frontends,
