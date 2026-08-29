@@ -2,7 +2,7 @@
 //!
 //! `AppServerRuntime` is the composition root for an in-process service. The
 //! host creates the provider-backed Thread and persistence state here, then
-//! all turn execution goes through the same protocol client used by ACP and
+//! all turn execution goes through the same protocol client used by clients and
 //! the external JSON-RPC transport.
 
 use crate::AppServer;
@@ -376,7 +376,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
     }
 
     /// Transfers the host-built service and its capability manifest into a
-    /// protocol connection for an external adapter such as ACP.
+    /// protocol connection for an external adapter.
     pub fn into_connection(self) -> AppServerConnection<M> {
         let manifest = capability_manifest_to_protocol(&self.capability_manifest);
         AppServerConnection::with_capability_manifest(self.server, manifest)

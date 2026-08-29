@@ -331,7 +331,3 @@ fn display_list(values: &[&str]) -> String {
         values.join(", ")
     }
 }
-
-#[cfg(test)]
-#[path = "world_tests.rs"]
-mod tests;

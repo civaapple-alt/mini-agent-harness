@@ -65,8 +65,8 @@ fn default_profile_exposes_tools_and_prompt_rule_sources() {
 #[test]
 fn builtin_profile_resolver_is_allowlisted() {
     assert_eq!(
-        RuntimeProfile::builtin("acp-minimal"),
-        Some(RuntimeProfile::acp_minimal())
+        RuntimeProfile::builtin("demo"),
+        Some(RuntimeProfile::demo())
     );
     assert_eq!(RuntimeProfile::builtin("general"), None);
     assert_eq!(RuntimeProfile::builtin("../interactive"), None);
@@ -93,20 +93,6 @@ fn no_tools_profile_is_explicit_and_does_not_admit_extensions() {
     assert!(manifest.enabled.iter().any(|name| name == "workflows"));
     assert_eq!(manifest.prompt_sources, ["builtin", "project", "workflows"]);
     assert_eq!(manifest.rule_sources, ["project", "workflows"]);
-}
-
-#[test]
-fn minimal_profile_disables_tools_extensions_and_workflows() {
-    let manifest = RuntimeProfile::acp_minimal().manifest();
-
-    assert_eq!(manifest.profile, "acp-minimal");
-    assert_eq!(manifest.prompt_sources, ["builtin", "project"]);
-    assert!(
-        manifest
-            .disabled
-            .iter()
-            .any(|(name, _)| name == "workflows")
-    );
 }
 
 #[test]

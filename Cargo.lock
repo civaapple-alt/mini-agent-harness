@@ -785,21 +785,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mini-agent-acp"
-version = "0.4.0"
-dependencies = [
- "mini-agent-app-server",
- "mini-agent-app-server-protocol",
- "mini-agent-capabilities",
- "mini-agent-core",
- "mini-agent-host",
- "mini-agent-protocol",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "mini-agent-app-server"
 version = "0.4.0"
 dependencies = [

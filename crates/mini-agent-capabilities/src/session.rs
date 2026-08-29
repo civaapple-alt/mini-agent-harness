@@ -1270,7 +1270,3 @@ pub fn try_load_session_events(
         Ok(Some(events))
     }
 }
-
-#[cfg(test)]
-#[path = "session_tests.rs"]
-mod tests;

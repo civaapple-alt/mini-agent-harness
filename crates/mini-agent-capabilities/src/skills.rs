@@ -1,4 +1,3 @@
-use crate::marketplaces;
 use serde::Deserialize;
 use serde_json::Map;
 use serde_json::Value;
@@ -20,8 +19,6 @@ const MAX_DIRECTORY_ENTRIES: usize = 128;
 const MAX_METADATA_BYTES: u64 = 64 * 1024;
 const MAX_INSTRUCTION_FRONTMATTER_BYTES: usize = 16 * 1024;
 const MAX_CATALOG_BYTES: usize = 16 * 1024;
-const MAX_SKILLSETS: usize = 16;
-const MAX_SKILLS_PER_SKILLSET: usize = 32;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_CONNECT_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -55,8 +52,6 @@ pub struct Discovery {
     skills: Vec<Skill>,
     mcp_servers: Vec<McpServerConfig>,
     plugins: Vec<String>,
-    extra_read_roots: Vec<PathBuf>,
-    marketplaces: usize,
     diagnostics: Vec<String>,
 }
 
@@ -75,28 +70,6 @@ struct SkillMetadata {
     description: String,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SkillsetFile {
-    skillsets: BTreeMap<String, SkillsetSelection>,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum SkillsetSelection {
-    Skills(Vec<String>),
-    Explicit(ExplicitSkillset),
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ExplicitSkillset {
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    skills: Vec<String>,
-}
-
 #[derive(Clone, Copy)]
 enum InstructionNameRule {
     ParentDirectory,
@@ -109,19 +82,6 @@ enum SkillDiscoveryPolicy {
     Direct,
     Strict,
     Compatible,
-}
-
-#[derive(Clone, Copy)]
-enum PluginAccounting {
-    Count,
-    Skip,
-}
-
-struct PluginLoadOptions<'a> {
-    expected_name: Option<&'a str>,
-    explicit_skills: Option<&'a [PathBuf]>,
-    accounting: PluginAccounting,
-    source: &'a str,
 }
 
 pub fn discover(workspace: &Path) -> Discovery {
@@ -145,9 +105,7 @@ pub fn discover(workspace: &Path) -> Discovery {
         &mut skills,
         &mut discovery.diagnostics,
     );
-    discover_skillsets(&workspace, &mut skills, &mut discovery);
     discover_plugins(&workspace, &mut skills, &mut discovery);
-    discover_marketplaces(&workspace, &mut skills, &mut discovery);
     discover_project_mcp(&workspace, &mut discovery);
     discovery.skills = bounded_catalog(skills.into_values(), &mut discovery.diagnostics);
     discovery
@@ -205,14 +163,6 @@ impl Discovery {
             .iter()
             .map(|server| format!("{}/{}", server.plugin_name, server.server_name))
             .collect()
-    }
-
-    pub fn marketplace_count(&self) -> usize {
-        self.marketplaces
-    }
-
-    pub fn extra_read_roots(&self) -> &[PathBuf] {
-        &self.extra_read_roots
     }
 
     pub fn stdio_mcp_server_count(&self) -> usize {
@@ -298,7 +248,7 @@ impl Discovery {
             "{base}\n\nAvailable project extensions (metadata only):\n\
              When a task matches an entry, read its listed instruction file \
              with read_file before proceeding. Resolve relative references from that file's directory. \
-             A plugin-agent entry supplies compatible task instructions; it does not create a subagent.\n\
+             A plugin-agent entry supplies compatible task instructions for the current run.\n\
              <available_extensions>\n{}{}</available_extensions>",
             catalog,
             if catalog.ends_with('\n') { "" } else { "\n" }
@@ -348,202 +298,7 @@ fn discover_plugins(
                 continue;
             }
         };
-        load_plugin(
-            workspace,
-            &plugin_root,
-            PluginLoadOptions {
-                expected_name: None,
-                explicit_skills: None,
-                accounting: PluginAccounting::Count,
-                source: "installed",
-            },
-            skills,
-            discovery,
-        );
-    }
-}
-
-fn discover_skillsets(
-    workspace: &Path,
-    skills: &mut BTreeMap<String, Skill>,
-    discovery: &mut Discovery,
-) {
-    let config_path = workspace.join(".agents/skillsets.json");
-    if config_path.exists() {
-        discover_configured_skillsets(workspace, &config_path, skills, discovery);
-        return;
-    }
-    let root = workspace.join(".agents/skillsets");
-    if !root.exists() {
-        return;
-    }
-    let root = match contained_directory(&root, workspace) {
-        Ok(root) => root,
-        Err(error) => {
-            discovery.diagnostics.push(error);
-            return;
-        }
-    };
-    for candidate in directory_children(&root, "skillset", &mut discovery.diagnostics) {
-        let skillset = match contained_directory(&candidate, workspace) {
-            Ok(skillset) => skillset,
-            Err(error) => {
-                discovery.diagnostics.push(error);
-                continue;
-            }
-        };
-        load_entire_skillset(workspace, &skillset, skills, &mut discovery.diagnostics);
-    }
-}
-
-fn discover_configured_skillsets(
-    workspace: &Path,
-    config_path: &Path,
-    skills: &mut BTreeMap<String, Skill>,
-    discovery: &mut Discovery,
-) {
-    let config = match read_skillset_file(config_path) {
-        Ok(config) => config,
-        Err(error) => {
-            discovery.diagnostics.push(error);
-            return;
-        }
-    };
-    if config.skillsets.len() > MAX_SKILLSETS {
-        discovery.diagnostics.push(format!(
-            "{} contains more than {MAX_SKILLSETS} skillsets",
-            config_path.display()
-        ));
-        return;
-    }
-    let skillsets_root = workspace.join(".agents/skillsets");
-    for (directory_name, selection) in config.skillsets {
-        if !marketplaces::safe_component(&directory_name) {
-            discovery.diagnostics.push(format!(
-                "{} skillset key {directory_name:?} must be one directory name",
-                config_path.display()
-            ));
-            continue;
-        }
-        let (configured_path, selected_skills) = match selection {
-            SkillsetSelection::Skills(names) => (None, names),
-            SkillsetSelection::Explicit(explicit) => (explicit.path, explicit.skills),
-        };
-        if selected_skills.is_empty() {
-            discovery
-                .diagnostics
-                .push(format!("skillset {directory_name:?} enables no skills"));
-            continue;
-        }
-        if selected_skills.len() > MAX_SKILLS_PER_SKILLSET {
-            discovery.diagnostics.push(format!(
-                "skillset {directory_name:?} enables more than {MAX_SKILLS_PER_SKILLSET} skills"
-            ));
-            continue;
-        }
-        let root = match marketplaces::resolve_local_directory(
-            workspace,
-            configured_path.as_deref(),
-            skillsets_root.join(&directory_name),
-        ) {
-            Ok(root) => root,
-            Err(error) => {
-                discovery.diagnostics.push(error);
-                continue;
-            }
-        };
-        marketplaces::record_extra_root(workspace, &root, &mut discovery.extra_read_roots);
-        let source = format!("skillset {directory_name}");
-        for (_, skill_root) in
-            marketplaces::find_named_skill_dirs(&root, selected_skills, &mut discovery.diagnostics)
-        {
-            let path = skill_root.join("SKILL.md");
-            match parse_instruction(
-                &path,
-                &root,
-                workspace,
-                &source,
-                "skill",
-                InstructionNameRule::Compatible,
-            ) {
-                Ok(skill) => insert_skill(skill, false, skills, &mut discovery.diagnostics),
-                Err(error) => discovery.diagnostics.push(error),
-            }
-        }
-    }
-}
-
-fn load_entire_skillset(
-    workspace: &Path,
-    skillset: &Path,
-    skills: &mut BTreeMap<String, Skill>,
-    diagnostics: &mut Vec<String>,
-) {
-    let source = format!(
-        "skillset {}",
-        skillset.file_name().unwrap_or_default().to_string_lossy()
-    );
-    let single_skill = skillset.join("SKILL.md");
-    if single_skill.is_file() {
-        match parse_instruction(
-            &single_skill,
-            skillset,
-            workspace,
-            &source,
-            "skill",
-            InstructionNameRule::Compatible,
-        ) {
-            Ok(skill) => insert_skill(skill, false, skills, diagnostics),
-            Err(error) => diagnostics.push(error),
-        }
-    }
-    discover_skill_root(
-        &skillset.join("skills"),
-        skillset,
-        workspace,
-        &source,
-        SkillDiscoveryPolicy::Compatible,
-        skills,
-        diagnostics,
-    );
-}
-
-fn read_skillset_file(path: &Path) -> Result<SkillsetFile, String> {
-    let content = read_bounded(path)?;
-    serde_json::from_str(&content)
-        .map_err(|error| format!("cannot parse {}: {error}", path.display()))
-}
-
-fn discover_marketplaces(
-    workspace: &Path,
-    skills: &mut BTreeMap<String, Skill>,
-    discovery: &mut Discovery,
-) {
-    let marketplace_discovery = marketplaces::discover(workspace);
-    discovery.marketplaces = marketplace_discovery.marketplace_count;
-    discovery
-        .diagnostics
-        .extend(marketplace_discovery.diagnostics);
-    for root in marketplace_discovery.extra_roots {
-        marketplaces::record_extra_root(workspace, &root, &mut discovery.extra_read_roots);
-    }
-    for plugin in marketplace_discovery.plugins {
-        load_plugin(
-            workspace,
-            &plugin.root,
-            PluginLoadOptions {
-                expected_name: Some(&plugin.name),
-                explicit_skills: plugin.explicit_skills.as_deref(),
-                accounting: if plugin.is_plugin {
-                    PluginAccounting::Count
-                } else {
-                    PluginAccounting::Skip
-                },
-                source: plugin.ecosystem,
-            },
-            skills,
-            discovery,
-        );
+        load_plugin(workspace, &plugin_root, "installed", skills, discovery);
     }
 }
 
@@ -552,22 +307,15 @@ enum PluginFlavor {
     Portable,
     Claude,
     Grok,
-    MarketplaceOnly,
 }
 
 fn load_plugin(
     workspace: &Path,
     plugin_root: &Path,
-    options: PluginLoadOptions<'_>,
+    source: &str,
     skills: &mut BTreeMap<String, Skill>,
     discovery: &mut Discovery,
 ) {
-    let PluginLoadOptions {
-        expected_name,
-        explicit_skills,
-        accounting,
-        source,
-    } = options;
     let manifest = find_plugin_manifest(plugin_root);
     let (plugin_name, flavor) = match manifest {
         Ok(Some((manifest_path, PluginFlavor::Portable))) => {
@@ -602,62 +350,33 @@ fn load_plugin(
                 }
             }
         }
-        Ok(None) => match (expected_name, explicit_skills) {
-            (Some(name), Some(_)) => (name.to_string(), PluginFlavor::MarketplaceOnly),
-            _ => {
-                discovery.diagnostics.push(format!(
-                    "{} has no supported plugin manifest",
-                    plugin_root.display()
-                ));
-                return;
-            }
-        },
+        Ok(None) => {
+            discovery.diagnostics.push(format!(
+                "{} has no supported plugin manifest",
+                plugin_root.display()
+            ));
+            return;
+        }
         Err(error) => {
             discovery.diagnostics.push(error);
             return;
         }
     };
-    if let Some(expected_name) = expected_name
-        && plugin_name != expected_name
-    {
-        discovery.diagnostics.push(format!(
-            "{} plugin name {plugin_name:?} does not match marketplace entry {expected_name:?}",
-            plugin_root.display()
-        ));
-        return;
-    }
-    if matches!(accounting, PluginAccounting::Count) {
-        discovery.plugins.push(plugin_name.clone());
-    }
+    discovery.plugins.push(plugin_name.clone());
     let source = format!("{source} plugin {plugin_name}");
-    if let Some(explicit_skills) = explicit_skills {
-        for skill_root in explicit_skills {
-            let path = skill_root.join("SKILL.md");
-            let name_rule = if flavor == PluginFlavor::Portable {
-                InstructionNameRule::ParentDirectory
-            } else {
-                InstructionNameRule::Compatible
-            };
-            match parse_instruction(&path, plugin_root, workspace, &source, "skill", name_rule) {
-                Ok(skill) => insert_skill(skill, false, skills, &mut discovery.diagnostics),
-                Err(error) => discovery.diagnostics.push(error),
-            }
-        }
-    } else {
-        discover_skill_root(
-            &plugin_root.join("skills"),
-            plugin_root,
-            workspace,
-            &source,
-            if flavor == PluginFlavor::Portable {
-                SkillDiscoveryPolicy::Strict
-            } else {
-                SkillDiscoveryPolicy::Compatible
-            },
-            skills,
-            &mut discovery.diagnostics,
-        );
-    }
+    discover_skill_root(
+        &plugin_root.join("skills"),
+        plugin_root,
+        workspace,
+        &source,
+        if flavor == PluginFlavor::Portable {
+            SkillDiscoveryPolicy::Strict
+        } else {
+            SkillDiscoveryPolicy::Compatible
+        },
+        skills,
+        &mut discovery.diagnostics,
+    );
     if matches!(flavor, PluginFlavor::Claude | PluginFlavor::Grok) {
         discover_agent_root(
             &plugin_root.join("agents"),
@@ -685,7 +404,6 @@ fn load_plugin(
             McpFileFormat::Legacy,
             discovery,
         ),
-        PluginFlavor::MarketplaceOnly => {}
     }
 }
 

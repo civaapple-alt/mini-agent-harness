@@ -65,21 +65,11 @@ Set `MENTOR_OPENAI_MODEL`. The mentor uses `OPENAI_API_KEY` and
 the mentor is enabled without printing credentials; `doctor` validates the
 effective mentor endpoint when the model is configured.
 
-## A cloned marketplace skill or plugin is missing
+## A workspace skill or plugin is missing
 
-Cloning a marketplace does not enable every entry. Name it in
-`.agents/marketplaces.json` with `{ "skills": ["name"] }` or
-`{ "plugins": ["name"] }`. Set `path` to an existing local clone, or omit it
-to use `.agents/marketplaces/<key>`. Skills match a `SKILL.md` directory or its YAML `name`
-(immediate `skills/<name>/` or nested within five levels). Plugins still need
-a Claude or Grok marketplace manifest. A legacy string array only matches an
-immediate skill or a plugin name under `.agents/marketplaces/<key>`. Then run
-`mini-agent doctor`. Remote `url` and `git-subdir` entries are never
-downloaded.
-
-If `.agents/skillsets.json` exists, unlisted skillsets and unlisted skills in
-those collections stay disabled. A missing skill usually means the json list omitted it, `path` does not
-resolve, or neither the directory nor YAML `name` matches.
+Only workspace-local `.agents/skills/<skill>/SKILL.md` entries and installed
+`.agents/plugins/<plugin>` packages are discovered. Run `mini-agent doctor` and
+check the bounded YAML name, plugin manifest, and workspace path.
 
 ## An MCP server is not discovered
 

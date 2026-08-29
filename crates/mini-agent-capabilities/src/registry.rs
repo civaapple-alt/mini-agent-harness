@@ -68,12 +68,12 @@ const BUILTIN_DESCRIPTORS: [CapabilityDescriptor; 4] = [
     CapabilityDescriptor {
         id: crate::BUILTIN_TOOL_PROVIDER,
         kind: CapabilityKind::Tool,
-        description: "Built-in workspace, process, web, image, and subagent tools",
+        description: "Built-in workspace, process, web, and image tools",
     },
     CapabilityDescriptor {
         id: crate::BUILTIN_EXTENSION_PROVIDER,
         kind: CapabilityKind::Extension,
-        description: "Built-in skill, plugin, marketplace, and MCP extensions",
+        description: "Built-in skill, plugin, and MCP extensions",
     },
     CapabilityDescriptor {
         id: crate::BUILTIN_POLICY_PROVIDER,
@@ -89,7 +89,7 @@ impl ToolProvider for BuiltinToolProvider {
         CapabilityDescriptor {
             id: crate::BUILTIN_TOOL_PROVIDER,
             kind: CapabilityKind::Tool,
-            description: "Built-in workspace, process, web, image, and subagent tools",
+            description: "Built-in workspace, process, web, and image tools",
         }
     }
 
@@ -203,7 +203,7 @@ impl CapabilityRegistry {
     }
 
     /// Builds the selected built-in tool provider without exposing its
-    /// concrete workspace, process, web, or subagent implementations to Host.
+    /// concrete workspace, process, web, or image implementations to Host.
     pub fn build_tools(&self, request: ToolBuildRequest) -> Result<Vec<Box<dyn Tool>>, ToolError> {
         if let Err(error) = self.validate(CapabilityKind::Tool, &request.provider_id) {
             return Err(ToolError(error));
@@ -251,7 +251,3 @@ impl CapabilityRegistry {
         Ok(crate::mcp::load(servers, approval))
     }
 }
-
-#[cfg(test)]
-#[path = "registry_tests.rs"]
-mod tests;

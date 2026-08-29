@@ -14,6 +14,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   modules private behind a curated root facade.
 - Removed the standalone paid-provider experiment crate and exploratory test
   targets from the mainline workspace; provider evaluation is now external.
+- Reduced extension discovery to workspace-local skills, installed plugins, and
+  MCP configuration; marketplace and skillset clone traversal is no longer in
+  the mainline path.
 
 ## [0.4.0] - 2026-08-29
 

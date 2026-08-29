@@ -1544,29 +1544,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_an_unavailable_requested_profile() {
-        let mut connection = connection();
-        let response = connection
-            .handle_request(JsonRpcRequest::request(
-                1,
-                METHOD_INITIALIZE,
-                serde_json::json!(InitializeParams {
-                    protocol_version: PROTOCOL_VERSION,
-                    client_name: "test".to_string(),
-                    client_version: "0".to_string(),
-                    capabilities: ClientCapabilities::default(),
-                    profile: Some("acp".to_string()),
-                    providers: None,
-                }),
-            ))
-            .await
-            .unwrap();
-
-        assert_eq!(response.error.unwrap().code, -32602);
-        assert!(!connection.initialized());
-    }
-
-    #[tokio::test]
     async fn rejects_an_unavailable_requested_provider() {
         let mut connection = connection();
         let response = connection
@@ -1590,40 +1567,6 @@ mod tests {
 
         assert_eq!(response.error.unwrap().code, -32602);
         assert!(!connection.initialized());
-    }
-
-    #[tokio::test]
-    async fn selects_profile_before_starting_stdio_service() {
-        let request = JsonRpcRequest::request(
-            1,
-            METHOD_INITIALIZE,
-            serde_json::json!(InitializeParams {
-                protocol_version: PROTOCOL_VERSION,
-                client_name: "startup-profile-test".to_string(),
-                client_version: "0".to_string(),
-                capabilities: ClientCapabilities::default(),
-                profile: Some("acp".to_string()),
-                providers: None,
-            }),
-        );
-        let input = format!("{}\n", serde_json::to_string(&request).unwrap());
-        let mut output = Vec::new();
-        let broker = ApprovalBroker::new();
-        serve_stdio_with_startup(
-            broker,
-            tokio::io::BufReader::new(std::io::Cursor::new(input.into_bytes())),
-            &mut output,
-            |params| {
-                assert_eq!(params.profile.as_deref(), Some("acp"));
-                let mut manifest = default_capability_manifest();
-                manifest.profile = "acp".to_string();
-                Ok((connection().server, manifest))
-            },
-        )
-        .await
-        .unwrap();
-        let response: JsonRpcResponse = serde_json::from_slice(output.trim_ascii()).unwrap();
-        assert_eq!(response.result.unwrap()["profile"], "acp");
     }
 
     #[tokio::test]

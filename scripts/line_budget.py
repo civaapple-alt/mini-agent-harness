@@ -11,8 +11,7 @@ PROJECT_LIMIT = 30_000
 
 # Keep the report aligned with the conceptual runtime layers. Capabilities are
 # reported separately because they are provider implementations behind Host;
-# protocol and ACP are also reported separately so each external boundary stays
-# visible.
+# protocol is reported separately so each external boundary stays visible.
 CAPABILITY_PACKAGES = ("mini-agent-capabilities",)
 
 LAYERS = (
@@ -24,7 +23,6 @@ LAYERS = (
         "app-server",
         ("mini-agent-app-server", "mini-agent-app-server-protocol"),
     ),
-    ("acp", ("mini-agent-acp",)),
     ("cli", ("mini-agent-cli",)),
     ("experiments", ("mini-agent-experiments",)),
 )

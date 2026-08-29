@@ -57,7 +57,7 @@ OPTIONS:
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
-    --no-tools                   Disable workspace, shell, web, image, process, subagent, and MCP tools
+    --no-tools                   Disable workspace, shell, web, image, process, and MCP tools
 ";
 
 pub const RESUME_HELP: &str = "mini-agent resume

@@ -233,14 +233,11 @@ where
         }
     }
     let mut tools = if profile.tools == ToolScope::All {
-        let extra_read_roots = skill_discovery
-            .as_ref()
-            .map_or_else(Vec::new, |discovery| discovery.extra_read_roots().to_vec());
         match registry.build_tools(mini_agent_capabilities::ToolBuildRequest {
             provider_id: profile.tool_provider.clone(),
             workspace: workspace.clone(),
             approval: approval.clone(),
-            extra_read_roots,
+            extra_read_roots: Vec::new(),
             sandbox: profile.sandbox,
             images: images.clone(),
             results,

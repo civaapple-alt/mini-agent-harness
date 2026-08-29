@@ -167,8 +167,6 @@ impl RuntimeProfile {
             "interactive" => Some(Self::interactive_default()),
             "ask" => Some(Self::ask_default()),
             "auto" => Some(Self::auto_default()),
-            "acp" => Some(Self::acp_default()),
-            "acp-minimal" => Some(Self::acp_minimal()),
             "demo" => Some(Self::demo()),
             _ => None,
         }
@@ -184,18 +182,6 @@ impl RuntimeProfile {
 
     pub fn auto_default() -> Self {
         Self::named("auto", ToolScope::All, ExtensionLoadDepth::Enabled)
-    }
-
-    pub fn acp_default() -> Self {
-        Self::named("acp", ToolScope::All, ExtensionLoadDepth::Selected)
-    }
-
-    pub fn acp_minimal() -> Self {
-        let mut profile = Self::named("acp-minimal", ToolScope::None, ExtensionLoadDepth::None);
-        profile.workflows = WorkflowScope::Disabled;
-        profile.regular_agent.prompts.workflows = false;
-        profile.regular_agent.rules.workflows = false;
-        profile
     }
 
     pub fn demo() -> Self {

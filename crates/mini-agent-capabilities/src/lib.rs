@@ -5,7 +5,6 @@
 //! profile resolution and runtime orchestration.
 
 mod image;
-mod marketplaces;
 mod mcp;
 mod model;
 mod openai;
@@ -18,7 +17,6 @@ mod sandbox;
 mod security;
 mod session;
 mod skills;
-mod subagent;
 mod web;
 mod workspace;
 
@@ -53,9 +51,6 @@ pub use path_policy::normalize_path;
 pub use path_policy::same_path;
 pub use persona::AgentPromptKind;
 pub use persona::PersonaPromptKind;
-pub use persona::ReviewStats;
-pub use persona::parse_review_stats;
-pub use persona::render_subagent_prompt;
 pub use registry::CapabilityDescriptor;
 pub use registry::CapabilityKind;
 pub use registry::CapabilityRegistry;

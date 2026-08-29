@@ -82,7 +82,6 @@ impl RuntimeProfile {
             enabled.push("workspace".to_string());
             enabled.push("web".to_string());
             enabled.push("image".to_string());
-            enabled.push("subagent".to_string());
             if self.agent.is_read_only() {
                 disabled.push(("shell".to_string(), "agent scope: read-only".to_string()));
                 disabled.push(("process".to_string(), "agent scope: read-only".to_string()));

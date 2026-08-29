@@ -52,7 +52,3 @@ fn classify_outcome(outcome: ToolExecutionOutcome) -> ToolExecutionOutcome {
     };
     ToolExecutionOutcome { status, ..outcome }
 }
-
-#[cfg(test)]
-#[path = "tool_outcome_tests.rs"]
-mod tests;

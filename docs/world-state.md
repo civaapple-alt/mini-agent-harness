@@ -1,6 +1,6 @@
 # World state and durable conversation direction
 
-Skills, plugins, marketplaces, and MCP preserve experience that people publish
+Skills, plugins, and MCP preserve experience that people publish
 and share. World state answers a different question: what is true in this
 specific execution environment right now?
 

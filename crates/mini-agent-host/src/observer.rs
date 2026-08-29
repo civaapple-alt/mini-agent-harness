@@ -346,31 +346,6 @@ fn tool_detail(call: &ToolCall) -> Option<String> {
             arg_str(&call.arguments, "handle")?,
             MAX_TOOL_DETAIL_BYTES,
         )),
-        "spawn_agent" => {
-            let task = arg_str(&call.arguments, "task_name").unwrap_or("task");
-            let role = arg_str(&call.arguments, "persona")
-                .or_else(|| arg_str(&call.arguments, "agent_type"));
-            let mut detail = match role {
-                Some(role) => format!("{task} [{role}]"),
-                None => task.to_string(),
-            };
-            if let Some(message) = arg_str(&call.arguments, "message").filter(|m| !m.is_empty()) {
-                let budget = MAX_TOOL_DETAIL_BYTES.saturating_sub(detail.len() + 3);
-                detail.push_str(" — ");
-                detail.push_str(&bounded_single_line(message, budget));
-            }
-            Some(bounded_single_line(&detail, MAX_TOOL_DETAIL_BYTES))
-        }
-        "send_subagent_message" => {
-            let session = arg_str(&call.arguments, "session_id").unwrap_or("session");
-            let mut detail = session.to_string();
-            if let Some(message) = arg_str(&call.arguments, "message").filter(|m| !m.is_empty()) {
-                let budget = MAX_TOOL_DETAIL_BYTES.saturating_sub(detail.len() + 3);
-                detail.push_str(" — ");
-                detail.push_str(&bounded_single_line(message, budget));
-            }
-            Some(bounded_single_line(&detail, MAX_TOOL_DETAIL_BYTES))
-        }
         _ => None,
     }
 }

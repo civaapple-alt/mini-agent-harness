@@ -252,7 +252,6 @@ impl RuntimeConfig {
             "skills": extensions.skill_count(),
             "plugin_agents": extensions.plugin_agent_count(),
             "plugins": extensions.plugin_count(),
-            "marketplaces": extensions.marketplace_count(),
             "mcp_servers": extensions.mcp_server_count(),
             "mcp_stdio_servers": extensions.stdio_mcp_server_count(),
             "mcp_http_servers": extensions.http_mcp_server_count(),
@@ -309,7 +308,6 @@ impl RuntimeConfig {
             format!("skills: {}", extensions.skill_count()),
             format!("plugin_agents: {}", extensions.plugin_agent_count()),
             format!("plugins: {}", extensions.plugin_count()),
-            format!("marketplaces: {}", extensions.marketplace_count()),
             format!("mcp_servers: {}", extensions.mcp_server_count()),
             format!("mcp_stdio_servers: {}", extensions.stdio_mcp_server_count()),
             format!("mcp_http_servers: {}", extensions.http_mcp_server_count()),
@@ -432,10 +430,9 @@ impl RuntimeConfig {
                 "extensions",
                 true,
                 format!(
-                    "{} instructions, {} plugins, {} marketplaces, and {} MCP servers ({} stdio, {} HTTP) discovered",
+                    "{} instructions, {} plugins, and {} MCP servers ({} stdio, {} HTTP) discovered",
                     skill_discovery.len(),
                     skill_discovery.plugin_count(),
-                    skill_discovery.marketplace_count(),
                     skill_discovery.mcp_server_count(),
                     skill_discovery.stdio_mcp_server_count(),
                     skill_discovery.http_mcp_server_count()

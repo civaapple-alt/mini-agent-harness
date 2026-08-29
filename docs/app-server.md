@@ -9,8 +9,8 @@ The default binary owns one configured thread per process. Embedded callers can
 construct a service with several preconfigured thread identities and address
 them through the same methods. The service also exposes bounded thread
 list/read/close, fork and resume, turn result reads, cooperative steering and
-interruption, and approval request/response routing. ACP is kept in the
-separate experimental `mini-agent-acp` edge adapter.
+interruption, and approval request/response routing. External adapters should
+use the same App Server boundary.
 
 Run it after configuring the provider environment:
 
@@ -74,7 +74,7 @@ thread is created.
 `initialize.params.providers` is an optional selector for the four local
 provider categories (`model`, `tools`, `extensions`, and `policy`). The
 standalone server applies these bounded IDs before constructing the first
-Thread; an embedded runtime and ACP require requested IDs to match the frozen
+Thread; an embedded runtime requires requested IDs to match the frozen
 profile. Provider instances, credentials, commands, and paths never cross the
 JSON-RPC boundary. The current registry exposes `openai` for models and
 `builtin` for the other three categories.

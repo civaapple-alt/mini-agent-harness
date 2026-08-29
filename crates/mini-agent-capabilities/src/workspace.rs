@@ -278,7 +278,6 @@ pub fn workspace_tools_with_read_roots_and_results(
         workspace: Arc::clone(&workspace),
         store: images,
     }));
-    tools.extend(crate::subagent::subagent_tools(Arc::clone(&workspace)));
     tools.extend(process_tools(processes));
     Ok(tools)
 }

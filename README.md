@@ -55,14 +55,9 @@ limits, failures, and observation events.
   Server owns workflow commands; Host only supplies the wrapped
   `HostWorkflowStore` persistence seam. The
   JSON-RPC surface also exposes `workflow/state`, `workflow/plan/set`, and
-  typed Goal lifecycle methods; ACP maps these to `session/workflow/*`.
+   typed Goal lifecycle methods.
   `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess
   clients.
-- `mini-agent-acp` is an experimental edge adapter that maps ACP-style
-  `session/new`, `session/prompt`, `session/cancel`, and
-  `session/workflow/*` messages to the
-  app-server. It does not modify the core execution contracts or claim full
-  ACP conformance yet.
 - `mini-agent-cli` is the frontend: REPL input, headless commands, output
   rendering, and local session interaction. Agent turns go through the local
   App Server runtime; the CLI does not own provider, tool, Thread, or Harness
@@ -72,10 +67,9 @@ limits, failures, and observation events.
   observation, and event contracts from `mini-agent-app-server::frontend` and
   has no direct Host or Capabilities dependency.
 
-The mainline is the CLI over the App Server boundary. ACP is an experimental
-side adapter and compatibility probe: it exercises the same App Server
-management and event contracts, but ACP-specific behavior does not become a
-constraint on Core, Host, or the CLI.
+The mainline is the CLI over the App Server boundary. Other frontends should
+exercise the same App Server management and event contracts rather than add
+another runtime execution path.
 
 The conceptual runtime direction is:
 
@@ -93,8 +87,8 @@ The crate dependency direction keeps the foundation independent:
 `mini-agent-core → mini-agent-protocol`; `mini-agent-host` builds on core and
 protocol; the app-server service depends on host, core, protocol, and the
 app-server wire DTOs; the CLI depends on the app-server service for agent turns
-and keeps only frontend concerns. ACP and JSON-RPC clients use the same
-service boundary and observe the same Thread/Turn event semantics.
+and keeps only frontend concerns. JSON-RPC clients observe the same
+Thread/Turn event semantics.
 
 ## Install
 
@@ -226,9 +220,7 @@ Project-scoped extensions live under `.agents/`:
 | Extension | Location |
 | --- | --- |
 | Agent Skill | `.agents/skills/<skill>/SKILL.md` |
-| Skill collection | `.agents/skillsets/` or `.agents/skillsets.json` |
 | Plugin | `.agents/plugins/<plugin>/` |
-| Marketplace | `.agents/marketplaces/` or `.agents/marketplaces.json` |
 | MCP | `.agents/mcp.json` or `.agents/mcp/<server>.json` |
 
 Discovery is bounded and approval-aware. Client-specific UI, hooks, LSP, and
@@ -245,7 +237,6 @@ nested-agent behavior are not emulated. See the
 - [Security policy](SECURITY.md) — reporting security problems.
 - [Privacy](docs/privacy.md) — local data and provider requests.
 - [App Server](docs/app-server.md) — versioned JSON-RPC methods and stdio usage.
-- [ACP boundary](docs/acp.md) — experimental session mapping and support scope.
 - [Release process](docs/releasing.md) — how to prepare and publish a release.
 - [Changelog](CHANGELOG.md) — version history.
 - [Agent Notes](.agents/notes/README.md) — architecture decisions and
@@ -263,7 +254,7 @@ python3 scripts/line_budget.py
 ```
 
   The line-budget report breaks Rust source down by the runtime layers: `core`,
-  `protocol`, `capabilities`, `host`, `app-server`, `acp`, and `cli`, followed by the enforced
+  `protocol`, `capabilities`, `host`, `app-server`, and `cli`, followed by the enforced
   workspace total. `capabilities` is the separately reported provider
   implementation group behind Host and is not part of the runtime-layer gate.
   Each layer and the
@@ -272,10 +263,10 @@ python3 scripts/line_budget.py
   tests, while Rust files below a `tests/` directory are counted as
   integration tests. The enforced ceilings are 20,000 lines for the runtime
   layers (`core` + `protocol` + `host` + `app-server`); the separately
-  reported `acp` edge is excluded from this runtime limit. The 30,000-line
-  workspace total is enforced for the 0.4.0 release, including tests. Both
-  ceilings block the release gate. The report still includes all Rust source,
-  including ACP and the CLI, so cleanup remains measurable.
+  20,000-line runtime limit. The 30,000-line workspace total is enforced for
+  the 0.4.0 release, including tests. Both ceilings block the release gate.
+  The report still includes all Rust source, including the CLI, so cleanup
+  remains measurable.
 
 The CI matrix covers Ubuntu, macOS, and Windows. Current development is
 validated on macOS arm64; Windows remains a first-class target and is checked
