@@ -10,14 +10,14 @@ use args::Command;
 use args::HelpTopic;
 use args::help_text;
 use args::parse_args;
-use host::RuntimeConfig;
-use host::RuntimeProfile;
-use host::load_workspace_profile;
 use mini_agent_app_server::SessionRequest;
-use mini_agent_capabilities::sandbox::SandboxKind;
-use mini_agent_capabilities::security::SecurityPreset;
-use mini_agent_capabilities::workspace::ApprovalMode;
-use mini_agent_host as host;
+use mini_agent_app_server::frontend::ApprovalMode;
+use mini_agent_app_server::frontend::RuntimeConfig;
+use mini_agent_app_server::frontend::RuntimeProfile;
+use mini_agent_app_server::frontend::SandboxKind;
+use mini_agent_app_server::frontend::SecurityPreset;
+use mini_agent_app_server::frontend::harness_config;
+use mini_agent_app_server::frontend::load_workspace_profile;
 
 pub(crate) fn version_line() -> String {
     format!("mini-agent {} ({})", env!("CARGO_PKG_VERSION"), git_sha())
@@ -180,7 +180,7 @@ fn run_status(json: bool) -> ExitCode {
                 return ExitCode::from(2);
             }
         };
-    let manifest = profile.manifest_with_config(&host::harness_config(false));
+    let manifest = profile.manifest_with_config(&harness_config(false));
     if json {
         let mut status = config.status_json();
         status["capabilities"] =

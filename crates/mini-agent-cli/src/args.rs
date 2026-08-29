@@ -1,5 +1,5 @@
-use mini_agent_capabilities::sandbox::SandboxKind;
-use mini_agent_capabilities::security::SecurityPreset;
+use mini_agent_app_server::frontend::SandboxKind;
+use mini_agent_app_server::frontend::SecurityPreset;
 
 pub const HELP: &str = "mini-agent — bounded native coding-agent CLI
 

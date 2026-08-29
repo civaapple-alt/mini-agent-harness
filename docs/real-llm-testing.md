@@ -50,17 +50,17 @@ Export credentials in the process environment or put them in the workspace
 
 Run one cheap smoke check first:
 
-    cargo run --release -p mini-agent-cli --example real_llm -- \
+    cargo run --release -p mini-agent-experiments --example real_llm -- \
       --allow-paid --scenario text --max-requests 1 --max-output-tokens 64
 
 Run the tool path separately:
 
-    cargo run --release -p mini-agent-cli --example real_llm -- \
+    cargo run --release -p mini-agent-experiments --example real_llm -- \
       --allow-paid --scenario tool --max-requests 2 --max-output-tokens 128
 
 Run the full provider check, with a maximum of sixteen provider requests:
 
-    cargo run --release -p mini-agent-cli --example real_llm -- \
+    cargo run --release -p mini-agent-experiments --example real_llm -- \
       --allow-paid --scenario all --max-requests 16 --max-output-tokens 512
 
 Use 1024 output tokens for the compaction scenario: some Responses-compatible

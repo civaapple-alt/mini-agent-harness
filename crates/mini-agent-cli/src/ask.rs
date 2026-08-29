@@ -1,12 +1,14 @@
 use mini_agent_app_server::SessionRequest;
+use mini_agent_app_server::frontend::ApprovalController;
+use mini_agent_app_server::frontend::ApprovalMode;
+use mini_agent_app_server::frontend::SandboxKind;
+use mini_agent_app_server::frontend::SecurityPreset;
+use mini_agent_app_server::frontend::TurnStatus;
+use mini_agent_app_server::frontend::observer::RunObserver;
+use mini_agent_app_server::frontend::observer::ScriptFormat;
+use mini_agent_app_server::frontend::observer::print_final_answer;
+use mini_agent_app_server::frontend::print_auto_warning;
 use mini_agent_app_server::local::LocalRuntimeRequest;
-use mini_agent_capabilities::sandbox::SandboxKind;
-use mini_agent_capabilities::security::SecurityPreset;
-use mini_agent_capabilities::workspace::{ApprovalController, ApprovalMode};
-use mini_agent_host::observer::RunObserver;
-use mini_agent_host::observer::ScriptFormat;
-use mini_agent_host::observer::print_final_answer;
-use mini_agent_host::print_auto_warning;
 use serde_json::json;
 use std::io;
 use std::io::IsTerminal;
@@ -86,12 +88,7 @@ pub async fn run(
         .map(|session| session.session_id);
 
     match result {
-        Ok(outcome)
-            if !matches!(
-                outcome.status,
-                mini_agent_core::TurnStatus::StepLimit | mini_agent_core::TurnStatus::Failed
-            ) =>
-        {
+        Ok(outcome) if !matches!(outcome.status, TurnStatus::StepLimit | TurnStatus::Failed) => {
             observer.finish();
             let _ = runtime.record_turn(started_at_ms, &prompt, &outcome);
             if json_output {

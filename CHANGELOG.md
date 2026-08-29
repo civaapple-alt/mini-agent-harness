@@ -67,6 +67,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   now App Server protocol methods shared by JSON-RPC and `LocalAppServerClient`.
   The CLI REPL uses that management boundary instead of direct Host world state
   or capability session access.
+- CLI no longer directly compiles against Host or Capabilities. Launch and
+  observation contracts come from the App Server frontend facade, while
+  provider-specific prompt and real-LLM experiments live in
+  `mini-agent-experiments`.
 
 ### Fixed
 

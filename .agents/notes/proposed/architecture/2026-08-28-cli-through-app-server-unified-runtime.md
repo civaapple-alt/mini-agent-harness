@@ -47,6 +47,13 @@ workspace line gate and cross-platform/real-provider evidence, while
 frontend-only profile, safety, approval, and extension discovery imports stay
 at the CLI bootstrap edge.
 
+The final dependency-closure slice is now implemented. `mini-agent-cli` has no
+direct `mini-agent-host`, `mini-agent-capabilities`, or `mini-agent-core`
+dependency; it imports the stable `mini-agent-app-server::frontend` facade.
+Provider-specific `prompt_weight` and `real_llm` examples moved to the new
+`mini-agent-experiments` crate. The remaining proposal gates are workspace
+line-budget cleanup and external platform/provider evidence.
+
 Follow-up verification on 2026-08-29 at `e317b14` passed
 `cargo test --workspace --all-targets -- --test-threads=1` and
 `cargo clippy --workspace --all-targets --locked -- -D warnings`. This is

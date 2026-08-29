@@ -8,6 +8,7 @@ members = [
     "crates/mini-agent-protocol",
     "crates/mini-agent-core",
     "crates/mini-agent-cli",
+    "crates/mini-agent-experiments",
 ]
 resolver = "2"
 

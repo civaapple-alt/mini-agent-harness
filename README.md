@@ -66,7 +66,10 @@ limits, failures, and observation events.
   App Server runtime; the CLI does not own provider, tool, Thread, or Harness
   assembly. The App Server's `local` bootstrap adapter resolves runtime
   profiles and launch settings for embedded frontends, keeping that setup out
-  of the REPL and headless command paths.
+  of the REPL and headless command paths. The CLI imports launch, approval,
+  observation, and event contracts from `mini-agent-app-server::frontend` and
+  has no direct Host or Capabilities dependency. Provider experiments are kept
+  in `mini-agent-experiments`.
 
 The mainline is the CLI over the App Server boundary. ACP is an experimental
 side adapter and compatibility probe: it exercises the same App Server

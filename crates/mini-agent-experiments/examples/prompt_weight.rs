@@ -27,7 +27,7 @@ const MINIMAL_PROMPT: &str = include_str!(
 const EXPANDED_PROMPT: &str = include_str!(
     "../../../.agents/notes/rejected/feature/resources/prompt-weight/prompt-weight-expanded.txt"
 );
-const HELP: &str = "prompt-weight experiment\n\nUSAGE:\n    cargo run -p mini-agent-cli --example prompt_weight -- [--runs N] [--output PATH]\n\nEach repetition normally issues 12 and may issue up to 18 model responses. Output paths must not already exist.";
+const HELP: &str = "prompt-weight experiment\n\nUSAGE:\n    cargo run -p mini-agent-experiments --example prompt_weight -- [--runs N] [--output PATH]\n\nEach repetition normally issues 12 and may issue up to 18 model responses. Output paths must not already exist.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Treatment {

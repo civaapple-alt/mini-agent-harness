@@ -843,9 +843,6 @@ name = "mini-agent-cli"
 version = "0.3.0"
 dependencies = [
  "mini-agent-app-server",
- "mini-agent-capabilities",
- "mini-agent-core",
- "mini-agent-host",
  "serde_json",
  "tokio",
 ]
@@ -856,6 +853,17 @@ version = "0.3.0"
 dependencies = [
  "mini-agent-protocol",
  "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "mini-agent-experiments"
+version = "0.3.0"
+dependencies = [
+ "mini-agent-capabilities",
+ "mini-agent-core",
+ "mini-agent-host",
  "serde_json",
  "tokio",
 ]

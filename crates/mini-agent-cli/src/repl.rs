@@ -1,26 +1,31 @@
 use mini_agent_app_server::AppServerRuntime;
 use mini_agent_app_server::SessionRequest;
 use mini_agent_app_server::ThreadUpdate;
+use mini_agent_app_server::frontend::ApprovalController;
+use mini_agent_app_server::frontend::ApprovalMode;
+use mini_agent_app_server::frontend::DEFAULT_MAX_PENDING_INPUTS;
+use mini_agent_app_server::frontend::EventEnvelope;
+use mini_agent_app_server::frontend::EventSink;
+use mini_agent_app_server::frontend::InputQueueError;
+use mini_agent_app_server::frontend::RunControl;
+use mini_agent_app_server::frontend::RuntimeProfile;
+use mini_agent_app_server::frontend::SandboxKind;
+use mini_agent_app_server::frontend::SecurityPolicy;
+use mini_agent_app_server::frontend::SecurityPreset;
+use mini_agent_app_server::frontend::StopReason;
+use mini_agent_app_server::frontend::ToolError;
+use mini_agent_app_server::frontend::TurnInput;
+use mini_agent_app_server::frontend::TurnInputMode;
+use mini_agent_app_server::frontend::TurnStatus;
+use mini_agent_app_server::frontend::WorkflowScope;
+use mini_agent_app_server::frontend::harness_config_auto;
+use mini_agent_app_server::frontend::load_workspace_profile;
+use mini_agent_app_server::frontend::observer::RunObserver;
+use mini_agent_app_server::frontend::print_auto_warning;
+use mini_agent_app_server::frontend::skills;
 use mini_agent_app_server::local::LocalRuntimeRequest;
 use mini_agent_app_server::mentor;
 use mini_agent_app_server::workflows as workflow_api;
-use mini_agent_capabilities::sandbox::SandboxKind;
-use mini_agent_capabilities::security::{SecurityPolicy, SecurityPreset};
-use mini_agent_capabilities::skills;
-use mini_agent_capabilities::workspace::{ApprovalController, ApprovalMode};
-use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
-use mini_agent_core::EventEnvelope;
-use mini_agent_core::EventSink;
-use mini_agent_core::InputQueueError;
-use mini_agent_core::RunControl;
-use mini_agent_core::ToolError;
-use mini_agent_core::TurnInput;
-use mini_agent_core::TurnInputMode;
-use mini_agent_host::RuntimeProfile;
-use mini_agent_host::WorkflowScope;
-use mini_agent_host::harness_config_auto;
-use mini_agent_host::observer::RunObserver;
-use mini_agent_host::print_auto_warning;
 use std::collections::VecDeque;
 use std::io;
 use std::io::IsTerminal;
@@ -141,9 +146,10 @@ pub async fn run(
     } else {
         RuntimeProfile::interactive_default()
     };
-    let startup_profile = match workspace.as_ref().map(|workspace| {
-        mini_agent_host::load_workspace_profile(workspace, startup_profile.clone())
-    }) {
+    let startup_profile = match workspace
+        .as_ref()
+        .map(|workspace| load_workspace_profile(workspace, startup_profile.clone()))
+    {
         Some(Ok(profile)) => profile,
         Some(Err(error)) => {
             eprintln!("profile> {error}");
@@ -629,10 +635,11 @@ fn spawn_worker(
                             ));
                             break;
                         };
-                        let steered = batch.turns.iter().any(|turn| {
-                            turn.stop_reason == Some(mini_agent_core::StopReason::Steered)
-                        });
-                        let step_limited = outcome.status == mini_agent_core::TurnStatus::StepLimit;
+                        let steered = batch
+                            .turns
+                            .iter()
+                            .any(|turn| turn.stop_reason == Some(StopReason::Steered));
+                        let step_limited = outcome.status == TurnStatus::StepLimit;
                         match (steered, step_limited) {
                             (true, _) => {
                                 let _ = events.send(ReplEvent::Notice(format!(

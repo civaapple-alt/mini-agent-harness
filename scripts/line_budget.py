@@ -24,6 +24,7 @@ LAYERS = (
     ),
     ("acp", ("mini-agent-acp",)),
     ("cli", ("mini-agent-cli",)),
+    ("experiments", ("mini-agent-experiments",)),
 )
 RUNTIME_PACKAGES = (
     "mini-agent-core",
