@@ -1,4 +1,4 @@
-use mini_agent_core::ToolError;
+use mini_agent_protocol::ToolError;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;

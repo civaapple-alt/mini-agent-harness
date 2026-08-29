@@ -2,22 +2,22 @@ use super::AppServer;
 use super::AppServerError;
 use super::ApprovalBroker;
 use super::ThreadUpdate;
-use mini_agent_core::Event;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
-use mini_agent_core::Model;
-use mini_agent_core::ModelEventSink;
-use mini_agent_core::ModelRequest;
-use mini_agent_core::ModelResponse;
 use mini_agent_core::Thread;
-use mini_agent_core::ThreadId;
-use mini_agent_core::ThreadStart;
 use mini_agent_core::ToolRegistry;
-use mini_agent_core::TurnCancel;
-use mini_agent_core::TurnInput;
-use mini_agent_core::TurnInputMode;
-use mini_agent_core::TurnStart;
-use mini_agent_core::TurnSubmission;
+use mini_agent_protocol::Event;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ModelEventSink;
+use mini_agent_protocol::ModelRequest;
+use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::ThreadStart;
+use mini_agent_protocol::TurnCancel;
+use mini_agent_protocol::TurnInput;
+use mini_agent_protocol::TurnInputMode;
+use mini_agent_protocol::TurnStart;
+use mini_agent_protocol::TurnSubmission;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -108,7 +108,7 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
     assert!(matches!(
         received.last().unwrap().event,
         Event::TurnFinished {
-            status: mini_agent_core::TurnStatus::Completed
+            status: mini_agent_protocol::TurnStatus::Completed
         }
     ));
 
@@ -122,7 +122,7 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
     assert_eq!(
         second,
         TurnSubmission::Started {
-            turn_id: mini_agent_core::TurnId::new("turn-2")
+            turn_id: mini_agent_protocol::TurnId::new("turn-2")
         }
     );
 }
@@ -137,7 +137,7 @@ async fn applies_thread_updates_without_exposing_the_harness_to_clients() {
     let checkpoint = server.thread_read().await.unwrap();
     assert_eq!(
         checkpoint.session.messages(),
-        &[mini_agent_core::Message::Context {
+        &[mini_agent_protocol::Message::Context {
             text: "host context".to_string()
         }]
     );
@@ -219,9 +219,9 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
     assert_eq!(
         statuses,
         [
-            mini_agent_core::TurnStatus::Cancelled,
-            mini_agent_core::TurnStatus::Completed,
-            mini_agent_core::TurnStatus::Completed,
+            mini_agent_protocol::TurnStatus::Cancelled,
+            mini_agent_protocol::TurnStatus::Completed,
+            mini_agent_protocol::TurnStatus::Completed,
         ]
     );
 }
@@ -240,7 +240,7 @@ async fn rejects_idle_steer_and_cancel_without_starting_a_second_loop() {
     );
     assert_eq!(
         server
-            .turn_cancel(TurnCancel::new(mini_agent_core::TurnId::new("turn-1")))
+            .turn_cancel(TurnCancel::new(mini_agent_protocol::TurnId::new("turn-1")))
             .await,
         Err(AppServerError::NoActiveTurn)
     );
@@ -277,7 +277,7 @@ async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
             .await
             .unwrap(),
         TurnSubmission::Started {
-            turn_id: mini_agent_core::TurnId::new("turn-2")
+            turn_id: mini_agent_protocol::TurnId::new("turn-2")
         }
     );
 
@@ -288,7 +288,7 @@ async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
             turn_ids.push(event.turn_id);
         }
     }
-    assert_eq!(turn_ids, [Some(mini_agent_core::TurnId::new("turn-2"))]);
+    assert_eq!(turn_ids, [Some(mini_agent_protocol::TurnId::new("turn-2"))]);
 }
 
 #[tokio::test]
@@ -317,7 +317,7 @@ async fn routes_multiple_preconfigured_threads_by_identity() {
     assert_eq!(
         submission,
         TurnSubmission::Started {
-            turn_id: mini_agent_core::TurnId::new("turn-1")
+            turn_id: mini_agent_protocol::TurnId::new("turn-1")
         }
     );
     for _ in 0..6 {

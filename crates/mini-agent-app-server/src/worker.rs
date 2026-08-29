@@ -1,7 +1,7 @@
 use super::*;
-use mini_agent_core::EventEnvelope;
-use mini_agent_core::EventSink;
 use mini_agent_core::SteeringMode;
+use mini_agent_protocol::EventEnvelope;
+use mini_agent_protocol::EventSink;
 
 pub(super) enum Command {
     Start {
@@ -104,12 +104,12 @@ pub(super) async fn worker_loop<M>(
                     threads.insert(key, thread);
                     continue;
                 }
-                if thread.status() == mini_agent_core::ThreadStatus::Closed {
+                if thread.status() == mini_agent_protocol::ThreadStatus::Closed {
                     let _ = reply.send(Err(AppServerError::Closed));
                     threads.insert(key, thread);
                     continue;
                 }
-                if thread.status() == mini_agent_core::ThreadStatus::Running {
+                if thread.status() == mini_agent_protocol::ThreadStatus::Running {
                     let _ = reply.send(Err(AppServerError::Busy));
                     threads.insert(key, thread);
                     continue;
@@ -165,7 +165,7 @@ pub(super) async fn worker_loop<M>(
                                 turn_id.as_str().to_string(),
                                 SettledTurn {
                                     id: turn_id.clone(),
-                                    status: mini_agent_core::TurnStatus::Failed,
+                                    status: mini_agent_protocol::TurnStatus::Failed,
                                     outcome: None,
                                     error: Some(error.to_string()),
                                 },
@@ -290,7 +290,7 @@ fn apply_thread_update<M>(
 where
     M: Model,
 {
-    if thread.status() == mini_agent_core::ThreadStatus::Running {
+    if thread.status() == mini_agent_protocol::ThreadStatus::Running {
         return Err(AppServerError::Busy);
     }
     match update {

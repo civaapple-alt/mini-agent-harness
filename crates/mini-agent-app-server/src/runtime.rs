@@ -25,22 +25,22 @@ use mini_agent_capabilities::OpenAiModel;
 use mini_agent_capabilities::SessionStore;
 use mini_agent_capabilities::build_model;
 use mini_agent_capabilities::workspace::ApprovalController;
-use mini_agent_core::Event;
-use mini_agent_core::EventSink;
 use mini_agent_core::HarnessConfig;
-use mini_agent_core::Model;
 use mini_agent_core::RunControl;
 use mini_agent_core::Thread;
-use mini_agent_core::ThreadId;
-use mini_agent_core::ThreadStart;
-use mini_agent_core::TurnInput;
-use mini_agent_core::TurnInputMode;
 use mini_agent_host::CapabilityManifest;
 use mini_agent_host::ModelProviderFactory;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
 use mini_agent_host::WorldState;
 use mini_agent_host::prepare_harness_with_model_factory;
+use mini_agent_protocol::Event;
+use mini_agent_protocol::EventSink;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::ThreadStart;
+use mini_agent_protocol::TurnInput;
+use mini_agent_protocol::TurnInputMode;
 use std::path::PathBuf;
 
 fn openai_model_factory(
@@ -512,7 +512,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             .await
             .map_err(|error| error.message)?;
         match submission {
-            mini_agent_core::TurnSubmission::Started { .. } => {}
+            mini_agent_protocol::TurnSubmission::Started { .. } => {}
             other => return Err(format!("turn was not started: {other:?}")),
         }
         let mut finished_turn_ids = Vec::new();
@@ -560,7 +560,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
 
     async fn read_settled_turn(
         &mut self,
-        turn_id: mini_agent_core::TurnId,
+        turn_id: mini_agent_protocol::TurnId,
     ) -> Result<mini_agent_app_server_protocol::TurnReadResult, String> {
         let mut last_error = None;
         for _ in 0..16 {
@@ -615,7 +615,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
                 .iter()
                 .rev()
                 .find_map(|message| match message {
-                    mini_agent_core::Message::User { text } => Some(text.as_str()),
+                    mini_agent_protocol::Message::User { text } => Some(text.as_str()),
                     _ => None,
                 })
                 .unwrap_or(fallback_prompt);

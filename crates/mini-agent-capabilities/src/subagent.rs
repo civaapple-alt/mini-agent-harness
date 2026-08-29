@@ -1,9 +1,9 @@
 use crate::workspace::Workspace;
 use crate::workspace::run_sandboxed_command;
 use crate::workspace::string_arg;
-use mini_agent_core::Tool;
-use mini_agent_core::ToolError;
-use mini_agent_core::ToolSpec;
+use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
 use std::fs;

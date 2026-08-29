@@ -78,12 +78,12 @@ use mini_agent_app_server_protocol::WorldSetExecutionParams;
 use mini_agent_app_server_protocol::WorldSetExecutionResult;
 use mini_agent_app_server_protocol::WorldStateResult;
 use mini_agent_capabilities::workspace::ApprovalMode;
-use mini_agent_core::EventEnvelope;
-use mini_agent_core::Model;
 use mini_agent_core::SessionState;
-use mini_agent_core::TurnCancel;
-use mini_agent_core::TurnInputMode;
-use mini_agent_core::TurnStart;
+use mini_agent_protocol::EventEnvelope;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::TurnCancel;
+use mini_agent_protocol::TurnInputMode;
+use mini_agent_protocol::TurnStart;
 use serde_json::Value;
 use tokio::io::AsyncBufRead;
 use tokio::io::AsyncBufReadExt;
@@ -173,7 +173,7 @@ where
         self.initialized
     }
 
-    pub fn has_thread(&self, thread_id: &mini_agent_core::ThreadId) -> bool {
+    pub fn has_thread(&self, thread_id: &mini_agent_protocol::ThreadId) -> bool {
         self.server.has_thread(thread_id)
     }
 
@@ -841,7 +841,7 @@ where
             .ok_or_else(|| JsonRpcError::server_error("runtime management is unavailable"))
     }
 
-    fn check_thread(&self, thread_id: &mini_agent_core::ThreadId) -> Result<(), JsonRpcError> {
+    fn check_thread(&self, thread_id: &mini_agent_protocol::ThreadId) -> Result<(), JsonRpcError> {
         if self.server.has_thread(thread_id) {
             Ok(())
         } else {
@@ -1270,14 +1270,14 @@ mod tests {
     use mini_agent_capabilities::workspace::ApprovalMode;
     use mini_agent_core::Harness;
     use mini_agent_core::HarnessConfig;
-    use mini_agent_core::ModelEventSink;
-    use mini_agent_core::ModelRequest;
-    use mini_agent_core::ModelResponse;
     use mini_agent_core::Thread;
-    use mini_agent_core::ThreadId;
-    use mini_agent_core::ThreadStart;
     use mini_agent_core::ToolRegistry;
-    use mini_agent_core::TurnInput;
+    use mini_agent_protocol::ModelEventSink;
+    use mini_agent_protocol::ModelRequest;
+    use mini_agent_protocol::ModelResponse;
+    use mini_agent_protocol::ThreadId;
+    use mini_agent_protocol::ThreadStart;
+    use mini_agent_protocol::TurnInput;
     use std::convert::Infallible;
     use tokio::io::AsyncBufReadExt;
     use tokio::io::AsyncWriteExt;
@@ -1723,7 +1723,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             submission,
-            mini_agent_core::TurnSubmission::Started { .. }
+            mini_agent_protocol::TurnSubmission::Started { .. }
         ));
         assert_eq!(client.next_event().await.unwrap().sequence, 1);
     }
@@ -1743,7 +1743,7 @@ mod tests {
         let mut local_events = Vec::new();
         loop {
             let event = local.next_event().await.unwrap();
-            let finished = matches!(event.event, mini_agent_core::Event::TurnFinished { .. });
+            let finished = matches!(event.event, mini_agent_protocol::Event::TurnFinished { .. });
             local_events.push(event);
             if finished {
                 break;
@@ -1786,7 +1786,10 @@ mod tests {
             let event: TurnEventNotification = serde_json::from_value(params).unwrap();
             let envelope =
                 EventEnvelope::new(event.thread_id, event.turn_id, event.sequence, event.event);
-            let finished = matches!(envelope.event, mini_agent_core::Event::TurnFinished { .. });
+            let finished = matches!(
+                envelope.event,
+                mini_agent_protocol::Event::TurnFinished { .. }
+            );
             json_events.push(envelope);
             if finished {
                 break;
@@ -1824,7 +1827,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        let turn_id: mini_agent_core::TurnId =
+        let turn_id: mini_agent_protocol::TurnId =
             serde_json::from_value(started.result.unwrap()["turn_id"].clone()).unwrap();
         for _ in 0..6 {
             let _ = connection.next_notification().await.unwrap();

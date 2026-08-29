@@ -1,7 +1,7 @@
-use mini_agent_core::Tool;
-use mini_agent_core::ToolExecutionOutcome;
-use mini_agent_core::ToolExecutionStatus;
-use mini_agent_core::ToolSpec;
+use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolExecutionOutcome;
+use mini_agent_protocol::ToolExecutionStatus;
+use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 
 /// Wraps host tools with the policy-aware outcome projection used by core.
@@ -19,7 +19,7 @@ impl Tool for ClassifiedTool {
         self.0.spec()
     }
 
-    fn execute(&self, arguments: &Value) -> Result<String, mini_agent_core::ToolError> {
+    fn execute(&self, arguments: &Value) -> Result<String, mini_agent_protocol::ToolError> {
         self.0.execute(arguments)
     }
 

@@ -42,6 +42,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Core execution contracts are separated from the protocol crate. Session,
   context, turn lifecycle, cancellation, and queued input are owned by the
   execution core, while wire payloads remain in protocol.
+- Core no longer re-exports Protocol types from its root API. Harness
+  run-control, context compaction, tool-batch execution, and model-event
+  forwarding now live in focused private modules while the public turn API is
+  unchanged.
 - Host responsibilities are separated from App Server transport and worker
   orchestration. Runtime configuration, provider setup, tools, workspace
   policy, persistence, Goal state, and Plan state remain in the Host layer.

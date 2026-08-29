@@ -1,13 +1,23 @@
 use super::*;
-use crate::ModelResponse;
-use crate::ModelUsage;
-use crate::Tool;
-use crate::ToolCall;
-use crate::ToolError;
-use crate::ToolExecutionOutcome;
-use crate::ToolExecutionStatus;
-use crate::ToolSpec;
-use crate::TurnInputMode;
+use crate::context_controller::COMPACT_TAIL_MAX_BYTES;
+use crate::context_controller::COMPACTION_PREFIX;
+use crate::context_controller::COMPACTION_PROMPT;
+use crate::context_controller::assemble_compacted;
+use crate::context_controller::serialized_len;
+use crate::context_controller::split_prefix_tail;
+use crate::context_controller::trim_prefix_to_fit;
+use crate::tool_batch_executor::truncate_utf8;
+use mini_agent_protocol::ModelEventSink;
+use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::ModelUsage;
+use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolCall;
+use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolExecutionOutcome;
+use mini_agent_protocol::ToolExecutionStatus;
+use mini_agent_protocol::ToolSpec;
+use mini_agent_protocol::TurnInput;
+use mini_agent_protocol::TurnInputMode;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -887,7 +897,7 @@ async fn empty_summary_falls_back_to_mechanical_trim() {
     assert!(!events.0.iter().any(|event| matches!(
         event,
         Event::RunFailed {
-            reason: crate::RunFailure::Compaction,
+            reason: mini_agent_protocol::RunFailure::Compaction,
         }
     )));
 }
@@ -1173,7 +1183,7 @@ async fn rejects_oversized_user_input_without_retaining_it() {
     assert!(matches!(
         events.0.as_slice(),
         [Event::RunFailed {
-            reason: crate::RunFailure::LimitExceeded(_)
+            reason: mini_agent_protocol::RunFailure::LimitExceeded(_)
         }]
     ));
     assert_eq!(

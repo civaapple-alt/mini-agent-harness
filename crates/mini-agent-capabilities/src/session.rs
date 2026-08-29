@@ -1,5 +1,5 @@
-use mini_agent_core::Message;
 use mini_agent_core::SessionState;
+use mini_agent_protocol::Message;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
@@ -1035,11 +1035,11 @@ pub fn timestamp_ms() -> u64 {
 
 pub fn try_load_session_events(
     lines: &[String],
-) -> Result<Option<Vec<mini_agent_core::Event>>, String> {
-    use mini_agent_core::Event;
-    use mini_agent_core::RunFailure;
-    use mini_agent_core::StopReason;
-    use mini_agent_core::ToolCall;
+) -> Result<Option<Vec<mini_agent_protocol::Event>>, String> {
+    use mini_agent_protocol::Event;
+    use mini_agent_protocol::RunFailure;
+    use mini_agent_protocol::StopReason;
+    use mini_agent_protocol::ToolCall;
 
     if lines.is_empty() {
         return Ok(None);

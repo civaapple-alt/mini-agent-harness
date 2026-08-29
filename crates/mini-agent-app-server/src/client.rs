@@ -63,11 +63,11 @@ use mini_agent_app_server_protocol::WorldRefreshResult;
 use mini_agent_app_server_protocol::WorldSetExecutionParams;
 use mini_agent_app_server_protocol::WorldSetExecutionResult;
 use mini_agent_app_server_protocol::WorldStateResult;
-use mini_agent_core::EventEnvelope;
-use mini_agent_core::Model;
-use mini_agent_core::ThreadId;
-use mini_agent_core::TurnId;
-use mini_agent_core::TurnSubmission;
+use mini_agent_protocol::EventEnvelope;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::TurnId;
+use mini_agent_protocol::TurnSubmission;
 use serde::de::DeserializeOwned;
 
 /// A local client that exercises the app-server protocol without a transport.
@@ -188,7 +188,7 @@ where
     pub async fn start_turn(
         &mut self,
         thread_id: ThreadId,
-        input: mini_agent_core::TurnInput,
+        input: mini_agent_protocol::TurnInput,
     ) -> Result<TurnSubmission, JsonRpcError> {
         self.call(METHOD_TURN_START, TurnStartParams { thread_id, input })
             .await

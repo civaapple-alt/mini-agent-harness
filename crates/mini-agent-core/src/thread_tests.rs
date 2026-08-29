@@ -1,29 +1,29 @@
 use super::Thread;
-use crate::Event;
-use crate::EventEnvelope;
-use crate::EventSink;
 use crate::Harness;
 use crate::HarnessConfig;
-use crate::Model;
-use crate::ModelEventSink;
-use crate::ModelRequest;
-use crate::ModelResponse;
 use crate::RunControl;
 use crate::SteeringMode;
 use crate::ThreadCheckpoint;
 use crate::ThreadError;
-use crate::ThreadId;
-use crate::ThreadStatus;
-use crate::Tool;
-use crate::ToolCall;
-use crate::ToolError;
 use crate::ToolRegistry;
-use crate::ToolSpec;
-use crate::TurnCancel;
-use crate::TurnId;
-use crate::TurnInput;
-use crate::TurnInputMode;
-use crate::TurnStatus;
+use mini_agent_protocol::Event;
+use mini_agent_protocol::EventEnvelope;
+use mini_agent_protocol::EventSink;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ModelEventSink;
+use mini_agent_protocol::ModelRequest;
+use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::ThreadStatus;
+use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolCall;
+use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolSpec;
+use mini_agent_protocol::TurnCancel;
+use mini_agent_protocol::TurnId;
+use mini_agent_protocol::TurnInput;
+use mini_agent_protocol::TurnInputMode;
+use mini_agent_protocol::TurnStatus;
 use serde_json::Value;
 use serde_json::json;
 use std::convert::Infallible;
@@ -229,7 +229,10 @@ async fn thread_cancellation_emits_ordered_events_and_settles() {
         .unwrap();
 
     assert_eq!(result.status, TurnStatus::Cancelled);
-    assert_eq!(result.outcome.stop_reason, crate::StopReason::Cancelled);
+    assert_eq!(
+        result.outcome.stop_reason,
+        mini_agent_protocol::StopReason::Cancelled
+    );
     assert_eq!(thread.status(), ThreadStatus::Idle);
     assert_eq!(sink.0.len(), 4);
     assert_eq!(sink.0[0].sequence, 1);
@@ -243,7 +246,7 @@ async fn thread_cancellation_emits_ordered_events_and_settles() {
     assert!(matches!(
         sink.0[2].event,
         Event::RunFinished {
-            stop_reason: crate::StopReason::Cancelled,
+            stop_reason: mini_agent_protocol::StopReason::Cancelled,
             ..
         }
     ));

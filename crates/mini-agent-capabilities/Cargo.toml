@@ -17,6 +17,7 @@ futures-util.workspace = true
 htmd = "0.5"
 http.workspace = true
 mini-agent-core = { version = "0.3.0", path = "../mini-agent-core" }
+mini-agent-protocol = { version = "0.3.0", path = "../mini-agent-protocol" }
 reqwest.workspace = true
 rmcp.workspace = true
 serde.workspace = true

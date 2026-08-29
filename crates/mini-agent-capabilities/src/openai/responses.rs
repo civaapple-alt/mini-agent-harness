@@ -8,13 +8,13 @@ use crate::image::ImageStore;
 use crate::image::ProjectedImage;
 use crate::image::vision_model_for;
 use crate::image::wire_image_block;
-use mini_agent_core::Message;
-use mini_agent_core::ModelEvent;
-use mini_agent_core::ModelEventSink;
-use mini_agent_core::ModelRequest;
-use mini_agent_core::ModelResponse;
-use mini_agent_core::ModelUsage;
-use mini_agent_core::ToolCall;
+use mini_agent_protocol::Message;
+use mini_agent_protocol::ModelEvent;
+use mini_agent_protocol::ModelEventSink;
+use mini_agent_protocol::ModelRequest;
+use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::ModelUsage;
+use mini_agent_protocol::ToolCall;
 use serde_json::Value;
 use serde_json::json;
 
@@ -304,7 +304,7 @@ fn event_error_message(event: &Value) -> String {
 mod tests {
     use super::*;
     use mini_agent_core::HarnessConfig;
-    use mini_agent_core::ToolSpec;
+    use mini_agent_protocol::ToolSpec;
 
     #[derive(Default)]
     struct Deltas {

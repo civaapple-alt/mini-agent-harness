@@ -3,27 +3,27 @@
 use crate::AppServer;
 use crate::AppServerConnection;
 use crate::LocalAppServerClient;
-use mini_agent_core::Event;
-use mini_agent_core::EventSink;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
-use mini_agent_core::Message;
-use mini_agent_core::Model;
-use mini_agent_core::ModelEventSink;
-use mini_agent_core::ModelRequest;
-use mini_agent_core::ModelResponse;
 use mini_agent_core::Thread;
-use mini_agent_core::ThreadId;
-use mini_agent_core::ThreadStart;
-use mini_agent_core::Tool;
-use mini_agent_core::ToolCall;
-use mini_agent_core::ToolError;
 use mini_agent_core::ToolRegistry;
-use mini_agent_core::ToolSpec;
-use mini_agent_core::TurnInput;
-use mini_agent_core::TurnInputMode;
-use mini_agent_core::TurnStatus;
 use mini_agent_host::RunObserver;
+use mini_agent_protocol::Event;
+use mini_agent_protocol::EventSink;
+use mini_agent_protocol::Message;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ModelEventSink;
+use mini_agent_protocol::ModelRequest;
+use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::ThreadStart;
+use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolCall;
+use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolSpec;
+use mini_agent_protocol::TurnInput;
+use mini_agent_protocol::TurnInputMode;
+use mini_agent_protocol::TurnStatus;
 use serde_json::Value;
 use serde_json::json;
 use std::convert::Infallible;
@@ -50,7 +50,7 @@ pub async fn run(prompt: String) -> Result<(), String> {
         .await
         .map_err(|error| format!("cannot start turn: {}", error.message))?
     {
-        mini_agent_core::TurnSubmission::Started { turn_id } => turn_id,
+        mini_agent_protocol::TurnSubmission::Started { turn_id } => turn_id,
         other => return Err(format!("turn was not started: {other:?}")),
     };
     loop {

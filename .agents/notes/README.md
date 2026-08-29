@@ -113,6 +113,7 @@ If a proposed approach is rejected during review:
 | 2026-08-29 | [Model Provider Factory Seam](implemented/architecture/2026-08-29-model-provider-factory-seam.md) | Generic Core Model construction through Host and App Server provider factories with an external provider example |
 | 2026-08-29 | [CLI REPL Worker Split](implemented/architecture/2026-08-29-cli-repl-worker-split.md) | Terminal presentation and command queueing separated from App Server worker and workflow execution |
 | 2026-08-29 | [App Server Owned Frontend Approval Contract](implemented/architecture/2026-08-29-app-server-owned-frontend-approval.md) | Approval lifecycle is wrapped at the App Server boundary while CLI startup policy remains explicit |
+| 2026-08-29 | [Core Protocol Boundary and Harness Module Ownership](implemented/architecture/2026-08-29-core-protocol-boundary-and-harness-modules.md) | Protocol contracts are imported directly and Harness execution responsibilities are split into private Core modules |
 | 2026-08-24 | [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md) | Strict boundary between pure microkernel core and host CLI adapters |
 | 2026-08-24 | [Hard Limits System](implemented/architecture/2026-08-24-hard-limits-system.md) | Hard bounds on context, responses, step count, and UTF-8 head/tail truncation |
 | 2026-08-26 | [Event-Driven Reactive Loop](implemented/architecture/2026-08-26-event-driven-reactive-loop.md) | Passive immutable observers driving live client UI and session-backed durable history |

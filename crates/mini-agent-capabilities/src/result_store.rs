@@ -1,6 +1,6 @@
-use mini_agent_core::Tool;
-use mini_agent_core::ToolError;
-use mini_agent_core::ToolSpec;
+use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -374,7 +374,7 @@ mod tests {
     use super::*;
     use crate::session::SessionRequest;
     use crate::session::SessionStore;
-    use mini_agent_core::Message;
+    use mini_agent_protocol::Message;
     use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
 

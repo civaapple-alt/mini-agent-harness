@@ -16,12 +16,12 @@ use mini_agent_capabilities::ModelProviderSettings;
 use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_capabilities::workspace::ApprovalMode;
 use mini_agent_core::HarnessConfig;
-use mini_agent_core::Model;
-use mini_agent_core::ModelEventSink;
-use mini_agent_core::ModelRequest;
-use mini_agent_core::ModelResponse;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ModelEventSink;
+use mini_agent_protocol::ModelRequest;
+use mini_agent_protocol::ModelResponse;
 use std::error::Error;
 
 struct EchoModel;

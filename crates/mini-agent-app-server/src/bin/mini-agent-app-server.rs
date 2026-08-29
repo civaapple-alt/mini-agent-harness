@@ -11,12 +11,12 @@ use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_capabilities::workspace::ApprovalMode;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
-use mini_agent_core::ThreadId;
-use mini_agent_core::ThreadStart;
 use mini_agent_host::HostRuntimeFactory;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
 use mini_agent_host::load_workspace_profile;
+use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::ThreadStart;
 use std::env;
 use std::error::Error;
 use tokio::io::BufReader;
@@ -127,6 +127,10 @@ fn approval_for(broker: ApprovalBroker) -> ApprovalController {
     ApprovalController::with_policy_and_callback(
         ApprovalMode::Interactive,
         SecurityPolicy::for_preset(SecurityPreset::Default),
-        move |action| broker.request(action).map_err(mini_agent_core::ToolError),
+        move |action| {
+            broker
+                .request(action)
+                .map_err(mini_agent_protocol::ToolError)
+        },
     )
 }

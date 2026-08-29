@@ -17,6 +17,7 @@ mini-agent-app-server-protocol = { version = "0.3.0", path = "../mini-agent-app-
 mini-agent-capabilities = { version = "0.3.0", path = "../mini-agent-capabilities" }
 mini-agent-core = { version = "0.3.0", path = "../mini-agent-core" }
 mini-agent-host = { version = "0.3.0", path = "../mini-agent-host" }
+mini-agent-protocol = { version = "0.3.0", path = "../mini-agent-protocol" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

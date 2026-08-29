@@ -8,23 +8,23 @@ use mini_agent_capabilities::session::DerivedItem;
 use mini_agent_capabilities::session::SessionRequest;
 use mini_agent_capabilities::session::SessionStore;
 use mini_agent_core::ContextLimitBehavior;
-use mini_agent_core::Event;
-use mini_agent_core::EventEnvelope;
-use mini_agent_core::EventSink;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
-use mini_agent_core::Message;
-use mini_agent_core::StopReason;
 use mini_agent_core::Thread;
-use mini_agent_core::ThreadId;
-use mini_agent_core::ThreadStart;
 use mini_agent_core::ToolRegistry;
-use mini_agent_core::TurnInput;
-use mini_agent_core::TurnInputMode;
 use mini_agent_host::config::RuntimeConfig;
 use mini_agent_host::observer::RunObserver;
 use mini_agent_host::observer::ScriptFormat;
 use mini_agent_host::observer::print_final_answer;
+use mini_agent_protocol::Event;
+use mini_agent_protocol::EventEnvelope;
+use mini_agent_protocol::EventSink;
+use mini_agent_protocol::Message;
+use mini_agent_protocol::StopReason;
+use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::ThreadStart;
+use mini_agent_protocol::TurnInput;
+use mini_agent_protocol::TurnInputMode;
 use serde_json::json;
 use std::process::ExitCode;
 
@@ -221,7 +221,7 @@ async fn run_harness_turn<M, S>(
     sink: &mut S,
 ) -> Result<TurnReadResult, String>
 where
-    M: mini_agent_core::Model + Send + 'static,
+    M: mini_agent_protocol::Model + Send + 'static,
     S: EventSink + Send,
 {
     let thread_id = ThreadId::new("mentor");
@@ -239,7 +239,7 @@ where
         .await
         .map_err(|error| error.message)?;
     let turn_id = match submission {
-        mini_agent_core::TurnSubmission::Started { turn_id } => turn_id,
+        mini_agent_protocol::TurnSubmission::Started { turn_id } => turn_id,
         other => return Err(format!("mentor turn was not started: {other:?}")),
     };
     loop {

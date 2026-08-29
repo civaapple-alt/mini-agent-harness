@@ -12,12 +12,12 @@ use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
 use mini_agent_capabilities::mcp;
 use mini_agent_capabilities::workspace::ApprovalController;
 use mini_agent_capabilities::workspace::ApprovalMode;
-use mini_agent_core::Model;
 use mini_agent_core::ThreadCheckpoint;
-use mini_agent_core::ThreadId;
-use mini_agent_core::TurnStatus;
 use mini_agent_host::WorldState;
 use mini_agent_host::tool_outcome::classify_tools;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::TurnStatus;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -259,7 +259,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .messages()
             .iter()
             .rev()
-            .find(|message| matches!(message, mini_agent_core::Message::Context { .. }))
+            .find(|message| matches!(message, mini_agent_protocol::Message::Context { .. }))
             .ok_or_else(|| "no context item is available to persist".to_string())?;
         session
             .store
@@ -286,8 +286,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         started_at_ms: u64,
         prompt: &str,
         result: &crate::runtime::RuntimeTurnResult,
-        messages: &[mini_agent_core::Message],
-        checkpoint: &[mini_agent_core::Message],
+        messages: &[mini_agent_protocol::Message],
+        checkpoint: &[mini_agent_protocol::Message],
     ) -> Result<(), String> {
         let mut state = self.state.lock().unwrap();
         let Some(session) = state.session.as_mut() else {

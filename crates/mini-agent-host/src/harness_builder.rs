@@ -5,8 +5,8 @@ use mini_agent_capabilities::build_model;
 use mini_agent_core::ContextLimitBehavior;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
-use mini_agent_core::Model;
 use mini_agent_core::ToolRegistry;
+use mini_agent_protocol::Model;
 
 use crate::config::RuntimeConfig;
 use crate::profile::{

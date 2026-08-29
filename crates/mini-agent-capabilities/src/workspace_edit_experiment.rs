@@ -1,16 +1,16 @@
 use super::*;
-use mini_agent_core::Event;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
-use mini_agent_core::Message;
-use mini_agent_core::Model;
-use mini_agent_core::ModelEventSink;
-use mini_agent_core::ModelRequest;
-use mini_agent_core::ModelResponse;
-use mini_agent_core::Observer;
-use mini_agent_core::StopReason;
-use mini_agent_core::ToolCall;
 use mini_agent_core::ToolRegistry;
+use mini_agent_protocol::Event;
+use mini_agent_protocol::Message;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ModelEventSink;
+use mini_agent_protocol::ModelRequest;
+use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::Observer;
+use mini_agent_protocol::StopReason;
+use mini_agent_protocol::ToolCall;
 
 const PROMPT: &str = "Change mode from slow to fast; preserve everything else.";
 const INITIAL: &str = "# preserve this comment\nmode = slow\nretries = 3\n# owner = runtime-team\n";

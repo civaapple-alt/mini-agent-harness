@@ -5,12 +5,12 @@ use crate::image::ProjectedImage;
 use crate::image::project_images;
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
-use mini_agent_core::Model;
-use mini_agent_core::ModelEventSink;
-use mini_agent_core::ModelRequest;
-use mini_agent_core::ModelResponse;
-use mini_agent_core::ModelUsage;
-use mini_agent_core::ToolCall;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ModelEventSink;
+use mini_agent_protocol::ModelRequest;
+use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::ModelUsage;
+use mini_agent_protocol::ToolCall;
 use reqwest::Client;
 use serde_json::Value;
 use std::error::Error;
@@ -93,7 +93,7 @@ fn project_for_request(
         .messages
         .iter()
         .filter_map(|message| match message {
-            mini_agent_core::Message::Tool { content, .. } => Some(content.clone()),
+            mini_agent_protocol::Message::Tool { content, .. } => Some(content.clone()),
             _ => None,
         })
         .collect::<Vec<_>>();

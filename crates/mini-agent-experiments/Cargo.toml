@@ -13,6 +13,7 @@ categories.workspace = true
 [dependencies]
 mini-agent-capabilities = { version = "0.3.0", path = "../mini-agent-capabilities" }
 mini-agent-core = { version = "0.3.0", path = "../mini-agent-core" }
+mini-agent-protocol = { version = "0.3.0", path = "../mini-agent-protocol" }
 mini-agent-host = { version = "0.3.0", path = "../mini-agent-host" }
 serde_json.workspace = true
 tokio.workspace = true

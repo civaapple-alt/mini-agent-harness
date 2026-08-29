@@ -4,41 +4,30 @@ use mini_agent_protocol::LimitExceeded;
 use mini_agent_protocol::LimitKind;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
-use mini_agent_protocol::ModelEvent;
-use mini_agent_protocol::ModelEventSink;
 use mini_agent_protocol::ModelRequest;
-use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::Observer;
 use mini_agent_protocol::StopReason;
-use mini_agent_protocol::ToolExecutionRequest;
-use mini_agent_protocol::TurnInput;
 use std::error::Error;
 use std::fmt;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 
 use crate::SessionState;
 use crate::context::context_bytes_for;
-use crate::input::InputQueueError;
-use crate::input::PendingInputQueue;
-
-const TRUNCATION_MARKER: &str = "\n[truncated]";
-const COMPACTION_PREFIX: &str = "[Compacted conversation context]";
-const COMPACTION_PROMPT: &str = "Summarize the conversation state for another coding agent that must continue the work. Preserve the user's active goal, constraints, decisions, files changed, commands and tests already run, failures, unresolved work, and the exact next actions. Be concise but do not omit information needed to continue. Output only the summary and do not call tools.";
-const COMPACT_TAIL_GROUPS: usize = 2;
-const COMPACT_TAIL_MAX_BYTES: usize = 128 * 1024;
+use crate::context_controller::COMPACTION_PROMPT;
+use crate::context_controller::assemble_compacted;
+use crate::context_controller::mechanical_compact;
+use crate::context_controller::split_compaction_parts;
+use crate::context_controller::trim_prefix_to_fit;
+use crate::run_control::RunControl;
+use crate::run_control::SteeringMode;
+use crate::tool_batch_executor::execute_tool_batch;
+use crate::turn_engine::ModelEventForwarder;
+use crate::turn_engine::SilentModelEvents;
+use crate::turn_engine::model_response_bytes;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContextLimitBehavior {
     Reject,
     Compact,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SteeringMode {
-    StopAtCheckpoint,
-    ContinueSameTurn,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,74 +59,6 @@ impl Default for HarnessConfig {
             max_context_bytes: 1024 * 1024,
             context_limit_behavior: ContextLimitBehavior::Reject,
         }
-    }
-}
-
-/// Cooperative control for a running turn.
-///
-/// A steering request is observed only at safe boundaries between model
-/// steps and after a complete tool batch, so tool side effects are never
-/// interrupted halfway through.
-#[derive(Clone, Default)]
-pub struct RunControl {
-    steer_requested: Arc<AtomicBool>,
-    cancel_requested: Arc<AtomicBool>,
-    pending_inputs: PendingInputQueue,
-}
-
-impl RunControl {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn request_steer(&self) {
-        self.steer_requested.store(true, Ordering::Release);
-    }
-
-    /// Requests cancellation at the next safe boundary of the active turn.
-    pub fn request_cancel(&self) {
-        self.cancel_requested.store(true, Ordering::Release);
-    }
-
-    pub fn clear_cancel(&self) {
-        self.cancel_requested.store(false, Ordering::Release);
-    }
-
-    pub fn submit(&self, input: TurnInput) -> Result<(), InputQueueError> {
-        let is_steer = input.mode == mini_agent_protocol::TurnInputMode::Steer;
-        self.pending_inputs.submit(input)?;
-        if is_steer {
-            self.request_steer();
-        }
-        Ok(())
-    }
-
-    pub fn take_steer_input(&self) -> Option<TurnInput> {
-        let input = self.pending_inputs.take_steer();
-        if input.is_none() || !self.pending_inputs.has_steer() {
-            self.clear_steer();
-        }
-        input
-    }
-
-    pub fn take_follow_up_input(&self) -> Option<TurnInput> {
-        self.pending_inputs.take_follow_up()
-    }
-
-    pub fn pending_input_count(&self) -> usize {
-        self.pending_inputs.len()
-    }
-
-    pub fn clear_steer(&self) {
-        self.steer_requested.store(false, Ordering::Release);
-    }
-
-    fn is_steer_requested(&self) -> bool {
-        self.steer_requested.load(Ordering::Acquire)
-    }
-
-    fn take_cancel_requested(&self) -> bool {
-        self.cancel_requested.swap(false, Ordering::AcqRel)
     }
 }
 
@@ -199,7 +120,7 @@ impl<M: Model> Harness<M> {
         &self.session
     }
 
-    pub fn tool_specs(&self) -> Vec<crate::ToolSpec> {
+    pub fn tool_specs(&self) -> Vec<mini_agent_protocol::ToolSpec> {
         self.tools.specs()
     }
 
@@ -294,7 +215,7 @@ impl<M: Model> Harness<M> {
         self.config = config;
     }
 
-    pub fn extend_tools(&mut self, tools: Vec<Box<dyn crate::Tool>>) {
+    pub fn extend_tools(&mut self, tools: Vec<Box<dyn mini_agent_protocol::Tool>>) {
         self.tools.extend(tools);
     }
 
@@ -414,7 +335,7 @@ impl<M: Model> Harness<M> {
                 Ok(response) => response,
                 Err(error) => {
                     observer.observe(&Event::RunFailed {
-                        reason: crate::RunFailure::Model,
+                        reason: mini_agent_protocol::RunFailure::Model,
                     });
                     return Err(HarnessError::Model(error));
                 }
@@ -494,33 +415,13 @@ impl<M: Model> Harness<M> {
                 ));
             }
 
-            let mut current_executed_batch = Vec::new();
-            for call in response.tool_calls {
-                observer.observe(&Event::ToolStarted { call: call.clone() });
-                let request = ToolExecutionRequest::from(call.clone());
-                let outcome = self.tools.execute_outcome(&request);
-                let is_error = outcome.status.is_error();
-                let content = outcome.content.clone();
-                let truncated = content.len() > self.config.max_tool_output_bytes;
-                let content = truncate_utf8(content, self.config.max_tool_output_bytes);
-
-                observer.observe(&Event::ToolFinished {
-                    call_id: call.id.clone(),
-                    name: call.name.clone(),
-                    content: content.clone(),
-                    is_error,
-                    truncated,
-                    outcome: Some(outcome.status),
-                });
-                self.session.push(Message::Tool {
-                    call_id: call.id,
-                    name: call.name.clone(),
-                    content: content.clone(),
-                    is_error,
-                    outcome: Some(outcome.status),
-                });
-                current_executed_batch.push((call.name, call.arguments, content));
-            }
+            let current_executed_batch = execute_tool_batch(
+                &self.tools,
+                response.tool_calls,
+                self.config.max_tool_output_bytes,
+                &mut self.session,
+                observer,
+            );
 
             if last_tool_batch.as_ref() == Some(&current_executed_batch) {
                 consecutive_duplicate_tool_batches =
@@ -569,7 +470,10 @@ impl<M: Model> Harness<M> {
         }
     }
 
-    fn ensure_context_limit(&self, tool_specs: &[crate::ToolSpec]) -> Result<(), LimitExceeded> {
+    fn ensure_context_limit(
+        &self,
+        tool_specs: &[mini_agent_protocol::ToolSpec],
+    ) -> Result<(), LimitExceeded> {
         let actual = self.context_bytes(&self.config.system_prompt, tool_specs);
         if actual <= self.config.max_context_bytes {
             Ok(())
@@ -594,13 +498,17 @@ impl<M: Model> Harness<M> {
         Ok(())
     }
 
-    fn context_bytes(&self, system_prompt: &str, tool_specs: &[crate::ToolSpec]) -> usize {
+    fn context_bytes(
+        &self,
+        system_prompt: &str,
+        tool_specs: &[mini_agent_protocol::ToolSpec],
+    ) -> usize {
         self.session.context_bytes(system_prompt, tool_specs)
     }
 
     async fn prepare_context<O: Observer + Send>(
         &mut self,
-        tool_specs: &[crate::ToolSpec],
+        tool_specs: &[mini_agent_protocol::ToolSpec],
         observer: &mut O,
     ) -> Result<(), HarnessError<M::Error>> {
         let actual = self.context_bytes(&self.config.system_prompt, tool_specs);
@@ -617,7 +525,7 @@ impl<M: Model> Harness<M> {
 
     async fn compact_context<O: Observer + Send>(
         &mut self,
-        tool_specs: &[crate::ToolSpec],
+        tool_specs: &[mini_agent_protocol::ToolSpec],
         observer: &mut O,
     ) -> Result<(), HarnessError<M::Error>> {
         let before_bytes = self.context_bytes(&self.config.system_prompt, tool_specs);
@@ -659,7 +567,7 @@ impl<M: Model> Harness<M> {
             Ok(response) => response,
             Err(error) => {
                 observer.observe(&Event::RunFailed {
-                    reason: crate::RunFailure::Model,
+                    reason: mini_agent_protocol::RunFailure::Model,
                 });
                 return Err(HarnessError::Model(error));
             }
@@ -713,8 +621,8 @@ impl<M: Model> Harness<M> {
         &mut self,
         compacted: Vec<Message>,
         before_bytes: usize,
-        usage: Option<crate::ModelUsage>,
-        tool_specs: &[crate::ToolSpec],
+        usage: Option<mini_agent_protocol::ModelUsage>,
+        tool_specs: &[mini_agent_protocol::ToolSpec],
         observer: &mut O,
     ) -> Result<(), HarnessError<M::Error>> {
         let after_bytes = context_bytes_for(&self.config.system_prompt, &compacted, tool_specs);
@@ -744,179 +652,7 @@ impl<M: Model> Harness<M> {
     }
 }
 
-const LOOP_WARNING_PREFIX: &str = "[Loop warning:";
 const LOOP_WARNING_TEXT: &str = "[Loop warning: identical tool calls and outputs were repeated without progress. Please adjust arguments or try an alternate strategy.]";
-
-fn split_compaction_parts(messages: &[Message]) -> (Vec<Message>, Option<Message>, Vec<Message>) {
-    let (without_context, context) = take_latest_context(messages);
-    let (prefix, tail) = split_prefix_tail(&without_context);
-    (prefix, context, tail)
-}
-
-fn take_latest_context(messages: &[Message]) -> (Vec<Message>, Option<Message>) {
-    let Some(index) = messages.iter().rposition(|message| match message {
-        Message::Context { text } => !text.starts_with(LOOP_WARNING_PREFIX),
-        _ => false,
-    }) else {
-        return (messages.to_vec(), None);
-    };
-    let context = messages[index].clone();
-    let mut rest = Vec::with_capacity(messages.len().saturating_sub(1));
-    rest.extend_from_slice(&messages[..index]);
-    rest.extend_from_slice(&messages[index + 1..]);
-    (rest, Some(context))
-}
-
-fn split_prefix_tail(messages: &[Message]) -> (Vec<Message>, Vec<Message>) {
-    let starts = assistant_starts(messages);
-    if starts.is_empty() {
-        return (messages.to_vec(), Vec::new());
-    }
-    let group_count = starts.len().min(COMPACT_TAIL_GROUPS);
-    let mut tail_start = starts[starts.len() - group_count];
-    let mut tail = messages[tail_start..].to_vec();
-    while assistant_starts(&tail).len() > 1 && serialized_len(&tail) > COMPACT_TAIL_MAX_BYTES {
-        let inner = assistant_starts(&tail);
-        tail_start += inner[1];
-        tail = messages[tail_start..].to_vec();
-    }
-    (messages[..tail_start].to_vec(), tail)
-}
-
-fn assistant_starts(messages: &[Message]) -> Vec<usize> {
-    messages
-        .iter()
-        .enumerate()
-        .filter_map(|(index, message)| {
-            matches!(message, Message::Assistant { .. }).then_some(index)
-        })
-        .collect()
-}
-
-fn serialized_len(messages: &[Message]) -> usize {
-    serde_json::to_vec(messages)
-        .expect("messages must serialize")
-        .len()
-}
-
-fn remove_first_message_group(messages: &mut Vec<Message>) {
-    if messages.is_empty() {
-        return;
-    }
-    match messages.remove(0) {
-        Message::Assistant { tool_calls, .. } if !tool_calls.is_empty() => {
-            while matches!(messages.first(), Some(Message::Tool { .. })) {
-                messages.remove(0);
-            }
-        }
-        _ => {}
-    }
-    while matches!(messages.first(), Some(Message::Tool { .. })) {
-        messages.remove(0);
-    }
-}
-
-fn trim_prefix_to_fit(
-    prefix: &mut Vec<Message>,
-    prompt: &str,
-    system_prompt: &str,
-    tool_specs: &[crate::ToolSpec],
-    max_bytes: usize,
-) {
-    while !prefix.is_empty() {
-        let mut request = prefix.clone();
-        request.push(Message::User {
-            text: prompt.to_string(),
-        });
-        if context_bytes_for(system_prompt, &request, tool_specs) <= max_bytes {
-            return;
-        }
-        remove_first_message_group(prefix);
-    }
-}
-
-fn assemble_compacted(
-    summary: Option<&str>,
-    context: Option<Message>,
-    tail: Vec<Message>,
-    max_user_input_bytes: usize,
-) -> Vec<Message> {
-    let mut compacted = Vec::new();
-    if let Some(summary) = summary {
-        let full_summary = format!("{COMPACTION_PREFIX}\n{summary}");
-        compacted.push(Message::User {
-            text: truncate_utf8(full_summary, max_user_input_bytes),
-        });
-    }
-    if let Some(context) = context {
-        compacted.push(context);
-    }
-    compacted.extend(tail);
-    compacted
-}
-
-fn mechanical_compact(
-    mut prefix: Vec<Message>,
-    context: Option<Message>,
-    tail: Vec<Message>,
-    compact_at: usize,
-    system_prompt: &str,
-    tool_specs: &[crate::ToolSpec],
-    max_user_input_bytes: usize,
-) -> Vec<Message> {
-    loop {
-        let compacted =
-            assemble_compacted(None, context.clone(), tail.clone(), max_user_input_bytes);
-        let mut candidate = prefix.clone();
-        candidate.extend(compacted.iter().cloned());
-        if prefix.is_empty()
-            || context_bytes_for(system_prompt, &candidate, tool_specs) < compact_at
-        {
-            return candidate;
-        }
-        remove_first_message_group(&mut prefix);
-    }
-}
-
-fn model_response_bytes(response: &ModelResponse) -> usize {
-    response.reasoning.len()
-        + response.text.len()
-        + serde_json::to_vec(&response.tool_calls)
-            .expect("tool calls must serialize")
-            .len()
-}
-
-struct SilentModelEvents;
-
-impl ModelEventSink for SilentModelEvents {
-    fn emit(&mut self, _event: ModelEvent) {}
-}
-
-struct ModelEventForwarder<'a, O> {
-    observer: &'a mut O,
-    emitted_bytes: usize,
-    max_bytes: usize,
-}
-
-impl<O: Observer> ModelEventSink for ModelEventForwarder<'_, O> {
-    fn emit(&mut self, event: ModelEvent) {
-        match event {
-            ModelEvent::ReasoningDelta(delta) => {
-                self.emitted_bytes = self.emitted_bytes.saturating_add(delta.len());
-                if self.emitted_bytes <= self.max_bytes {
-                    self.observer
-                        .observe(&Event::AssistantReasoningDelta { delta });
-                }
-            }
-            ModelEvent::TextDelta(delta) => {
-                self.emitted_bytes = self.emitted_bytes.saturating_add(delta.len());
-                if self.emitted_bytes <= self.max_bytes {
-                    self.observer.observe(&Event::AssistantTextDelta { delta });
-                }
-            }
-        }
-    }
-}
 
 fn finish<O: Observer>(
     final_text: String,
@@ -936,53 +672,16 @@ fn finish<O: Observer>(
 
 fn fail_limit<E, O: Observer>(limit: LimitExceeded, observer: &mut O) -> HarnessError<E> {
     observer.observe(&Event::RunFailed {
-        reason: crate::RunFailure::LimitExceeded(limit),
+        reason: mini_agent_protocol::RunFailure::LimitExceeded(limit),
     });
     HarnessError::Limit(limit)
 }
 
 fn fail_compaction<E, O: Observer>(reason: String, observer: &mut O) -> HarnessError<E> {
     observer.observe(&Event::RunFailed {
-        reason: crate::RunFailure::Compaction,
+        reason: mini_agent_protocol::RunFailure::Compaction,
     });
     HarnessError::Compaction(reason)
-}
-
-fn truncate_utf8(mut content: String, max_bytes: usize) -> String {
-    if content.len() <= max_bytes {
-        return content;
-    }
-
-    if max_bytes <= TRUNCATION_MARKER.len() {
-        let end = floor_char_boundary(&content, max_bytes);
-        content.truncate(end);
-        return content;
-    }
-
-    let retained_bytes = max_bytes - TRUNCATION_MARKER.len();
-    let head_bytes = retained_bytes.div_ceil(2);
-    let tail_bytes = retained_bytes - head_bytes;
-    let head_end = floor_char_boundary(&content, head_bytes);
-    let tail_start = ceil_char_boundary(&content, content.len() - tail_bytes);
-    let mut output = String::with_capacity(max_bytes);
-    output.push_str(&content[..head_end]);
-    output.push_str(TRUNCATION_MARKER);
-    output.push_str(&content[tail_start..]);
-    output
-}
-
-fn floor_char_boundary(text: &str, mut index: usize) -> usize {
-    while index > 0 && !text.is_char_boundary(index) {
-        index -= 1;
-    }
-    index
-}
-
-fn ceil_char_boundary(text: &str, mut index: usize) -> usize {
-    while index < text.len() && !text.is_char_boundary(index) {
-        index += 1;
-    }
-    index
 }
 
 #[cfg(test)]

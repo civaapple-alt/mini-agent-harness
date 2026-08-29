@@ -1,9 +1,9 @@
 use super::classify_outcome;
-use mini_agent_core::Tool;
-use mini_agent_core::ToolError;
-use mini_agent_core::ToolExecutionOutcome;
-use mini_agent_core::ToolExecutionStatus;
-use mini_agent_core::ToolSpec;
+use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolExecutionOutcome;
+use mini_agent_protocol::ToolExecutionStatus;
+use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 
 struct LegacyTool(&'static str);

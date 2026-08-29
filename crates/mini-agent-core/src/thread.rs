@@ -1,13 +1,13 @@
 use crate::Harness;
 use crate::HarnessError;
-use crate::Model;
-use crate::Observer;
 use crate::RunControl;
 use crate::RunOutcome;
 use crate::SteeringMode;
 use mini_agent_protocol::Event;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::EventSink;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::Observer;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStatus;
 use mini_agent_protocol::TurnCancel;
@@ -332,10 +332,10 @@ impl<M: Model> Thread<M> {
 
 fn status_for_outcome(outcome: &RunOutcome) -> TurnStatus {
     match outcome.stop_reason {
-        crate::StopReason::Completed => TurnStatus::Completed,
-        crate::StopReason::StepLimit => TurnStatus::StepLimit,
-        crate::StopReason::Steered => TurnStatus::Steered,
-        crate::StopReason::Cancelled => TurnStatus::Cancelled,
+        mini_agent_protocol::StopReason::Completed => TurnStatus::Completed,
+        mini_agent_protocol::StopReason::StepLimit => TurnStatus::StepLimit,
+        mini_agent_protocol::StopReason::Steered => TurnStatus::Steered,
+        mini_agent_protocol::StopReason::Cancelled => TurnStatus::Cancelled,
     }
 }
 

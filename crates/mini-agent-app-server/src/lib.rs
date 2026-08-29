@@ -1,16 +1,16 @@
-use mini_agent_core::EventEnvelope;
-use mini_agent_core::Model;
 use mini_agent_core::RunControl;
 use mini_agent_core::Thread;
 use mini_agent_core::ThreadCheckpoint;
-use mini_agent_core::ThreadId;
-use mini_agent_core::ThreadStart;
-use mini_agent_core::TurnCancel;
-use mini_agent_core::TurnId;
-use mini_agent_core::TurnInput;
-use mini_agent_core::TurnInputMode;
-use mini_agent_core::TurnStart;
-use mini_agent_core::TurnSubmission;
+use mini_agent_protocol::EventEnvelope;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::ThreadStart;
+use mini_agent_protocol::TurnCancel;
+use mini_agent_protocol::TurnId;
+use mini_agent_protocol::TurnInput;
+use mini_agent_protocol::TurnInputMode;
+use mini_agent_protocol::TurnStart;
+use mini_agent_protocol::TurnSubmission;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -182,14 +182,14 @@ pub enum ThreadUpdate {
     ClearHistory,
     AppendContext(String),
     ReplaceConfig(mini_agent_core::HarnessConfig),
-    ExtendTools(Vec<Box<dyn mini_agent_core::Tool>>),
+    ExtendTools(Vec<Box<dyn mini_agent_protocol::Tool>>),
 }
 
 /// A settled turn record retained by the service for inspection.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SettledTurn {
     pub id: TurnId,
-    pub status: mini_agent_core::TurnStatus,
+    pub status: mini_agent_protocol::TurnStatus,
     pub outcome: Option<mini_agent_core::RunOutcome>,
     pub error: Option<String>,
 }

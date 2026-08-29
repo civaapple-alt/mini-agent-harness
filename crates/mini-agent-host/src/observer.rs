@@ -1,8 +1,8 @@
-use mini_agent_core::Event;
-use mini_agent_core::EventEnvelope;
-use mini_agent_core::EventSink;
-use mini_agent_core::Observer;
-use mini_agent_core::ToolCall;
+use mini_agent_protocol::Event;
+use mini_agent_protocol::EventEnvelope;
+use mini_agent_protocol::EventSink;
+use mini_agent_protocol::Observer;
+use mini_agent_protocol::ToolCall;
 use serde_json::Value;
 use serde_json::json;
 use std::io;

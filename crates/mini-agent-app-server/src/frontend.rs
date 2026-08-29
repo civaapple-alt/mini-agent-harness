@@ -17,15 +17,15 @@ pub use mini_agent_capabilities::security::SecurityPreset;
 use mini_agent_capabilities::workspace::ApprovalController as CapabilityApprovalController;
 pub use mini_agent_capabilities::workspace::ApprovalMode;
 pub use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
-pub use mini_agent_core::EventEnvelope;
-pub use mini_agent_core::EventSink;
 pub use mini_agent_core::InputQueueError;
 pub use mini_agent_core::RunControl;
-pub use mini_agent_core::StopReason;
-pub use mini_agent_core::ToolError;
-pub use mini_agent_core::TurnInput;
-pub use mini_agent_core::TurnInputMode;
-pub use mini_agent_core::TurnStatus;
+pub use mini_agent_protocol::EventEnvelope;
+pub use mini_agent_protocol::EventSink;
+pub use mini_agent_protocol::StopReason;
+pub use mini_agent_protocol::ToolError;
+pub use mini_agent_protocol::TurnInput;
+pub use mini_agent_protocol::TurnInputMode;
+pub use mini_agent_protocol::TurnStatus;
 pub fn harness_config_auto(copilot: bool, auto_max_steps: usize) -> mini_agent_core::HarnessConfig {
     mini_agent_host::harness_config_auto(copilot, auto_max_steps)
 }
