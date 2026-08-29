@@ -331,9 +331,10 @@ fn tool_detail(call: &ToolCall) -> Option<String> {
             arg_str(&call.arguments, "command")?,
             MAX_TOOL_DETAIL_BYTES,
         )),
-        "read_file" | "edit_file" | "write_file" | "open_file" | "read_image" => Some(
-            bounded_single_line(arg_str(&call.arguments, "path")?, MAX_TOOL_DETAIL_BYTES),
-        ),
+        "read_file" | "edit_file" | "write_file" | "read_image" => Some(bounded_single_line(
+            arg_str(&call.arguments, "path")?,
+            MAX_TOOL_DETAIL_BYTES,
+        )),
         "web_fetch" => Some(bounded_single_line(
             arg_str(&call.arguments, "url")?,
             MAX_TOOL_DETAIL_BYTES,
