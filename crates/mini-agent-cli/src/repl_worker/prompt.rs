@@ -41,10 +41,6 @@ where
     } else {
         prompt
     };
-    let started_at_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
     let mut observer = ChannelObserver(events.clone());
     let goal_timeout = if goal_objective.is_some() {
         model_runtime
@@ -90,15 +86,6 @@ where
             return PromptOutcome::Finished;
         }
     };
-    if let Err(error) = model_runtime.block_on(runtime.client_mut().record_batch(
-        started_at_ms,
-        &prompt,
-        &batch,
-    )) {
-        let _ = events.send(ReplEvent::Warning(format!(
-            "warning: session persistence stopped: {error}"
-        )));
-    }
     let Some(outcome) = batch.turns.last() else {
         let _ = events.send(ReplEvent::Warning(
             "error: app server returned an empty turn batch".to_string(),

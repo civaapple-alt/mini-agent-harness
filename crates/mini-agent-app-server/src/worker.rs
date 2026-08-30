@@ -6,7 +6,10 @@ use crate::action::ActionResult;
 use crate::action::ActionSequencer;
 use crate::management::RuntimeActorState;
 use crate::runtime_actor::RuntimeRequest;
+use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_core::SteeringMode;
+use mini_agent_core::TurnResult;
+use mini_agent_protocol::Event;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::EventSink;
 
@@ -67,6 +70,13 @@ pub(super) enum Command {
 
 struct BroadcastSink {
     events: broadcast::Sender<EventEnvelope>,
+    pending_finish: Option<EventEnvelope>,
+}
+
+impl BroadcastSink {
+    fn take_pending_finish(&mut self) -> Option<EventEnvelope> {
+        self.pending_finish.take()
+    }
 }
 
 struct RunningCommandContext<'a, M> {
@@ -78,7 +88,11 @@ struct RunningCommandContext<'a, M> {
 
 impl EventSink for BroadcastSink {
     fn emit(&mut self, event: EventEnvelope) {
-        let _ = self.events.send(event);
+        if matches!(event.event, Event::TurnFinished { .. }) {
+            self.pending_finish = Some(event);
+        } else {
+            let _ = self.events.send(event);
+        }
     }
 }
 
@@ -170,6 +184,9 @@ pub(super) async fn worker_loop<M>(
                         .take()
                         .expect("app-server turn input must exist before execution");
                     let turn_id = thread.next_turn_id();
+                    let started_at_ms = timestamp_ms();
+                    let prompt = input.text.clone();
+                    let previous_message_count = thread.harness().messages().len();
                     if let Some(reply) = initial_reply.take() {
                         runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                         respond(
@@ -183,6 +200,7 @@ pub(super) async fn worker_loop<M>(
                     let input = TurnInput::new(TurnInputMode::Start, input.text);
                     let mut sink = BroadcastSink {
                         events: events.clone(),
+                        pending_finish: None,
                     };
                     let mut turn = Box::pin(thread.run_turn_with_events(
                         input,
@@ -219,29 +237,82 @@ pub(super) async fn worker_loop<M>(
                             },
                         }
                     };
+                    drop(turn);
                     match turn_result {
                         Ok(result) => {
+                            let projected = project_turn_result(&result);
+                            let turn_messages = projected
+                                .messages
+                                .get(previous_message_count..)
+                                .unwrap_or(&projected.messages);
+                            let persistence_error = thread
+                                .checkpoint()
+                                .map_err(|error| AppServerError::Checkpoint(error.to_string()))
+                                .and_then(|checkpoint| {
+                                    runtime_actor::persist_turn(
+                                        &mut runtime,
+                                        started_at_ms,
+                                        &prompt,
+                                        &projected,
+                                        turn_messages,
+                                        &checkpoint,
+                                    )
+                                })
+                                .err()
+                                .map(|error| error.to_string());
                             settled_turns.insert(
                                 result.id.as_str().to_string(),
                                 SettledTurn {
                                     id: result.id,
                                     status: result.status,
                                     outcome: Some(result.outcome),
-                                    error: None,
+                                    error: persistence_error,
                                 },
                             );
                         }
                         Err(error) => {
+                            let error = error.to_string();
+                            let projected = TurnReadResult {
+                                turn_id: turn_id.clone(),
+                                status: mini_agent_protocol::TurnStatus::Failed,
+                                stop_reason: None,
+                                final_text: None,
+                                steps: 0,
+                                messages: Vec::new(),
+                                error: Some(error.clone()),
+                            };
+                            let persistence_error = thread
+                                .checkpoint()
+                                .map_err(|checkpoint_error| {
+                                    AppServerError::Checkpoint(checkpoint_error.to_string())
+                                })
+                                .and_then(|checkpoint| {
+                                    runtime_actor::persist_turn(
+                                        &mut runtime,
+                                        started_at_ms,
+                                        &prompt,
+                                        &projected,
+                                        &projected.messages,
+                                        &checkpoint,
+                                    )
+                                })
+                                .err()
+                                .map(|persist_error| {
+                                    format!("{error}; session persistence failed: {persist_error}")
+                                });
                             settled_turns.insert(
                                 turn_id.as_str().to_string(),
                                 SettledTurn {
                                     id: turn_id.clone(),
                                     status: mini_agent_protocol::TurnStatus::Failed,
                                     outcome: None,
-                                    error: Some(error.to_string()),
+                                    error: Some(persistence_error.unwrap_or(error)),
                                 },
                             );
                         }
+                    }
+                    if let Some(event) = sink.take_pending_finish() {
+                        let _ = events.send(event);
                     }
                     runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                     next_input = control
@@ -484,6 +555,25 @@ fn respond<T>(
     result: Result<T, AppServerError>,
 ) {
     let _ = reply.send(result.map(|value| ActionResponse { value, receipt }));
+}
+
+fn timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn project_turn_result(result: &TurnResult) -> TurnReadResult {
+    TurnReadResult {
+        turn_id: result.id.clone(),
+        status: result.status,
+        stop_reason: Some(result.outcome.stop_reason),
+        final_text: Some(result.outcome.final_text.clone()),
+        steps: result.outcome.steps,
+        messages: result.outcome.messages.clone(),
+        error: None,
+    }
 }
 
 fn handle_running_command<M>(

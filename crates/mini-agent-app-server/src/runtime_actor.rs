@@ -8,7 +8,9 @@ use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::McpLoadResult;
 use mini_agent_capabilities::load_mcp;
 use mini_agent_core::Thread;
+use mini_agent_core::ThreadCheckpoint;
 use mini_agent_host::tool_outcome::classify_tools;
+use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ThreadId;
 use std::collections::HashMap;
@@ -163,22 +165,6 @@ pub(super) fn handle<M>(
             });
             respond(reply, receipt, result);
         }
-        RuntimeCommand::RecordTurn {
-            started_at_ms,
-            prompt,
-            result,
-            messages,
-            checkpoint,
-            reply,
-        } => {
-            let result = mutate(runtime, runtime_revision, |state| {
-                state
-                    .management
-                    .record_turn(started_at_ms, &prompt, &result, &messages, &checkpoint)
-                    .map(|()| ((), true))
-            });
-            respond(reply, receipt, result);
-        }
         RuntimeCommand::WorkflowState { reply } => respond(
             reply,
             receipt,
@@ -307,7 +293,6 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::RetryMcp { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ReadCheckpoint { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::StartNewThread { reply } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::RecordTurn { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowState { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowSetPlan { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowInitGoal { reply, .. } => respond(reply, receipt, Err(error)),
@@ -574,6 +559,26 @@ pub(super) fn advance_revision(
         let revision = state.advance_revision();
         runtime_revision.store(revision.value(), Ordering::SeqCst);
     }
+}
+
+pub(super) fn persist_turn(
+    runtime: &mut Option<RuntimeActorState>,
+    started_at_ms: u64,
+    prompt: &str,
+    result: &crate::RuntimeTurnResult,
+    messages: &[Message],
+    checkpoint: &ThreadCheckpoint,
+) -> Result<(), AppServerError> {
+    let Some(state) = runtime.as_mut() else {
+        return Ok(());
+    };
+    state.management.record_turn(
+        started_at_ms,
+        prompt,
+        result,
+        messages,
+        checkpoint.session.messages(),
+    )
 }
 
 fn respond<T>(

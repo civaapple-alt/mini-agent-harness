@@ -1,9 +1,8 @@
-use crate::RuntimeTurnResult;
 use crate::action::ActionResult;
 use crate::action::RuntimeRevision;
 use mini_agent_capabilities::{ApprovalController, ApprovalMode};
 use mini_agent_core::ThreadCheckpoint;
-use mini_agent_protocol::{Message, ThreadId};
+use mini_agent_protocol::ThreadId;
 use tokio::sync::oneshot;
 
 pub(super) struct RuntimeRequest {
@@ -54,14 +53,6 @@ pub(super) enum RuntimeCommand {
     StartNewThread {
         reply: oneshot::Sender<ActionResult<()>>,
     },
-    RecordTurn {
-        started_at_ms: u64,
-        prompt: String,
-        result: RuntimeTurnResult,
-        messages: Vec<Message>,
-        checkpoint: Vec<Message>,
-        reply: oneshot::Sender<ActionResult<()>>,
-    },
     WorkflowState {
         reply: oneshot::Sender<ActionResult<(bool, Option<crate::workflows::GoalState>)>>,
     },
@@ -107,7 +98,6 @@ impl RuntimeCommand {
                 | Self::UpdateThread { .. }
                 | Self::RetryMcp { .. }
                 | Self::StartNewThread { .. }
-                | Self::RecordTurn { .. }
                 | Self::WorkflowSetPlan { .. }
                 | Self::WorkflowInitGoal { .. }
                 | Self::WorkflowRecordVerdict { .. }

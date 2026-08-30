@@ -200,45 +200,6 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
-    pub async fn record_turn(
-        &self,
-        started_at_ms: u64,
-        prompt: &str,
-        result: &RuntimeTurnResult,
-    ) -> Result<(), String> {
-        self.record_turn_with_messages(
-            started_at_ms,
-            prompt,
-            result,
-            &result.messages,
-            &result.messages,
-        )
-        .await
-    }
-
-    pub async fn record_turn_with_messages(
-        &self,
-        started_at_ms: u64,
-        prompt: &str,
-        result: &RuntimeTurnResult,
-        messages: &[Message],
-        checkpoint: &[Message],
-    ) -> Result<(), String> {
-        let result = result.clone();
-        let prompt = prompt.to_string();
-        let messages = messages.to_vec();
-        let checkpoint = checkpoint.to_vec();
-        self.request(|reply| RuntimeCommand::RecordTurn {
-            started_at_ms,
-            prompt,
-            result,
-            messages,
-            checkpoint,
-            reply,
-        })
-        .await
-    }
-
     async fn request<T, F>(&self, build: F) -> Result<T, String>
     where
         F: FnOnce(oneshot::Sender<ActionResult<T>>) -> RuntimeCommand,

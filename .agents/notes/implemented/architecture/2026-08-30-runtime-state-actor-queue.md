@@ -55,6 +55,6 @@ Actor 不替代 Core agent loop，也不意味着所有 capability 都变成 act
   超时、暂停、恢复和并发命令路径。
 - actor 命令协议单独放在 `runtime_command.rs`，处理逻辑保留在
   `runtime_actor.rs`，避免继续扩大单一模块。
-- 如果未来需要整轮 turn 的崩溃原子持久化，下一步是把剩余的 post-turn
-  `RecordTurn` 提交也收拢到 worker action 内。当前的 revision/CAS 和 context
-  事务边界见 `2026-08-30-runtime-revision-cas-and-transaction.md`。
+- settled turn 的 Session 提交已经收拢到 worker action 内。当前的
+  revision/CAS、context 事务和 turn 结算边界见
+  `2026-08-30-runtime-revision-cas-and-transaction.md`。

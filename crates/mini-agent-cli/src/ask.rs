@@ -73,11 +73,6 @@ pub async fn run(
         RunObserver::for_script(format)
     };
 
-    let started_at_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
     let result = runtime
         .client_mut()
         .run_turn(prompt.clone(), &mut observer)
@@ -93,10 +88,6 @@ pub async fn run(
     match result {
         Ok(outcome) if !matches!(outcome.status, TurnStatus::StepLimit | TurnStatus::Failed) => {
             observer.finish();
-            let _ = runtime
-                .client_mut()
-                .record_turn(started_at_ms, &prompt, &outcome)
-                .await;
             if json_output {
                 println!(
                     "{}",
@@ -124,10 +115,6 @@ pub async fn run(
             );
             let mut outcome = outcome;
             outcome.error = Some(error.clone());
-            let _ = runtime
-                .client_mut()
-                .record_turn(started_at_ms, &prompt, &outcome)
-                .await;
             eprintln!("error: {error}");
             if json_output {
                 println!(

@@ -36,11 +36,16 @@ World。
 
 ## 保留的边界
 
-一轮 Core turn 结束后的 `RecordTurn` 仍是 actor 队列中的独立持久化命令，
-但它同样受 revision CAS 保护，不能把过期 checkpoint 写入 Session。若进程
-恰好在 turn 完成与该命令入队之间退出，自动恢复整轮 turn 仍需要后续把 turn
-提交进一步收拢到 worker 内部；这不影响当前 Thread/Session context 更新的
-原子边界。
+一轮 Core turn 现在由 worker 在持有 Thread 的同一个执行动作中完成结算：
+先取得 settled result 和 checkpoint，再调用 Runtime Actor 内部的 Session
+持久化适配，最后释放 `TurnFinished` 事件。CLI 不再调用 `record_turn` 或
+`record_batch`，也不再决定持久化时机。每轮只把相对 turn 开始时新增的消息
+写入 item records，checkpoint 仍保存完整上下文。
+
+如果 Session 写入失败，`turn/read` 会返回原始 turn 结果及持久化错误；完成
+事件仍然会被释放，避免客户端永久等待。当前仍没有跨进程事务日志：进程在
+文件系统 sync 之后退出属于成功，文件系统自身故障由 SessionStore 的追加
+回滚和尾部恢复策略处理。
 
 ## Verification
 

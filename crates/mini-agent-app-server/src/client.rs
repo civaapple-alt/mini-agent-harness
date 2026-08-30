@@ -348,55 +348,6 @@ where
             .flatten()
     }
 
-    pub async fn record_turn(
-        &mut self,
-        started_at_ms: u64,
-        prompt: &str,
-        result: &RuntimeTurnResult,
-    ) -> Result<(), String> {
-        self.connection
-            .runtime_management()?
-            .record_turn(started_at_ms, prompt, result)
-            .await
-    }
-
-    pub async fn record_batch(
-        &mut self,
-        started_at_ms: u64,
-        fallback_prompt: &str,
-        batch: &RuntimeTurnBatch,
-    ) -> Result<(), String> {
-        let mut previous_message_count = 0;
-        for result in &batch.turns {
-            let prompt = result
-                .messages
-                .iter()
-                .rev()
-                .find_map(|message| match message {
-                    mini_agent_protocol::Message::User { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .unwrap_or(fallback_prompt);
-            let turn_messages = result
-                .messages
-                .get(previous_message_count..)
-                .unwrap_or(&result.messages)
-                .to_vec();
-            previous_message_count = result.messages.len();
-            self.connection
-                .runtime_management()?
-                .record_turn_with_messages(
-                    started_at_ms,
-                    prompt,
-                    result,
-                    &turn_messages,
-                    &result.messages,
-                )
-                .await?;
-        }
-        Ok(())
-    }
-
     pub async fn thread_id(&self) -> ThreadId {
         self.connection.thread_id().await
     }
