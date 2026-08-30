@@ -1,6 +1,7 @@
 use mini_agent_app_server::AppServerError;
 use mini_agent_app_server::ApprovalBroker;
 use mini_agent_app_server::RuntimeManagementService;
+use mini_agent_app_server::RuntimeServices;
 use mini_agent_app_server::StartupServices;
 use mini_agent_app_server::capability_manifest_to_protocol;
 use mini_agent_app_server::serve_stdio_with_startup_and_services;
@@ -77,7 +78,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let management = RuntimeManagementService::new(
             server.clone(),
             None,
-            thread_id,
             world,
             enabled_mcp_servers,
             mcp_tool_count,
@@ -92,8 +92,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             server,
             capability_manifest,
             StartupServices {
-                workflows: Some(workflows),
-                management: Some(management),
+                runtime: Some(RuntimeServices::new(management, workflows)),
             },
         ))
     })

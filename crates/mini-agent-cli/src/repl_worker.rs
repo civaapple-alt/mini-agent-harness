@@ -137,11 +137,15 @@ pub(super) fn spawn_worker(
         let mcp_tool_count = mcp_status.tool_count;
         if let Ok(Some(opened)) = model_runtime.block_on(runtime.client_mut().session_info()) {
             if opened.resumed {
-                let _ = model_runtime.block_on(runtime.update_thread(ThreadUpdate::AppendContext(
-                    "[Session resumed. Note: previously running background processes and result preview handles from prior sessions have expired.]".to_string(),
-                )));
                 let _ = model_runtime.block_on(
-                    runtime.update_thread(ThreadUpdate::AppendContext(world.context.clone())),
+                    runtime.client_mut().update_thread(ThreadUpdate::AppendContext(
+                        "[Session resumed. Note: previously running background processes and result preview handles from prior sessions have expired.]".to_string(),
+                    )),
+                );
+                let _ = model_runtime.block_on(
+                    runtime
+                        .client_mut()
+                        .update_thread(ThreadUpdate::AppendContext(world.context.clone())),
                 );
                 if let Ok(state) = model_runtime.block_on(runtime.client_mut().workflow_state())
                     && state
@@ -159,8 +163,8 @@ pub(super) fn spawn_worker(
                 "session> {label} {} | thread {} | {}",
                 opened.session_id, opened.thread_id, opened.path
             )));
-            if let Ok(checkpoint) = model_runtime.block_on(runtime.read_checkpoint()) {
-                let _ = runtime.record_context(&checkpoint);
+            if let Ok(checkpoint) = model_runtime.block_on(runtime.client_mut().read_checkpoint()) {
+                let _ = runtime.client_mut().record_context(&checkpoint);
             }
         }
         if !enabled_mcp_servers.is_empty() {
@@ -208,7 +212,9 @@ pub(super) fn spawn_worker(
                             match model_runtime.block_on(async {
                                 tokio::time::timeout(
                                     timeout,
-                                    runtime.run_turn_batch(prompt.clone(), &mut observer),
+                                    runtime
+                                        .client_mut()
+                                        .run_turn_batch(prompt.clone(), &mut observer),
                                 )
                                 .await
                             }) {
@@ -228,8 +234,11 @@ pub(super) fn spawn_worker(
                                 }
                             }
                         } else {
-                            model_runtime
-                                .block_on(runtime.run_turn_batch(prompt.clone(), &mut observer))
+                            model_runtime.block_on(
+                                runtime
+                                    .client_mut()
+                                    .run_turn_batch(prompt.clone(), &mut observer),
+                            )
                         };
                         let batch = match result {
                             Ok(batch) => batch,
@@ -244,7 +253,11 @@ pub(super) fn spawn_worker(
                                 break;
                             }
                         };
-                        if let Err(error) = runtime.record_batch(started_at_ms, &prompt, &batch) {
+                        if let Err(error) =
+                            runtime
+                                .client_mut()
+                                .record_batch(started_at_ms, &prompt, &batch)
+                        {
                             let _ = events.send(ReplEvent::Warning(format!(
                                 "warning: session persistence stopped: {error}"
                             )));
@@ -293,7 +306,8 @@ pub(super) fn spawn_worker(
                                 if goal_objective.is_none() {
                                     break;
                                 }
-                                let Some(checkpoint_seq) = runtime.checkpoint_seq() else {
+                                let Some(checkpoint_seq) = runtime.client_mut().checkpoint_seq()
+                                else {
                                     let _ = events.send(ReplEvent::Warning(
                                         "goal> cannot verify without a settled durable checkpoint"
                                             .to_string(),
@@ -324,22 +338,23 @@ pub(super) fn spawn_worker(
                                         break;
                                     }
                                 };
-                                let checkpoint =
-                                    match model_runtime.block_on(runtime.read_checkpoint()) {
-                                        Ok(checkpoint) => checkpoint,
-                                        Err(error) => {
-                                            let _ = events.send(ReplEvent::Warning(format!(
-                                                "goal> checkpoint unavailable: {error}"
-                                            )));
-                                            fail_active_goal(
-                                                &mut runtime,
-                                                &model_runtime,
-                                                &approval,
-                                                &mut goal_objective,
-                                            );
-                                            break;
-                                        }
-                                    };
+                                let checkpoint = match model_runtime
+                                    .block_on(runtime.client_mut().read_checkpoint())
+                                {
+                                    Ok(checkpoint) => checkpoint,
+                                    Err(error) => {
+                                        let _ = events.send(ReplEvent::Warning(format!(
+                                            "goal> checkpoint unavailable: {error}"
+                                        )));
+                                        fail_active_goal(
+                                            &mut runtime,
+                                            &model_runtime,
+                                            &approval,
+                                            &mut goal_objective,
+                                        );
+                                        break;
+                                    }
+                                };
                                 let (verifier_output, verdict) =
                                     match model_runtime.block_on(mentor::verify_checkpoint(
                                         &runtime_config,
@@ -440,14 +455,19 @@ pub(super) fn spawn_worker(
                             .flatten()
                             .is_some();
                         if has_session
-                            && let Err(error) = model_runtime.block_on(runtime.start_new_thread())
+                            && let Err(error) =
+                                model_runtime.block_on(runtime.client_mut().start_new_thread())
                         {
                             let _ = events.send(ReplEvent::Warning(format!(
                                 "warning: session persistence stopped: {error}"
                             )));
                         }
                         if let Some(error) = model_runtime
-                            .block_on(runtime.update_thread(ThreadUpdate::ClearHistory))
+                            .block_on(
+                                runtime
+                                    .client_mut()
+                                    .update_thread(ThreadUpdate::ClearHistory),
+                            )
                             .err()
                         {
                             let _ = events.send(ReplEvent::Warning(format!(
@@ -457,6 +477,7 @@ pub(super) fn spawn_worker(
                         }
                         match model_runtime.block_on(
                             runtime
+                                .client_mut()
                                 .update_thread(ThreadUpdate::AppendContext(world.context.clone())),
                         ) {
                             Ok(()) => {
@@ -647,9 +668,11 @@ pub(super) fn spawn_worker(
                         approval.set_mode(mode);
                         let mut config = harness_config_auto(copilot, auto_max_steps);
                         config.system_prompt.clone_from(&stable_system_prompt);
-                        if let Err(error) = model_runtime
-                            .block_on(runtime.update_thread(ThreadUpdate::ReplaceConfig(config)))
-                        {
+                        if let Err(error) = model_runtime.block_on(
+                            runtime
+                                .client_mut()
+                                .update_thread(ThreadUpdate::ReplaceConfig(config)),
+                        ) {
                             let _ = events.send(ReplEvent::Warning(format!(
                                 "error: cannot change execution mode: {error}"
                             )));
@@ -716,17 +739,19 @@ pub(super) fn spawn_worker(
                                     let mut config = harness_config_auto(copilot, auto_max_steps);
                                     config.system_prompt =
                                         workflow_api::with_plan_mode_overlay(&stable_system_prompt);
-                                    let _ =
-                                        model_runtime
-                                            .block_on(runtime.update_thread(
-                                                ThreadUpdate::ReplaceConfig(config),
-                                            ));
+                                    let _ = model_runtime.block_on(
+                                        runtime
+                                            .client_mut()
+                                            .update_thread(ThreadUpdate::ReplaceConfig(config)),
+                                    );
                                     let context = format!(
                                         "[Plan Mode active: living plan at {}. Plan only — research and update plan.md. Do not produce the final deliverable. Relative path plan.md maps to that file. Workspace modifications are locked.]",
                                         plan_file.display()
                                     );
                                     let _ = model_runtime.block_on(
-                                        runtime.update_thread(ThreadUpdate::AppendContext(context)),
+                                        runtime
+                                            .client_mut()
+                                            .update_thread(ThreadUpdate::AppendContext(context)),
                                     );
                                     persist_latest_context(&mut runtime, &model_runtime, &events);
                                     let _ = events.send(ReplEvent::Notice(format!(
@@ -753,7 +778,9 @@ pub(super) fn spawn_worker(
                             let mut config = harness_config_auto(copilot, auto_max_steps);
                             config.system_prompt.clone_from(&stable_system_prompt);
                             let _ = model_runtime.block_on(
-                                runtime.update_thread(ThreadUpdate::ReplaceConfig(config)),
+                                runtime
+                                    .client_mut()
+                                    .update_thread(ThreadUpdate::ReplaceConfig(config)),
                             );
                             let _ = events.send(ReplEvent::Notice(
                                 "plan mode off: resumed standard execution mode".to_string(),
@@ -814,7 +841,9 @@ pub(super) fn spawn_worker(
                                 };
                                 config.system_prompt.clone_from(&stable_system_prompt);
                                 let _ = model_runtime.block_on(
-                                    runtime.update_thread(ThreadUpdate::ReplaceConfig(config)),
+                                    runtime
+                                        .client_mut()
+                                        .update_thread(ThreadUpdate::ReplaceConfig(config)),
                                 );
                                 let goal_plan = goal_dir.join("plan.md");
                                 let context = format!(
@@ -825,7 +854,9 @@ pub(super) fn spawn_worker(
                                     goal_plan.display()
                                 );
                                 let _ = model_runtime.block_on(
-                                    runtime.update_thread(ThreadUpdate::AppendContext(context)),
+                                    runtime
+                                        .client_mut()
+                                        .update_thread(ThreadUpdate::AppendContext(context)),
                                 );
                                 persist_latest_context(&mut runtime, &model_runtime, &events);
                                 let _ = events.send(ReplEvent::Notice(format!(
@@ -863,8 +894,8 @@ fn persist_latest_context(
     events: &mpsc::SyncSender<ReplEvent>,
 ) {
     if let Err(error) = model_runtime
-        .block_on(runtime.read_checkpoint())
-        .and_then(|checkpoint| runtime.record_context(&checkpoint))
+        .block_on(runtime.client_mut().read_checkpoint())
+        .and_then(|checkpoint| runtime.client_mut().record_context(&checkpoint))
     {
         let _ = events.send(ReplEvent::Warning(format!(
             "warning: session persistence stopped: {error}"

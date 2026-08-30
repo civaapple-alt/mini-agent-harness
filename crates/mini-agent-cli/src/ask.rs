@@ -78,7 +78,10 @@ pub async fn run(
         .unwrap_or_default()
         .as_millis() as u64;
 
-    let result = runtime.run_turn(prompt.clone(), &mut observer).await;
+    let result = runtime
+        .client_mut()
+        .run_turn(prompt.clone(), &mut observer)
+        .await;
     let session_id = runtime
         .client_mut()
         .session_info()
@@ -90,7 +93,9 @@ pub async fn run(
     match result {
         Ok(outcome) if !matches!(outcome.status, TurnStatus::StepLimit | TurnStatus::Failed) => {
             observer.finish();
-            let _ = runtime.record_turn(started_at_ms, &prompt, &outcome);
+            let _ = runtime
+                .client_mut()
+                .record_turn(started_at_ms, &prompt, &outcome);
             if json_output {
                 println!(
                     "{}",
@@ -118,7 +123,9 @@ pub async fn run(
             );
             let mut outcome = outcome;
             outcome.error = Some(error.clone());
-            let _ = runtime.record_turn(started_at_ms, &prompt, &outcome);
+            let _ = runtime
+                .client_mut()
+                .record_turn(started_at_ms, &prompt, &outcome);
             eprintln!("error: {error}");
             if json_output {
                 println!(

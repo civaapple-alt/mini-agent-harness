@@ -129,10 +129,11 @@ pub mod local;
 pub mod management;
 pub mod mentor;
 pub mod runtime;
-pub mod workflows;
+mod workflows;
 
 pub use client::LocalAppServerClient;
 pub use json_rpc::AppServerConnection;
+pub use json_rpc::RuntimeServices;
 pub use json_rpc::StartupServices;
 pub use json_rpc::serve_stdio_with_approval_and_manifest;
 pub use json_rpc::serve_stdio_with_startup_and_services;

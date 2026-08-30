@@ -102,8 +102,35 @@ pub struct AppServerConnection<M> {
     approval: ApprovalBroker,
     approval_enabled: bool,
     capability_manifest: CapabilityManifest,
-    workflows: Option<WorkflowService>,
-    management: Option<RuntimeManagementService<M>>,
+    runtime: Option<RuntimeServices<M>>,
+}
+
+/// Host-owned services that share one runtime identity.
+///
+/// Keeping these services together prevents a connection from accidentally
+/// combining workflow state from one runtime with management state from
+/// another runtime.
+#[derive(Clone)]
+pub struct RuntimeServices<M> {
+    management: RuntimeManagementService<M>,
+    workflows: WorkflowService,
+}
+
+impl<M> RuntimeServices<M> {
+    pub fn new(management: RuntimeManagementService<M>, workflows: WorkflowService) -> Self {
+        Self {
+            management,
+            workflows,
+        }
+    }
+
+    fn management(&self) -> &RuntimeManagementService<M> {
+        &self.management
+    }
+
+    fn workflows(&self) -> &WorkflowService {
+        &self.workflows
+    }
 }
 
 impl<M> AppServerConnection<M>
@@ -151,21 +178,13 @@ where
             approval,
             approval_enabled,
             capability_manifest,
-            workflows: None,
-            management: None,
+            runtime: None,
         }
     }
 
-    /// Attaches the runtime-bound workflow service to this protocol
-    /// connection. Workflow state remains optional for generic in-process
-    /// App Servers that were not built from a Host runtime.
-    pub fn with_workflow_service(mut self, workflows: WorkflowService) -> Self {
-        self.workflows = Some(workflows);
-        self
-    }
-
-    pub fn with_runtime_management(mut self, management: RuntimeManagementService<M>) -> Self {
-        self.management = Some(management);
+    /// Attaches the host-owned services for one runtime identity.
+    pub fn with_runtime_services(mut self, runtime: RuntimeServices<M>) -> Self {
+        self.runtime = Some(runtime);
         self
     }
 
@@ -348,8 +367,8 @@ where
                 turn_read: true,
                 thread_list: true,
                 approval_requests: self.approval_enabled,
-                workflows: self.workflows.is_some(),
-                runtime_management: self.management.is_some(),
+                workflows: self.runtime.is_some(),
+                runtime_management: self.runtime.is_some(),
             },
             profile: self.capability_manifest.profile.clone(),
             capability_manifest: self.capability_manifest.clone(),
@@ -717,8 +736,9 @@ where
     }
 
     fn workflow_service(&self) -> Result<&WorkflowService, JsonRpcError> {
-        self.workflows
+        self.runtime
             .as_ref()
+            .map(RuntimeServices::workflows)
             .ok_or_else(|| JsonRpcError::server_error("workflow service is unavailable"))
     }
 
@@ -834,8 +854,9 @@ where
     }
 
     fn management_service(&self) -> Result<&RuntimeManagementService<M>, JsonRpcError> {
-        self.management
+        self.runtime
             .as_ref()
+            .map(RuntimeServices::management)
             .ok_or_else(|| JsonRpcError::server_error("runtime management is unavailable"))
     }
 
@@ -845,6 +866,21 @@ where
         } else {
             Err(JsonRpcError::server_error("unknown thread"))
         }
+    }
+
+    pub(crate) fn thread_id(&self) -> mini_agent_protocol::ThreadId {
+        self.runtime
+            .as_ref()
+            .map(|runtime| runtime.management().thread_id())
+            .unwrap_or_else(|| self.server.thread_id().clone())
+    }
+
+    pub(crate) fn runtime_management(&self) -> Result<&RuntimeManagementService<M>, String> {
+        self.management_service().map_err(|error| error.message)
+    }
+
+    pub(crate) fn into_server(self) -> AppServer<M> {
+        self.server
     }
 }
 
@@ -871,16 +907,12 @@ where
 
 /// Optional services attached to a startup-created App Server connection.
 pub struct StartupServices<M> {
-    pub workflows: Option<WorkflowService>,
-    pub management: Option<RuntimeManagementService<M>>,
+    pub runtime: Option<RuntimeServices<M>>,
 }
 
 impl<M> Default for StartupServices<M> {
     fn default() -> Self {
-        Self {
-            workflows: None,
-            management: None,
-        }
+        Self { runtime: None }
     }
 }
 
@@ -964,11 +996,8 @@ where
         approval.clone(),
         capability_manifest,
     );
-    if let Some(workflows) = services.workflows {
-        connection = connection.with_workflow_service(workflows);
-    }
-    if let Some(management) = services.management {
-        connection = connection.with_runtime_management(management);
+    if let Some(runtime) = services.runtime {
+        connection = connection.with_runtime_services(runtime);
     }
     if let Some(response) = connection.handle_request(request).await {
         write_json_line(&mut writer, &response).await?;
@@ -1006,7 +1035,7 @@ where
                     Some(serde_json::to_value(ApprovalRequestNotification {
                         request_id: request.request_id,
                         action: request.action,
-                        thread_id: connection.server.thread_id().clone(),
+                        thread_id: connection.thread_id(),
                         turn_id: None,
                     }).expect("approval notification is serializable")),
                 );
@@ -1222,8 +1251,23 @@ mod tests {
             Thread::new(ThreadId::new("initial"), harness),
         );
         let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
+        let management = RuntimeManagementService::new(
+            server.clone(),
+            None,
+            mini_agent_host::WorldState::detect(
+                &root,
+                ApprovalMode::Automatic,
+                false,
+                SandboxKind::Native,
+            ),
+            Vec::new(),
+            0,
+            Vec::new(),
+            ApprovalController::with_preset(ApprovalMode::Automatic, Default::default()),
+        );
         (
-            AppServerConnection::new(server).with_workflow_service(workflows),
+            AppServerConnection::new(server)
+                .with_runtime_services(RuntimeServices::new(management, workflows)),
             root,
         )
     }
@@ -1246,7 +1290,6 @@ mod tests {
         let management = RuntimeManagementService::new(
             server.clone(),
             None,
-            ThreadId::new("thread-1"),
             mini_agent_host::WorldState::detect(
                 &root,
                 ApprovalMode::Automatic,
@@ -1259,7 +1302,10 @@ mod tests {
             ApprovalController::with_preset(ApprovalMode::Automatic, Default::default()),
         );
         (
-            AppServerConnection::new(server).with_runtime_management(management),
+            AppServerConnection::new(server).with_runtime_services(RuntimeServices::new(
+                management,
+                WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default()),
+            )),
             root,
         )
     }

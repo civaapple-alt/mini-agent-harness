@@ -7,17 +7,12 @@ use mini_agent_host::HostWorkflowStore;
 use std::io;
 use std::path::PathBuf;
 
-pub use mini_agent_host::GoalLimits;
-pub use mini_agent_host::GoalState;
-pub use mini_agent_host::GoalStatus;
-pub use mini_agent_host::PlanSlash;
-pub use mini_agent_host::VerdictOutcome;
-pub use mini_agent_host::VerifierVerdict;
-pub use mini_agent_host::goal_turn_prompt;
-pub use mini_agent_host::parse_plan_slash;
-pub use mini_agent_host::parse_verifier_verdict;
-pub use mini_agent_host::planning_turn_prompt;
-pub use mini_agent_host::with_plan_mode_overlay;
+pub(crate) use mini_agent_host::GoalLimits;
+pub(crate) use mini_agent_host::GoalState;
+pub(crate) use mini_agent_host::GoalStatus;
+pub(crate) use mini_agent_host::VerdictOutcome;
+pub(crate) use mini_agent_host::VerifierVerdict;
+pub(crate) use mini_agent_host::parse_verifier_verdict;
 
 /// App Server bound workflow service for one durable session directory.
 #[derive(Clone, Debug)]
@@ -32,43 +27,47 @@ impl WorkflowService {
         }
     }
 
-    pub fn enable_plan_mode(&self, prompt: Option<&str>) -> io::Result<()> {
+    pub(crate) fn enable_plan_mode(&self, prompt: Option<&str>) -> io::Result<()> {
         self.store.init_plan_mode(prompt).map(|_| ())
     }
 
-    pub fn disable_plan_mode(&self) -> io::Result<()> {
+    pub(crate) fn disable_plan_mode(&self) -> io::Result<()> {
         self.store.disable_plan_mode()
     }
 
-    pub fn plan_active(&self) -> bool {
+    pub(crate) fn plan_active(&self) -> bool {
         self.store.plan_active()
     }
 
-    pub fn init_goal(&self, objective: &str) -> io::Result<GoalState> {
+    pub(crate) fn init_goal(&self, objective: &str) -> io::Result<GoalState> {
         self.store.init_goal(objective)
     }
 
-    pub fn load_goal_state(&self) -> io::Result<Option<GoalState>> {
+    pub(crate) fn load_goal_state(&self) -> io::Result<Option<GoalState>> {
         self.store.load_goal_state()
     }
 
-    pub fn verification_criteria(&self) -> io::Result<String> {
+    pub(crate) fn verification_criteria(&self) -> io::Result<String> {
         self.store.verification_criteria()
     }
 
-    pub fn record_verifier_verdict(&self, checkpoint_seq: u64, output: &str) -> io::Result<()> {
+    pub(crate) fn record_verifier_verdict(
+        &self,
+        checkpoint_seq: u64,
+        output: &str,
+    ) -> io::Result<()> {
         self.store.record_verifier_verdict(checkpoint_seq, output)
     }
 
-    pub fn advance_goal(&self, verdict: Option<VerifierVerdict>) -> io::Result<GoalState> {
+    pub(crate) fn advance_goal(&self, verdict: Option<VerifierVerdict>) -> io::Result<GoalState> {
         self.store.advance_goal(verdict)
     }
 
-    pub fn pause_goal(&self) -> io::Result<()> {
+    pub(crate) fn pause_goal(&self) -> io::Result<()> {
         self.store.pause_goal()
     }
 
-    pub fn fail_goal(&self) -> io::Result<GoalState> {
+    pub(crate) fn fail_goal(&self) -> io::Result<GoalState> {
         self.store.fail_goal()
     }
 }

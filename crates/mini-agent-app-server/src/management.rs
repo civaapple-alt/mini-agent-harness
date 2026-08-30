@@ -24,6 +24,7 @@ use std::sync::Mutex;
 pub struct RuntimeManagementService<M> {
     server: AppServer<M>,
     state: Arc<Mutex<RuntimeManagementState>>,
+    approval: ApprovalController,
 }
 
 impl<M> Clone for RuntimeManagementService<M> {
@@ -31,18 +32,21 @@ impl<M> Clone for RuntimeManagementService<M> {
         Self {
             server: self.server.clone(),
             state: self.state.clone(),
+            approval: self.approval.clone(),
         }
     }
 }
 
 struct RuntimeManagementState {
     session: Option<OpenedSession>,
-    thread_id: ThreadId,
     world: WorldState,
-    enabled_mcp_servers: Vec<String>,
-    mcp_tool_count: usize,
-    retry_mcp_servers: Vec<McpServerConfig>,
-    approval: ApprovalController,
+    mcp: McpRuntimeState,
+}
+
+struct McpRuntimeState {
+    enabled_servers: Vec<String>,
+    tool_count: usize,
+    retry_servers: Vec<McpServerConfig>,
 }
 
 impl<M: Model + Send + 'static> RuntimeManagementService<M> {
@@ -50,7 +54,6 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     pub fn new(
         server: AppServer<M>,
         session: Option<OpenedSession>,
-        thread_id: ThreadId,
         world: WorldState,
         enabled_mcp_servers: Vec<String>,
         mcp_tool_count: usize,
@@ -61,13 +64,14 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             server,
             state: Arc::new(Mutex::new(RuntimeManagementState {
                 session,
-                thread_id,
                 world,
-                enabled_mcp_servers,
-                mcp_tool_count,
-                retry_mcp_servers,
-                approval,
+                mcp: McpRuntimeState {
+                    enabled_servers: enabled_mcp_servers,
+                    tool_count: mcp_tool_count,
+                    retry_servers: retry_mcp_servers,
+                },
             })),
+            approval,
         }
     }
 
@@ -91,7 +95,12 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     }
 
     pub fn thread_id(&self) -> ThreadId {
-        self.state.lock().unwrap().thread_id.clone()
+        let state = self.state.lock().unwrap();
+        state
+            .session
+            .as_ref()
+            .map(|opened| ThreadId::new(opened.store.thread_id().to_string()))
+            .unwrap_or_else(|| self.server.thread_id().clone())
     }
 
     pub fn world(&self) -> WorldState {
@@ -99,15 +108,15 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     }
 
     pub fn enabled_mcp_servers(&self) -> Vec<String> {
-        self.state.lock().unwrap().enabled_mcp_servers.clone()
+        self.state.lock().unwrap().mcp.enabled_servers.clone()
     }
 
     pub fn mcp_tool_count(&self) -> usize {
-        self.state.lock().unwrap().mcp_tool_count
+        self.state.lock().unwrap().mcp.tool_count
     }
 
     pub fn retry_mcp_servers(&self) -> Vec<McpServerConfig> {
-        self.state.lock().unwrap().retry_mcp_servers.clone()
+        self.state.lock().unwrap().mcp.retry_servers.clone()
     }
 
     pub async fn refresh_world(&self) -> Result<bool, String> {
@@ -147,14 +156,15 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     pub fn mcp_status(&self) -> (Vec<String>, Vec<String>, usize) {
         let state = self.state.lock().unwrap();
         let inactive = state
-            .retry_mcp_servers
+            .mcp
+            .retry_servers
             .iter()
             .map(|server| format!("{}/{}", server.plugin_name, server.server_name))
             .collect();
         (
-            state.enabled_mcp_servers.clone(),
+            state.mcp.enabled_servers.clone(),
             inactive,
-            state.mcp_tool_count,
+            state.mcp.tool_count,
         )
     }
 
@@ -168,12 +178,11 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 tool_count: 0,
             });
         }
-        let approval = self.state.lock().unwrap().approval.clone();
         let McpLoadResult {
             tools,
             loaded_servers,
             diagnostics,
-        } = load_mcp(&servers, approval);
+        } = load_mcp(&servers, self.approval.clone());
         let inactive_servers = servers
             .iter()
             .filter(|server| {
@@ -186,13 +195,14 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         self.update_thread(ThreadUpdate::ExtendTools(classify_tools(tools)))
             .await?;
         let mut state = self.state.lock().unwrap();
-        state.retry_mcp_servers.retain(|server| {
+        state.mcp.retry_servers.retain(|server| {
             !loaded_servers.contains(&format!("{}/{}", server.plugin_name, server.server_name))
         });
         state
-            .enabled_mcp_servers
+            .mcp
+            .enabled_servers
             .extend(enabled_servers.iter().cloned());
-        state.mcp_tool_count += tool_count;
+        state.mcp.tool_count += tool_count;
         Ok(McpRetryResult {
             enabled_servers,
             inactive_servers,
@@ -217,23 +227,19 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     }
 
     pub async fn start_new_thread(&self) -> Result<(), String> {
-        let (old_thread_id, new_thread_id) = {
+        let old_thread_id = self.thread_id();
+        let new_thread_id = {
             let mut state = self.state.lock().unwrap();
-            let old_thread_id = state.thread_id.clone();
             let Some(session) = state.session.as_mut() else {
                 return Err("session persistence is disabled".to_string());
             };
             session.store.start_thread()?;
-            (
-                old_thread_id,
-                ThreadId::new(session.store.thread_id().to_string()),
-            )
+            ThreadId::new(session.store.thread_id().to_string())
         };
         self.server
-            .thread_reset(old_thread_id, new_thread_id.clone(), 1)
+            .thread_reset(old_thread_id, new_thread_id, 1)
             .await
             .map_err(|error| error.to_string())?;
-        self.state.lock().unwrap().thread_id = new_thread_id;
         Ok(())
     }
 
