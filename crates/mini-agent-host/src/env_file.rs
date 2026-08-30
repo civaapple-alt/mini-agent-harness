@@ -13,7 +13,6 @@ pub struct Environment {
 pub enum ValueSource {
     Process,
     EnvFile,
-    #[allow(dead_code)]
     UserEnv,
 }
 

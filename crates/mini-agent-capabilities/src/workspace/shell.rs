@@ -105,13 +105,8 @@ pub(crate) fn shell_command(command: &str) -> Command {
     }
 }
 
-#[allow(dead_code)]
 pub(super) struct CommandOutput {
     pub(super) text: String,
-    pub(super) raw_stdout: String,
-    pub(super) raw_stderr: String,
-    pub(super) timed_out: bool,
-    pub(super) exit_code: Option<i32>,
     pub(super) source_bytes: usize,
     pub(super) source_truncated: bool,
 }
@@ -174,10 +169,6 @@ fn run_sandboxed_command(
     let raw_stderr = stderr.render();
     Ok(CommandOutput {
         text: format!("exit: {status_str}\nstdout:\n{raw_stdout}\nstderr:\n{raw_stderr}"),
-        raw_stdout,
-        raw_stderr,
-        timed_out,
-        exit_code: if timed_out { None } else { status.code() },
         source_bytes,
         source_truncated,
     })

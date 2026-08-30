@@ -308,7 +308,6 @@ where
     })
 }
 
-#[allow(dead_code)]
 pub fn harness_config(copilot: bool) -> HarnessConfig {
     harness_config_auto(copilot, AUTO_MAX_STEPS)
 }

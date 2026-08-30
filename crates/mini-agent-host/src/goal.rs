@@ -278,7 +278,6 @@ pub fn disable_plan_mode(session_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 pub fn is_plan_mode_active(session_dir: &Path) -> bool {
     let state_file = session_dir.join("plan_mode.json");
     if let Ok(content) = fs::read_to_string(state_file)
@@ -347,7 +346,6 @@ pub fn init_goal_workspace_with_limits(
     Ok(state)
 }
 
-#[allow(dead_code)]
 pub fn load_goal_state(session_dir: &Path) -> io::Result<Option<GoalState>> {
     let state_file = session_dir.join("goal").join("state.json");
     if !state_file.exists() {
@@ -397,7 +395,6 @@ pub fn fail_goal(session_dir: &Path) -> io::Result<GoalState> {
     Ok(state)
 }
 
-#[allow(dead_code)]
 pub fn parse_verifier_verdict(content: &str) -> VerifierVerdict {
     let lower = content.to_ascii_lowercase();
     let outcome = if lower.contains("verdict: approved")
@@ -442,7 +439,6 @@ pub fn parse_verifier_verdict(content: &str) -> VerifierVerdict {
     }
 }
 
-#[allow(dead_code)]
 pub fn advance_goal_milestone(
     session_dir: &Path,
     verdict: Option<VerifierVerdict>,
@@ -480,7 +476,6 @@ pub fn advance_goal_milestone(
     Ok(state)
 }
 
-#[allow(dead_code)]
 pub fn pause_goal(session_dir: &Path) -> io::Result<()> {
     let goal_dir = session_dir.join("goal");
     let state_file = goal_dir.join("state.json");

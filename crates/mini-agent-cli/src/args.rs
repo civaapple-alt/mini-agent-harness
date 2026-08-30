@@ -132,7 +132,6 @@ pub struct Invocation {
     pub json: bool,
     pub automatic: bool,
     pub no_tools: bool,
-    #[allow(dead_code)]
     pub session_id: Option<String>,
     pub security_preset: SecurityPreset,
     pub security_preset_explicit: bool,

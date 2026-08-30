@@ -501,14 +501,14 @@ fn shell_preserves_utf8_from_workspace_files() {
     };
     let output = run_shell(command, &root, SandboxKind::Native, COMMAND_TIMEOUT).unwrap();
     assert!(
-        output.raw_stdout.contains("小巧强悍，性能出众"),
+        output.text.contains("小巧强悍，性能出众"),
         "stdout was {:?}",
-        output.raw_stdout
+        output.text
     );
     assert!(
-        output.raw_stdout.contains("数据统计卡片"),
+        output.text.contains("数据统计卡片"),
         "stdout was {:?}",
-        output.raw_stdout
+        output.text
     );
     let python = if cfg!(windows) { "python" } else { "python3" };
     let py = run_shell(
@@ -520,12 +520,12 @@ fn shell_preserves_utf8_from_workspace_files() {
         COMMAND_TIMEOUT,
     );
     if let Ok(py) = py
-        && py.exit_code == Some(0)
+        && py.text.starts_with("exit: 0\n")
     {
         assert!(
-            py.raw_stdout.contains("小巧强悍，性能出众"),
+            py.text.contains("小巧强悍，性能出众"),
             "python stdout was {:?}",
-            py.raw_stdout
+            py.text
         );
     }
 

@@ -21,7 +21,6 @@ pub struct ApprovalController {
 }
 
 impl ApprovalController {
-    #[allow(dead_code)]
     pub fn new(mode: ApprovalMode) -> Self {
         Self::with_policy_and_callback(
             mode,
@@ -34,7 +33,6 @@ impl ApprovalController {
         Self::with_policy_and_callback(mode, SecurityPolicy::for_preset(preset), terminal_approval)
     }
 
-    #[allow(dead_code)]
     pub fn with_callback(
         mode: ApprovalMode,
         callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,
