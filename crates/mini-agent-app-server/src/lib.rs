@@ -144,8 +144,8 @@ pub use mini_agent_app_server_protocol::{
 };
 pub use runtime::capability_manifest_to_protocol;
 pub use runtime::{
-    AppServerRuntime, McpRetryResult, RuntimeSessionInfo, RuntimeTurnBatch, RuntimeTurnResult,
-    SessionRequest,
+    AppServerRuntime, McpRetryResult, RuntimeSessionInfo, RuntimeStartOptions, RuntimeTurnBatch,
+    RuntimeTurnResult, SessionRequest,
 };
 pub use workflows::WorkflowService;
 

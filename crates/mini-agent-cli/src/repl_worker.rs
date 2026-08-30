@@ -5,6 +5,9 @@
 
 use super::*;
 
+#[path = "repl_worker/prompt.rs"]
+mod prompt;
+
 pub(super) enum ReplEvent {
     Input(Result<Option<String>, String>),
     Observed(EventEnvelope),
@@ -188,262 +191,28 @@ pub(super) fn spawn_worker(
             loop {
                 match command {
                     WorkerCommand::Prompt(prompt) => {
-                        run_control.clear_steer();
-                        let prompt = if plan_active {
-                            workflow_api::planning_turn_prompt(&prompt)
-                        } else {
-                            prompt
-                        };
-                        let started_at_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        let mut observer = ChannelObserver(events.clone());
-                        let goal_timeout = if goal_objective.is_some() {
-                            model_runtime
-                                .block_on(runtime.client_mut().workflow_state())
-                                .ok()
-                                .and_then(|state| state.goal)
-                                .map(|state| Duration::from_secs(state.milestone_timeout_secs))
-                        } else {
-                            None
-                        };
-                        let result = if let Some(timeout) = goal_timeout {
-                            match model_runtime.block_on(async {
-                                tokio::time::timeout(
-                                    timeout,
-                                    runtime
-                                        .client_mut()
-                                        .run_turn_batch(prompt.clone(), &mut observer),
-                                )
-                                .await
-                            }) {
-                                Ok(result) => result,
-                                Err(_) => {
-                                    let _ = events.send(ReplEvent::Warning(format!(
-                                        "goal> milestone timed out after {} seconds",
-                                        timeout.as_secs()
-                                    )));
-                                    fail_active_goal(
-                                        &mut runtime,
-                                        &model_runtime,
-                                        &approval,
-                                        &mut goal_objective,
-                                    );
-                                    break;
-                                }
-                            }
-                        } else {
-                            model_runtime.block_on(
-                                runtime
-                                    .client_mut()
-                                    .run_turn_batch(prompt.clone(), &mut observer),
-                            )
-                        };
-                        let batch = match result {
-                            Ok(batch) => batch,
-                            Err(error) => {
-                                report_run_error(&events, &error);
-                                fail_active_goal(
-                                    &mut runtime,
-                                    &model_runtime,
-                                    &approval,
-                                    &mut goal_objective,
-                                );
-                                break;
-                            }
-                        };
-                        if let Err(error) =
-                            runtime
-                                .client_mut()
-                                .record_batch(started_at_ms, &prompt, &batch)
-                        {
-                            let _ = events.send(ReplEvent::Warning(format!(
-                                "warning: session persistence stopped: {error}"
-                            )));
-                        }
-                        let Some(outcome) = batch.turns.last() else {
-                            let _ = events.send(ReplEvent::Warning(
-                                "error: app server returned an empty turn batch".to_string(),
-                            ));
-                            break;
-                        };
-                        let steered = batch
-                            .turns
-                            .iter()
-                            .any(|turn| turn.stop_reason == Some(StopReason::Steered));
-                        let step_limited = outcome.status == TurnStatus::StepLimit;
-                        match (steered, step_limited) {
-                            (true, _) => {
-                                let _ = events.send(ReplEvent::Notice(format!(
-                                    "steer> checkpoint saved after {} model step(s); continuing with the new message",
-                                    outcome.steps
-                                )));
-                                if goal_objective.is_some() {
-                                    let _ =
-                                        model_runtime.block_on(runtime.client_mut().pause_goal());
-                                    approval.set_goal_dir(None);
-                                    goal_objective = None;
-                                    let _ = events.send(ReplEvent::Notice(
-                                        "goal> paused by steer; follow-up runs as a regular turn"
-                                            .to_string(),
-                                    ));
-                                }
-                            }
-                            (_, true) => {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "warning: stopped after {} model steps",
-                                    outcome.steps
-                                )));
-                                fail_active_goal(
-                                    &mut runtime,
-                                    &model_runtime,
-                                    &approval,
-                                    &mut goal_objective,
-                                );
-                            }
-                            _ => {
-                                if goal_objective.is_none() {
-                                    break;
-                                }
-                                let Some(checkpoint_seq) = runtime.client_mut().checkpoint_seq()
-                                else {
-                                    let _ = events.send(ReplEvent::Warning(
-                                        "goal> cannot verify without a settled durable checkpoint"
-                                            .to_string(),
-                                    ));
-                                    fail_active_goal(
-                                        &mut runtime,
-                                        &model_runtime,
-                                        &approval,
-                                        &mut goal_objective,
-                                    );
-                                    break;
-                                };
-                                let criteria = match model_runtime
-                                    .block_on(runtime.client_mut().goal_criteria())
-                                {
-                                    Ok(result) => result.criteria,
-                                    Err(error) => {
-                                        let _ = events.send(ReplEvent::Warning(format!(
-                                            "goal> verifier unavailable: {}",
-                                            error.message
-                                        )));
-                                        fail_active_goal(
-                                            &mut runtime,
-                                            &model_runtime,
-                                            &approval,
-                                            &mut goal_objective,
-                                        );
-                                        break;
-                                    }
-                                };
-                                let checkpoint = match model_runtime
-                                    .block_on(runtime.client_mut().read_checkpoint())
-                                {
-                                    Ok(checkpoint) => checkpoint,
-                                    Err(error) => {
-                                        let _ = events.send(ReplEvent::Warning(format!(
-                                            "goal> checkpoint unavailable: {error}"
-                                        )));
-                                        fail_active_goal(
-                                            &mut runtime,
-                                            &model_runtime,
-                                            &approval,
-                                            &mut goal_objective,
-                                        );
-                                        break;
-                                    }
-                                };
-                                let (verifier_output, verdict) =
-                                    match model_runtime.block_on(mentor::verify_checkpoint(
+                        match prompt::run_prompt(prompt::PromptContext {
+                            prompt,
+                            plan_active,
+                            run_control: &run_control,
+                            runtime: &mut runtime,
+                            model_runtime: &model_runtime,
+                            approval: &approval,
+                            goal_objective: &mut goal_objective,
+                            events: &events,
+                            verify_checkpoint:
+                                |messages: &[mini_agent_app_server::frontend::Message],
+                                 criteria: &str| {
+                                    model_runtime.block_on(mentor::verify_checkpoint(
                                         &runtime_config,
-                                        checkpoint.session.messages(),
-                                        &criteria,
-                                    )) {
-                                        Ok(result) => result,
-                                        Err(error) => {
-                                            let _ = events.send(ReplEvent::Warning(format!(
-                                                "goal> verifier failed: {error}"
-                                            )));
-                                            fail_active_goal(
-                                                &mut runtime,
-                                                &model_runtime,
-                                                &approval,
-                                                &mut goal_objective,
-                                            );
-                                            break;
-                                        }
-                                    };
-                                if let Err(error) = model_runtime.block_on(
-                                    runtime
-                                        .client_mut()
-                                        .record_verifier_verdict(checkpoint_seq, &verifier_output),
-                                ) {
-                                    let _ = events.send(ReplEvent::Warning(format!(
-                                        "goal> cannot persist verifier verdict: {}",
-                                        error.message
-                                    )));
-                                    fail_active_goal(
-                                        &mut runtime,
-                                        &model_runtime,
-                                        &approval,
-                                        &mut goal_objective,
-                                    );
-                                    break;
-                                }
-                                if verdict.outcome == workflow_api::VerdictOutcome::Invalid {
-                                    let _ = events.send(ReplEvent::Warning(
-                                        "goal> verifier returned an invalid verdict; goal failed"
-                                            .to_string(),
-                                    ));
-                                    fail_active_goal(
-                                        &mut runtime,
-                                        &model_runtime,
-                                        &approval,
-                                        &mut goal_objective,
-                                    );
-                                    break;
-                                }
-                                let next =
-                                    match model_runtime.block_on(runtime.client_mut().advance_goal(
-                                        WorkflowGoalAdvanceParams {
-                                            verdict: Some(protocol_verifier_verdict(&verdict)),
-                                        },
-                                    )) {
-                                        Ok(next) => next,
-                                        Err(error) => {
-                                            let _ = events.send(ReplEvent::Warning(format!(
-                                                "goal> cannot advance milestone: {}",
-                                                error.message
-                                            )));
-                                            fail_active_goal(
-                                                &mut runtime,
-                                                &model_runtime,
-                                                &approval,
-                                                &mut goal_objective,
-                                            );
-                                            break;
-                                        }
-                                    };
-                                let _ = events.send(ReplEvent::Notice(format!(
-                                    "goal> verifier: {:?} (milestone {}/{})",
-                                    next.status, next.current_milestone, next.total_milestones
-                                )));
-                                if matches!(
-                                    next.status,
-                                    WorkflowGoalStatus::Converged | WorkflowGoalStatus::Failed
-                                ) {
-                                    approval.set_goal_dir(None);
-                                    goal_objective = None;
-                                    break;
-                                }
-                                let objective = goal_objective.clone().unwrap_or(prompt.clone());
-                                command = WorkerCommand::Prompt(workflow_api::goal_turn_prompt(
-                                    &objective,
-                                    next.current_milestone,
-                                    next.total_milestones,
-                                ));
+                                        messages,
+                                        criteria,
+                                    ))
+                                },
+                        }) {
+                            prompt::PromptOutcome::Finished => {}
+                            prompt::PromptOutcome::Continue(next) => {
+                                command = next;
                                 continue;
                             }
                         }

@@ -21,6 +21,7 @@ pub use mini_agent_core::InputQueueError;
 pub use mini_agent_core::RunControl;
 pub use mini_agent_protocol::EventEnvelope;
 pub use mini_agent_protocol::EventSink;
+pub use mini_agent_protocol::Message;
 pub use mini_agent_protocol::StopReason;
 pub use mini_agent_protocol::ToolError;
 pub use mini_agent_protocol::TurnInput;

@@ -5,6 +5,7 @@
 //! input/output and approval adapter.
 
 use crate::AppServerRuntime;
+use crate::RuntimeStartOptions;
 use crate::SessionRequest;
 use crate::frontend::ApprovalController;
 use mini_agent_capabilities::ApprovalMode;
@@ -127,14 +128,15 @@ impl LocalRuntimeLaunch {
         approval: ApprovalController,
         control: Arc<RunControl>,
     ) -> Result<AppServerRuntime, String> {
-        AppServerRuntime::start_with_control_and_profile(
-            self.runtime_config,
-            approval.into_capability(),
-            self.harness_config,
-            self.session_request,
+        AppServerRuntime::start(RuntimeStartOptions {
+            runtime_config: self.runtime_config,
+            approval: approval.into_capability(),
+            harness_config: self.harness_config,
+            session_request: self.session_request,
             control,
-            self.profile,
-        )
+            profile: self.profile,
+            registry: mini_agent_capabilities::CapabilityRegistry::builtin(),
+        })
         .await
     }
 }

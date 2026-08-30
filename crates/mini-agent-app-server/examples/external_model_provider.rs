@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 use mini_agent_app_server::AppServerRuntime;
+use mini_agent_app_server::RuntimeStartOptions;
 use mini_agent_app_server::SessionRequest;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ApprovalMode;
@@ -75,13 +76,15 @@ async fn start(runtime_config: RuntimeConfig) -> Result<AppServerRuntime<EchoMod
         description: "Example in-process model provider",
     });
     AppServerRuntime::<EchoModel>::start_with_model_factory(
-        runtime_config,
-        ApprovalController::new(ApprovalMode::Automatic),
-        HarnessConfig::default(),
-        SessionRequest::Disabled,
-        std::sync::Arc::new(mini_agent_core::RunControl::new()),
-        profile,
-        registry,
+        RuntimeStartOptions {
+            runtime_config,
+            approval: ApprovalController::new(ApprovalMode::Automatic),
+            harness_config: HarnessConfig::default(),
+            session_request: SessionRequest::Disabled,
+            control: std::sync::Arc::new(mini_agent_core::RunControl::new()),
+            profile,
+            registry,
+        },
         echo_factory,
     )
     .await

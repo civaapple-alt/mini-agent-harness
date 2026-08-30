@@ -94,46 +94,47 @@ pub struct AppServerRuntime<M: Model = OpenAiModel> {
     capability_manifest: CapabilityManifest,
 }
 
-impl AppServerRuntime<OpenAiModel> {
-    pub async fn start_with_control_and_profile(
-        runtime_config: RuntimeConfig,
-        approval: ApprovalController,
-        config: HarnessConfig,
-        session_request: SessionRequest,
-        control: std::sync::Arc<RunControl>,
-        profile: RuntimeProfile,
-    ) -> Result<Self, String> {
-        Self::start_with_control_and_profile_and_registry_with_model_factory(
-            runtime_config,
-            approval,
-            config,
-            session_request,
-            control,
-            profile,
-            CapabilityRegistry::builtin(),
-            openai_model_factory,
-        )
-        .await
-    }
+/// Explicit inputs for constructing one host-backed App Server runtime.
+///
+/// The model factory remains a separate argument because it is the only
+/// application-defined implementation seam; all runtime policy and identity
+/// inputs travel together in this value.
+pub struct RuntimeStartOptions {
+    pub runtime_config: RuntimeConfig,
+    pub approval: ApprovalController,
+    pub harness_config: HarnessConfig,
+    pub session_request: SessionRequest,
+    pub control: std::sync::Arc<RunControl>,
+    pub profile: RuntimeProfile,
+    pub registry: CapabilityRegistry,
+}
 
+impl AppServerRuntime<OpenAiModel> {
+    pub async fn start(options: RuntimeStartOptions) -> Result<Self, String> {
+        Self::start_with_model_factory(options, openai_model_factory).await
+    }
+}
+
+impl<M: Model + Send + 'static> AppServerRuntime<M> {
     /// Builds a runtime with an embedding application's model provider and
     /// capability registry. The Host still owns tool, policy, extension, and
     /// world assembly; only model construction crosses this seam.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn start_with_control_and_profile_and_registry_with_model_factory<M, F>(
-        runtime_config: RuntimeConfig,
-        approval: ApprovalController,
-        config: HarnessConfig,
-        session_request: SessionRequest,
-        control: std::sync::Arc<RunControl>,
-        profile: RuntimeProfile,
-        registry: CapabilityRegistry,
+    pub async fn start_with_model_factory<F>(
+        options: RuntimeStartOptions,
         model_factory: F,
-    ) -> Result<AppServerRuntime<M>, String>
+    ) -> Result<Self, String>
     where
-        M: Model + Send + 'static,
         F: ModelProviderFactory<M>,
     {
+        let RuntimeStartOptions {
+            runtime_config,
+            approval,
+            harness_config,
+            session_request,
+            control,
+            profile,
+            registry,
+        } = options;
         let workspace = runtime_config.workspace();
         let goal_limits = runtime_config.goal_limits();
         let model_name = runtime_config.model().unwrap_or_default().to_string();
@@ -171,7 +172,7 @@ impl AppServerRuntime<OpenAiModel> {
         } = prepare_harness_with_model_factory(
             &runtime_config,
             approval.clone(),
-            config,
+            harness_config,
             profile,
             results,
             registry,
@@ -240,36 +241,6 @@ impl AppServerRuntime<OpenAiModel> {
 }
 
 impl<M: Model + Send + 'static> AppServerRuntime<M> {
-    /// Starts an App Server runtime with an embedding application's model
-    /// provider. This is the provider-neutral entry point for hosts that do
-    /// not use the built-in OpenAI-compatible model.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn start_with_model_factory<F>(
-        runtime_config: RuntimeConfig,
-        approval: ApprovalController,
-        config: HarnessConfig,
-        session_request: SessionRequest,
-        control: std::sync::Arc<RunControl>,
-        profile: RuntimeProfile,
-        registry: CapabilityRegistry,
-        model_factory: F,
-    ) -> Result<Self, String>
-    where
-        F: ModelProviderFactory<M>,
-    {
-        AppServerRuntime::<OpenAiModel>::start_with_control_and_profile_and_registry_with_model_factory(
-            runtime_config,
-            approval,
-            config,
-            session_request,
-            control,
-            profile,
-            registry,
-            model_factory,
-        )
-        .await
-    }
-
     pub fn client_mut(&mut self) -> &mut LocalAppServerClient<M> {
         &mut self.client
     }
