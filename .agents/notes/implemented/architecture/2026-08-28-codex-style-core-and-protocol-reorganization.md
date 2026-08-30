@@ -51,9 +51,12 @@ implement a sandbox. Those responsibilities remain host adapters.
   and `retryable`);
 - optional outcome status on `ToolFinished` and `Message::Tool`.
 
-Legacy payload-only event and session records remain readable because the new
-status fields are optional. The protocol does not contain JSON-RPC method
-names, provider clients, storage formats, or policy implementations.
+Provider-facing tool messages and live events keep outcome status optional at
+the protocol boundary because those payloads are projected into different
+wire shapes. Persisted session checkpoints accept only the current record
+shape; the session loader does not migrate payload-only historical records.
+The protocol does not contain JSON-RPC method names, provider clients, storage
+formats, or policy implementations.
 
 ### Service boundary
 
@@ -97,8 +100,8 @@ The current workspace verifies the boundary with:
 - `git diff --check`;
 - core tests for context/session limits, success/failure, steer/follow-up,
   cancellation, structured tool status, checkpoints, and turn identity;
-- protocol tests for typed control DTOs, legacy event/session decoding, and
-  structured outcome serialization;
+- protocol tests for typed control DTOs, event projection, and structured
+  outcome serialization;
 - app-server tests for lifecycle events, queued/steered/cancelled turns,
   restored checkpoints, JSON-RPC initialization, and event projection;
 - app-server-protocol tests for JSON-RPC framing DTOs, camelCase payloads, and

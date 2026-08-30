@@ -31,14 +31,15 @@ We instituted strict architectural boundaries and refactored core harness algori
 - `MAX_PROJECT_INSTRUCTIONS_BYTES`: Bounded to `16 KiB` (~4K tokens) in [`project_context.rs`](../../../../crates/mini-agent-cli/src/project_context.rs) with UTF-8 head and tail retention.
 - Compaction summary: Explicitly truncated to `max_user_input_bytes` (`32 KiB`).
 
-### 3. Comprehensive History Validation & Legacy Discovery
+### 3. Comprehensive History Validation & Canonical Discovery
 - [`restore_history`](../../../../crates/mini-agent-core/src/harness.rs) validates all message variants:
   - `Message::Context`: `<= max_context_item_bytes` (8 KiB)
   - `Message::User`: `<= max_user_input_bytes` (32 KiB)
   - `Message::Assistant`: `<= max_model_response_bytes` (64 KiB) and `<= max_tool_calls_per_step` (8)
   - `Message::Tool`: `<= max_tool_output_bytes` (16 KiB)
   - Total context: `<= max_context_bytes` (1 MiB)
-- `list`, `resume`, `fork`, and `resolve_session_file` in [`crates/mini-agent-cli/src/session.rs`](../../../../crates/mini-agent-cli/src/session.rs) probe both `~/.mini-agent/sessions/<workspace>/` and legacy `.agents/sessions/<id>.jsonl` / `<id>/session.jsonl`.
+- `list`, `resume`, `fork`, and `resolve_session_file` use only the canonical
+  `~/.mini-agent/sessions/<workspace>/<id>/session.jsonl` layout.
 
 ### 4. Turn-Atomic Message Trimming & State Prioritization
 - `remove_first_message_group` in [`crates/mini-agent-core/src/harness.rs`](../../../../crates/mini-agent-core/src/harness.rs) guarantees that an `Assistant` message containing tool calls and all its corresponding following `Tool` messages are removed atomically, eliminating orphan tool settlement items.

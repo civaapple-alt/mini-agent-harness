@@ -357,7 +357,7 @@ fn goal_mode_runs_a_tool_turn_and_verifies_the_settled_history() {
     fs::write(
         root.join(".env"),
         format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://{address}/v1\nMENTOR_OPENAI_MODEL=mentor-model\n"
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://{address}/v1\nVERIFIER_OPENAI_MODEL=verifier-model\n"
         ),
     )
     .unwrap();
@@ -402,7 +402,7 @@ fn goal_mode_runs_a_tool_turn_and_verifies_the_settled_history() {
     assert_eq!(requests[0]["model"], "primary-model");
     assert!(requests[1]["input"].to_string().contains("goal-evidence"));
     for request in [2, 4, 6] {
-        assert_eq!(requests[request]["model"], "mentor-model");
+        assert_eq!(requests[request]["model"], "verifier-model");
         assert_eq!(requests[request]["tools"], json!([]));
         assert!(
             requests[request]["input"]
@@ -454,7 +454,7 @@ fn goal_mode_timeout_is_deterministic_and_keeps_repl_alive() {
     fs::write(
         root.join(".env"),
         format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://{address}/v1\nMENTOR_OPENAI_MODEL=mentor-model\nMINI_AGENT_GOAL_TIMEOUT_SECS=1\n"
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://{address}/v1\nVERIFIER_OPENAI_MODEL=verifier-model\nMINI_AGENT_GOAL_TIMEOUT_SECS=1\n"
         ),
     )
     .unwrap();
@@ -514,7 +514,7 @@ fn running_goal_is_paused_when_a_session_restarts() {
     let root = test_root();
     fs::write(
         root.join(".env"),
-        "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://127.0.0.1:9/v1\nMENTOR_OPENAI_MODEL=mentor-model\n",
+        "OPENAI_API_KEY=test-key\nOPENAI_MODEL=primary-model\nOPENAI_BASE_URL=http://127.0.0.1:9/v1\nVERIFIER_OPENAI_MODEL=verifier-model\n",
     )
     .unwrap();
     let mut first = mini_agent(&root)
@@ -1134,8 +1134,8 @@ fn mini_agent(root: &Path) -> Command {
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
-        .env_remove("MENTOR_OPENAI_MODEL")
-        .env_remove("MENTOR_OPENAI_API_KEY")
-        .env_remove("MENTOR_OPENAI_BASE_URL");
+        .env_remove("VERIFIER_OPENAI_MODEL")
+        .env_remove("VERIFIER_OPENAI_API_KEY")
+        .env_remove("VERIFIER_OPENAI_BASE_URL");
     command
 }

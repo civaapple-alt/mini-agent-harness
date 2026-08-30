@@ -10,9 +10,6 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const VERIFIER_OPENAI_API_KEY: &str = "VERIFIER_OPENAI_API_KEY";
 const VERIFIER_OPENAI_MODEL: &str = "VERIFIER_OPENAI_MODEL";
 const VERIFIER_OPENAI_BASE_URL: &str = "VERIFIER_OPENAI_BASE_URL";
-const LEGACY_MENTOR_OPENAI_API_KEY: &str = "MENTOR_OPENAI_API_KEY";
-const LEGACY_MENTOR_OPENAI_MODEL: &str = "MENTOR_OPENAI_MODEL";
-const LEGACY_MENTOR_OPENAI_BASE_URL: &str = "MENTOR_OPENAI_BASE_URL";
 
 #[derive(Clone)]
 pub struct RuntimeConfig {
@@ -53,25 +50,10 @@ impl RuntimeConfig {
         let base_url = resolve_value("OPENAI_BASE_URL", &workspace_env, &user_env)
             .map(|value| value.value)
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
-        let verifier_api_key = resolve_compatible_value(
-            VERIFIER_OPENAI_API_KEY,
-            LEGACY_MENTOR_OPENAI_API_KEY,
-            &workspace_env,
-            &user_env,
-        );
-        let verifier_model = resolve_compatible_value(
-            VERIFIER_OPENAI_MODEL,
-            LEGACY_MENTOR_OPENAI_MODEL,
-            &workspace_env,
-            &user_env,
-        );
-        let verifier_base_url = resolve_compatible_value(
-            VERIFIER_OPENAI_BASE_URL,
-            LEGACY_MENTOR_OPENAI_BASE_URL,
-            &workspace_env,
-            &user_env,
-        )
-        .map(|value| value.value);
+        let verifier_api_key = resolve_value(VERIFIER_OPENAI_API_KEY, &workspace_env, &user_env);
+        let verifier_model = resolve_value(VERIFIER_OPENAI_MODEL, &workspace_env, &user_env);
+        let verifier_base_url = resolve_value(VERIFIER_OPENAI_BASE_URL, &workspace_env, &user_env)
+            .map(|value| value.value);
         let max_agent_steps = match resolve_value("MINI_AGENT_MAX_STEPS", &workspace_env, &user_env)
         {
             Some(value) => Some(parse_max_agent_steps(&value.value)?),
@@ -165,17 +147,11 @@ impl RuntimeConfig {
     }
 
     /// Resolves the separate tool-free provider used by Goal verification.
-    ///
-    /// `MENTOR_OPENAI_*` names are accepted as legacy fallbacks while new
-    /// callers should configure `VERIFIER_OPENAI_*`.
     pub fn verifier_provider_settings(&self) -> Result<ProviderSettings, String> {
         let model = self
             .verifier_model
             .as_ref()
-            .ok_or_else(|| {
-                "VERIFIER_OPENAI_MODEL is required for Goal verification (MENTOR_OPENAI_MODEL is accepted for compatibility)"
-                    .to_string()
-            })?
+            .ok_or_else(|| "VERIFIER_OPENAI_MODEL is required for Goal verification".to_string())?
             .value
             .clone();
         let api_key = self
@@ -183,7 +159,7 @@ impl RuntimeConfig {
             .as_ref()
             .or(self.api_key.as_ref())
             .ok_or_else(|| {
-                "VERIFIER_OPENAI_API_KEY or OPENAI_API_KEY is required for Goal verification (MENTOR_OPENAI_API_KEY is accepted for compatibility)"
+                "VERIFIER_OPENAI_API_KEY or OPENAI_API_KEY is required for Goal verification"
                     .to_string()
             })?
             .value
@@ -280,15 +256,6 @@ fn resolve_value(name: &str, workspace: &Environment, user: &Environment) -> Opt
     })
 }
 
-fn resolve_compatible_value(
-    name: &str,
-    legacy_name: &str,
-    workspace: &Environment,
-    user: &Environment,
-) -> Option<ResolvedValue> {
-    resolve_value(name, workspace, user).or_else(|| resolve_value(legacy_name, workspace, user))
-}
-
 fn user_config_dir() -> Option<PathBuf> {
     home_dir().map(|home| home.join(".mini-agent"))
 }
@@ -354,11 +321,11 @@ mod tests {
     }
 
     #[test]
-    fn verifier_provider_settings_prefers_canonical_names() {
+    fn verifier_provider_settings_reads_canonical_names() {
         let workspace = unique_dir("verifier-canonical");
         fs::write(
             workspace.join(".env"),
-            "OPENAI_API_KEY=primary-key\nOPENAI_MODEL=primary-model\nVERIFIER_OPENAI_API_KEY=verifier-key\nVERIFIER_OPENAI_MODEL=verifier-model\nVERIFIER_OPENAI_BASE_URL=http://verifier.test/v1\nMENTOR_OPENAI_MODEL=legacy-model\n",
+            "OPENAI_API_KEY=primary-key\nOPENAI_MODEL=primary-model\nVERIFIER_OPENAI_API_KEY=verifier-key\nVERIFIER_OPENAI_MODEL=verifier-model\nVERIFIER_OPENAI_BASE_URL=http://verifier.test/v1\n",
         )
         .unwrap();
 
@@ -368,23 +335,6 @@ mod tests {
         assert_eq!(provider.api_key, "verifier-key");
         assert_eq!(provider.model, "verifier-model");
         assert_eq!(provider.base_url, "http://verifier.test/v1");
-    }
-
-    #[test]
-    fn verifier_provider_settings_accepts_legacy_mentor_names() {
-        let workspace = unique_dir("verifier-legacy");
-        fs::write(
-            workspace.join(".env"),
-            "OPENAI_API_KEY=primary-key\nOPENAI_MODEL=primary-model\nMENTOR_OPENAI_API_KEY=legacy-key\nMENTOR_OPENAI_MODEL=legacy-model\nMENTOR_OPENAI_BASE_URL=http://legacy.test/v1\n",
-        )
-        .unwrap();
-
-        let config = RuntimeConfig::load_from(workspace, None).unwrap();
-
-        let provider = config.verifier_provider_settings().unwrap();
-        assert_eq!(provider.api_key, "legacy-key");
-        assert_eq!(provider.model, "legacy-model");
-        assert_eq!(provider.base_url, "http://legacy.test/v1");
     }
 
     #[test]

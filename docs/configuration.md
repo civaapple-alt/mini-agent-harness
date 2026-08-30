@@ -210,10 +210,8 @@ When Goal Mode has a verifier gate, set `VERIFIER_OPENAI_MODEL` to run a separat
 tool-free check against the latest settled checkpoint:
 
 The verifier inherits the primary credential and endpoint unless the
-verifier-specific overrides are set. The legacy `MENTOR_OPENAI_MODEL`,
-`MENTOR_OPENAI_API_KEY`, and `MENTOR_OPENAI_BASE_URL` names remain accepted as
-fallbacks for existing installations. It has a separate system role, exactly
-one model step, and an empty tool catalog. Its bounded verdict is stored in the
+verifier-specific overrides are set. It has a separate system role, exactly one
+model step, and an empty tool catalog. Its bounded verdict is stored in the
 Goal workspace and is not replayed as primary conversation history.
 
 ## Project extensions

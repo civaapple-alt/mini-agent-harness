@@ -16,7 +16,7 @@ persist settled records; there is no persistence opt-out flag.
    - Sessions are stored under `~/.mini-agent/sessions/<workspace>/<session-id>/session.jsonl`.
    - File-based mutex locking (`SessionLock`) prevents concurrent writes to the same session directory.
 2. **Append-Only Event Records**:
-   - All session headers, threads, turns, checkpoints, derived mentor items, and stored result handles are written as distinct JSONL records with strict sequence numbers (`seq`).
+   - All session headers, threads, turns, checkpoints, derived verifier items, and stored result handles are written as distinct JSONL records with strict sequence numbers (`seq`).
 3. **Settled Checkpoint Rule**:
    - Checkpoints are committed only after a turn fully settles (`TurnStatus::Completed` or `TurnStatus::StepLimit`).
    - Resumption always restores from the latest valid checkpoint record.

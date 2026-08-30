@@ -8,8 +8,9 @@ Durable sessions are host-owned. The CLI stores them under:
 
     ~/.mini-agent/sessions/<encoded-workspace-path>/<session-id>/
 
-The project-local .agents/sessions/ layout is read only as a legacy
-compatibility format when resuming or listing old sessions.
+This is the only session storage layout. Session creation, listing, resume,
+and fork resolve files through this path; historical project-local layouts are
+not probed.
 
 The current session directory contains these files when the corresponding
 behavior is used:

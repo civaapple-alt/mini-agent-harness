@@ -112,13 +112,19 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                     .and_then(Value::as_str)
                     .ok_or_else(|| "checkpoint is missing thread_id".to_string())?
                     .to_string();
-                let messages = serde_json::from_value(
+                let messages: Vec<Message> = serde_json::from_value(
                     record
                         .get("messages")
                         .cloned()
                         .ok_or_else(|| "checkpoint is missing messages".to_string())?,
                 )
                 .map_err(|error| format!("invalid checkpoint messages: {error}"))?;
+                if messages
+                    .iter()
+                    .any(|message| matches!(message, Message::Tool { outcome: None, .. }))
+                {
+                    return Err("session checkpoint has a tool record without outcome".to_string());
+                }
                 latest_checkpoint = Some((seq, thread_id, messages));
             }
             Some(_) if header_seen => {}

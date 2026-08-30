@@ -13,8 +13,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Kept `mini-agent-capabilities` as one crate while making implementation
   modules private behind a curated root facade.
 - Renamed the current Goal verification implementation from the legacy Mentor
-  naming to `verifier`; `MENTOR_OPENAI_*` remains accepted as a compatibility
-  fallback for existing configuration.
+  naming to `verifier`; new configuration uses `VERIFIER_OPENAI_*`.
 - Removed the standalone paid-provider experiment crate and exploratory test
   targets from the mainline workspace; provider evaluation is now external.
 - Reduced extension discovery to workspace-local skills, installed plugins, and

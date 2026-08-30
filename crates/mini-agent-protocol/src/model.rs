@@ -25,7 +25,8 @@ pub enum Message {
         name: String,
         content: String,
         is_error: bool,
-        /// Structured policy/execution status; omitted by legacy sessions.
+        /// Structured policy/execution status; omitted when projecting to a
+        /// provider request.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         outcome: Option<ToolExecutionStatus>,
     },
