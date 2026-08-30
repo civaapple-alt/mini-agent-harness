@@ -5,6 +5,12 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.5.0] - 2026-08-30
+
+### Changed
+
 - Removed the duplicate public `RuntimeBuilder` API; `HostRuntimeFactory` is
   now the single named Host runtime construction entry point.
 - Tightened workflow ownership: App Server workflow commands are the frontend
@@ -25,8 +31,23 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   tool-free workflow gate.
 - Removed stale session replay/derived-state adapters, unused persona and
   profile variants, duplicate capability/discovery/security accessors, and
-  redundant App Server runtime proxies. The new baseline is 26,984 Rust source
-  lines, including tests, with 13,846 lines in the runtime layers.
+  redundant App Server runtime proxies. The 0.5.0 baseline is 28,932 Rust
+  source lines, including tests, with 15,745 lines in the runtime layers.
+- Unified Runtime Actor ownership for Thread lifecycle, World, Workflow, MCP,
+  Session persistence, and RuntimeRevision state changes behind one ordered
+  App Server worker queue.
+- Made `RuntimeRevision` participate in mutation CAS checks. Stale runtime
+  actions now return structured revision conflicts instead of silently applying
+  last-write-wins updates.
+- Moved settled-turn Session persistence into the Runtime Actor boundary. The
+  worker persists the checkpoint before releasing `TurnFinished`, and reports
+  persistence failures through the settled turn result.
+- Added App Server action result metadata: `actionId`, `actionSequence`, and
+  `stateRevision`. Admitted-action errors expose the same metadata in
+  JSON-RPC `error.data`; Core `eventSequence` remains independent.
+- Removed redundant Runtime management wrappers and the unused `UpdateWorld`
+  command while retaining typed local checkpoint/context operations needed by
+  the CLI runtime.
 
 ## [0.4.0] - 2026-08-29
 

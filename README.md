@@ -57,7 +57,9 @@ limits, failures, and observation events.
   JSON-RPC surface also exposes `workflow/state`, `workflow/plan/set`, and
    typed Goal lifecycle methods.
   `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess
-  clients.
+  clients. Runtime actions are serialized by the App Server Actor and return
+  `actionId`, `actionSequence`, and `stateRevision`; Core event sequence numbers
+  remain separate.
 - `mini-agent-cli` is the frontend: REPL input, headless commands, output
   rendering, and local session interaction. Agent turns go through the local
   App Server runtime; the CLI does not own provider, tool, Thread, or Harness
@@ -70,6 +72,11 @@ limits, failures, and observation events.
 The mainline is the CLI over the App Server boundary. Other frontends should
 exercise the same App Server management and event contracts rather than add
 another runtime execution path.
+
+Runtime state has one authority: the App Server Runtime Actor orders Thread,
+World, Workflow, MCP, Session, and revision changes. Host implements the
+capability and persistence seams, while CLI and JSON-RPC clients submit actions
+and consume results and events.
 
 The conceptual runtime direction is:
 
@@ -252,7 +259,7 @@ python3 scripts/line_budget.py
   integration tests. The enforced ceilings are 20,000 lines for the runtime
   layers (`core` + `protocol` + `host` + `app-server`). The 30,000-line
   workspace total is enforced for
-  the 0.4.0 release, including tests. Both ceilings block the release gate.
+  the 0.5.0 release, including tests. Both ceilings block the release gate.
   The report still includes all Rust source, including the CLI, so cleanup
   remains measurable.
 

@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_LIMIT = 20_000
 # The workspace total includes production code and tests and is a hard release
-# gate for the 0.4.0 release.
+# gate for the 0.5.0 release.
 PROJECT_LIMIT = 30_000
 
 # Keep the report aligned with the conceptual runtime layers. Capabilities are

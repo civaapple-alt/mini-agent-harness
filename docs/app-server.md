@@ -35,7 +35,7 @@ The service returns a correlated response for each request. Requests admitted
 to the runtime actor use an action result envelope around the method payload:
 
 ```json
-{"value":{"status":"started","turn_id":"turn-1"},"actionId":2,"actionSequence":2,"stateRevision":1}
+{"value":{"status":"started","turn_id":"turn-1"},"actionId":1,"actionSequence":1,"stateRevision":1}
 ```
 
 `actionId` identifies the admitted action, `actionSequence` is the server-side
