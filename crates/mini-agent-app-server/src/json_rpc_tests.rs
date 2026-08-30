@@ -156,7 +156,14 @@ async fn exposes_session_world_and_mcp_management() {
         ))
         .await
         .unwrap();
-    assert!(response.result.unwrap().is_null());
+    let result = response.result.unwrap();
+    assert!(result["value"].is_null());
+    assert_eq!(
+        result["actionId"], 1,
+        "session/info is the first admitted runtime action"
+    );
+    assert_eq!(result["actionSequence"], 1);
+    assert_eq!(result["stateRevision"], 0);
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -166,10 +173,11 @@ async fn exposes_session_world_and_mcp_management() {
         ))
         .await
         .unwrap();
-    assert_eq!(
-        response.result.unwrap()["workspace"],
-        root.display().to_string()
-    );
+    let result = response.result.unwrap();
+    assert_eq!(result["value"]["workspace"], root.display().to_string());
+    assert_eq!(result["actionId"], 2);
+    assert_eq!(result["actionSequence"], 2);
+    assert_eq!(result["stateRevision"], 0);
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -179,7 +187,11 @@ async fn exposes_session_world_and_mcp_management() {
         ))
         .await
         .unwrap();
-    assert_eq!(response.result.unwrap()["toolCount"], 0);
+    let result = response.result.unwrap();
+    assert_eq!(result["value"]["toolCount"], 0);
+    assert_eq!(result["actionId"], 3);
+    assert_eq!(result["actionSequence"], 3);
+    assert_eq!(result["stateRevision"], 0);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -224,7 +236,7 @@ async fn runtime_mutations_reject_stale_revision_tokens() {
     assert!(first.is_ok() ^ second.is_ok());
     let conflict = if first.is_err() { first } else { second };
     assert!(matches!(
-        conflict,
+        conflict.map_err(|failure| failure.error),
         Err(AppServerError::RevisionConflict {
             expected: 0,
             actual: 1
@@ -286,7 +298,11 @@ async fn requires_initialize_and_handles_turn_start() {
         .await
         .unwrap();
     assert!(response.error.is_none());
-    assert_eq!(response.result.unwrap()["status"], "started");
+    let result = response.result.unwrap();
+    assert_eq!(result["value"]["status"], "started");
+    assert_eq!(result["actionId"], 1);
+    assert_eq!(result["actionSequence"], 1);
+    assert_eq!(result["stateRevision"], 0);
 }
 
 #[tokio::test]
@@ -317,7 +333,11 @@ async fn exposes_workflow_management_without_host_paths() {
         ))
         .await
         .unwrap();
-    assert_eq!(response.result.unwrap()["planActive"], true);
+    let result = response.result.unwrap();
+    assert_eq!(result["value"]["planActive"], true);
+    assert_eq!(result["actionId"], 1);
+    assert_eq!(result["actionSequence"], 1);
+    assert_eq!(result["stateRevision"], 1);
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -327,7 +347,11 @@ async fn exposes_workflow_management_without_host_paths() {
         ))
         .await
         .unwrap();
-    assert_eq!(response.result.unwrap()["status"], "running");
+    let result = response.result.unwrap();
+    assert_eq!(result["value"]["status"], "running");
+    assert_eq!(result["actionId"], 3);
+    assert_eq!(result["actionSequence"], 3);
+    assert_eq!(result["stateRevision"], 2);
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -337,10 +361,14 @@ async fn exposes_workflow_management_without_host_paths() {
         ))
         .await
         .unwrap();
-    let state = response.result.unwrap();
+    let result = response.result.unwrap();
+    let state = result["value"].clone();
     assert_eq!(state["planActive"], true);
     assert_eq!(state["goal"]["status"], "running");
     assert!(state["goal"].get("planFile").is_none());
+    assert_eq!(result["actionId"], 4);
+    assert_eq!(result["actionSequence"], 4);
+    assert_eq!(result["stateRevision"], 2);
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -350,7 +378,11 @@ async fn exposes_workflow_management_without_host_paths() {
         ))
         .await
         .unwrap();
-    assert_eq!(response.result.unwrap()["status"], "user_paused");
+    let result = response.result.unwrap();
+    assert_eq!(result["value"]["status"], "user_paused");
+    assert_eq!(result["actionId"], 5);
+    assert_eq!(result["actionSequence"], 5);
+    assert_eq!(result["stateRevision"], 3);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -579,7 +611,7 @@ async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
         .await
         .unwrap();
     let turn_id: mini_agent_protocol::TurnId =
-        serde_json::from_value(started.result.unwrap()["turn_id"].clone()).unwrap();
+        serde_json::from_value(started.result.unwrap()["value"]["turn_id"].clone()).unwrap();
     for _ in 0..6 {
         let _ = connection.next_notification().await.unwrap();
     }
@@ -593,7 +625,7 @@ async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
         ))
         .await
         .unwrap();
-    assert_eq!(turn.result.unwrap()["finalText"], "done");
+    assert_eq!(turn.result.unwrap()["value"]["finalText"], "done");
 
     let thread = connection
         .handle_request(JsonRpcRequest::request(
@@ -605,7 +637,7 @@ async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
         ))
         .await
         .unwrap();
-    assert_eq!(thread.result.unwrap()["status"], "idle");
+    assert_eq!(thread.result.unwrap()["value"]["status"], "idle");
 }
 
 #[tokio::test]
@@ -684,7 +716,11 @@ async fn exposes_factory_backed_thread_lifecycle_methods() {
         ))
         .await
         .unwrap();
-    assert_eq!(created.result.unwrap()["threadId"], "thread-2");
+    let result = created.result.unwrap();
+    assert_eq!(result["value"]["threadId"], "thread-2");
+    assert_eq!(result["actionId"], 1);
+    assert_eq!(result["actionSequence"], 1);
+    assert_eq!(result["stateRevision"], 0);
     let forked = connection
         .handle_request(JsonRpcRequest::request(
             3,
@@ -696,7 +732,11 @@ async fn exposes_factory_backed_thread_lifecycle_methods() {
         ))
         .await
         .unwrap();
-    assert_eq!(forked.result.unwrap()["threadId"], "thread-3");
+    let result = forked.result.unwrap();
+    assert_eq!(result["value"]["threadId"], "thread-3");
+    assert_eq!(result["actionId"], 2);
+    assert_eq!(result["actionSequence"], 2);
+    assert_eq!(result["stateRevision"], 0);
     let listed = connection
         .handle_request(JsonRpcRequest::request(
             4,

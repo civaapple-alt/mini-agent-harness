@@ -6,6 +6,8 @@ use super::ApprovalBroker;
 use super::ApprovalRequest;
 use super::RuntimeManagementService;
 use super::WorkflowService;
+use crate::action::ActionFailure;
+use crate::action::ActionResponse;
 use mini_agent_app_server_protocol::ApprovalRequestNotification;
 use mini_agent_app_server_protocol::ApprovalRespondParams;
 use mini_agent_app_server_protocol::CapabilityManifest;
@@ -82,6 +84,7 @@ use mini_agent_core::SessionState;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::TurnCancel;
+use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnStart;
 use serde_json::Value;
@@ -485,12 +488,44 @@ fn response_error(id: Option<Value>, error: JsonRpcError) -> Option<JsonRpcRespo
     Some(JsonRpcResponse::error(id, error))
 }
 
+fn response_action<T: serde::Serialize>(
+    id: Option<Value>,
+    response: ActionResponse<T>,
+) -> Option<JsonRpcResponse> {
+    response_value(id, response.into_protocol())
+}
+
+fn response_action_with<T: serde::Serialize>(
+    id: Option<Value>,
+    response: ActionResponse<impl Sized>,
+    value: T,
+) -> Option<JsonRpcResponse> {
+    response_value(
+        id,
+        mini_agent_app_server_protocol::ActionResult {
+            value,
+            action_id: response.metadata().action_id,
+            action_sequence: response.metadata().action_sequence,
+            state_revision: response.metadata().state_revision,
+        },
+    )
+}
+
 fn workflow_error(message: String) -> JsonRpcError {
     JsonRpcError::server_error(format!("workflow operation failed: {message}"))
 }
 
 fn map_server_error(error: AppServerError) -> JsonRpcError {
     JsonRpcError::server_error(error.to_string())
+}
+
+fn map_action_error(error: ActionFailure) -> JsonRpcError {
+    let metadata = error.metadata();
+    let mut mapped = map_server_error(error.error);
+    if let Some(metadata) = metadata {
+        mapped.data = serde_json::to_value(metadata).ok();
+    }
+    mapped
 }
 
 #[cfg(test)]

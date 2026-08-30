@@ -131,6 +131,25 @@ pub struct JsonRpcError {
     pub data: Option<Value>,
 }
 
+/// Server-assigned identity and ordering for one accepted App Server action.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionMetadata {
+    pub action_id: u64,
+    pub action_sequence: u64,
+    pub state_revision: u64,
+}
+
+/// Result envelope for an App Server action or query.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionResult<T> {
+    pub value: T,
+    pub action_id: u64,
+    pub action_sequence: u64,
+    pub state_revision: u64,
+}
+
 impl JsonRpcError {
     pub fn parse_error(message: impl Into<String>) -> Self {
         Self::new(-32700, message)
@@ -671,6 +690,21 @@ mod tests {
         assert_eq!(value["providers"]["model"], "openai");
         assert_eq!(value["providers"]["tools"], "builtin");
         assert!(value.get("protocol_version").is_none());
+    }
+
+    #[test]
+    fn action_result_uses_camel_case_metadata() {
+        let value = serde_json::to_value(ActionResult {
+            value: serde_json::json!({"ok": true}),
+            action_id: 3,
+            action_sequence: 4,
+            state_revision: 5,
+        })
+        .unwrap();
+        assert_eq!(value["actionId"], 3);
+        assert_eq!(value["actionSequence"], 4);
+        assert_eq!(value["stateRevision"], 5);
+        assert!(value.get("action_id").is_none());
     }
 
     #[test]

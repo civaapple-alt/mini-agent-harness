@@ -16,6 +16,12 @@ ActionEnvelope 仍记录 worker 接纳命令时的 base revision。它描述服�
 看到的状态版本，和请求携带的 expected revision 各司其职：前者用于审计和
 排序，后者用于拒绝过期写入。
 
+阶段六把已接纳动作的元数据投影到 App Server v2 的结果信封：
+`actionId` 标识动作，`actionSequence` 表示 worker 接纳顺序，
+`stateRevision` 表示结果产生时捕获的 Runtime 版本。被 actor 拒绝的已接纳
+动作把相同字段放进 JSON-RPC error 的 `data`；参数校验、方法不存在等尚未
+接纳的请求不伪造动作元数据。
+
 ## Session 与 Thread 的原子边界
 
 `AppendContext` 是当前最重要的跨对象更新，现按以下顺序在 actor 中执行：

@@ -14,9 +14,11 @@ where
         };
         let thread_id = params.thread_id.unwrap_or(self.thread_id().await);
         if !self.server.has_thread(&thread_id) {
-            return match self.server.thread_start(thread_id.clone()).await {
-                Ok(thread_id) => response_value(request.id, ThreadStartResult { thread_id }),
-                Err(error) => response_error(request.id, map_server_error(error)),
+            return match self.server.thread_start_action(thread_id.clone()).await {
+                Ok(response) => {
+                    response_action_with(request.id, response, ThreadStartResult { thread_id })
+                }
+                Err(error) => response_error(request.id, map_action_error(error)),
             };
         }
         response_value(request.id, ThreadStartResult { thread_id })
@@ -69,11 +71,14 @@ where
         };
         match self
             .server
-            .thread_fork(params.source_thread_id, params.new_thread_id)
+            .thread_fork_action(params.source_thread_id, params.new_thread_id)
             .await
         {
-            Ok(thread_id) => response_value(request.id, ThreadForkResult { thread_id }),
-            Err(error) => response_error(request.id, map_server_error(error)),
+            Ok(response) => {
+                let thread_id = response.value.clone();
+                response_action_with(request.id, response, ThreadForkResult { thread_id })
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 
@@ -97,11 +102,14 @@ where
         };
         match self
             .server
-            .thread_resume(params.thread_id, core_checkpoint)
+            .thread_resume_action(params.thread_id, core_checkpoint)
             .await
         {
-            Ok(thread_id) => response_value(request.id, ThreadResumeResult { thread_id }),
-            Err(error) => response_error(request.id, map_server_error(error)),
+            Ok(response) => {
+                let thread_id = response.value.clone();
+                response_action_with(request.id, response, ThreadResumeResult { thread_id })
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 
@@ -116,20 +124,24 @@ where
         if let Err(error) = self.check_thread(&params.thread_id) {
             return response_error(request.id, error);
         }
-        match self.server.thread_read_for(params.thread_id).await {
-            Ok(checkpoint) => response_value(
-                request.id,
-                ThreadReadResult {
-                    thread_id: checkpoint.thread_id,
-                    status: checkpoint.status,
-                    messages: checkpoint.session.messages().to_vec(),
-                    context_revision: checkpoint.session.context_revision(),
-                    next_turn_number: checkpoint.next_turn_number,
-                    last_turn_id: checkpoint.last_turn_id,
-                    next_event_sequence: checkpoint.next_event_sequence,
-                },
-            ),
-            Err(error) => response_error(request.id, map_server_error(error)),
+        match self.server.thread_read_action(params.thread_id).await {
+            Ok(response) => {
+                let checkpoint = response.value.clone();
+                response_action_with(
+                    request.id,
+                    response,
+                    ThreadReadResult {
+                        thread_id: checkpoint.thread_id,
+                        status: checkpoint.status,
+                        messages: checkpoint.session.messages().to_vec(),
+                        context_revision: checkpoint.session.context_revision(),
+                        next_turn_number: checkpoint.next_turn_number,
+                        last_turn_id: checkpoint.last_turn_id,
+                        next_event_sequence: checkpoint.next_event_sequence,
+                    },
+                )
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 
@@ -144,9 +156,11 @@ where
         if let Err(error) = self.check_thread(&params.thread_id) {
             return response_error(request.id, error);
         }
-        match self.server.thread_close_for(params.thread_id).await {
-            Ok(()) => response_value(request.id, serde_json::json!({ "closed": true })),
-            Err(error) => response_error(request.id, map_server_error(error)),
+        match self.server.thread_close_action(params.thread_id).await {
+            Ok(response) => {
+                response_action_with(request.id, response, serde_json::json!({ "closed": true }))
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 }

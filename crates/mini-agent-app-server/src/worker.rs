@@ -1,5 +1,6 @@
 use super::*;
 use crate::action::ActionEnvelope;
+use crate::action::ActionFailure;
 use crate::action::ActionReceipt;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
@@ -115,20 +116,23 @@ pub(super) async fn worker_loop<M>(
         .collect::<HashMap<_, _>>();
     let mut settled_turns = HashMap::new();
     while let Some(command) = commands.recv().await {
+        if let Command::InstallRuntime { state } = command {
+            runtime = Some(*state);
+            continue;
+        }
         let base_revision = runtime
             .as_ref()
             .map(RuntimeActorState::revision)
             .unwrap_or_default();
-        let action = action_sequencer.admit(command, base_revision);
+        let action = action_sequencer.admit(command, base_revision, runtime_revision.clone());
+        let action_base_revision = action.base_revision;
         let receipt = action.receipt();
         match action.command {
-            Command::InstallRuntime { state } => {
-                runtime = Some(*state);
-            }
             Command::Runtime(request) => {
                 runtime_actor::handle_request(
                     request,
                     receipt,
+                    action_base_revision,
                     &mut runtime,
                     &mut threads,
                     &thread_ids,
@@ -191,7 +195,7 @@ pub(super) async fn worker_loop<M>(
                         runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                         respond(
                             reply,
-                            receipt,
+                            receipt.clone(),
                             Ok(TurnSubmission::Started {
                                 turn_id: turn_id.clone(),
                             }),
@@ -216,7 +220,11 @@ pub(super) async fn worker_loop<M>(
                                     .as_ref()
                                     .map(RuntimeActorState::revision)
                                     .unwrap_or_default();
-                                let action = action_sequencer.admit(command, base_revision);
+                                let action = action_sequencer.admit(
+                                    command,
+                                    base_revision,
+                                    runtime_revision.clone(),
+                                );
                                 handle_running_command(
                                     action,
                                     &control,
@@ -444,6 +452,9 @@ pub(super) async fn worker_loop<M>(
                 }
                 respond(reply, receipt, result);
             }
+            Command::InstallRuntime { .. } => {
+                unreachable!("runtime installation is handled before action admission")
+            }
         }
     }
 }
@@ -554,7 +565,20 @@ fn respond<T>(
     receipt: ActionReceipt,
     result: Result<T, AppServerError>,
 ) {
-    let _ = reply.send(result.map(|value| ActionResponse { value, receipt }));
+    let state_revision = receipt.current_revision();
+    let _ = reply.send(
+        result
+            .map(|value| ActionResponse {
+                value,
+                receipt: receipt.clone(),
+                state_revision,
+            })
+            .map_err(|error| ActionFailure {
+                error,
+                receipt: Some(receipt),
+                state_revision: Some(state_revision),
+            }),
+    );
 }
 
 fn timestamp_ms() -> u64 {
@@ -585,6 +609,7 @@ fn handle_running_command<M>(
 ) where
     M: Model,
 {
+    let action_base_revision = action.base_revision;
     let receipt = action.receipt();
     match action.command {
         Command::Start {
@@ -669,6 +694,7 @@ fn handle_running_command<M>(
         Command::Runtime(request) => runtime_actor::handle_running(
             request,
             receipt,
+            action_base_revision,
             context.runtime,
             context.threads,
             context.thread_ids,

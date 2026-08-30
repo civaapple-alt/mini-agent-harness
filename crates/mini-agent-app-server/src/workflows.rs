@@ -4,6 +4,8 @@
 //! The store is moved into the App Server worker and this type only sends
 //! workflow commands through that worker.
 
+use crate::AppServerError;
+use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::runtime_actor::RuntimeCommand;
@@ -61,17 +63,30 @@ impl WorkflowService {
             .await
     }
 
-    pub(crate) async fn enable_plan_mode(&self, prompt: Option<&str>) -> io::Result<()> {
-        self.request(|reply| RuntimeCommand::WorkflowSetPlan {
+    pub(crate) async fn state_action(
+        &self,
+    ) -> Result<ActionResponse<(bool, Option<GoalState>)>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::WorkflowState { reply })
+            .await
+    }
+
+    pub(crate) async fn enable_plan_mode_action(
+        &self,
+        prompt: Option<&str>,
+    ) -> Result<ActionResponse<()>, ActionFailure> {
+        let prompt = prompt.map(str::to_string);
+        self.request_action(|reply| RuntimeCommand::WorkflowSetPlan {
             active: true,
-            prompt: prompt.map(str::to_string),
+            prompt,
             reply,
         })
         .await
     }
 
-    pub(crate) async fn disable_plan_mode(&self) -> io::Result<()> {
-        self.request(|reply| RuntimeCommand::WorkflowSetPlan {
+    pub(crate) async fn disable_plan_mode_action(
+        &self,
+    ) -> Result<ActionResponse<()>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::WorkflowSetPlan {
             active: false,
             prompt: None,
             reply,
@@ -79,9 +94,12 @@ impl WorkflowService {
         .await
     }
 
-    pub(crate) async fn init_goal(&self, objective: &str) -> io::Result<GoalState> {
+    pub(crate) async fn init_goal_action(
+        &self,
+        objective: &str,
+    ) -> Result<ActionResponse<GoalState>, ActionFailure> {
         let objective = objective.to_string();
-        self.request(|reply| RuntimeCommand::WorkflowInitGoal { objective, reply })
+        self.request_action(|reply| RuntimeCommand::WorkflowInitGoal { objective, reply })
             .await
     }
 
@@ -90,18 +108,20 @@ impl WorkflowService {
             .await
     }
 
-    pub(crate) async fn verification_criteria(&self) -> io::Result<String> {
-        self.request(|reply| RuntimeCommand::WorkflowCriteria { reply })
+    pub(crate) async fn verification_criteria_action(
+        &self,
+    ) -> Result<ActionResponse<String>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::WorkflowCriteria { reply })
             .await
     }
 
-    pub(crate) async fn record_verifier_verdict(
+    pub(crate) async fn record_verifier_verdict_action(
         &self,
         checkpoint_seq: u64,
         output: &str,
-    ) -> io::Result<()> {
+    ) -> Result<ActionResponse<()>, ActionFailure> {
         let output = output.to_string();
-        self.request(|reply| RuntimeCommand::WorkflowRecordVerdict {
+        self.request_action(|reply| RuntimeCommand::WorkflowRecordVerdict {
             checkpoint_seq,
             output,
             reply,
@@ -109,21 +129,23 @@ impl WorkflowService {
         .await
     }
 
-    pub(crate) async fn advance_goal(
+    pub(crate) async fn advance_goal_action(
         &self,
         verdict: Option<VerifierVerdict>,
-    ) -> io::Result<GoalState> {
-        self.request(|reply| RuntimeCommand::WorkflowAdvance { verdict, reply })
+    ) -> Result<ActionResponse<GoalState>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::WorkflowAdvance { verdict, reply })
             .await
     }
 
-    pub(crate) async fn pause_goal(&self) -> io::Result<()> {
-        self.request(|reply| RuntimeCommand::WorkflowPause { reply })
+    pub(crate) async fn pause_goal_action(&self) -> Result<ActionResponse<()>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::WorkflowPause { reply })
             .await
     }
 
-    pub(crate) async fn fail_goal(&self) -> io::Result<GoalState> {
-        self.request(|reply| RuntimeCommand::WorkflowFail { reply })
+    pub(crate) async fn fail_goal_action(
+        &self,
+    ) -> Result<ActionResponse<GoalState>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::WorkflowFail { reply })
             .await
     }
 
@@ -131,14 +153,25 @@ impl WorkflowService {
     where
         F: FnOnce(oneshot::Sender<ActionResult<T>>) -> RuntimeCommand,
     {
+        self.request_action(build)
+            .await
+            .map(ActionResponse::into_value)
+            .map_err(ActionFailure::into_error)
+            .map_err(|error| io::Error::other(error.to_string()))
+    }
+
+    async fn request_action<T, F>(&self, build: F) -> Result<ActionResponse<T>, ActionFailure>
+    where
+        F: FnOnce(oneshot::Sender<ActionResult<T>>) -> RuntimeCommand,
+    {
         let commands = self
             .commands
             .as_ref()
-            .ok_or_else(|| io::Error::other("workflow service is not bound"))?;
+            .ok_or_else(|| ActionFailure::without_receipt(AppServerError::RuntimeUnavailable))?;
         let revision = self
             .revision
             .as_ref()
-            .ok_or_else(|| io::Error::other("workflow service is not bound"))?;
+            .ok_or_else(|| ActionFailure::without_receipt(AppServerError::RuntimeUnavailable))?;
         let (reply, response) = oneshot::channel();
         commands
             .send(Command::Runtime(RuntimeRequest {
@@ -146,11 +179,9 @@ impl WorkflowService {
                 command: build(reply),
             }))
             .await
-            .map_err(|_| io::Error::other("runtime actor is unavailable"))?;
+            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
         response
             .await
-            .map_err(|_| io::Error::other("runtime actor dropped the response"))?
-            .map(ActionResponse::into_value)
-            .map_err(|error| io::Error::other(error.to_string()))
+            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
     }
 }

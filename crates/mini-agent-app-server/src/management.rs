@@ -5,6 +5,7 @@ use crate::AppServerError;
 use crate::McpRetryResult;
 use crate::RuntimeSessionInfo;
 use crate::RuntimeTurnResult;
+use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::runtime_actor::RuntimeCommand;
@@ -137,6 +138,13 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
+    pub(crate) async fn session_info_action(
+        &self,
+    ) -> Result<ActionResponse<Option<RuntimeSessionInfo>>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::SessionInfo { reply })
+            .await
+    }
+
     pub async fn checkpoint_seq(&self) -> Result<Option<u64>, String> {
         self.request(|reply| RuntimeCommand::CheckpointSeq { reply })
             .await
@@ -151,8 +159,18 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         self.request(|reply| RuntimeCommand::World { reply }).await
     }
 
+    pub(crate) async fn world_action(&self) -> Result<ActionResponse<WorldState>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::World { reply })
+            .await
+    }
+
     pub async fn refresh_world(&self) -> Result<bool, String> {
         self.request(|reply| RuntimeCommand::RefreshWorld { reply })
+            .await
+    }
+
+    pub(crate) async fn refresh_world_action(&self) -> Result<ActionResponse<bool>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::RefreshWorld { reply })
             .await
     }
 
@@ -169,19 +187,42 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         .await
     }
 
+    pub(crate) async fn set_execution_action(
+        &self,
+        approval: ApprovalMode,
+        copilot: bool,
+    ) -> Result<ActionResponse<bool>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::SetExecution {
+            approval,
+            copilot,
+            reply,
+        })
+        .await
+    }
+
     pub async fn update_world(&self, updated: WorldState) -> Result<bool, String> {
         self.request(|reply| RuntimeCommand::UpdateWorld { updated, reply })
             .await
     }
 
-    pub(crate) async fn mcp_status(&self) -> Result<McpRuntimeSnapshot, String> {
-        self.request(|reply| RuntimeCommand::McpStatus { reply })
+    pub(crate) async fn mcp_status_action(
+        &self,
+    ) -> Result<ActionResponse<McpRuntimeSnapshot>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::McpStatus { reply })
             .await
     }
 
     pub async fn retry_mcp(&self) -> Result<McpRetryResult, String> {
         let approval = self.approval.clone();
         self.request(|reply| RuntimeCommand::RetryMcp { approval, reply })
+            .await
+    }
+
+    pub(crate) async fn retry_mcp_action(
+        &self,
+    ) -> Result<ActionResponse<McpRetryResult>, ActionFailure> {
+        let approval = self.approval.clone();
+        self.request_action(|reply| RuntimeCommand::RetryMcp { approval, reply })
             .await
     }
 
@@ -204,6 +245,17 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     where
         F: FnOnce(oneshot::Sender<ActionResult<T>>) -> RuntimeCommand,
     {
+        self.request_action(build)
+            .await
+            .map(ActionResponse::into_value)
+            .map_err(ActionFailure::into_error)
+            .map_err(|error| error.to_string())
+    }
+
+    async fn request_action<T, F>(&self, build: F) -> Result<ActionResponse<T>, ActionFailure>
+    where
+        F: FnOnce(oneshot::Sender<ActionResult<T>>) -> RuntimeCommand,
+    {
         let (reply, response) = oneshot::channel();
         self.server
             .commands
@@ -212,12 +264,10 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 command: build(reply),
             }))
             .await
-            .map_err(|_| "runtime actor is unavailable".to_string())?;
+            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
         response
             .await
-            .map_err(|_| "runtime actor dropped the response".to_string())?
-            .map(ActionResponse::into_value)
-            .map_err(|error| error.to_string())
+            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
     }
 }
 

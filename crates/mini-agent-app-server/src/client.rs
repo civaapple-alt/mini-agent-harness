@@ -532,7 +532,15 @@ where
         if let Some(error) = response.error {
             return Err(error);
         }
-        serde_json::from_value(response.result.unwrap_or(serde_json::Value::Null))
+        let result = response.result.unwrap_or(serde_json::Value::Null);
+        if result.get("actionId").is_some() {
+            return serde_json::from_value::<mini_agent_app_server_protocol::ActionResult<T>>(
+                result,
+            )
+            .map(|envelope| envelope.value)
+            .map_err(|error| JsonRpcError::server_error(error.to_string()));
+        }
+        serde_json::from_value(result)
             .map_err(|error| JsonRpcError::server_error(error.to_string()))
     }
 }

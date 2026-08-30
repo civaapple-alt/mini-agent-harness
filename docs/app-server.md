@@ -31,11 +31,26 @@ Then start the configured thread and submit a turn:
 {"jsonrpc":"2.0","id":3,"method":"turn/start","params":{"threadId":"default","input":{"mode":"start","text":"inspect the workspace"}}}
 ```
 
-The service returns a correlated response for each request and ordered
-`turn/event` notifications containing the core event type, thread/turn
-identity, and sequence number. `turn/steer` validates the supplied active
-`turnId`; `turn/interrupt` requests cooperative cancellation; `turn/read`
-returns the settled result and messages. When the host runtime is wired with
+The service returns a correlated response for each request. Requests admitted
+to the runtime actor use an action result envelope around the method payload:
+
+```json
+{"value":{"status":"started","turn_id":"turn-1"},"actionId":2,"actionSequence":2,"stateRevision":1}
+```
+
+`actionId` identifies the admitted action, `actionSequence` is the server-side
+admission order, and `stateRevision` is the Runtime version captured when the
+result was produced. Actor-rejected actions put the same metadata in the
+JSON-RPC error's `data`; requests rejected before admission do not claim an
+action. The protocol negotiation and thread index responses remain structural
+responses rather than action results.
+
+The service also emits ordered `turn/event` notifications containing the core
+event type, thread/turn identity, and `sequence` number. That sequence belongs
+to the Core Thread event stream and is intentionally distinct from
+`actionSequence`. `turn/steer` validates the supplied active `turnId`;
+`turn/interrupt` requests cooperative cancellation; `turn/read` returns the
+settled result and messages. When the host runtime is wired with
 an `ApprovalBroker`, sensitive tool calls emit an `approval/request`
 notification and continue after the client replies with `approval/respond`.
 

@@ -1,7 +1,9 @@
 use crate::AppServerError;
+use crate::action::ActionFailure;
 use crate::action::ActionReceipt;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
+use crate::action::RuntimeRevision;
 use crate::management::RuntimeActorState;
 pub(super) use crate::runtime_command::{RuntimeCommand, RuntimeRequest};
 use mini_agent_capabilities::ApprovalController;
@@ -23,6 +25,7 @@ use tokio::sync::oneshot;
 pub(super) fn handle_request<M>(
     request: RuntimeRequest,
     receipt: ActionReceipt,
+    base_revision: RuntimeRevision,
     runtime: &mut Option<RuntimeActorState>,
     threads: &mut HashMap<String, Thread<M>>,
     thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
@@ -30,7 +33,7 @@ pub(super) fn handle_request<M>(
 ) where
     M: Model,
 {
-    if let Err(error) = check_revision(&request, runtime) {
+    if let Err(error) = check_revision(&request, runtime, base_revision) {
         reject_runtime(request.command, receipt, error);
         return;
     }
@@ -308,6 +311,7 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
 pub(super) fn handle_running<M>(
     request: RuntimeRequest,
     receipt: ActionReceipt,
+    base_revision: RuntimeRevision,
     runtime: &mut Option<RuntimeActorState>,
     threads: &mut HashMap<String, Thread<M>>,
     thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
@@ -315,7 +319,7 @@ pub(super) fn handle_running<M>(
 ) where
     M: Model,
 {
-    if let Err(error) = check_revision(&request, runtime) {
+    if let Err(error) = check_revision(&request, runtime, base_revision) {
         reject_runtime(request.command, receipt, error);
         return;
     }
@@ -349,6 +353,7 @@ pub(super) fn handle_running<M>(
 fn check_revision(
     request: &RuntimeRequest,
     runtime: &Option<RuntimeActorState>,
+    base_revision: RuntimeRevision,
 ) -> Result<(), AppServerError> {
     if !request.command.is_mutation() {
         return Ok(());
@@ -357,12 +362,13 @@ fn check_revision(
         .as_ref()
         .map(RuntimeActorState::revision)
         .unwrap_or_default();
-    if request.expected_revision == actual {
+    debug_assert_eq!(actual, base_revision);
+    if request.expected_revision == base_revision {
         Ok(())
     } else {
         Err(AppServerError::RevisionConflict {
             expected: request.expected_revision.value(),
-            actual: actual.value(),
+            actual: base_revision.value(),
         })
     }
 }
@@ -586,5 +592,18 @@ fn respond<T>(
     receipt: ActionReceipt,
     result: Result<T, AppServerError>,
 ) {
-    let _ = reply.send(result.map(|value| ActionResponse { value, receipt }));
+    let state_revision = receipt.current_revision();
+    let _ = reply.send(
+        result
+            .map(|value| ActionResponse {
+                value,
+                receipt: receipt.clone(),
+                state_revision,
+            })
+            .map_err(|error| ActionFailure {
+                error,
+                receipt: Some(receipt),
+                state_revision: Some(state_revision),
+            }),
+    );
 }

@@ -23,11 +23,11 @@ where
         }
         match self
             .server
-            .turn_start_for(params.thread_id, TurnStart::new(params.input))
+            .submit_start_action(params.thread_id, TurnStart::new(params.input), None)
             .await
         {
-            Ok(submission) => response_value(request.id, submission),
-            Err(error) => response_error(request.id, map_server_error(error)),
+            Ok(response) => response_action(request.id, response),
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 
@@ -39,26 +39,33 @@ where
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
-        match self.server.turn_read(params.turn_id.clone()).await {
-            Ok(result) => response_value(
-                request.id,
-                mini_agent_app_server_protocol::TurnReadResult {
-                    turn_id: result.id,
-                    status: result.status,
-                    stop_reason: result.outcome.as_ref().map(|outcome| outcome.stop_reason),
-                    final_text: result
-                        .outcome
-                        .as_ref()
-                        .map(|outcome| outcome.final_text.clone()),
-                    steps: result.outcome.as_ref().map_or(0, |outcome| outcome.steps),
-                    messages: result
-                        .outcome
-                        .as_ref()
-                        .map_or_else(Vec::new, |outcome| outcome.messages.clone()),
-                    error: result.error,
-                },
-            ),
-            Err(error) => response_error(request.id, map_server_error(error)),
+        match self.server.turn_read_action(params.turn_id.clone()).await {
+            Ok(response) => match response.value.clone() {
+                Some(result) => response_action_with(
+                    request.id,
+                    response,
+                    mini_agent_app_server_protocol::TurnReadResult {
+                        turn_id: result.id,
+                        status: result.status,
+                        stop_reason: result.outcome.as_ref().map(|outcome| outcome.stop_reason),
+                        final_text: result
+                            .outcome
+                            .as_ref()
+                            .map(|outcome| outcome.final_text.clone()),
+                        steps: result.outcome.as_ref().map_or(0, |outcome| outcome.steps),
+                        messages: result
+                            .outcome
+                            .as_ref()
+                            .map_or_else(Vec::new, |outcome| outcome.messages.clone()),
+                        error: result.error,
+                    },
+                ),
+                None => response_error(
+                    request.id,
+                    map_server_error(AppServerError::TurnNotFound(params.turn_id)),
+                ),
+            },
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 
@@ -72,11 +79,15 @@ where
         };
         match self
             .server
-            .turn_steer_for(params.thread_id, params.turn_id, params.text)
+            .submit_start_action(
+                params.thread_id,
+                TurnStart::new(TurnInput::new(TurnInputMode::Steer, params.text)),
+                Some(params.turn_id),
+            )
             .await
         {
-            Ok(submission) => response_value(request.id, submission),
-            Err(error) => response_error(request.id, map_server_error(error)),
+            Ok(response) => response_action(request.id, response),
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 
@@ -90,11 +101,15 @@ where
         };
         match self
             .server
-            .turn_cancel_for(params.thread_id, TurnCancel::new(params.turn_id))
+            .turn_cancel_action(params.thread_id, TurnCancel::new(params.turn_id))
             .await
         {
-            Ok(()) => response_value(request.id, serde_json::json!({ "accepted": true })),
-            Err(error) => response_error(request.id, map_server_error(error)),
+            Ok(response) => response_action_with(
+                request.id,
+                response,
+                serde_json::json!({ "accepted": true }),
+            ),
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 }

@@ -12,19 +12,20 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        let (plan_active, goal) = match workflows.state().await {
-            Ok(state) => state,
-            Err(error) => {
-                return response_error(request.id, workflow_error(error.to_string()));
+        match workflows.state_action().await {
+            Ok(response) => {
+                let (plan_active, goal) = response.value.clone();
+                response_action_with(
+                    request.id,
+                    response,
+                    WorkflowState {
+                        plan_active,
+                        goal: goal.map(workflow_goal_state),
+                    },
+                )
             }
-        };
-        response_value(
-            request.id,
-            WorkflowState {
-                plan_active,
-                goal: goal.map(workflow_goal_state),
-            },
-        )
+            Err(error) => response_error(request.id, map_action_error(error)),
+        }
     }
 
     pub(super) async fn handle_workflow_plan_set(
@@ -40,14 +41,24 @@ where
             Err(error) => return response_error(request.id, error),
         };
         let result = if params.active {
-            workflows.enable_plan_mode(params.prompt.as_deref()).await
+            workflows
+                .enable_plan_mode_action(params.prompt.as_deref())
+                .await
         } else {
-            workflows.disable_plan_mode().await
+            workflows.disable_plan_mode_action().await
         };
-        if let Err(error) = result {
-            return response_error(request.id, workflow_error(error.to_string()));
-        }
-        self.handle_workflow_state(request).await
+        let response = match result {
+            Ok(response) => response,
+            Err(error) => return response_error(request.id, map_action_error(error)),
+        };
+        let state = match workflows.state().await {
+            Ok((plan_active, goal)) => WorkflowState {
+                plan_active,
+                goal: goal.map(workflow_goal_state),
+            },
+            Err(error) => return response_error(request.id, workflow_error(error.to_string())),
+        };
+        response_action_with(request.id, response, state)
     }
 
     pub(super) async fn handle_workflow_goal_start(
@@ -62,9 +73,12 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        match workflows.init_goal(&params.objective).await {
-            Ok(state) => response_value(request.id, workflow_goal_state(state)),
-            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+        match workflows.init_goal_action(&params.objective).await {
+            Ok(response) => {
+                let state = workflow_goal_state(response.value.clone());
+                response_action_with(request.id, response, state)
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 
@@ -76,11 +90,14 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        if let Err(error) = workflows.pause_goal().await {
-            return response_error(request.id, workflow_error(error.to_string()));
-        }
+        let response = match workflows.pause_goal_action().await {
+            Ok(response) => response,
+            Err(error) => return response_error(request.id, map_action_error(error)),
+        };
         match workflows.load_goal_state().await {
-            Ok(Some(state)) => response_value(request.id, workflow_goal_state(state)),
+            Ok(Some(state)) => {
+                response_action_with(request.id, response, workflow_goal_state(state))
+            }
             Ok(None) => response_error(request.id, JsonRpcError::server_error("no active goal")),
             Err(error) => response_error(request.id, workflow_error(error.to_string())),
         }
@@ -94,9 +111,12 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        match workflows.fail_goal().await {
-            Ok(state) => response_value(request.id, workflow_goal_state(state)),
-            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+        match workflows.fail_goal_action().await {
+            Ok(response) => {
+                let state = workflow_goal_state(response.value.clone());
+                response_action_with(request.id, response, state)
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 
@@ -108,12 +128,16 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        match workflows.verification_criteria().await {
-            Ok(criteria) => response_value(
-                request.id,
-                mini_agent_app_server_protocol::WorkflowGoalCriteriaResult { criteria },
-            ),
-            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+        match workflows.verification_criteria_action().await {
+            Ok(response) => {
+                let criteria = response.value.clone();
+                response_action_with(
+                    request.id,
+                    response,
+                    mini_agent_app_server_protocol::WorkflowGoalCriteriaResult { criteria },
+                )
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 
@@ -130,9 +154,12 @@ where
             Err(error) => return response_error(request.id, error),
         };
         let verdict = params.verdict.map(host_verifier_verdict);
-        match workflows.advance_goal(verdict).await {
-            Ok(state) => response_value(request.id, workflow_goal_state(state)),
-            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+        match workflows.advance_goal_action(verdict).await {
+            Ok(response) => {
+                let state = workflow_goal_state(response.value.clone());
+                response_action_with(request.id, response, state)
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 
@@ -149,11 +176,13 @@ where
             Err(error) => return response_error(request.id, error),
         };
         match workflows
-            .record_verifier_verdict(params.checkpoint_seq, &params.output)
+            .record_verifier_verdict_action(params.checkpoint_seq, &params.output)
             .await
         {
-            Ok(()) => response_value(request.id, serde_json::json!({"recorded": true})),
-            Err(error) => response_error(request.id, workflow_error(error.to_string())),
+            Ok(response) => {
+                response_action_with(request.id, response, serde_json::json!({"recorded": true}))
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
 

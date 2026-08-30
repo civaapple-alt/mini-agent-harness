@@ -20,14 +20,19 @@ does not own the App Server command order.
 The App Server worker now wraps every queued command in an internal
 ActionEnvelope. The worker assigns an ActionId and an ActionSequence when it
 admits the command, then includes an ActionReceipt in the internal reply. The
-public facade currently projects the receipt away, so this change does not
-alter the 0.4.0 external API.
+App Server v2 results project that receipt as `actionId`, `actionSequence`,
+and the state revision captured when the result was produced. Rejected
+admitted actions carry the same metadata in JSON-RPC error `data`. The
+in-process client unwraps the result value after crossing the same protocol
+dispatcher, so local frontend code does not duplicate the wire envelope.
 
 The following counters remain independent:
 
 - ActionId: identity of one admitted command.
 - ActionSequence: total order assigned by the server worker at admission.
 - EventEnvelope.sequence: order of Core output events within the Thread.
+- Action results and action errors expose server admission identity and order;
+  the Core event sequence remains independent.
 - RuntimeRevision: the monotonic state-tree revision used for stale-write
   detection. Runtime mutations carry the revision they observed and the actor
   rejects the mutation when that token is no longer current.
@@ -54,9 +59,11 @@ The following counters remain independent:
 - ActionSequencer tests independent action identity and server-admission
   sequence allocation.
 - Existing App Server tests continue to exercise lifecycle, updates, turn
-  control, and multi-thread behavior through the public facade.
+  control, and multi-thread behavior through the public facade; JSON-RPC tests
+  also assert the wire-level Action Result metadata.
 - The App Server CAS test verifies that concurrent stale mutation tokens allow
   exactly one mutation to commit.
 - Session restart coverage verifies that a newly created session has a durable
   empty checkpoint before the first context update.
-- No external protocol fields or historical compatibility paths are added.
+- No historical compatibility paths are added; action metadata is part of the
+  current App Server protocol contract.
