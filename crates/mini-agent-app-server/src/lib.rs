@@ -154,6 +154,7 @@ pub use workflows::WorkflowService;
 
 mod worker;
 use action::ActionResponse;
+use action::RuntimeRevision;
 use management::RuntimeActorState;
 use worker::{Command, worker_loop};
 
@@ -169,6 +170,7 @@ pub enum AppServerError {
     Disconnected,
     TurnNotFound(TurnId),
     Checkpoint(String),
+    RevisionConflict { expected: u64, actual: u64 },
     ThreadNotFound(ThreadId),
     ThreadAlreadyExists(ThreadId),
     ThreadFactoryUnavailable,
@@ -216,6 +218,10 @@ impl fmt::Display for AppServerError {
                 write!(formatter, "turn {} is not available", turn_id.as_str())
             }
             Self::Checkpoint(error) => write!(formatter, "checkpoint unavailable: {error}"),
+            Self::RevisionConflict { expected, actual } => write!(
+                formatter,
+                "runtime revision conflict: expected {expected}, actual {actual}"
+            ),
             Self::ThreadNotFound(thread_id) => {
                 write!(formatter, "thread {} is not available", thread_id.as_str())
             }
@@ -241,6 +247,7 @@ pub struct AppServer<M> {
     control: Arc<RunControl>,
     thread_id: ThreadId,
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
+    runtime_revision: Arc<AtomicU64>,
     factory: Option<Arc<dyn ThreadFactory<M>>>,
     _model: std::marker::PhantomData<fn() -> M>,
 }
@@ -253,6 +260,7 @@ impl<M> Clone for AppServer<M> {
             control: self.control.clone(),
             thread_id: self.thread_id.clone(),
             thread_ids: self.thread_ids.clone(),
+            runtime_revision: self.runtime_revision.clone(),
             factory: self.factory.clone(),
             _model: std::marker::PhantomData,
         }
@@ -344,6 +352,7 @@ where
             "app-server thread identities must be unique"
         );
         let thread_ids = Arc::new(Mutex::new(thread_ids));
+        let runtime_revision = Arc::new(AtomicU64::new(0));
         let (commands, command_receiver) = mpsc::channel(COMMAND_BUFFER);
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         tokio::spawn(worker_loop(
@@ -351,6 +360,7 @@ where
             command_receiver,
             events.clone(),
             thread_ids.clone(),
+            runtime_revision.clone(),
             factory.clone(),
             control.clone(),
         ));
@@ -360,6 +370,7 @@ where
             control,
             thread_id: start.thread_id,
             thread_ids,
+            runtime_revision,
             factory,
             _model: std::marker::PhantomData,
         }
@@ -369,15 +380,26 @@ where
         self.commands.clone()
     }
 
+    pub(crate) fn runtime_revision(&self) -> RuntimeRevision {
+        self.runtime_revision.load(Ordering::SeqCst).into()
+    }
+
+    pub(crate) fn runtime_revision_handle(&self) -> Arc<AtomicU64> {
+        self.runtime_revision.clone()
+    }
+
     pub(crate) fn install_runtime_state(
         &self,
         state: RuntimeActorState,
     ) -> Result<(), AppServerError> {
+        let revision = state.revision().value();
         self.commands
             .try_send(Command::InstallRuntime {
                 state: Box::new(state),
             })
-            .map_err(|_| AppServerError::Disconnected)
+            .map_err(|_| AppServerError::Disconnected)?;
+        self.runtime_revision.store(revision, Ordering::SeqCst);
+        Ok(())
     }
 
     pub fn thread_id(&self) -> &ThreadId {

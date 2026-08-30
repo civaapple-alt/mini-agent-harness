@@ -166,9 +166,6 @@ pub(super) fn spawn_worker(
                 "session> {label} {} | thread {} | {}",
                 opened.session_id, opened.thread_id, opened.path
             )));
-            if let Ok(checkpoint) = model_runtime.block_on(runtime.client_mut().read_checkpoint()) {
-                let _ = model_runtime.block_on(runtime.client_mut().record_context(&checkpoint));
-            }
         }
         if !enabled_mcp_servers.is_empty() {
             let _ = events.send(ReplEvent::Notice(format!(
@@ -250,7 +247,6 @@ pub(super) fn spawn_worker(
                                 .update_thread(ThreadUpdate::AppendContext(world.context.clone())),
                         ) {
                             Ok(()) => {
-                                persist_latest_context(&mut runtime, &model_runtime, &events);
                                 let _ =
                                     events.send(ReplEvent::Notice("new conversation".to_string()));
                             }
@@ -522,7 +518,6 @@ pub(super) fn spawn_worker(
                                             .client_mut()
                                             .update_thread(ThreadUpdate::AppendContext(context)),
                                     );
-                                    persist_latest_context(&mut runtime, &model_runtime, &events);
                                     let _ = events.send(ReplEvent::Notice(format!(
                                     "plan mode on: workspace modifications locked. Living plan at {}",
                                     plan_file.display()
@@ -627,7 +622,6 @@ pub(super) fn spawn_worker(
                                         .client_mut()
                                         .update_thread(ThreadUpdate::AppendContext(context)),
                                 );
-                                persist_latest_context(&mut runtime, &model_runtime, &events);
                                 let _ = events.send(ReplEvent::Notice(format!(
                                 "goal mode on [goal_id: {}]: executing milestone {}/{} (auto-approve, copilot on)",
                                 state.goal_id, state.current_milestone, state.total_milestones
@@ -655,22 +649,6 @@ pub(super) fn spawn_worker(
         }
         let _ = events.send(ReplEvent::Exited);
     })
-}
-
-fn persist_latest_context(
-    runtime: &mut AppServerRuntime,
-    model_runtime: &tokio::runtime::Runtime,
-    events: &mpsc::SyncSender<ReplEvent>,
-) {
-    let result = model_runtime.block_on(async {
-        let checkpoint = runtime.client_mut().read_checkpoint().await?;
-        runtime.client_mut().record_context(&checkpoint).await
-    });
-    if let Err(error) = result {
-        let _ = events.send(ReplEvent::Warning(format!(
-            "warning: session persistence stopped: {error}"
-        )));
-    }
 }
 
 fn fail_active_goal(

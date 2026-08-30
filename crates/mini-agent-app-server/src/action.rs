@@ -8,12 +8,25 @@ pub(super) struct ActionId(u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct ActionSequence(u64);
 
-/// Identifies the runtime state version observed when an action was admitted.
-///
-/// State mutation and compare-and-swap enforcement are intentionally deferred
-/// until the runtime state tree is moved behind the same actor queue.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// Identifies the runtime state version observed by an action.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct RuntimeRevision(u64);
+
+impl RuntimeRevision {
+    pub(super) fn value(self) -> u64 {
+        self.0
+    }
+
+    pub(super) fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+}
+
+impl From<u64> for RuntimeRevision {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
 
 /// Metadata attached to the result of an admitted action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,11 +84,15 @@ impl ActionSequencer {
     }
 
     /// Assigns identity and server-admission order to the next queued command.
-    pub(super) fn admit<T>(&mut self, command: T) -> ActionEnvelope<T> {
+    pub(super) fn admit<T>(
+        &mut self,
+        command: T,
+        base_revision: RuntimeRevision,
+    ) -> ActionEnvelope<T> {
         let envelope = ActionEnvelope {
             id: ActionId(self.next_id),
             sequence: ActionSequence(self.next_sequence),
-            base_revision: RuntimeRevision(0),
+            base_revision,
             command,
         };
         self.next_id = self.next_id.saturating_add(1);
@@ -87,12 +104,13 @@ impl ActionSequencer {
 #[cfg(test)]
 mod tests {
     use super::ActionSequencer;
+    use super::RuntimeRevision;
 
     #[test]
     fn assigns_independent_action_identity_and_admission_order() {
         let mut sequencer = ActionSequencer::new();
-        let first = sequencer.admit("first");
-        let second = sequencer.admit("second");
+        let first = sequencer.admit("first", RuntimeRevision::default());
+        let second = sequencer.admit("second", RuntimeRevision::default());
 
         assert_eq!(first.receipt().id, first.id);
         assert_eq!(first.receipt().sequence, first.sequence);

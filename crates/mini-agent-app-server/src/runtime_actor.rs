@@ -3,7 +3,7 @@ use crate::action::ActionReceipt;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::management::RuntimeActorState;
-pub(super) use crate::runtime_command::RuntimeCommand;
+pub(super) use crate::runtime_command::{RuntimeCommand, RuntimeRequest};
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::McpLoadResult;
 use mini_agent_capabilities::load_mcp;
@@ -14,7 +14,33 @@ use mini_agent_protocol::ThreadId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use tokio::sync::oneshot;
+
+pub(super) fn handle_request<M>(
+    request: RuntimeRequest,
+    receipt: ActionReceipt,
+    runtime: &mut Option<RuntimeActorState>,
+    threads: &mut HashMap<String, Thread<M>>,
+    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
+    runtime_revision: &AtomicU64,
+) where
+    M: Model,
+{
+    if let Err(error) = check_revision(&request, runtime) {
+        reject_runtime(request.command, receipt, error);
+        return;
+    }
+    handle(
+        request.command,
+        receipt,
+        runtime,
+        threads,
+        thread_ids,
+        runtime_revision,
+    );
+}
 
 pub(super) fn handle<M>(
     command: RuntimeCommand,
@@ -22,6 +48,7 @@ pub(super) fn handle<M>(
     runtime: &mut Option<RuntimeActorState>,
     threads: &mut HashMap<String, Thread<M>>,
     thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
+    runtime_revision: &AtomicU64,
 ) where
     M: Model,
 {
@@ -59,19 +86,16 @@ pub(super) fn handle<M>(
                 .ok_or(AppServerError::RuntimeUnavailable),
         ),
         RuntimeCommand::RefreshWorld { reply } => {
-            let result = runtime
-                .as_mut()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| {
-                    let current = state.management.world();
-                    let refreshed = mini_agent_host::WorldState::detect(
-                        current.workspace(),
-                        current.approval(),
-                        current.copilot(),
-                        current.sandbox(),
-                    );
-                    update_world(threads, state, refreshed)
-                });
+            let result = mutate(runtime, runtime_revision, |state| {
+                let current = state.management.world();
+                let refreshed = mini_agent_host::WorldState::detect(
+                    current.workspace(),
+                    current.approval(),
+                    current.copilot(),
+                    current.sandbox(),
+                );
+                update_world(threads, state, refreshed).map(|changed| (changed, changed))
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::SetExecution {
@@ -79,24 +103,27 @@ pub(super) fn handle<M>(
             copilot,
             reply,
         } => {
-            let result = runtime
-                .as_mut()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| {
-                    let current = state.management.world();
-                    update_world(
-                        threads,
-                        state,
-                        current.with_execution(approval, copilot, current.sandbox()),
-                    )
-                });
+            let result = mutate(runtime, runtime_revision, |state| {
+                let current = state.management.world();
+                update_world(
+                    threads,
+                    state,
+                    current.with_execution(approval, copilot, current.sandbox()),
+                )
+                .map(|changed| (changed, changed))
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::UpdateWorld { updated, reply } => {
-            let result = runtime
-                .as_mut()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| update_world(threads, state, updated));
+            let result = mutate(runtime, runtime_revision, |state| {
+                update_world(threads, state, updated).map(|changed| (changed, changed))
+            });
+            respond(reply, receipt, result);
+        }
+        RuntimeCommand::UpdateThread { update, reply } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                update_thread(threads, state, update).map(|()| ((), true))
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::McpStatus { reply } => respond(
@@ -108,10 +135,9 @@ pub(super) fn handle<M>(
                 .ok_or(AppServerError::RuntimeUnavailable),
         ),
         RuntimeCommand::RetryMcp { approval, reply } => {
-            let result = runtime
-                .as_mut()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| retry_mcp(threads, state, approval));
+            let result = mutate(runtime, runtime_revision, |state| {
+                retry_mcp(threads, state, approval)
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::ReadCheckpoint { reply } => {
@@ -132,17 +158,9 @@ pub(super) fn handle<M>(
             respond(reply, receipt, result);
         }
         RuntimeCommand::StartNewThread { reply } => {
-            let result = runtime
-                .as_mut()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| start_new_thread(threads, thread_ids, state));
-            respond(reply, receipt, result);
-        }
-        RuntimeCommand::RecordContext { checkpoint, reply } => {
-            let result = runtime
-                .as_mut()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| state.management.record_context(&checkpoint));
+            let result = mutate(runtime, runtime_revision, |state| {
+                start_new_thread(threads, thread_ids, state).map(|()| ((), true))
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::RecordTurn {
@@ -153,18 +171,12 @@ pub(super) fn handle<M>(
             checkpoint,
             reply,
         } => {
-            let result = runtime
-                .as_mut()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| {
-                    state.management.record_turn(
-                        started_at_ms,
-                        &prompt,
-                        &result,
-                        &messages,
-                        &checkpoint,
-                    )
-                });
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .management
+                    .record_turn(started_at_ms, &prompt, &result, &messages, &checkpoint)
+                    .map(|()| ((), true))
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::WorkflowState { reply } => respond(
@@ -185,27 +197,28 @@ pub(super) fn handle<M>(
             prompt,
             reply,
         } => {
-            let result = runtime
-                .as_ref()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| {
-                    if active {
-                        state
-                            .workflow
-                            .init_plan_mode(prompt.as_deref())
-                            .map(|_| ())
-                            .map_err(workflow_error)
-                    } else {
-                        state.workflow.disable_plan_mode().map_err(workflow_error)
-                    }
-                });
+            let result = mutate(runtime, runtime_revision, |state| {
+                if active {
+                    state
+                        .workflow
+                        .init_plan_mode(prompt.as_deref())
+                        .map(|_| ())
+                        .map_err(workflow_error)
+                } else {
+                    state.workflow.disable_plan_mode().map_err(workflow_error)
+                }
+                .map(|()| ((), true))
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::WorkflowInitGoal { objective, reply } => {
-            let result = runtime
-                .as_ref()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| state.workflow.init_goal(&objective).map_err(workflow_error));
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .workflow
+                    .init_goal(&objective)
+                    .map(|goal| (goal, true))
+                    .map_err(workflow_error)
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::WorkflowLoadGoal { reply } => respond(
@@ -234,115 +247,94 @@ pub(super) fn handle<M>(
             output,
             reply,
         } => {
-            let result = runtime
-                .as_ref()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| {
-                    state
-                        .workflow
-                        .record_verifier_verdict(checkpoint_seq, &output)
-                        .map_err(workflow_error)
-                });
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .workflow
+                    .record_verifier_verdict(checkpoint_seq, &output)
+                    .map(|()| ((), true))
+                    .map_err(workflow_error)
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::WorkflowAdvance { verdict, reply } => {
-            let result = runtime
-                .as_ref()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| state.workflow.advance_goal(verdict).map_err(workflow_error));
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .workflow
+                    .advance_goal(verdict)
+                    .map(|goal| (goal, true))
+                    .map_err(workflow_error)
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::WorkflowPause { reply } => {
-            let result = runtime
-                .as_ref()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| state.workflow.pause_goal().map_err(workflow_error));
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .workflow
+                    .pause_goal()
+                    .map(|()| ((), true))
+                    .map_err(workflow_error)
+            });
             respond(reply, receipt, result);
         }
         RuntimeCommand::WorkflowFail { reply } => {
-            let result = runtime
-                .as_ref()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| state.workflow.fail_goal().map_err(workflow_error));
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .workflow
+                    .fail_goal()
+                    .map(|goal| (goal, true))
+                    .map_err(workflow_error)
+            });
             respond(reply, receipt, result);
         }
     }
 }
 
 pub(super) fn reject_running(command: RuntimeCommand, receipt: ActionReceipt) {
+    reject_runtime(command, receipt, AppServerError::Busy);
+}
+
+fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppServerError) {
     match command {
-        RuntimeCommand::SessionInfo { reply } => respond(reply, receipt, Err(AppServerError::Busy)),
-        RuntimeCommand::CheckpointSeq { reply } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::ThreadId { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::World { reply } => respond(reply, receipt, Err(AppServerError::Busy)),
-        RuntimeCommand::RefreshWorld { reply } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::SetExecution { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::UpdateWorld { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::McpStatus { reply } => respond(reply, receipt, Err(AppServerError::Busy)),
-        RuntimeCommand::RetryMcp { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::ReadCheckpoint { reply } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::StartNewThread { reply } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::RecordContext { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::RecordTurn { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::WorkflowState { reply } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::WorkflowSetPlan { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::WorkflowInitGoal { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::WorkflowLoadGoal { reply } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::WorkflowCriteria { reply } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::WorkflowRecordVerdict { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::WorkflowAdvance { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::WorkflowPause { reply } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
-        RuntimeCommand::WorkflowFail { reply } => {
-            respond(reply, receipt, Err(AppServerError::Busy))
-        }
+        RuntimeCommand::SessionInfo { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::CheckpointSeq { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::ThreadId { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::World { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::RefreshWorld { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::SetExecution { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::UpdateWorld { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::UpdateThread { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::McpStatus { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::RetryMcp { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::ReadCheckpoint { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::StartNewThread { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::RecordTurn { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::WorkflowState { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::WorkflowSetPlan { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::WorkflowInitGoal { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::WorkflowLoadGoal { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::WorkflowCriteria { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::WorkflowRecordVerdict { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::WorkflowAdvance { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::WorkflowPause { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::WorkflowFail { reply } => respond(reply, receipt, Err(error)),
     }
 }
 
 pub(super) fn handle_running<M>(
-    command: RuntimeCommand,
+    request: RuntimeRequest,
     receipt: ActionReceipt,
     runtime: &mut Option<RuntimeActorState>,
     threads: &mut HashMap<String, Thread<M>>,
     thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
+    runtime_revision: &AtomicU64,
 ) where
     M: Model,
 {
+    if let Err(error) = check_revision(&request, runtime) {
+        reject_runtime(request.command, receipt, error);
+        return;
+    }
+    let command = request.command;
     match command {
         RuntimeCommand::SessionInfo { .. }
         | RuntimeCommand::CheckpointSeq { .. }
@@ -357,10 +349,36 @@ pub(super) fn handle_running<M>(
         | RuntimeCommand::WorkflowRecordVerdict { .. }
         | RuntimeCommand::WorkflowAdvance { .. }
         | RuntimeCommand::WorkflowPause { .. }
-        | RuntimeCommand::WorkflowFail { .. } => {
-            handle(command, receipt, runtime, threads, thread_ids)
-        }
+        | RuntimeCommand::WorkflowFail { .. } => handle(
+            command,
+            receipt,
+            runtime,
+            threads,
+            thread_ids,
+            runtime_revision,
+        ),
         command => reject_running(command, receipt),
+    }
+}
+
+fn check_revision(
+    request: &RuntimeRequest,
+    runtime: &Option<RuntimeActorState>,
+) -> Result<(), AppServerError> {
+    if !request.command.is_mutation() {
+        return Ok(());
+    }
+    let actual = runtime
+        .as_ref()
+        .map(RuntimeActorState::revision)
+        .unwrap_or_default();
+    if request.expected_revision == actual {
+        Ok(())
+    } else {
+        Err(AppServerError::RevisionConflict {
+            expected: request.expected_revision.value(),
+            actual: actual.value(),
+        })
     }
 }
 
@@ -378,35 +396,79 @@ where
     let context = updated
         .model_context()
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
+    append_context_and_persist(threads, state, context)?;
+    state.management.set_world(updated);
+    Ok(true)
+}
+
+fn append_context_and_persist<M>(
+    threads: &mut HashMap<String, Thread<M>>,
+    state: &mut RuntimeActorState,
+    context: String,
+) -> Result<(), AppServerError>
+where
+    M: Model,
+{
     let thread_id = state.management.thread_id();
     let thread = threads
         .get_mut(thread_id.as_str())
         .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
+    let previous = thread
+        .checkpoint()
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
     crate::worker::apply_thread_update(thread, crate::ThreadUpdate::AppendContext(context))?;
     let checkpoint = thread
         .checkpoint()
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-    state.management.record_context(&checkpoint)?;
-    state.management.set_world(updated);
-    Ok(true)
+    if let Err(error) = state.management.record_context(&checkpoint) {
+        if let Err(rollback) = thread.restore_checkpoint(previous) {
+            return Err(AppServerError::Checkpoint(format!(
+                "{error}; Thread rollback failed: {rollback}"
+            )));
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn update_thread<M>(
+    threads: &mut HashMap<String, Thread<M>>,
+    state: &mut RuntimeActorState,
+    update: crate::ThreadUpdate,
+) -> Result<(), AppServerError>
+where
+    M: Model,
+{
+    if let crate::ThreadUpdate::AppendContext(context) = update {
+        return append_context_and_persist(threads, state, context);
+    }
+    let thread_id = state.management.thread_id();
+    let thread = threads
+        .get_mut(thread_id.as_str())
+        .ok_or(AppServerError::ThreadNotFound(thread_id))?;
+    crate::worker::apply_thread_update(thread, update)?;
+    Ok(())
 }
 
 fn retry_mcp<M>(
     threads: &mut HashMap<String, Thread<M>>,
     state: &mut RuntimeActorState,
     approval: ApprovalController,
-) -> Result<crate::McpRetryResult, AppServerError>
+) -> Result<(crate::McpRetryResult, bool), AppServerError>
 where
     M: Model,
 {
     let servers = state.management.retry_mcp_servers();
     if servers.is_empty() {
-        return Ok(crate::McpRetryResult {
-            enabled_servers: Vec::new(),
-            inactive_servers: Vec::new(),
-            diagnostics: Vec::new(),
-            tool_count: 0,
-        });
+        return Ok((
+            crate::McpRetryResult {
+                enabled_servers: Vec::new(),
+                inactive_servers: Vec::new(),
+                diagnostics: Vec::new(),
+                tool_count: 0,
+            },
+            false,
+        ));
     }
     let McpLoadResult {
         tools,
@@ -434,12 +496,15 @@ where
     state
         .management
         .record_mcp_retry(&loaded_server_names, &enabled_servers, tool_count);
-    Ok(crate::McpRetryResult {
-        enabled_servers,
-        inactive_servers,
-        diagnostics,
-        tool_count,
-    })
+    Ok((
+        crate::McpRetryResult {
+            enabled_servers,
+            inactive_servers,
+            diagnostics,
+            tool_count,
+        },
+        true,
+    ))
 }
 
 fn start_new_thread<M>(
@@ -482,6 +547,33 @@ where
 
 fn workflow_error(error: std::io::Error) -> AppServerError {
     AppServerError::Checkpoint(error.to_string())
+}
+
+fn mutate<T, F>(
+    runtime: &mut Option<RuntimeActorState>,
+    runtime_revision: &AtomicU64,
+    operation: F,
+) -> Result<T, AppServerError>
+where
+    F: FnOnce(&mut RuntimeActorState) -> Result<(T, bool), AppServerError>,
+{
+    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    let (value, changed) = operation(state)?;
+    if changed {
+        let revision = state.advance_revision();
+        runtime_revision.store(revision.value(), Ordering::SeqCst);
+    }
+    Ok(value)
+}
+
+pub(super) fn advance_revision(
+    runtime: &mut Option<RuntimeActorState>,
+    runtime_revision: &AtomicU64,
+) {
+    if let Some(state) = runtime {
+        let revision = state.advance_revision();
+        runtime_revision.store(revision.value(), Ordering::SeqCst);
+    }
 }
 
 fn respond<T>(

@@ -8,6 +8,7 @@ use crate::RuntimeTurnResult;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::runtime_actor::RuntimeCommand;
+use crate::runtime_actor::RuntimeRequest;
 use crate::worker::Command;
 use crate::workflows::WorkflowService;
 use mini_agent_capabilities::ApprovalController;
@@ -28,6 +29,7 @@ use tokio::sync::oneshot;
 pub(crate) struct RuntimeActorState {
     pub(crate) management: RuntimeManagementState,
     pub(crate) workflow: HostWorkflowStore,
+    revision: crate::action::RuntimeRevision,
 }
 
 pub(crate) struct RuntimeManagementState {
@@ -115,9 +117,11 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .install_runtime_state(RuntimeActorState {
                 management,
                 workflow,
+                revision: crate::action::RuntimeRevision::default(),
             })
             .map_err(|error| error.to_string())?;
-        let workflows = WorkflowService::bound(server.command_sender());
+        let workflows =
+            WorkflowService::bound(server.command_sender(), server.runtime_revision_handle());
         Ok((
             Self {
                 server,
@@ -129,27 +133,26 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     }
 
     pub async fn session_info(&self) -> Result<Option<RuntimeSessionInfo>, String> {
-        self.request(|reply| Command::Runtime(RuntimeCommand::SessionInfo { reply }))
+        self.request(|reply| RuntimeCommand::SessionInfo { reply })
             .await
     }
 
     pub async fn checkpoint_seq(&self) -> Result<Option<u64>, String> {
-        self.request(|reply| Command::Runtime(RuntimeCommand::CheckpointSeq { reply }))
+        self.request(|reply| RuntimeCommand::CheckpointSeq { reply })
             .await
     }
 
     pub async fn thread_id(&self) -> Result<ThreadId, String> {
-        self.request(|reply| Command::Runtime(RuntimeCommand::ThreadId { reply }))
+        self.request(|reply| RuntimeCommand::ThreadId { reply })
             .await
     }
 
     pub async fn world(&self) -> Result<WorldState, String> {
-        self.request(|reply| Command::Runtime(RuntimeCommand::World { reply }))
-            .await
+        self.request(|reply| RuntimeCommand::World { reply }).await
     }
 
     pub async fn refresh_world(&self) -> Result<bool, String> {
-        self.request(|reply| Command::Runtime(RuntimeCommand::RefreshWorld { reply }))
+        self.request(|reply| RuntimeCommand::RefreshWorld { reply })
             .await
     }
 
@@ -158,52 +161,42 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         approval: ApprovalMode,
         copilot: bool,
     ) -> Result<bool, String> {
-        self.request(|reply| {
-            Command::Runtime(RuntimeCommand::SetExecution {
-                approval,
-                copilot,
-                reply,
-            })
+        self.request(|reply| RuntimeCommand::SetExecution {
+            approval,
+            copilot,
+            reply,
         })
         .await
     }
 
     pub async fn update_world(&self, updated: WorldState) -> Result<bool, String> {
-        self.request(|reply| Command::Runtime(RuntimeCommand::UpdateWorld { updated, reply }))
+        self.request(|reply| RuntimeCommand::UpdateWorld { updated, reply })
             .await
     }
 
     pub(crate) async fn mcp_status(&self) -> Result<McpRuntimeSnapshot, String> {
-        self.request(|reply| Command::Runtime(RuntimeCommand::McpStatus { reply }))
+        self.request(|reply| RuntimeCommand::McpStatus { reply })
             .await
     }
 
     pub async fn retry_mcp(&self) -> Result<McpRetryResult, String> {
         let approval = self.approval.clone();
-        self.request(|reply| Command::Runtime(RuntimeCommand::RetryMcp { approval, reply }))
+        self.request(|reply| RuntimeCommand::RetryMcp { approval, reply })
             .await
     }
 
     pub async fn update_thread(&self, update: crate::ThreadUpdate) -> Result<(), String> {
-        self.server
-            .thread_update_for(self.thread_id().await?, update)
+        self.request(|reply| RuntimeCommand::UpdateThread { update, reply })
             .await
-            .map_err(|error| error.to_string())
     }
 
     pub async fn read_checkpoint(&self) -> Result<ThreadCheckpoint, String> {
-        self.request(|reply| Command::Runtime(RuntimeCommand::ReadCheckpoint { reply }))
+        self.request(|reply| RuntimeCommand::ReadCheckpoint { reply })
             .await
     }
 
     pub async fn start_new_thread(&self) -> Result<(), String> {
-        self.request(|reply| Command::Runtime(RuntimeCommand::StartNewThread { reply }))
-            .await
-    }
-
-    pub async fn record_context(&self, checkpoint: &ThreadCheckpoint) -> Result<(), String> {
-        let checkpoint = checkpoint.clone();
-        self.request(|reply| Command::Runtime(RuntimeCommand::RecordContext { checkpoint, reply }))
+        self.request(|reply| RuntimeCommand::StartNewThread { reply })
             .await
     }
 
@@ -235,27 +228,28 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         let prompt = prompt.to_string();
         let messages = messages.to_vec();
         let checkpoint = checkpoint.to_vec();
-        self.request(|reply| {
-            Command::Runtime(RuntimeCommand::RecordTurn {
-                started_at_ms,
-                prompt,
-                result,
-                messages,
-                checkpoint,
-                reply,
-            })
+        self.request(|reply| RuntimeCommand::RecordTurn {
+            started_at_ms,
+            prompt,
+            result,
+            messages,
+            checkpoint,
+            reply,
         })
         .await
     }
 
     async fn request<T, F>(&self, build: F) -> Result<T, String>
     where
-        F: FnOnce(oneshot::Sender<ActionResult<T>>) -> Command,
+        F: FnOnce(oneshot::Sender<ActionResult<T>>) -> RuntimeCommand,
     {
         let (reply, response) = oneshot::channel();
         self.server
             .commands
-            .send(build(reply))
+            .send(Command::Runtime(RuntimeRequest {
+                expected_revision: self.server.runtime_revision(),
+                command: build(reply),
+            }))
             .await
             .map_err(|_| "runtime actor is unavailable".to_string())?;
         response
@@ -263,6 +257,17 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .map_err(|_| "runtime actor dropped the response".to_string())?
             .map(ActionResponse::into_value)
             .map_err(|error| error.to_string())
+    }
+}
+
+impl RuntimeActorState {
+    pub(crate) fn revision(&self) -> crate::action::RuntimeRevision {
+        self.revision
+    }
+
+    pub(crate) fn advance_revision(&mut self) -> crate::action::RuntimeRevision {
+        self.revision = self.revision.next();
+        self.revision
     }
 }
 

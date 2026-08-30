@@ -1,9 +1,15 @@
 use crate::RuntimeTurnResult;
 use crate::action::ActionResult;
+use crate::action::RuntimeRevision;
 use mini_agent_capabilities::{ApprovalController, ApprovalMode};
 use mini_agent_core::ThreadCheckpoint;
 use mini_agent_protocol::{Message, ThreadId};
 use tokio::sync::oneshot;
+
+pub(super) struct RuntimeRequest {
+    pub(super) expected_revision: RuntimeRevision,
+    pub(super) command: RuntimeCommand,
+}
 
 /// Runtime management and workflow commands handled by the App Server actor.
 pub(super) enum RuntimeCommand {
@@ -31,6 +37,10 @@ pub(super) enum RuntimeCommand {
         updated: mini_agent_host::WorldState,
         reply: oneshot::Sender<ActionResult<bool>>,
     },
+    UpdateThread {
+        update: crate::ThreadUpdate,
+        reply: oneshot::Sender<ActionResult<()>>,
+    },
     McpStatus {
         reply: oneshot::Sender<ActionResult<crate::management::McpRuntimeSnapshot>>,
     },
@@ -42,10 +52,6 @@ pub(super) enum RuntimeCommand {
         reply: oneshot::Sender<ActionResult<ThreadCheckpoint>>,
     },
     StartNewThread {
-        reply: oneshot::Sender<ActionResult<()>>,
-    },
-    RecordContext {
-        checkpoint: ThreadCheckpoint,
         reply: oneshot::Sender<ActionResult<()>>,
     },
     RecordTurn {
@@ -89,4 +95,25 @@ pub(super) enum RuntimeCommand {
     WorkflowFail {
         reply: oneshot::Sender<ActionResult<crate::workflows::GoalState>>,
     },
+}
+
+impl RuntimeCommand {
+    pub(super) fn is_mutation(&self) -> bool {
+        matches!(
+            self,
+            Self::RefreshWorld { .. }
+                | Self::SetExecution { .. }
+                | Self::UpdateWorld { .. }
+                | Self::UpdateThread { .. }
+                | Self::RetryMcp { .. }
+                | Self::StartNewThread { .. }
+                | Self::RecordTurn { .. }
+                | Self::WorkflowSetPlan { .. }
+                | Self::WorkflowInitGoal { .. }
+                | Self::WorkflowRecordVerdict { .. }
+                | Self::WorkflowAdvance { .. }
+                | Self::WorkflowPause { .. }
+                | Self::WorkflowFail { .. }
+        )
+    }
 }

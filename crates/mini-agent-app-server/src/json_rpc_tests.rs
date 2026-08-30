@@ -17,6 +17,7 @@ use mini_agent_protocol::TurnInput;
 use std::convert::Infallible;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::oneshot;
 
 struct DoneModel;
 
@@ -179,6 +180,56 @@ async fn exposes_session_world_and_mcp_management() {
         .await
         .unwrap();
     assert_eq!(response.result.unwrap()["toolCount"], 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn runtime_mutations_reject_stale_revision_tokens() {
+    let (connection, root) = management_connection();
+    let management = connection.runtime_management().unwrap().clone();
+    let world = management.world().await.unwrap();
+    let commands = management.server.command_sender();
+    let first_world = world.with_execution(ApprovalMode::Interactive, true, world.sandbox());
+    let second_world = world.with_execution(ApprovalMode::Automatic, true, world.sandbox());
+
+    let (first_reply, first_response) = oneshot::channel();
+    commands
+        .send(crate::worker::Command::Runtime(
+            crate::runtime_actor::RuntimeRequest {
+                expected_revision: crate::action::RuntimeRevision::default(),
+                command: crate::runtime_actor::RuntimeCommand::UpdateWorld {
+                    updated: first_world,
+                    reply: first_reply,
+                },
+            },
+        ))
+        .await
+        .unwrap();
+    let (second_reply, second_response) = oneshot::channel();
+    commands
+        .send(crate::worker::Command::Runtime(
+            crate::runtime_actor::RuntimeRequest {
+                expected_revision: crate::action::RuntimeRevision::default(),
+                command: crate::runtime_actor::RuntimeCommand::UpdateWorld {
+                    updated: second_world,
+                    reply: second_reply,
+                },
+            },
+        ))
+        .await
+        .unwrap();
+
+    let first = first_response.await.unwrap();
+    let second = second_response.await.unwrap();
+    assert!(first.is_ok() ^ second.is_ok());
+    let conflict = if first.is_err() { first } else { second };
+    assert!(matches!(
+        conflict,
+        Err(AppServerError::RevisionConflict {
+            expected: 0,
+            actual: 1
+        })
+    ));
     std::fs::remove_dir_all(root).unwrap();
 }
 

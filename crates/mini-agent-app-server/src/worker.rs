@@ -5,7 +5,7 @@ use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::action::ActionSequencer;
 use crate::management::RuntimeActorState;
-use crate::runtime_actor::RuntimeCommand;
+use crate::runtime_actor::RuntimeRequest;
 use mini_agent_core::SteeringMode;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::EventSink;
@@ -14,7 +14,7 @@ pub(super) enum Command {
     InstallRuntime {
         state: Box<RuntimeActorState>,
     },
-    Runtime(RuntimeCommand),
+    Runtime(RuntimeRequest),
     Start {
         thread_id: ThreadId,
         request: TurnStart,
@@ -69,6 +69,13 @@ struct BroadcastSink {
     events: broadcast::Sender<EventEnvelope>,
 }
 
+struct RunningCommandContext<'a, M> {
+    runtime: &'a mut Option<RuntimeActorState>,
+    threads: &'a mut HashMap<String, Thread<M>>,
+    thread_ids: &'a Arc<Mutex<Vec<ThreadId>>>,
+    runtime_revision: &'a Arc<AtomicU64>,
+}
+
 impl EventSink for BroadcastSink {
     fn emit(&mut self, event: EventEnvelope) {
         let _ = self.events.send(event);
@@ -80,6 +87,7 @@ pub(super) async fn worker_loop<M>(
     mut commands: mpsc::Receiver<Command>,
     events: broadcast::Sender<EventEnvelope>,
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
+    runtime_revision: Arc<AtomicU64>,
     factory: Option<Arc<dyn ThreadFactory<M>>>,
     control: Arc<RunControl>,
 ) where
@@ -93,14 +101,25 @@ pub(super) async fn worker_loop<M>(
         .collect::<HashMap<_, _>>();
     let mut settled_turns = HashMap::new();
     while let Some(command) = commands.recv().await {
-        let action = action_sequencer.admit(command);
+        let base_revision = runtime
+            .as_ref()
+            .map(RuntimeActorState::revision)
+            .unwrap_or_default();
+        let action = action_sequencer.admit(command, base_revision);
         let receipt = action.receipt();
         match action.command {
             Command::InstallRuntime { state } => {
                 runtime = Some(*state);
             }
-            Command::Runtime(command) => {
-                runtime_actor::handle(command, receipt, &mut runtime, &mut threads, &thread_ids);
+            Command::Runtime(request) => {
+                runtime_actor::handle_request(
+                    request,
+                    receipt,
+                    &mut runtime,
+                    &mut threads,
+                    &thread_ids,
+                    &runtime_revision,
+                );
             }
             Command::Start {
                 thread_id,
@@ -152,6 +171,7 @@ pub(super) async fn worker_loop<M>(
                         .expect("app-server turn input must exist before execution");
                     let turn_id = thread.next_turn_id();
                     if let Some(reply) = initial_reply.take() {
+                        runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                         respond(
                             reply,
                             receipt,
@@ -174,15 +194,22 @@ pub(super) async fn worker_loop<M>(
                         tokio::select! {
                             result = &mut turn => break result,
                             Some(command) = commands.recv() => {
-                                let action = action_sequencer.admit(command);
+                                let base_revision = runtime
+                                    .as_ref()
+                                    .map(RuntimeActorState::revision)
+                                    .unwrap_or_default();
+                                let action = action_sequencer.admit(command, base_revision);
                                 handle_running_command(
                                     action,
                                     &control,
                                     &thread_id,
                                     &turn_id,
-                                    &mut runtime,
-                                    &mut threads,
-                                    &thread_ids,
+                                    RunningCommandContext {
+                                        runtime: &mut runtime,
+                                        threads: &mut threads,
+                                        thread_ids: &thread_ids,
+                                        runtime_revision: &runtime_revision,
+                                    },
                                 );
                             },
                             else => {
@@ -216,6 +243,7 @@ pub(super) async fn worker_loop<M>(
                             );
                         }
                     }
+                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                     next_input = control
                         .take_steer_input()
                         .or_else(|| control.take_follow_up_input());
@@ -248,6 +276,9 @@ pub(super) async fn worker_loop<M>(
                     .get_mut(thread_id.as_str())
                     .ok_or(AppServerError::ThreadNotFound(thread_id))
                     .and_then(|thread| apply_thread_update(thread, update));
+                if result.is_ok() {
+                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
+                }
                 respond(reply, receipt, result);
             }
             Command::ResetThread {
@@ -275,6 +306,9 @@ pub(super) async fn worker_loop<M>(
                 } else {
                     Err(AppServerError::ThreadNotFound(thread_id))
                 };
+                if result.is_ok() {
+                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
+                }
                 respond(reply, receipt, result);
             }
             Command::CloseThread { thread_id, reply } => {
@@ -286,6 +320,9 @@ pub(super) async fn worker_loop<M>(
                             .close()
                             .map_err(|error| AppServerError::Checkpoint(error.to_string()))
                     });
+                if result.is_ok() {
+                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
+                }
                 respond(reply, receipt, result);
             }
             Command::ReadTurn { turn_id, reply } => {
@@ -297,6 +334,9 @@ pub(super) async fn worker_loop<M>(
             }
             Command::CreateThread { thread_id, reply } => {
                 let result = create_thread(&mut threads, &thread_ids, factory.as_ref(), thread_id);
+                if result.is_ok() {
+                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
+                }
                 respond(reply, receipt, result);
             }
             Command::ForkThread {
@@ -311,6 +351,9 @@ pub(super) async fn worker_loop<M>(
                     source_thread_id,
                     new_thread_id,
                 );
+                if result.is_ok() {
+                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
+                }
                 respond(reply, receipt, result);
             }
             Command::ResumeThread {
@@ -325,6 +368,9 @@ pub(super) async fn worker_loop<M>(
                     thread_id,
                     checkpoint,
                 );
+                if result.is_ok() {
+                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
+                }
                 respond(reply, receipt, result);
             }
         }
@@ -445,9 +491,7 @@ fn handle_running_command<M>(
     control: &RunControl,
     active_thread_id: &ThreadId,
     turn_id: &TurnId,
-    runtime: &mut Option<RuntimeActorState>,
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
+    context: RunningCommandContext<'_, M>,
 ) where
     M: Model,
 {
@@ -532,8 +576,13 @@ fn handle_running_command<M>(
             respond(reply, receipt, Err(AppServerError::Busy));
         }
         Command::InstallRuntime { .. } => {}
-        Command::Runtime(command) => {
-            runtime_actor::handle_running(command, receipt, runtime, threads, thread_ids)
-        }
+        Command::Runtime(request) => runtime_actor::handle_running(
+            request,
+            receipt,
+            context.runtime,
+            context.threads,
+            context.thread_ids,
+            context.runtime_revision,
+        ),
     }
 }

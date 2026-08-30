@@ -293,7 +293,9 @@ impl SessionStore {
                     "thread_id": thread_id,
                     "timestamp_ms": now,
                 }),
+                store.checkpoint_record(&[]),
             ])?;
+            store.checkpoint_seq = store.next_seq.saturating_sub(1);
             write_prompt_context(&session_dir, workspace, &session_id);
             store.update_summary_and_signals("", 0, None);
             return Ok(OpenedSession {
@@ -366,7 +368,9 @@ impl SessionStore {
                 "thread_id": thread_id,
                 "timestamp_ms": now,
             }),
+            store.checkpoint_record(&[]),
         ])?;
+        store.checkpoint_seq = store.next_seq.saturating_sub(1);
         write_prompt_context(&session_dir, workspace, session_id);
         store.update_summary_and_signals("", 0, None);
         Ok(OpenedSession {
@@ -526,6 +530,8 @@ impl SessionStore {
         let append_lock = Arc::clone(&self.append_lock);
         let _append_guard = append_lock.lock().unwrap();
         self.refresh_append_position()?;
+        let original_bytes = self.bytes;
+        let original_next_seq = self.next_seq;
         let mut encoded = Vec::new();
         let mut next_seq = self.next_seq;
         for record in &mut records {
@@ -548,11 +554,26 @@ impl SessionStore {
         if next_bytes > MAX_SESSION_BYTES {
             return Err(format!("session exceeds {MAX_SESSION_BYTES} byte limit"));
         }
-        self.file
+        let write_result = self
+            .file
             .write_all(&encoded)
             .and_then(|()| self.file.flush())
-            .and_then(|()| self.file.sync_data())
-            .map_err(|error| format!("cannot persist session: {error}"))?;
+            .and_then(|()| self.file.sync_data());
+        if let Err(error) = write_result {
+            let rollback_result = self
+                .file
+                .set_len(original_bytes)
+                .and_then(|()| self.file.seek(SeekFrom::End(0)).map(|_| ()))
+                .and_then(|()| self.file.sync_data());
+            self.bytes = original_bytes;
+            self.next_seq = original_next_seq;
+            return match rollback_result {
+                Ok(()) => Err(format!("cannot persist session: {error}")),
+                Err(rollback) => Err(format!(
+                    "cannot persist session: {error}; rollback failed: {rollback}"
+                )),
+            };
+        }
         self.bytes = next_bytes;
         self.next_seq = next_seq;
         Ok(())

@@ -348,13 +348,6 @@ where
             .flatten()
     }
 
-    pub async fn record_context(&mut self, checkpoint: &ThreadCheckpoint) -> Result<(), String> {
-        self.connection
-            .runtime_management()?
-            .record_context(checkpoint)
-            .await
-    }
-
     pub async fn record_turn(
         &mut self,
         started_at_ms: u64,

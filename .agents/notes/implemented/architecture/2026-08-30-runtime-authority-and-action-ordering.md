@@ -28,10 +28,9 @@ The following counters remain independent:
 - ActionId: identity of one admitted command.
 - ActionSequence: total order assigned by the server worker at admission.
 - EventEnvelope.sequence: order of Core output events within the Thread.
-- RuntimeRevision: the future state-tree revision used for stale-write
-  detection. Phase two records the initial base revision (0); mutation and
-  compare-and-swap enforcement are intentionally deferred until runtime state
-  is consolidated behind the same actor queue.
+- RuntimeRevision: the monotonic state-tree revision used for stale-write
+  detection. Runtime mutations carry the revision they observed and the actor
+  rejects the mutation when that token is no longer current.
 
 ## Consequences
 
@@ -41,10 +40,14 @@ The following counters remain independent:
   identifiers or client wall-clock timing.
 - Core event ordering remains owned by Core and is not conflated with input
   action ordering.
-- Runtime management, workflow, approval, and the thread_ids index still
-  contain separate state or synchronization paths. They are the next
-  consolidation targets; this change intentionally does not pretend they are
-  already one atomic state tree.
+- Runtime management and workflow state now share `RuntimeActorState` and one
+  revision. Successful mutations advance the revision before their replies are
+  delivered; direct Thread lifecycle mutations advance the same revision.
+- A context update now applies to the live Thread and its Session checkpoint
+  within one actor action. A persistence failure restores the Thread
+  checkpoint, and a failed Session append truncates its own partial write.
+- `thread_ids` remains a worker-maintained lifecycle index, but successful
+  lifecycle changes participate in the same revision stream.
 
 ## Verification
 
@@ -52,4 +55,8 @@ The following counters remain independent:
   sequence allocation.
 - Existing App Server tests continue to exercise lifecycle, updates, turn
   control, and multi-thread behavior through the public facade.
+- The App Server CAS test verifies that concurrent stale mutation tokens allow
+  exactly one mutation to commit.
+- Session restart coverage verifies that a newly created session has a durable
+  empty checkpoint before the first context update.
 - No external protocol fields or historical compatibility paths are added.

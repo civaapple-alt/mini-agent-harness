@@ -43,7 +43,9 @@ Actor 不替代 Core agent loop，也不意味着所有 capability 都变成 act
   进入，避免状态卡在 `running`。
 - `ApprovalController` 仍是 capability 回调通道，不作为运行时状态树的一部分；
   它服务于工具执行中的请求响应，不负责决定状态命令顺序。
-- `thread_ids` 仍是 worker 维护的生命周期索引，尚未并入可比较的状态 revision。
+- `thread_ids` 仍是 worker 维护的生命周期索引；成功的生命周期变更现在会
+  推进同一个 runtime revision，但索引本身仍由 worker 维护，尚未存入
+  `RuntimeActorState`。
 - 启动阶段仍允许在 worker 绑定前构造 Session 和 Workflow store；绑定完成后
   所有运行时访问都走 actor。
 
@@ -53,5 +55,6 @@ Actor 不替代 Core agent loop，也不意味着所有 capability 都变成 act
   超时、暂停、恢复和并发命令路径。
 - actor 命令协议单独放在 `runtime_command.rs`，处理逻辑保留在
   `runtime_actor.rs`，避免继续扩大单一模块。
-- 下一阶段可在此基础上引入统一 `RuntimeRevision` 的递增和 compare-and-swap
-  检查，再处理跨 Session 持久化与 Thread 更新的事务边界。
+- 如果未来需要整轮 turn 的崩溃原子持久化，下一步是把剩余的 post-turn
+  `RecordTurn` 提交也收拢到 worker action 内。当前的 revision/CAS 和 context
+  事务边界见 `2026-08-30-runtime-revision-cas-and-transaction.md`。
