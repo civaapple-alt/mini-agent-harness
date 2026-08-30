@@ -1,44 +1,38 @@
 //! Runtime management operations shared by local and JSON-RPC clients.
 
 use crate::AppServer;
+use crate::AppServerError;
 use crate::McpRetryResult;
 use crate::RuntimeSessionInfo;
-use crate::ThreadUpdate;
+use crate::RuntimeTurnResult;
+use crate::action::ActionResponse;
+use crate::action::ActionResult;
+use crate::runtime_actor::RuntimeCommand;
+use crate::worker::Command;
+use crate::workflows::WorkflowService;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ApprovalMode;
-use mini_agent_capabilities::McpLoadResult;
 use mini_agent_capabilities::McpServerConfig;
 use mini_agent_capabilities::OpenedSession;
 use mini_agent_capabilities::TurnCommit;
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
-use mini_agent_capabilities::load_mcp;
 use mini_agent_core::ThreadCheckpoint;
+use mini_agent_host::HostWorkflowStore;
 use mini_agent_host::WorldState;
-use mini_agent_host::tool_outcome::classify_tools;
+use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::TurnStatus;
-use std::sync::Arc;
-use std::sync::Mutex;
+use tokio::sync::oneshot;
 
-pub struct RuntimeManagementService<M> {
-    server: AppServer<M>,
-    state: Arc<Mutex<RuntimeManagementState>>,
-    approval: ApprovalController,
+pub(crate) struct RuntimeActorState {
+    pub(crate) management: RuntimeManagementState,
+    pub(crate) workflow: HostWorkflowStore,
 }
 
-impl<M> Clone for RuntimeManagementService<M> {
-    fn clone(&self) -> Self {
-        Self {
-            server: self.server.clone(),
-            state: self.state.clone(),
-            approval: self.approval.clone(),
-        }
-    }
-}
-
-struct RuntimeManagementState {
+pub(crate) struct RuntimeManagementState {
     session: Option<OpenedSession>,
+    active_thread_id: ThreadId,
     world: WorldState,
     mcp: McpRuntimeState,
 }
@@ -47,6 +41,35 @@ struct McpRuntimeState {
     enabled_servers: Vec<String>,
     tool_count: usize,
     retry_servers: Vec<McpServerConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct McpRuntimeSnapshot {
+    pub(crate) enabled_servers: Vec<String>,
+    pub(crate) inactive_servers: Vec<String>,
+    pub(crate) tool_count: usize,
+    pub(crate) retry_available: bool,
+}
+
+/// Handle for runtime management commands.
+///
+/// Mutable session, world, and MCP state is owned by the App Server worker
+/// after RuntimeServices binds this handle to a workflow store.
+pub struct RuntimeManagementService<M> {
+    pub(crate) server: AppServer<M>,
+    state: Option<RuntimeManagementState>,
+    approval: ApprovalController,
+}
+
+impl<M> Clone for RuntimeManagementService<M> {
+    fn clone(&self) -> Self {
+        debug_assert!(self.state.is_none());
+        Self {
+            server: self.server.clone(),
+            state: None,
+            approval: self.approval.clone(),
+        }
+    }
 }
 
 impl<M: Model + Send + 'static> RuntimeManagementService<M> {
@@ -60,74 +83,74 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         retry_mcp_servers: Vec<McpServerConfig>,
         approval: ApprovalController,
     ) -> Self {
+        let active_thread_id = server.thread_id().clone();
         Self {
             server,
-            state: Arc::new(Mutex::new(RuntimeManagementState {
+            state: Some(RuntimeManagementState {
                 session,
+                active_thread_id,
                 world,
                 mcp: McpRuntimeState {
                     enabled_servers: enabled_mcp_servers,
                     tool_count: mcp_tool_count,
                     retry_servers: retry_mcp_servers,
                 },
-            })),
+            }),
             approval,
         }
     }
 
-    pub fn session_info(&self) -> Option<RuntimeSessionInfo> {
-        let state = self.state.lock().unwrap();
-        state.session.as_ref().map(|opened| RuntimeSessionInfo {
-            session_id: opened.store.session_id().to_string(),
-            thread_id: opened.store.thread_id().to_string(),
-            path: opened.store.path().display().to_string(),
-            resumed: opened.resumed,
-        })
+    pub(crate) fn bind_workflow(
+        self,
+        workflows: WorkflowService,
+    ) -> Result<(Self, WorkflowService), String> {
+        let Self {
+            server,
+            state,
+            approval,
+        } = self;
+        let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
+        let workflow = workflows.into_store().map_err(|error| error.to_string())?;
+        server
+            .install_runtime_state(RuntimeActorState {
+                management,
+                workflow,
+            })
+            .map_err(|error| error.to_string())?;
+        let workflows = WorkflowService::bound(server.command_sender());
+        Ok((
+            Self {
+                server,
+                state: None,
+                approval,
+            },
+            workflows,
+        ))
     }
 
-    pub fn checkpoint_seq(&self) -> Option<u64> {
-        self.state
-            .lock()
-            .unwrap()
-            .session
-            .as_ref()
-            .map(|opened| opened.store.checkpoint_seq())
+    pub async fn session_info(&self) -> Result<Option<RuntimeSessionInfo>, String> {
+        self.request(|reply| Command::Runtime(RuntimeCommand::SessionInfo { reply }))
+            .await
     }
 
-    pub fn thread_id(&self) -> ThreadId {
-        let state = self.state.lock().unwrap();
-        state
-            .session
-            .as_ref()
-            .map(|opened| ThreadId::new(opened.store.thread_id().to_string()))
-            .unwrap_or_else(|| self.server.thread_id().clone())
+    pub async fn checkpoint_seq(&self) -> Result<Option<u64>, String> {
+        self.request(|reply| Command::Runtime(RuntimeCommand::CheckpointSeq { reply }))
+            .await
     }
 
-    pub fn world(&self) -> WorldState {
-        self.state.lock().unwrap().world.clone()
+    pub async fn thread_id(&self) -> Result<ThreadId, String> {
+        self.request(|reply| Command::Runtime(RuntimeCommand::ThreadId { reply }))
+            .await
     }
 
-    pub fn enabled_mcp_servers(&self) -> Vec<String> {
-        self.state.lock().unwrap().mcp.enabled_servers.clone()
-    }
-
-    pub fn mcp_tool_count(&self) -> usize {
-        self.state.lock().unwrap().mcp.tool_count
-    }
-
-    pub fn retry_mcp_servers(&self) -> Vec<McpServerConfig> {
-        self.state.lock().unwrap().mcp.retry_servers.clone()
+    pub async fn world(&self) -> Result<WorldState, String> {
+        self.request(|reply| Command::Runtime(RuntimeCommand::World { reply }))
+            .await
     }
 
     pub async fn refresh_world(&self) -> Result<bool, String> {
-        let world = self.world();
-        let refreshed = WorldState::detect(
-            world.workspace(),
-            world.approval(),
-            world.copilot(),
-            world.sandbox(),
-        );
-        self.update_world(refreshed).await
+        self.request(|reply| Command::Runtime(RuntimeCommand::RefreshWorld { reply }))
+            .await
     }
 
     pub async fn set_execution(
@@ -135,136 +158,60 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         approval: ApprovalMode,
         copilot: bool,
     ) -> Result<bool, String> {
-        let world = self.world();
-        self.update_world(world.with_execution(approval, copilot, world.sandbox()))
-            .await
+        self.request(|reply| {
+            Command::Runtime(RuntimeCommand::SetExecution {
+                approval,
+                copilot,
+                reply,
+            })
+        })
+        .await
     }
 
     pub async fn update_world(&self, updated: WorldState) -> Result<bool, String> {
-        if updated == self.world() {
-            return Ok(false);
-        }
-        let context = updated.model_context()?;
-        self.update_thread(ThreadUpdate::AppendContext(context))
-            .await?;
-        let checkpoint = self.read_checkpoint().await?;
-        self.record_context(&checkpoint)?;
-        self.state.lock().unwrap().world = updated;
-        Ok(true)
+        self.request(|reply| Command::Runtime(RuntimeCommand::UpdateWorld { updated, reply }))
+            .await
     }
 
-    pub fn mcp_status(&self) -> (Vec<String>, Vec<String>, usize) {
-        let state = self.state.lock().unwrap();
-        let inactive = state
-            .mcp
-            .retry_servers
-            .iter()
-            .map(|server| format!("{}/{}", server.plugin_name, server.server_name))
-            .collect();
-        (
-            state.mcp.enabled_servers.clone(),
-            inactive,
-            state.mcp.tool_count,
-        )
+    pub(crate) async fn mcp_status(&self) -> Result<McpRuntimeSnapshot, String> {
+        self.request(|reply| Command::Runtime(RuntimeCommand::McpStatus { reply }))
+            .await
     }
 
     pub async fn retry_mcp(&self) -> Result<McpRetryResult, String> {
-        let servers = self.retry_mcp_servers();
-        if servers.is_empty() {
-            return Ok(McpRetryResult {
-                enabled_servers: Vec::new(),
-                inactive_servers: Vec::new(),
-                diagnostics: Vec::new(),
-                tool_count: 0,
-            });
-        }
-        let McpLoadResult {
-            tools,
-            loaded_servers,
-            diagnostics,
-        } = load_mcp(&servers, self.approval.clone());
-        let inactive_servers = servers
-            .iter()
-            .filter(|server| {
-                !loaded_servers.contains(&format!("{}/{}", server.plugin_name, server.server_name))
-            })
-            .map(|server| format!("{}/{}", server.plugin_name, server.server_name))
-            .collect::<Vec<_>>();
-        let enabled_servers = loaded_servers.iter().cloned().collect::<Vec<_>>();
-        let tool_count = tools.len();
-        self.update_thread(ThreadUpdate::ExtendTools(classify_tools(tools)))
-            .await?;
-        let mut state = self.state.lock().unwrap();
-        state.mcp.retry_servers.retain(|server| {
-            !loaded_servers.contains(&format!("{}/{}", server.plugin_name, server.server_name))
-        });
-        state
-            .mcp
-            .enabled_servers
-            .extend(enabled_servers.iter().cloned());
-        state.mcp.tool_count += tool_count;
-        Ok(McpRetryResult {
-            enabled_servers,
-            inactive_servers,
-            diagnostics,
-            tool_count,
-        })
+        let approval = self.approval.clone();
+        self.request(|reply| Command::Runtime(RuntimeCommand::RetryMcp { approval, reply }))
+            .await
     }
 
-    pub async fn update_thread(&self, update: ThreadUpdate) -> Result<(), String> {
-        let thread_id = self.thread_id();
+    pub async fn update_thread(&self, update: crate::ThreadUpdate) -> Result<(), String> {
         self.server
-            .thread_update_for(thread_id, update)
+            .thread_update_for(self.thread_id().await?, update)
             .await
             .map_err(|error| error.to_string())
     }
 
     pub async fn read_checkpoint(&self) -> Result<ThreadCheckpoint, String> {
-        self.server
-            .thread_read_for(self.thread_id())
+        self.request(|reply| Command::Runtime(RuntimeCommand::ReadCheckpoint { reply }))
             .await
-            .map_err(|error| error.to_string())
     }
 
     pub async fn start_new_thread(&self) -> Result<(), String> {
-        let old_thread_id = self.thread_id();
-        let new_thread_id = {
-            let mut state = self.state.lock().unwrap();
-            let Some(session) = state.session.as_mut() else {
-                return Err("session persistence is disabled".to_string());
-            };
-            session.store.start_thread()?;
-            ThreadId::new(session.store.thread_id().to_string())
-        };
-        self.server
-            .thread_reset(old_thread_id, new_thread_id, 1)
+        self.request(|reply| Command::Runtime(RuntimeCommand::StartNewThread { reply }))
             .await
-            .map_err(|error| error.to_string())?;
-        Ok(())
     }
 
-    pub fn record_context(&self, checkpoint: &ThreadCheckpoint) -> Result<(), String> {
-        let mut state = self.state.lock().unwrap();
-        let Some(session) = state.session.as_mut() else {
-            return Ok(());
-        };
-        let context = checkpoint
-            .session
-            .messages()
-            .iter()
-            .rev()
-            .find(|message| matches!(message, mini_agent_protocol::Message::Context { .. }))
-            .ok_or_else(|| "no context item is available to persist".to_string())?;
-        session
-            .store
-            .record_context(context, checkpoint.session.messages())
+    pub async fn record_context(&self, checkpoint: &ThreadCheckpoint) -> Result<(), String> {
+        let checkpoint = checkpoint.clone();
+        self.request(|reply| Command::Runtime(RuntimeCommand::RecordContext { checkpoint, reply }))
+            .await
     }
 
-    pub fn record_turn(
+    pub async fn record_turn(
         &self,
         started_at_ms: u64,
         prompt: &str,
-        result: &crate::runtime::RuntimeTurnResult,
+        result: &RuntimeTurnResult,
     ) -> Result<(), String> {
         self.record_turn_with_messages(
             started_at_ms,
@@ -273,18 +220,152 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             &result.messages,
             &result.messages,
         )
+        .await
     }
 
-    pub fn record_turn_with_messages(
+    pub async fn record_turn_with_messages(
         &self,
         started_at_ms: u64,
         prompt: &str,
-        result: &crate::runtime::RuntimeTurnResult,
-        messages: &[mini_agent_protocol::Message],
-        checkpoint: &[mini_agent_protocol::Message],
+        result: &RuntimeTurnResult,
+        messages: &[Message],
+        checkpoint: &[Message],
     ) -> Result<(), String> {
-        let mut state = self.state.lock().unwrap();
-        let Some(session) = state.session.as_mut() else {
+        let result = result.clone();
+        let prompt = prompt.to_string();
+        let messages = messages.to_vec();
+        let checkpoint = checkpoint.to_vec();
+        self.request(|reply| {
+            Command::Runtime(RuntimeCommand::RecordTurn {
+                started_at_ms,
+                prompt,
+                result,
+                messages,
+                checkpoint,
+                reply,
+            })
+        })
+        .await
+    }
+
+    async fn request<T, F>(&self, build: F) -> Result<T, String>
+    where
+        F: FnOnce(oneshot::Sender<ActionResult<T>>) -> Command,
+    {
+        let (reply, response) = oneshot::channel();
+        self.server
+            .commands
+            .send(build(reply))
+            .await
+            .map_err(|_| "runtime actor is unavailable".to_string())?;
+        response
+            .await
+            .map_err(|_| "runtime actor dropped the response".to_string())?
+            .map(ActionResponse::into_value)
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl RuntimeManagementState {
+    pub(crate) fn session_info(&self) -> Option<RuntimeSessionInfo> {
+        self.session.as_ref().map(|opened| RuntimeSessionInfo {
+            session_id: opened.store.session_id().to_string(),
+            thread_id: opened.store.thread_id().to_string(),
+            path: opened.store.path().display().to_string(),
+            resumed: opened.resumed,
+        })
+    }
+
+    pub(crate) fn checkpoint_seq(&self) -> Option<u64> {
+        self.session
+            .as_ref()
+            .map(|opened| opened.store.checkpoint_seq())
+    }
+
+    pub(crate) fn thread_id(&self) -> ThreadId {
+        self.session
+            .as_ref()
+            .map(|opened| ThreadId::new(opened.store.thread_id().to_string()))
+            .unwrap_or_else(|| self.active_thread_id.clone())
+    }
+
+    pub(crate) fn world(&self) -> WorldState {
+        self.world.clone()
+    }
+
+    pub(crate) fn set_world(&mut self, world: WorldState) {
+        self.world = world;
+    }
+
+    pub(crate) fn mcp_status(&self) -> McpRuntimeSnapshot {
+        let inactive_servers = self
+            .mcp
+            .retry_servers
+            .iter()
+            .map(|server| format!("{}/{}", server.plugin_name, server.server_name))
+            .collect::<Vec<_>>();
+        McpRuntimeSnapshot {
+            enabled_servers: self.mcp.enabled_servers.clone(),
+            inactive_servers,
+            tool_count: self.mcp.tool_count,
+            retry_available: !self.mcp.retry_servers.is_empty(),
+        }
+    }
+
+    pub(crate) fn retry_mcp_servers(&self) -> Vec<McpServerConfig> {
+        self.mcp.retry_servers.clone()
+    }
+
+    pub(crate) fn record_mcp_retry(
+        &mut self,
+        loaded_servers: &[String],
+        enabled_servers: &[String],
+        tool_count: usize,
+    ) {
+        self.mcp.retry_servers.retain(|server| {
+            !loaded_servers.contains(&format!("{}/{}", server.plugin_name, server.server_name))
+        });
+        self.mcp
+            .enabled_servers
+            .extend(enabled_servers.iter().cloned());
+        self.mcp.tool_count += tool_count;
+    }
+
+    pub(crate) fn session_mut(&mut self) -> Option<&mut OpenedSession> {
+        self.session.as_mut()
+    }
+
+    pub(crate) fn record_context(
+        &mut self,
+        checkpoint: &ThreadCheckpoint,
+    ) -> Result<(), AppServerError> {
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        let context = checkpoint
+            .session
+            .messages()
+            .iter()
+            .rev()
+            .find(|message| matches!(message, Message::Context { .. }))
+            .ok_or_else(|| {
+                AppServerError::Checkpoint("no context item is available to persist".to_string())
+            })?;
+        session
+            .store
+            .record_context(context, checkpoint.session.messages())
+            .map_err(AppServerError::Checkpoint)
+    }
+
+    pub(crate) fn record_turn(
+        &mut self,
+        started_at_ms: u64,
+        prompt: &str,
+        result: &RuntimeTurnResult,
+        messages: &[Message],
+        checkpoint: &[Message],
+    ) -> Result<(), AppServerError> {
+        let Some(session) = self.session.as_mut() else {
             return Ok(());
         };
         let status = match result.status {
@@ -294,17 +375,20 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             TurnStatus::Cancelled => SessionTurnStatus::Cancelled,
             TurnStatus::Failed | TurnStatus::InProgress => SessionTurnStatus::Failed,
         };
-        session.store.record_turn_with_id(
-            result.turn_id.as_str(),
-            TurnCommit {
-                started_at_ms,
-                prompt,
-                status,
-                steps: result.steps,
-                error: result.error.as_deref(),
-                messages,
-                checkpoint,
-            },
-        )
+        session
+            .store
+            .record_turn_with_id(
+                result.turn_id.as_str(),
+                TurnCommit {
+                    started_at_ms,
+                    prompt,
+                    status,
+                    steps: result.steps,
+                    error: result.error.as_deref(),
+                    messages,
+                    checkpoint,
+                },
+            )
+            .map_err(AppServerError::Checkpoint)
     }
 }

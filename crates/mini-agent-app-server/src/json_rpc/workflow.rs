@@ -12,8 +12,8 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        let goal = match workflows.load_goal_state() {
-            Ok(goal) => goal,
+        let (plan_active, goal) = match workflows.state().await {
+            Ok(state) => state,
             Err(error) => {
                 return response_error(request.id, workflow_error(error.to_string()));
             }
@@ -21,7 +21,7 @@ where
         response_value(
             request.id,
             WorkflowState {
-                plan_active: workflows.plan_active(),
+                plan_active,
                 goal: goal.map(workflow_goal_state),
             },
         )
@@ -40,9 +40,9 @@ where
             Err(error) => return response_error(request.id, error),
         };
         let result = if params.active {
-            workflows.enable_plan_mode(params.prompt.as_deref())
+            workflows.enable_plan_mode(params.prompt.as_deref()).await
         } else {
-            workflows.disable_plan_mode()
+            workflows.disable_plan_mode().await
         };
         if let Err(error) = result {
             return response_error(request.id, workflow_error(error.to_string()));
@@ -62,7 +62,7 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        match workflows.init_goal(&params.objective) {
+        match workflows.init_goal(&params.objective).await {
             Ok(state) => response_value(request.id, workflow_goal_state(state)),
             Err(error) => response_error(request.id, workflow_error(error.to_string())),
         }
@@ -76,10 +76,10 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        if let Err(error) = workflows.pause_goal() {
+        if let Err(error) = workflows.pause_goal().await {
             return response_error(request.id, workflow_error(error.to_string()));
         }
-        match workflows.load_goal_state() {
+        match workflows.load_goal_state().await {
             Ok(Some(state)) => response_value(request.id, workflow_goal_state(state)),
             Ok(None) => response_error(request.id, JsonRpcError::server_error("no active goal")),
             Err(error) => response_error(request.id, workflow_error(error.to_string())),
@@ -94,7 +94,7 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        match workflows.fail_goal() {
+        match workflows.fail_goal().await {
             Ok(state) => response_value(request.id, workflow_goal_state(state)),
             Err(error) => response_error(request.id, workflow_error(error.to_string())),
         }
@@ -108,7 +108,7 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        match workflows.verification_criteria() {
+        match workflows.verification_criteria().await {
             Ok(criteria) => response_value(
                 request.id,
                 mini_agent_app_server_protocol::WorkflowGoalCriteriaResult { criteria },
@@ -130,7 +130,7 @@ where
             Err(error) => return response_error(request.id, error),
         };
         let verdict = params.verdict.map(host_verifier_verdict);
-        match workflows.advance_goal(verdict) {
+        match workflows.advance_goal(verdict).await {
             Ok(state) => response_value(request.id, workflow_goal_state(state)),
             Err(error) => response_error(request.id, workflow_error(error.to_string())),
         }
@@ -148,7 +148,10 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
-        match workflows.record_verifier_verdict(params.checkpoint_seq, &params.output) {
+        match workflows
+            .record_verifier_verdict(params.checkpoint_seq, &params.output)
+            .await
+        {
             Ok(()) => response_value(request.id, serde_json::json!({"recorded": true})),
             Err(error) => response_error(request.id, workflow_error(error.to_string())),
         }

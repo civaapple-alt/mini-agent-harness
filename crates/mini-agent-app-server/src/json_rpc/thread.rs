@@ -12,9 +12,7 @@ where
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
-        let thread_id = params
-            .thread_id
-            .unwrap_or_else(|| self.server.thread_id().clone());
+        let thread_id = params.thread_id.unwrap_or(self.thread_id().await);
         if !self.server.has_thread(&thread_id) {
             return match self.server.thread_start(thread_id.clone()).await {
                 Ok(thread_id) => response_value(request.id, ThreadStartResult { thread_id }),

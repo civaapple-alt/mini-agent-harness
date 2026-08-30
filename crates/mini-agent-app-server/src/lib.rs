@@ -129,6 +129,8 @@ pub mod json_rpc;
 pub mod local;
 pub mod management;
 pub mod runtime;
+mod runtime_actor;
+mod runtime_command;
 pub mod verifier;
 mod workflows;
 
@@ -152,6 +154,7 @@ pub use workflows::WorkflowService;
 
 mod worker;
 use action::ActionResponse;
+use management::RuntimeActorState;
 use worker::{Command, worker_loop};
 
 /// A bounded error returned by the in-process control-plane adapter.
@@ -169,6 +172,7 @@ pub enum AppServerError {
     ThreadNotFound(ThreadId),
     ThreadAlreadyExists(ThreadId),
     ThreadFactoryUnavailable,
+    RuntimeUnavailable,
 }
 
 /// A host-side update applied to a settled Thread by the App Server worker.
@@ -219,6 +223,7 @@ impl fmt::Display for AppServerError {
                 write!(formatter, "thread {} already exists", thread_id.as_str())
             }
             Self::ThreadFactoryUnavailable => formatter.write_str("thread factory is unavailable"),
+            Self::RuntimeUnavailable => formatter.write_str("runtime state is unavailable"),
         }
     }
 }
@@ -358,6 +363,21 @@ where
             factory,
             _model: std::marker::PhantomData,
         }
+    }
+
+    pub(crate) fn command_sender(&self) -> mpsc::Sender<Command> {
+        self.commands.clone()
+    }
+
+    pub(crate) fn install_runtime_state(
+        &self,
+        state: RuntimeActorState,
+    ) -> Result<(), AppServerError> {
+        self.commands
+            .try_send(Command::InstallRuntime {
+                state: Box::new(state),
+            })
+            .map_err(|_| AppServerError::Disconnected)
     }
 
     pub fn thread_id(&self) -> &ThreadId {

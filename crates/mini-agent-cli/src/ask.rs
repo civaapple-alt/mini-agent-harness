@@ -95,7 +95,8 @@ pub async fn run(
             observer.finish();
             let _ = runtime
                 .client_mut()
-                .record_turn(started_at_ms, &prompt, &outcome);
+                .record_turn(started_at_ms, &prompt, &outcome)
+                .await;
             if json_output {
                 println!(
                     "{}",
@@ -125,7 +126,8 @@ pub async fn run(
             outcome.error = Some(error.clone());
             let _ = runtime
                 .client_mut()
-                .record_turn(started_at_ms, &prompt, &outcome);
+                .record_turn(started_at_ms, &prompt, &outcome)
+                .await;
             eprintln!("error: {error}");
             if json_output {
                 println!(

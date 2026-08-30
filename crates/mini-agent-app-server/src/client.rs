@@ -270,7 +270,7 @@ where
     ) -> Result<RuntimeTurnBatch, String> {
         let submission = self
             .start_turn(
-                self.connection.thread_id(),
+                self.connection.thread_id().await,
                 TurnInput::new(TurnInputMode::Start, prompt.into()),
             )
             .await
@@ -338,20 +338,24 @@ where
             .await
     }
 
-    pub fn checkpoint_seq(&self) -> Option<u64> {
+    pub async fn checkpoint_seq(&self) -> Option<u64> {
         self.connection
             .runtime_management()
+            .ok()?
+            .checkpoint_seq()
+            .await
             .ok()
-            .and_then(|management| management.checkpoint_seq())
+            .flatten()
     }
 
-    pub fn record_context(&mut self, checkpoint: &ThreadCheckpoint) -> Result<(), String> {
+    pub async fn record_context(&mut self, checkpoint: &ThreadCheckpoint) -> Result<(), String> {
         self.connection
             .runtime_management()?
             .record_context(checkpoint)
+            .await
     }
 
-    pub fn record_turn(
+    pub async fn record_turn(
         &mut self,
         started_at_ms: u64,
         prompt: &str,
@@ -360,9 +364,10 @@ where
         self.connection
             .runtime_management()?
             .record_turn(started_at_ms, prompt, result)
+            .await
     }
 
-    pub fn record_batch(
+    pub async fn record_batch(
         &mut self,
         started_at_ms: u64,
         fallback_prompt: &str,
@@ -393,13 +398,14 @@ where
                     result,
                     &turn_messages,
                     &result.messages,
-                )?;
+                )
+                .await?;
         }
         Ok(())
     }
 
-    pub fn thread_id(&self) -> ThreadId {
-        self.connection.thread_id()
+    pub async fn thread_id(&self) -> ThreadId {
+        self.connection.thread_id().await
     }
 
     pub fn into_server(self) -> crate::AppServer<M> {
@@ -550,7 +556,7 @@ where
     async fn read_idle_checkpoint(&mut self) -> Result<ThreadReadResult, String> {
         let mut last_error = None;
         for _ in 0..256 {
-            match self.read_thread(self.connection.thread_id()).await {
+            match self.read_thread(self.connection.thread_id().await).await {
                 Ok(checkpoint) => return Ok(checkpoint),
                 Err(error) => {
                     last_error = Some(error.message);

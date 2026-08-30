@@ -4,11 +4,17 @@ use crate::action::ActionReceipt;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::action::ActionSequencer;
+use crate::management::RuntimeActorState;
+use crate::runtime_actor::RuntimeCommand;
 use mini_agent_core::SteeringMode;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::EventSink;
 
 pub(super) enum Command {
+    InstallRuntime {
+        state: Box<RuntimeActorState>,
+    },
+    Runtime(RuntimeCommand),
     Start {
         thread_id: ThreadId,
         request: TurnStart,
@@ -80,6 +86,7 @@ pub(super) async fn worker_loop<M>(
     M: Model + Send + 'static,
 {
     let mut action_sequencer = ActionSequencer::new();
+    let mut runtime = None;
     let mut threads = threads
         .into_iter()
         .map(|thread| (thread.id().as_str().to_string(), thread))
@@ -89,6 +96,12 @@ pub(super) async fn worker_loop<M>(
         let action = action_sequencer.admit(command);
         let receipt = action.receipt();
         match action.command {
+            Command::InstallRuntime { state } => {
+                runtime = Some(*state);
+            }
+            Command::Runtime(command) => {
+                runtime_actor::handle(command, receipt, &mut runtime, &mut threads, &thread_ids);
+            }
             Command::Start {
                 thread_id,
                 request,
@@ -162,7 +175,15 @@ pub(super) async fn worker_loop<M>(
                             result = &mut turn => break result,
                             Some(command) = commands.recv() => {
                                 let action = action_sequencer.admit(command);
-                                handle_running_command(action, &control, &thread_id, &turn_id);
+                                handle_running_command(
+                                    action,
+                                    &control,
+                                    &thread_id,
+                                    &turn_id,
+                                    &mut runtime,
+                                    &mut threads,
+                                    &thread_ids,
+                                );
                             },
                             else => {
                                 drop(turn);
@@ -310,7 +331,7 @@ pub(super) async fn worker_loop<M>(
     }
 }
 
-fn apply_thread_update<M>(
+pub(super) fn apply_thread_update<M>(
     thread: &mut Thread<M>,
     update: ThreadUpdate,
 ) -> Result<(), AppServerError>
@@ -419,12 +440,17 @@ fn respond<T>(
     let _ = reply.send(result.map(|value| ActionResponse { value, receipt }));
 }
 
-fn handle_running_command(
+fn handle_running_command<M>(
     action: ActionEnvelope<Command>,
     control: &RunControl,
     active_thread_id: &ThreadId,
     turn_id: &TurnId,
-) {
+    runtime: &mut Option<RuntimeActorState>,
+    threads: &mut HashMap<String, Thread<M>>,
+    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
+) where
+    M: Model,
+{
     let receipt = action.receipt();
     match action.command {
         Command::Start {
@@ -504,6 +530,10 @@ fn handle_running_command(
         }
         Command::ResumeThread { reply, .. } => {
             respond(reply, receipt, Err(AppServerError::Busy));
+        }
+        Command::InstallRuntime { .. } => {}
+        Command::Runtime(command) => {
+            runtime_actor::handle_running(command, receipt, runtime, threads, thread_ids)
         }
     }
 }

@@ -90,10 +90,11 @@ where
             return PromptOutcome::Finished;
         }
     };
-    if let Err(error) = runtime
-        .client_mut()
-        .record_batch(started_at_ms, &prompt, &batch)
-    {
+    if let Err(error) = model_runtime.block_on(runtime.client_mut().record_batch(
+        started_at_ms,
+        &prompt,
+        &batch,
+    )) {
         let _ = events.send(ReplEvent::Warning(format!(
             "warning: session persistence stopped: {error}"
         )));
@@ -135,7 +136,9 @@ where
             if goal_objective.is_none() {
                 return PromptOutcome::Finished;
             }
-            let Some(checkpoint_seq) = runtime.client_mut().checkpoint_seq() else {
+            let Some(checkpoint_seq) =
+                model_runtime.block_on(runtime.client_mut().checkpoint_seq())
+            else {
                 let _ = events.send(ReplEvent::Warning(
                     "goal> cannot verify without a settled durable checkpoint".to_string(),
                 ));

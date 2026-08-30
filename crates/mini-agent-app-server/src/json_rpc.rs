@@ -123,11 +123,18 @@ pub struct RuntimeServices<M> {
 }
 
 impl<M> RuntimeServices<M> {
-    pub fn new(management: RuntimeManagementService<M>, workflows: WorkflowService) -> Self {
-        Self {
+    pub fn new(
+        management: RuntimeManagementService<M>,
+        workflows: WorkflowService,
+    ) -> Result<Self, String>
+    where
+        M: Model + Send + 'static,
+    {
+        let (management, workflows) = management.bind_workflow(workflows)?;
+        Ok(Self {
             management,
             workflows,
-        }
+        })
     }
 
     fn management(&self) -> &RuntimeManagementService<M> {
@@ -402,11 +409,15 @@ where
         }
     }
 
-    pub(crate) fn thread_id(&self) -> mini_agent_protocol::ThreadId {
-        self.runtime
-            .as_ref()
-            .map(|runtime| runtime.management().thread_id())
-            .unwrap_or_else(|| self.server.thread_id().clone())
+    pub(crate) async fn thread_id(&self) -> mini_agent_protocol::ThreadId {
+        match self.runtime.as_ref() {
+            Some(runtime) => runtime
+                .management()
+                .thread_id()
+                .await
+                .unwrap_or_else(|_| self.server.thread_id().clone()),
+            None => self.server.thread_id().clone(),
+        }
     }
 
     pub(crate) fn runtime_management(&self) -> Result<&RuntimeManagementService<M>, String> {

@@ -78,7 +78,7 @@ fn workflow_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf)
     );
     (
         AppServerConnection::new(server)
-            .with_runtime_services(RuntimeServices::new(management, workflows)),
+            .with_runtime_services(RuntimeServices::new(management, workflows).unwrap()),
         root,
     )
 }
@@ -113,10 +113,13 @@ fn management_connection() -> (AppServerConnection<DoneModel>, std::path::PathBu
         ApprovalController::with_preset(ApprovalMode::Automatic, Default::default()),
     );
     (
-        AppServerConnection::new(server).with_runtime_services(RuntimeServices::new(
-            management,
-            WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default()),
-        )),
+        AppServerConnection::new(server).with_runtime_services(
+            RuntimeServices::new(
+                management,
+                WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default()),
+            )
+            .unwrap(),
+        ),
         root,
     )
 }

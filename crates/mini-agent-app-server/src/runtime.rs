@@ -216,11 +216,13 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             retry_mcp_servers,
             approval.clone(),
         );
+        let services = RuntimeServices::new(management, workflow_service)
+            .map_err(|error| format!("cannot bind runtime services: {error}"))?;
         let connection = AppServerConnection::with_capability_manifest(
             server.clone(),
             capability_manifest_to_protocol(&capability_manifest),
         )
-        .with_runtime_services(RuntimeServices::new(management, workflow_service));
+        .with_runtime_services(services);
         let mut client = LocalAppServerClient::with_control(connection, control.clone());
         client
             .initialize_with_profile(
@@ -261,8 +263,8 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         &self.model_name
     }
 
-    pub fn thread_id(&self) -> ThreadId {
-        self.client.thread_id()
+    pub async fn thread_id(&self) -> ThreadId {
+        self.client.thread_id().await
     }
 
     pub fn stable_system_prompt(&self) -> &str {
@@ -273,8 +275,8 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         &self.capability_manifest
     }
 
-    pub fn checkpoint_seq(&self) -> Option<u64> {
-        self.client.checkpoint_seq()
+    pub async fn checkpoint_seq(&self) -> Option<u64> {
+        self.client.checkpoint_seq().await
     }
 }
 

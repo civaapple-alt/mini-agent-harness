@@ -12,8 +12,8 @@ where
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
-        match management.session_info() {
-            Some(info) => response_value(
+        match management.session_info().await {
+            Ok(Some(info)) => response_value(
                 request.id,
                 SessionInfoResult {
                     session_id: info.session_id,
@@ -22,7 +22,8 @@ where
                     resumed: info.resumed,
                 },
             ),
-            None => response_value(request.id, serde_json::Value::Null),
+            Ok(None) => response_value(request.id, serde_json::Value::Null),
+            Err(error) => response_error(request.id, workflow_error(error)),
         }
     }
 
@@ -34,7 +35,10 @@ where
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
-        response_value(request.id, world_state_result(management))
+        match world_state_result(management).await {
+            Ok(state) => response_value(request.id, state),
+            Err(error) => response_error(request.id, workflow_error(error)),
+        }
     }
 
     pub(super) async fn handle_world_refresh(
@@ -46,13 +50,10 @@ where
             Err(error) => return response_error(request.id, error),
         };
         match management.refresh_world().await {
-            Ok(changed) => response_value(
-                request.id,
-                WorldRefreshResult {
-                    changed,
-                    state: world_state_result(management),
-                },
-            ),
+            Ok(changed) => match world_state_result(management).await {
+                Ok(state) => response_value(request.id, WorldRefreshResult { changed, state }),
+                Err(error) => response_error(request.id, workflow_error(error)),
+            },
             Err(error) => response_error(request.id, workflow_error(error)),
         }
     }
@@ -80,13 +81,10 @@ where
             Err(error) => return response_error(request.id, error),
         };
         match management.set_execution(approval, params.copilot).await {
-            Ok(changed) => response_value(
-                request.id,
-                WorldSetExecutionResult {
-                    changed,
-                    state: world_state_result(management),
-                },
-            ),
+            Ok(changed) => match world_state_result(management).await {
+                Ok(state) => response_value(request.id, WorldSetExecutionResult { changed, state }),
+                Err(error) => response_error(request.id, workflow_error(error)),
+            },
             Err(error) => response_error(request.id, workflow_error(error)),
         }
     }
@@ -99,16 +97,18 @@ where
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
-        let (enabled_servers, inactive_servers, tool_count) = management.mcp_status();
-        response_value(
-            request.id,
-            McpStatusResult {
-                enabled_servers,
-                inactive_servers,
-                tool_count,
-                retry_available: !management.retry_mcp_servers().is_empty(),
-            },
-        )
+        match management.mcp_status().await {
+            Ok(status) => response_value(
+                request.id,
+                McpStatusResult {
+                    enabled_servers: status.enabled_servers,
+                    inactive_servers: status.inactive_servers,
+                    tool_count: status.tool_count,
+                    retry_available: status.retry_available,
+                },
+            ),
+            Err(error) => response_error(request.id, workflow_error(error)),
+        }
     }
 
     pub(super) async fn handle_mcp_retry(
@@ -141,14 +141,14 @@ where
     }
 }
 
-fn world_state_result<M: Model + Send + 'static>(
+async fn world_state_result<M: Model + Send + 'static>(
     management: &RuntimeManagementService<M>,
-) -> WorldStateResult {
-    let world = management.world();
-    WorldStateResult {
+) -> Result<WorldStateResult, String> {
+    let world = management.world().await?;
+    Ok(WorldStateResult {
         workspace: world.workspace().display().to_string(),
         status: world.status_json(),
         lines: world.status_lines(),
         context: world.model_context().unwrap_or_default(),
-    }
+    })
 }

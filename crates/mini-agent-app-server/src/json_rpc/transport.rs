@@ -144,7 +144,7 @@ where
                     Some(serde_json::to_value(ApprovalRequestNotification {
                         request_id: request.request_id,
                         action: request.action,
-                        thread_id: connection.thread_id(),
+                        thread_id: connection.thread_id().await,
                         turn_id: None,
                     }).expect("approval notification is serializable")),
                 );

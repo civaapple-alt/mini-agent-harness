@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             server,
             capability_manifest,
             StartupServices {
-                runtime: Some(RuntimeServices::new(management, workflows)),
+                runtime: Some(RuntimeServices::new(management, workflows)?),
             },
         ))
     })

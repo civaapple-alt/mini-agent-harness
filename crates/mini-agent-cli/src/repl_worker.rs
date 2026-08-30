@@ -167,7 +167,7 @@ pub(super) fn spawn_worker(
                 opened.session_id, opened.thread_id, opened.path
             )));
             if let Ok(checkpoint) = model_runtime.block_on(runtime.client_mut().read_checkpoint()) {
-                let _ = runtime.client_mut().record_context(&checkpoint);
+                let _ = model_runtime.block_on(runtime.client_mut().record_context(&checkpoint));
             }
         }
         if !enabled_mcp_servers.is_empty() {
@@ -662,10 +662,11 @@ fn persist_latest_context(
     model_runtime: &tokio::runtime::Runtime,
     events: &mpsc::SyncSender<ReplEvent>,
 ) {
-    if let Err(error) = model_runtime
-        .block_on(runtime.client_mut().read_checkpoint())
-        .and_then(|checkpoint| runtime.client_mut().record_context(&checkpoint))
-    {
+    let result = model_runtime.block_on(async {
+        let checkpoint = runtime.client_mut().read_checkpoint().await?;
+        runtime.client_mut().record_context(&checkpoint).await
+    });
+    if let Err(error) = result {
         let _ = events.send(ReplEvent::Warning(format!(
             "warning: session persistence stopped: {error}"
         )));
