@@ -81,7 +81,7 @@ fn windows_utf8_shell_script(command: &str) -> String {
     format!("{preamble}{command}")
 }
 
-pub fn shell_command(command: &str) -> Command {
+pub(crate) fn shell_command(command: &str) -> Command {
     #[cfg(windows)]
     {
         let wrapped = windows_utf8_shell_script(command);
@@ -105,17 +105,18 @@ pub fn shell_command(command: &str) -> Command {
     }
 }
 
-pub struct CommandOutput {
-    pub text: String,
-    pub raw_stdout: String,
-    pub raw_stderr: String,
-    pub timed_out: bool,
-    pub exit_code: Option<i32>,
-    pub source_bytes: usize,
-    pub source_truncated: bool,
+#[allow(dead_code)]
+pub(super) struct CommandOutput {
+    pub(super) text: String,
+    pub(super) raw_stdout: String,
+    pub(super) raw_stderr: String,
+    pub(super) timed_out: bool,
+    pub(super) exit_code: Option<i32>,
+    pub(super) source_bytes: usize,
+    pub(super) source_truncated: bool,
 }
 
-pub fn run_sandboxed_command(
+fn run_sandboxed_command(
     mut cmd: Command,
     root: &Path,
     sandbox_kind: SandboxKind,

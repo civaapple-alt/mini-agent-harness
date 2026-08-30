@@ -42,7 +42,7 @@ impl std::fmt::Display for SandboxKind {
 }
 
 #[cfg(windows)]
-pub mod windows_job {
+mod windows_job {
     use std::ffi::c_void;
     use std::os::windows::io::AsRawHandle;
     use std::process::Child;
@@ -107,7 +107,7 @@ pub mod windows_job {
     unsafe impl Sync for JobObjectGuard {}
 
     impl JobObjectGuard {
-        pub fn create() -> Option<Self> {
+        pub(super) fn create() -> Option<Self> {
             unsafe {
                 let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
                 if handle.is_null() {
@@ -129,14 +129,14 @@ pub mod windows_job {
             }
         }
 
-        pub fn assign_child(&self, child: &Child) -> bool {
+        pub(super) fn assign_child(&self, child: &Child) -> bool {
             unsafe {
                 let raw_handle = child.as_raw_handle() as RawHandle;
                 AssignProcessToJobObject(self.handle, raw_handle) != 0
             }
         }
 
-        pub fn terminate(&self, exit_code: u32) -> bool {
+        pub(super) fn terminate(&self, exit_code: u32) -> bool {
             unsafe { TerminateJobObject(self.handle, exit_code) != 0 }
         }
     }
@@ -152,13 +152,13 @@ pub mod windows_job {
     }
 }
 
-pub struct ProcessSandbox {
+pub(crate) struct ProcessSandbox {
     #[cfg(windows)]
     job_object: Option<windows_job::JobObjectGuard>,
 }
 
 impl ProcessSandbox {
-    pub fn new(kind: SandboxKind) -> Self {
+    pub(crate) fn new(kind: SandboxKind) -> Self {
         #[cfg(windows)]
         let job_object = if kind == SandboxKind::Native {
             windows_job::JobObjectGuard::create()
@@ -172,7 +172,7 @@ impl ProcessSandbox {
         }
     }
 
-    pub fn attach_child(&self, child: &Child) {
+    pub(crate) fn attach_child(&self, child: &Child) {
         #[cfg(windows)]
         if let Some(ref job) = self.job_object {
             job.assign_child(child);
@@ -181,7 +181,7 @@ impl ProcessSandbox {
         let _ = child;
     }
 
-    pub fn terminate(&self, child: &mut Child) -> io::Result<ExitStatus> {
+    pub(crate) fn terminate(&self, child: &mut Child) -> io::Result<ExitStatus> {
         #[cfg(windows)]
         {
             if let Some(ref job) = self.job_object {

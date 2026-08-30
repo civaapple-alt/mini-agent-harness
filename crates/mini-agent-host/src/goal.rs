@@ -174,10 +174,6 @@ pub fn living_plan_path(session_dir: &Path) -> PathBuf {
     session_dir.join("plan.md")
 }
 
-#[cfg(test)]
-use mini_agent_capabilities::goal_relative_rest;
-#[cfg(test)]
-use mini_agent_capabilities::is_plan_md_alias;
 use mini_agent_capabilities::normalize_path;
 
 fn unquote(text: &str) -> &str {

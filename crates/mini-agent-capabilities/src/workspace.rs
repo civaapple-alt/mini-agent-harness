@@ -20,7 +20,7 @@ use mini_agent_protocol::ToolError;
 use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
-pub use shell::{CommandOutput, run_sandboxed_command, shell_command};
+pub(crate) use shell::shell_command;
 #[cfg(test)]
 use shell::{Shell, capture_bounded, run_shell};
 #[cfg(test)]
@@ -90,15 +90,15 @@ pub fn workspace_tools_with_read_roots_and_results(
     Ok(tools)
 }
 
-pub struct Workspace {
-    pub root: PathBuf,
-    pub extra_read_roots: Vec<PathBuf>,
-    pub approval: ApprovalController,
-    pub sandbox: SandboxKind,
+struct Workspace {
+    root: PathBuf,
+    extra_read_roots: Vec<PathBuf>,
+    approval: ApprovalController,
+    sandbox: SandboxKind,
 }
 
 impl Workspace {
-    pub fn with_read_roots(
+    fn with_read_roots(
         root: PathBuf,
         approval: ApprovalController,
         extra_read_roots: Vec<PathBuf>,
@@ -120,7 +120,7 @@ impl Workspace {
         })
     }
 
-    pub fn read_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
+    fn read_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
         let candidate = self.candidate(value)?;
         let resolved = candidate
             .canonicalize()
@@ -131,11 +131,7 @@ impl Workspace {
         self.ensure_readable(resolved)
     }
 
-    pub fn local_file_path(
-        &self,
-        value: &Value,
-        outside_action: &str,
-    ) -> Result<PathBuf, ToolError> {
+    fn local_file_path(&self, value: &Value, outside_action: &str) -> Result<PathBuf, ToolError> {
         let candidate = self.candidate(value)?;
         let resolved = candidate
             .canonicalize()
@@ -291,7 +287,7 @@ impl Workspace {
         }
     }
 
-    pub fn approve(&self, action: &str) -> Result<(), ToolError> {
+    fn approve(&self, action: &str) -> Result<(), ToolError> {
         self.approval.approve(action)
     }
 }
@@ -324,7 +320,7 @@ fn file_tool_spec(name: &str, description: &str, content: bool) -> ToolSpec {
     }
 }
 
-pub fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, ToolError> {
+pub(crate) fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, ToolError> {
     arguments
         .get(name)
         .and_then(Value::as_str)

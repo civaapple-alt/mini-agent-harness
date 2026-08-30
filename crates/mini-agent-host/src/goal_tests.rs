@@ -65,18 +65,6 @@ fn plan_mode_lifecycle_creates_and_toggles_state() {
     let plan_file = init_plan_mode_with_prompt(&dir, None).unwrap();
     assert!(plan_file.is_file());
     assert!(is_plan_mode_active(&dir));
-    assert!(is_plan_md_alias(Path::new("plan.md")));
-    assert!(is_plan_md_alias(Path::new("./plan.md")));
-    assert!(!is_plan_md_alias(Path::new("docs/plan.md")));
-    assert_eq!(
-        goal_relative_rest(Path::new("goal/plan.md")).as_deref(),
-        Some(Path::new("plan.md"))
-    );
-    assert_eq!(
-        goal_relative_rest(Path::new("./goal/state.json")).as_deref(),
-        Some(Path::new("state.json"))
-    );
-    assert_eq!(goal_relative_rest(Path::new("plan.md")), None);
 
     disable_plan_mode(&dir).unwrap();
     assert!(!is_plan_mode_active(&dir));

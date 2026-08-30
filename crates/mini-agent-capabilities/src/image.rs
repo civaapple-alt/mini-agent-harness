@@ -14,9 +14,9 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-pub const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
-pub const MAX_IMAGES_PER_REQUEST: usize = 4;
-pub const MAX_INLINE_REQUEST_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const MAX_IMAGES_PER_REQUEST: usize = 4;
+pub(crate) const MAX_INLINE_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 const MAX_STORED_IMAGES: usize = 16;
 const FILE_EXPIRY_SECONDS: u64 = 7 * 24 * 60 * 60;
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(60);
@@ -42,13 +42,13 @@ impl FileUploader for NoUpload {
     }
 }
 
-pub struct DeepSeekFiles {
+pub(crate) struct DeepSeekFiles {
     api_key: String,
     endpoint: String,
 }
 
 impl DeepSeekFiles {
-    pub fn new(api_key: String, base_url: &str) -> Self {
+    pub(crate) fn new(api_key: String, base_url: &str) -> Self {
         let base_url = base_url.trim().trim_end_matches('/');
         Self {
             api_key,
@@ -118,12 +118,12 @@ struct Inner {
 }
 
 #[derive(Clone)]
-pub struct StoredImage {
-    pub id: String,
-    pub media_type: &'static str,
-    pub bytes: Vec<u8>,
-    pub file_id: Option<String>,
-    pub display_path: String,
+pub(crate) struct StoredImage {
+    pub(crate) id: String,
+    pub(crate) media_type: &'static str,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) file_id: Option<String>,
+    pub(crate) display_path: String,
 }
 
 impl ImageStore {
@@ -194,7 +194,7 @@ impl ImageStore {
         }
     }
 
-    pub fn get(&self, id: &str) -> Option<StoredImage> {
+    pub(crate) fn get(&self, id: &str) -> Option<StoredImage> {
         self.inner.lock().unwrap().records.get(id).cloned()
     }
 
@@ -227,7 +227,7 @@ impl ImageStore {
         stored
     }
 
-    pub fn save(
+    pub(crate) fn save(
         &self,
         display_path: &str,
         media_type: &'static str,
@@ -321,7 +321,7 @@ fn extension_for(media_type: &str) -> &'static str {
     }
 }
 
-pub fn detect_image(bytes: &[u8]) -> Option<&'static str> {
+pub(crate) fn detect_image(bytes: &[u8]) -> Option<&'static str> {
     if bytes.len() >= 8 && bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
         Some("image/png")
     } else if bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF {
@@ -335,7 +335,7 @@ pub fn detect_image(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-pub fn declared_media_type(path: &Path) -> Option<&'static str> {
+pub(crate) fn declared_media_type(path: &Path) -> Option<&'static str> {
     match path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -350,7 +350,7 @@ pub fn declared_media_type(path: &Path) -> Option<&'static str> {
     }
 }
 
-pub fn format_envelope(stored: &StoredImage) -> String {
+pub(crate) fn format_envelope(stored: &StoredImage) -> String {
     let file_id = stored
         .file_id
         .as_deref()
@@ -366,13 +366,13 @@ pub fn format_envelope(stored: &StoredImage) -> String {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ImageEnvelope {
+pub(crate) struct ImageEnvelope {
     pub id: String,
     pub file_id: Option<String>,
     pub media_type: String,
 }
 
-pub fn parse_envelope(content: &str) -> Option<ImageEnvelope> {
+pub(crate) fn parse_envelope(content: &str) -> Option<ImageEnvelope> {
     let start = content.find("<mini_agent_image ")?;
     let tag = content[start..].split("/>").next()?;
     Some(ImageEnvelope {
@@ -390,7 +390,7 @@ fn attr(tag: &str, name: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-pub fn vision_model_for(configured: &str, has_images: bool) -> String {
+pub(crate) fn vision_model_for(configured: &str, has_images: bool) -> String {
     if !has_images {
         return configured.to_string();
     }
@@ -401,7 +401,7 @@ pub fn vision_model_for(configured: &str, has_images: bool) -> String {
     }
 }
 
-pub fn uses_deepseek_files(base_url: &str) -> bool {
+pub(crate) fn uses_deepseek_files(base_url: &str) -> bool {
     base_url.to_ascii_lowercase().contains("api.deepseek.com")
 }
 
@@ -412,13 +412,16 @@ fn is_deepseek_text_model(model: &str) -> bool {
 }
 
 #[derive(Clone, Debug)]
-pub enum ProjectedImage {
+pub(crate) enum ProjectedImage {
     FileId(String),
     Inline { data_url: String },
     Missing(String),
 }
 
-pub fn project_images(contents: &[String], store: &ImageStore) -> Vec<Option<ProjectedImage>> {
+pub(crate) fn project_images(
+    contents: &[String],
+    store: &ImageStore,
+) -> Vec<Option<ProjectedImage>> {
     let mut resolved = contents
         .iter()
         .map(|content| parse_envelope(content).map(|envelope| resolve_envelope(&envelope, store)))
@@ -525,7 +528,7 @@ fn b64_encode(bytes: &[u8]) -> String {
     out
 }
 
-pub fn wire_image_block(image: &ProjectedImage) -> Value {
+pub(crate) fn wire_image_block(image: &ProjectedImage) -> Value {
     match image {
         ProjectedImage::FileId(file_id) => json!({
             "type": "input_image",

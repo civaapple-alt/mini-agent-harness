@@ -605,7 +605,7 @@ fn new_id(prefix: &str) -> String {
     )
 }
 
-pub fn timestamp_ms() -> u64 {
+pub(crate) fn timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
