@@ -32,10 +32,6 @@ pub(super) enum RuntimeCommand {
         copilot: bool,
         reply: oneshot::Sender<ActionResult<bool>>,
     },
-    UpdateWorld {
-        updated: mini_agent_host::WorldState,
-        reply: oneshot::Sender<ActionResult<bool>>,
-    },
     UpdateThread {
         update: crate::ThreadUpdate,
         reply: oneshot::Sender<ActionResult<()>>,
@@ -94,7 +90,6 @@ impl RuntimeCommand {
             self,
             Self::RefreshWorld { .. }
                 | Self::SetExecution { .. }
-                | Self::UpdateWorld { .. }
                 | Self::UpdateThread { .. }
                 | Self::RetryMcp { .. }
                 | Self::StartNewThread { .. }

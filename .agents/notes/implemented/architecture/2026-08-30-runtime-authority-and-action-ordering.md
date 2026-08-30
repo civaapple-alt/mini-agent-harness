@@ -53,6 +53,10 @@ The following counters remain independent:
   checkpoint, and a failed Session append truncates its own partial write.
 - `thread_ids` remains a worker-maintained lifecycle index, but successful
   lifecycle changes participate in the same revision stream.
+- The final cleanup removes duplicate direct RuntimeManagementService wrappers
+  for operations already exposed through JSON-RPC. Host-only Thread checkpoint
+  and context operations remain available to the local runtime because they
+  carry typed Core values that are not part of the wire API.
 
 ## Verification
 

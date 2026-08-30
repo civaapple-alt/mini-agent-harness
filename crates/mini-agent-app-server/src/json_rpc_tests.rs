@@ -199,18 +199,16 @@ async fn exposes_session_world_and_mcp_management() {
 async fn runtime_mutations_reject_stale_revision_tokens() {
     let (connection, root) = management_connection();
     let management = connection.runtime_management().unwrap().clone();
-    let world = management.world().await.unwrap();
     let commands = management.server.command_sender();
-    let first_world = world.with_execution(ApprovalMode::Interactive, true, world.sandbox());
-    let second_world = world.with_execution(ApprovalMode::Automatic, true, world.sandbox());
 
     let (first_reply, first_response) = oneshot::channel();
     commands
         .send(crate::worker::Command::Runtime(
             crate::runtime_actor::RuntimeRequest {
                 expected_revision: crate::action::RuntimeRevision::default(),
-                command: crate::runtime_actor::RuntimeCommand::UpdateWorld {
-                    updated: first_world,
+                command: crate::runtime_actor::RuntimeCommand::SetExecution {
+                    approval: ApprovalMode::Interactive,
+                    copilot: true,
                     reply: first_reply,
                 },
             },
@@ -222,8 +220,9 @@ async fn runtime_mutations_reject_stale_revision_tokens() {
         .send(crate::worker::Command::Runtime(
             crate::runtime_actor::RuntimeRequest {
                 expected_revision: crate::action::RuntimeRevision::default(),
-                command: crate::runtime_actor::RuntimeCommand::UpdateWorld {
-                    updated: second_world,
+                command: crate::runtime_actor::RuntimeCommand::SetExecution {
+                    approval: ApprovalMode::Automatic,
+                    copilot: true,
                     reply: second_reply,
                 },
             },

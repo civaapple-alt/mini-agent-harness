@@ -119,12 +119,6 @@ pub(super) fn handle<M>(
             });
             respond(reply, receipt, result);
         }
-        RuntimeCommand::UpdateWorld { updated, reply } => {
-            let result = mutate(runtime, runtime_revision, |state| {
-                update_world(threads, state, updated).map(|changed| (changed, changed))
-            });
-            respond(reply, receipt, result);
-        }
         RuntimeCommand::UpdateThread { update, reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 update_thread(threads, state, update).map(|()| ((), true))
@@ -290,7 +284,6 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::World { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::RefreshWorld { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::SetExecution { reply, .. } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::UpdateWorld { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::UpdateThread { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::McpStatus { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::RetryMcp { reply, .. } => respond(reply, receipt, Err(error)),

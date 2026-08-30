@@ -133,11 +133,6 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         ))
     }
 
-    pub async fn session_info(&self) -> Result<Option<RuntimeSessionInfo>, String> {
-        self.request(|reply| RuntimeCommand::SessionInfo { reply })
-            .await
-    }
-
     pub(crate) async fn session_info_action(
         &self,
     ) -> Result<ActionResponse<Option<RuntimeSessionInfo>>, ActionFailure> {
@@ -150,12 +145,12 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
-    pub async fn thread_id(&self) -> Result<ThreadId, String> {
+    pub(crate) async fn thread_id(&self) -> Result<ThreadId, String> {
         self.request(|reply| RuntimeCommand::ThreadId { reply })
             .await
     }
 
-    pub async fn world(&self) -> Result<WorldState, String> {
+    pub(crate) async fn world(&self) -> Result<WorldState, String> {
         self.request(|reply| RuntimeCommand::World { reply }).await
     }
 
@@ -164,27 +159,9 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
-    pub async fn refresh_world(&self) -> Result<bool, String> {
-        self.request(|reply| RuntimeCommand::RefreshWorld { reply })
-            .await
-    }
-
     pub(crate) async fn refresh_world_action(&self) -> Result<ActionResponse<bool>, ActionFailure> {
         self.request_action(|reply| RuntimeCommand::RefreshWorld { reply })
             .await
-    }
-
-    pub async fn set_execution(
-        &self,
-        approval: ApprovalMode,
-        copilot: bool,
-    ) -> Result<bool, String> {
-        self.request(|reply| RuntimeCommand::SetExecution {
-            approval,
-            copilot,
-            reply,
-        })
-        .await
     }
 
     pub(crate) async fn set_execution_action(
@@ -200,21 +177,10 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         .await
     }
 
-    pub async fn update_world(&self, updated: WorldState) -> Result<bool, String> {
-        self.request(|reply| RuntimeCommand::UpdateWorld { updated, reply })
-            .await
-    }
-
     pub(crate) async fn mcp_status_action(
         &self,
     ) -> Result<ActionResponse<McpRuntimeSnapshot>, ActionFailure> {
         self.request_action(|reply| RuntimeCommand::McpStatus { reply })
-            .await
-    }
-
-    pub async fn retry_mcp(&self) -> Result<McpRetryResult, String> {
-        let approval = self.approval.clone();
-        self.request(|reply| RuntimeCommand::RetryMcp { approval, reply })
             .await
     }
 
