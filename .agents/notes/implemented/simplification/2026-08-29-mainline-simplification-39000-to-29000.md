@@ -142,7 +142,7 @@ and static-value assertions. Coverage was retained for the meaningful paths:
 - MCP stdio/HTTP behavior, approvals, failure isolation, and circuit breaking;
 - App Server public JSON-RPC behavior;
 - CLI stdin, profiles, model-only mode, follow-up, steer, durable resume,
-  restart, Mentor, Goal, timeout, and auto-mode workflows.
+  restart, Goal verifier, timeout, and auto-mode workflows.
 
 The test rule is therefore “fewer layers, stronger boundary coverage”: remove
 duplicate implementation-level tests only when a public workflow test still

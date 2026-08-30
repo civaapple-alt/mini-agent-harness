@@ -13,7 +13,7 @@ The harness uses a passive `Observer::observe(&Event)` contract. Observers canno
 The runtime has two related outputs:
 
 - **Live event stream**: reasoning, assistant text, tool status, approvals, turn lifecycle, and failures are rendered by the CLI or broadcast by App Server.
-- **Durable session log**: settled turns, context checkpoints, derived mentor items, and stored result handles append to the session's `session.jsonl`. This is the single durable source of truth and is reloaded on resume.
+- **Durable session log**: settled turns, context checkpoints, derived verifier items, and stored result handles append to the session's `session.jsonl`. This is the single durable source of truth and is reloaded on resume.
 
 External trace files and trace replay are not part of the mainline runtime. Detailed trace replay was prompt-weight specific and is retained only as a rejected historical experiment.
 

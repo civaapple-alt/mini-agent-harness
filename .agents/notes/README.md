@@ -113,6 +113,7 @@ If a proposed approach is rejected during review:
 | 2026-08-30 | [Runtime Control-Plane Ownership](implemented/architecture/2026-08-30-runtime-control-plane-ownership.md) | One local/remote App Server path, one runtime service unit, and fewer duplicated runtime state sources |
 | 2026-08-30 | [File Boundaries and Runtime Start Options](implemented/architecture/2026-08-30-file-boundaries-and-runtime-start-options.md) | Internal module boundaries for large files and one named host runtime startup input |
 | 2026-08-30 | [Capabilities API Boundaries](implemented/architecture/2026-08-30-capabilities-api-boundaries.md) | Capabilities root facade split into stable contracts, composition seams, and crate-internal implementation |
+| 2026-08-30 | [Goal Verifier Naming Boundary](implemented/architecture/2026-08-30-goal-verifier-naming.md) | Replaced current Mentor implementation names with Goal verifier terminology while retaining legacy environment aliases |
 | 2026-08-29 | [Model Provider Factory Seam](implemented/architecture/2026-08-29-model-provider-factory-seam.md) | Generic Core Model construction through Host and App Server provider factories with an external provider example |
 | 2026-08-29 | [CLI REPL Worker Split](implemented/architecture/2026-08-29-cli-repl-worker-split.md) | Terminal presentation and command queueing separated from App Server worker and workflow execution |
 | 2026-08-29 | [App Server Owned Frontend Approval Contract](implemented/architecture/2026-08-29-app-server-owned-frontend-approval.md) | Approval lifecycle is wrapped at the App Server boundary while CLI startup policy remains explicit |
@@ -139,7 +140,7 @@ If a proposed approach is rejected during review:
 |---|---|---|
 | 2026-08-24 | [Context Compaction](implemented/feature/2026-08-24-context-compaction.md) | Prefix compaction preserving latest world state and recent tool work verbatim |
 | 2026-08-24 | [Durable Sessions & Recovery](implemented/feature/2026-08-24-durable-sessions-and-recovery.md) | Append-only JSONL session checkpoints with torn-tail auto recovery |
-| 2026-08-24 | [Independent Mentor System](implemented/feature/2026-08-24-independent-mentor-system.md) | Tool-free independent verification model with isolated derived items |
+| 2026-08-24 | [Historical: Independent Mentor System](implemented/feature/2026-08-24-independent-mentor-system.md) | Superseded standalone Mentor design; retained behavior is the Goal verifier |
 | 2026-08-24 | [MCP & Skills Integration](implemented/feature/2026-08-24-mcp-and-skills-integration.md) | Stdio and HTTP MCP support with progressive skill discovery |
 | 2026-08-24 | [Explicit World State](implemented/feature/2026-08-24-explicit-world-state.md) | Deterministic host environment detection and context injection |
 | 2026-08-26 | [Fail-Closed Approval](implemented/feature/2026-08-26-fail-closed-approval-and-tool-orchestration.md) | Permission matrix, interactive TTY approval, and path containment |

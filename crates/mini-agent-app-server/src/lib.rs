@@ -127,8 +127,8 @@ pub mod frontend;
 pub mod json_rpc;
 pub mod local;
 pub mod management;
-pub mod mentor;
 pub mod runtime;
+pub mod verifier;
 mod workflows;
 
 pub use client::LocalAppServerClient;

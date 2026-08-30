@@ -1,3 +1,5 @@
+//! Goal verifier turn orchestration through the App Server boundary.
+
 use crate::AppServer;
 use crate::AppServerConnection;
 use crate::LocalAppServerClient;
@@ -28,12 +30,13 @@ impl EventSink for DiscardEvents {
     fn emit(&mut self, _event: EventEnvelope) {}
 }
 
-pub async fn verify_checkpoint(
+/// Runs one isolated Goal verifier turn against a settled checkpoint.
+pub async fn verify_goal_checkpoint(
     runtime_config: &RuntimeConfig,
     messages: &[Message],
     criteria: &str,
 ) -> Result<(String, crate::workflows::VerifierVerdict), String> {
-    let provider = runtime_config.mentor_provider_settings()?;
+    let provider = runtime_config.verifier_provider_settings()?;
     let model = OpenAiModel::new(
         provider.api_key,
         provider.model,
@@ -85,14 +88,14 @@ where
     M: mini_agent_protocol::Model + Send + 'static,
     S: EventSink + Send,
 {
-    let thread_id = ThreadId::new("mentor");
+    let thread_id = ThreadId::new("goal-verifier");
     let server = AppServer::new(
         ThreadStart::new(thread_id.clone()),
         Thread::new(thread_id.clone(), harness),
     );
     let mut client = LocalAppServerClient::new(AppServerConnection::new(server));
     client
-        .initialize("mini-agent-mentor", env!("CARGO_PKG_VERSION"))
+        .initialize("mini-agent-goal-verifier", env!("CARGO_PKG_VERSION"))
         .await
         .map_err(|error| error.message)?;
     let submission = client
@@ -101,7 +104,7 @@ where
         .map_err(|error| error.message)?;
     let turn_id = match submission {
         mini_agent_protocol::TurnSubmission::Started { turn_id } => turn_id,
-        other => return Err(format!("mentor turn was not started: {other:?}")),
+        other => return Err(format!("goal verifier turn was not started: {other:?}")),
     };
     loop {
         let event = client.next_event().await.map_err(|error| error.message)?;

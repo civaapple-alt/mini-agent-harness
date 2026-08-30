@@ -200,10 +200,10 @@ pub(super) fn spawn_worker(
                             approval: &approval,
                             goal_objective: &mut goal_objective,
                             events: &events,
-                            verify_checkpoint:
+                            verify_goal_checkpoint:
                                 |messages: &[mini_agent_app_server::frontend::Message],
                                  criteria: &str| {
-                                    model_runtime.block_on(mentor::verify_checkpoint(
+                                    model_runtime.block_on(verifier::verify_goal_checkpoint(
                                         &runtime_config,
                                         messages,
                                         criteria,
@@ -576,7 +576,7 @@ pub(super) fn spawn_worker(
                             ));
                             break;
                         }
-                        if let Err(error) = runtime_config.mentor_provider_settings() {
+                        if let Err(error) = runtime_config.verifier_provider_settings() {
                             let _ = events.send(ReplEvent::Warning(format!(
                                 "goal> requires an independent verifier: {error}"
                             )));

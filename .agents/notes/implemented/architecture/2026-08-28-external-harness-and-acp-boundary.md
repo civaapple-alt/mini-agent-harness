@@ -104,7 +104,7 @@ Layer 3: mini-agent-app-server
 
 Layer 2: mini-agent-host + workflows
   Provider, concrete tools, MCP, skills, sandbox, security, workspace,
-  world, persistence, Goal, Plan, Mentor, and Persona
+  world, persistence, Goal, Plan, verifier, and Persona
 
 Layer 1: mini-agent-core + mini-agent-protocol
   Execution kernel and transport-neutral model/tool/turn/event contracts
@@ -211,7 +211,7 @@ the same service without changing core behavior.
 - approval, security policy, and sandbox implementations;
 - workspace/world context;
 - session and result persistence;
-- Goal/Plan/Mentor/Persona services.
+- Goal/Plan/verifier/Persona services.
 
 The builder may keep local secrets and filesystem paths. Those values must be
 translated into safe thread/turn settings before crossing the app-server wire.

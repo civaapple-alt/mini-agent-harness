@@ -12,13 +12,16 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   seam and no longer publishes the workflow implementation module.
 - Kept `mini-agent-capabilities` as one crate while making implementation
   modules private behind a curated root facade.
+- Renamed the current Goal verification implementation from the legacy Mentor
+  naming to `verifier`; `MENTOR_OPENAI_*` remains accepted as a compatibility
+  fallback for existing configuration.
 - Removed the standalone paid-provider experiment crate and exploratory test
   targets from the mainline workspace; provider evaluation is now external.
 - Reduced extension discovery to workspace-local skills, installed plugins, and
   MCP configuration; marketplace and skillset clone traversal is no longer in
   the mainline path.
 - Removed the remaining standalone `demo`, `doctor`, `status`, `sessions`, and
-  `mentor` CLI command paths; runtime status is available through the
+  legacy `mentor` CLI command paths; runtime status is available through the
   interactive `/status` command and Goal verification remains an internal
   tool-free workflow gate.
 - Removed stale session replay/derived-state adapters, unused persona and

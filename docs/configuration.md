@@ -17,9 +17,9 @@ response reports the bounded non-secret capability manifest.
 | `OPENAI_API_KEY` | for primary commands | Bearer credential for the Responses endpoint |
 | `OPENAI_MODEL` | for primary commands | Provider model identifier. DeepSeek flash/pro image-bearing requests use `deepseek-v4-flash-vision-exp` |
 | `OPENAI_BASE_URL` | no | Responses API root; defaults to `https://api.openai.com/v1`. Files API is `{base}/files` |
-| `MENTOR_OPENAI_MODEL` | for Goal verification | Independent verifier model identifier |
-| `MENTOR_OPENAI_API_KEY` | no | Verifier credential override; otherwise inherits `OPENAI_API_KEY` |
-| `MENTOR_OPENAI_BASE_URL` | no | Verifier API root override; otherwise inherits `OPENAI_BASE_URL` |
+| `VERIFIER_OPENAI_MODEL` | for Goal verification | Goal verifier model identifier |
+| `VERIFIER_OPENAI_API_KEY` | no | Goal verifier credential override; otherwise inherits `OPENAI_API_KEY` |
+| `VERIFIER_OPENAI_BASE_URL` | no | Goal verifier API root override; otherwise inherits `OPENAI_BASE_URL` |
 | `MINI_AGENT_MAX_STEPS` | no | Copilot/auto model-step cap; `0` means unlimited (the default) |
 | `MINI_AGENT_GOAL_MAX_LOOPS` | no | Maximum Goal milestone attempts; defaults to `20` |
 | `MINI_AGENT_GOAL_STEP_BUDGET` | no | Maximum model steps per Goal milestone; defaults to `50` |
@@ -196,7 +196,7 @@ and the append-only `session.jsonl` log. Large tool results are recorded as
 Mini-Agent decouples task execution workflows from approval policies:
 
 - **Plan Mode (`/plan` or `/plan <prompt>`)**: Locks codebase mutations to read-only while permitting edits exclusively to the session living plan (`~/.mini-agent/sessions/<workspace>/<id>/plan.md`). Relative path `plan.md` maps to that file. Tracks planning state in `plan_mode.json`.
-- **Autonomous Goal Mode (`/goal <objective>`)**: Materializes a dedicated `goal/` workspace containing `state.json` (milestone progress, loop counts, verifier scores) and `plan.md` (acceptance criteria). Integrates with independent mentor verifiers (`goal/verifier_verdict.md`) to provide blind validation gates before advancing milestones.
+- **Autonomous Goal Mode (`/goal <objective>`)**: Materializes a dedicated `goal/` workspace containing `state.json` (milestone progress, loop counts, verifier scores) and `plan.md` (acceptance criteria). Integrates with an independent Goal verifier (`goal/verifier_verdict.md`) to provide blind validation gates before advancing milestones.
 
 Goal limits can be shortened in a workspace `.env` for deterministic local
 fixtures. A timeout stops the current milestone cooperatively, persists a
@@ -206,12 +206,14 @@ not forcibly interrupt synchronous tool effects.
 
 ## Goal verification
 
-When Goal Mode has a verifier gate, set `MENTOR_OPENAI_MODEL` to run a separate,
+When Goal Mode has a verifier gate, set `VERIFIER_OPENAI_MODEL` to run a separate,
 tool-free check against the latest settled checkpoint:
 
 The verifier inherits the primary credential and endpoint unless the
-verifier-specific overrides are set. It has a separate system role, exactly one
-model step, and an empty tool catalog. Its bounded verdict is stored in the
+verifier-specific overrides are set. The legacy `MENTOR_OPENAI_MODEL`,
+`MENTOR_OPENAI_API_KEY`, and `MENTOR_OPENAI_BASE_URL` names remain accepted as
+fallbacks for existing installations. It has a separate system role, exactly
+one model step, and an empty tool catalog. Its bounded verdict is stored in the
 Goal workspace and is not replayed as primary conversation history.
 
 ## Project extensions

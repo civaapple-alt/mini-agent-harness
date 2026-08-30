@@ -52,10 +52,11 @@ starting a Goal verifier.
 
 ## Goal verification reports missing configuration
 
-Set `MENTOR_OPENAI_MODEL`. The verifier uses `OPENAI_API_KEY` and
-`OPENAI_BASE_URL` unless `MENTOR_OPENAI_API_KEY` or
-`MENTOR_OPENAI_BASE_URL` overrides them. It runs with one model step and no
-tools, and stores only its bounded verdict in the Goal workspace.
+Set `VERIFIER_OPENAI_MODEL`. The verifier uses `OPENAI_API_KEY` and
+`OPENAI_BASE_URL` unless `VERIFIER_OPENAI_API_KEY` or
+`VERIFIER_OPENAI_BASE_URL` overrides them. The legacy `MENTOR_OPENAI_*` names
+remain accepted as fallbacks. It runs with one model step and no tools, and
+stores only its bounded verdict in the Goal workspace.
 
 ## A workspace skill or plugin is missing
 

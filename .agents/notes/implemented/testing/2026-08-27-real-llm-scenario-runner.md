@@ -15,7 +15,7 @@ supports nine bounded scenarios:
 - persistence: two requests for a settled checkpoint, reopen, and restored context;
 - vision: up to three requests including DeepSeek Files upload, image projection, and response;
 - compaction: two requests including the auxiliary summarization request.
-- mentor: one request for an independent review and a persisted derived item.
+- verifier: one request for an independent review and a persisted derived item.
 - goal: one request for verifier parsing, verdict persistence, and milestone advancement.
 - mcp: two requests for a production MCP stdio path plus model tool settlement.
 
@@ -27,7 +27,7 @@ bounded wall-clock timeout. Results are emitted as JSONL without the API key.
 ## Boundary
 
 This runner tests the real provider adapter plus the portable core harness. It
-does not pretend to prove general model quality. Mentor and Goal use production
+does not pretend to prove general model quality. The verifier and Goal use production
 state/verdict code; MCP uses the production loader with a local stdio fixture.
 Persistent CLI sessions and provider image projection remain scenario-specific
 and budgeted; every provider request uses the single Responses protocol.

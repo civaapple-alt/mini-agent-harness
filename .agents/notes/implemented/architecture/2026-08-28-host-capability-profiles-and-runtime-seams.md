@@ -341,7 +341,7 @@ RuntimeProfile
     ├── ExtensionSeam   -> skills/plugins/marketplaces/MCP selection and loading
     ├── PolicySeam      -> sandbox + security + approval controller
     ├── ContextSeam     -> prompt/rules/world/agent/persona bounded context
-    ├── WorkflowSeam    -> Goal / Plan / Mentor workflow services
+    ├── WorkflowSeam    -> Goal / Plan / verifier workflow services
     └── StateSeam       -> SessionStore + session-bound ResultStore
 ```
 
@@ -402,7 +402,7 @@ The proposed source precedence is:
 2. Host policy rules for sandbox, security, approval, and workspace boundaries;
 3. selected foundational agent contract;
 4. selected persona overlay and file collaboration contract;
-5. selected Goal/Plan/Mentor workflow rider;
+5. selected Goal/Plan/verifier workflow rider;
 6. workspace `AGENTS.md` and configured project rules;
 7. selected skill/plugin instructions; the user prompt remains turn input and is
    never merged into the stable system prompt.
@@ -546,7 +546,7 @@ bounded system prompt + file contract + workflow policy
 The foundational agent supplies the base operating contract (`explore`, `plan`,
 or `general`). A persona adds a bounded role overlay and optional collaboration
 contract (`review_file` or `summary_file`). The workflow profile controls
-whether `/plan`, `/goal`, mentor verification, retries, and milestone state are
+whether `/plan`, `/goal`, Goal verifier checks, retries, and milestone state are
 available. These layers must be merged once during profile resolution so the
 model receives one stable prompt foundation; they must not each append an
 independent hidden system prompt on every turn.
@@ -555,7 +555,7 @@ independent hidden system prompt on every turn.
 `ContextSeam` renders their bounded context items. Both invoke turn control via
 App Server and use the shared Session/Result Store. They cannot directly call a
 provider, execute a tool, or create a second Thread loop. A profile with
-workflows disabled must reject `/goal`, `/plan`, and mentor workflow requests
+workflows disabled must reject `/goal`, `/plan`, and Goal verifier workflow requests
 with a visible capability-scope diagnostic.
 
 ## Migration plan
@@ -607,7 +607,7 @@ with a visible capability-scope diagnostic.
 
 ## Acceptance criteria
 
-- Existing CLI interactive, ask, auto, demo, mentor, Goal, resume, steer, and
+- Existing CLI interactive, ask, auto, Goal verifier, Goal, resume, steer, and
   follow-up behavior remains covered by the current integration suite.
 - A minimal profile starts without skill/plugin/marketplace/MCP discovery and
   exposes no unselected tools.

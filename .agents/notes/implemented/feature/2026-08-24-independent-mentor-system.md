@@ -1,6 +1,11 @@
-# Independent Mentor Session Analysis and Verification
+# Historical: Independent Mentor Session Analysis and Verification
 
-Status: implemented
+Status: historical — superseded by the Goal verifier workflow
+
+This note records the pre-0.4.0 standalone Mentor design. The current product
+has no standalone Mentor command; the retained verification behavior is owned
+by Goal Mode and documented as the Goal verifier. The legacy environment names
+remain supported only as configuration aliases.
 
 ## Context
 

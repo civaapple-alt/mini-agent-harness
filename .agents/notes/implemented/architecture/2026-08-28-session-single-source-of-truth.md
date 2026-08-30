@@ -4,7 +4,7 @@ Status: implemented
 
 ## Decision
 
-`~/.mini-agent/sessions/<workspace>/<session-id>/session.jsonl` is the only durable runtime record. The append-only log stores session and thread lifecycle, context checkpoints, settled turns, derived mentor items, and `result_stored` records for large tool outputs.
+`~/.mini-agent/sessions/<workspace>/<session-id>/session.jsonl` is the only durable runtime record. The append-only log stores session and thread lifecycle, context checkpoints, settled turns, derived verifier items, and `result_stored` records for large tool outputs.
 
 `SessionStore` owns the append position and a shared append lock. `ResultStore` can bind to that store, reloads result handles from existing records on resume, and appends new handles under the same lock and sequence space. Persisted result content is bounded to 64 KiB so JSON escaping stays below the session record limit while retaining source byte and truncation metadata.
 

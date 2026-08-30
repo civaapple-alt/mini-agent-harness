@@ -133,7 +133,7 @@ An incomplete final JSONL line is treated as a torn write and truncated before
 new records are appended. One lock file prevents concurrent writers; a stale
 lock is never ignored automatically.
 
-Mentor analysis restores only the newest settled checkpoint under the same
+Goal verifier analysis restores only the newest settled checkpoint under the same
 session lock. It uses the normal 1 MiB context and 64 KiB response ceilings,
 rejects any proposed tool call, and appends its result under the existing
 512 KiB record and 32 MiB session limits. Its deterministic FNV-1a source

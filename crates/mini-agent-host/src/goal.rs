@@ -312,7 +312,14 @@ pub fn init_goal_workspace_with_limits(
         },
         milestone_step_budget: limits.milestone_step_budget,
         milestone_timeout_secs: limits.milestone_timeout_secs,
-        verifier_model: std::env::var("MENTOR_OPENAI_MODEL").ok(),
+        verifier_model: std::env::var("VERIFIER_OPENAI_MODEL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                std::env::var("MENTOR_OPENAI_MODEL")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            }),
         last_verifier_score: None,
         updated_at_ms: current_time_ms(),
     };

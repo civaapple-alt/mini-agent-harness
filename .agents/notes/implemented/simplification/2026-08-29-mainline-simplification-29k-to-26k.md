@@ -43,7 +43,7 @@ orchestration.
 
 ## What was removed
 
-- The obsolete session-event replay adapter and the unused derived mentor
+- The obsolete session-event replay adapter and the unused derived verifier
   storage model were deleted. Goal verification still runs as a separate,
   tool-free check and persists its bounded verdict, but it is not a second
   replayable conversation history.

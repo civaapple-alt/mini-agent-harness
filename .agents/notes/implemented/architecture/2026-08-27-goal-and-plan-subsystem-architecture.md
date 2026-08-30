@@ -102,7 +102,7 @@ sequenceDiagram
     participant Harness as Goal Runner (mini-agent goal)
     participant GoalStore as goal/state.json & goal/plan.md
     participant Worker as Subagent: Implementer
-    participant Verifier as Independent Mentor Verifier
+    participant Verifier as Independent Goal Verifier
 
     User->>Harness: /goal "Refactor network layer"
     Harness->>GoalStore: Initialize goal/state.json (status: running, milestone: 1)
@@ -112,7 +112,7 @@ sequenceDiagram
         Worker->>Worker: Code edits, local test verification
         Worker-->>Harness: Milestone work completed
         
-        Harness->>Verifier: Independent blind verification audit (mentor verify)
+        Harness->>Verifier: Independent blind Goal verification audit
         Verifier->>GoalStore: Write YAML frontmatter verdict to goal/verifier_verdict.md
         
         alt Verifier Outcome == APPROVED

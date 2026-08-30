@@ -14,7 +14,7 @@ pub(super) struct PromptContext<'a, F> {
     pub(super) approval: &'a ApprovalController,
     pub(super) goal_objective: &'a mut Option<String>,
     pub(super) events: &'a mpsc::SyncSender<ReplEvent>,
-    pub(super) verify_checkpoint: F,
+    pub(super) verify_goal_checkpoint: F,
 }
 
 pub(super) fn run_prompt<F>(context: PromptContext<'_, F>) -> PromptOutcome
@@ -33,7 +33,7 @@ where
         approval,
         goal_objective,
         events,
-        verify_checkpoint,
+        verify_goal_checkpoint,
     } = context;
     run_control.clear_steer();
     let prompt = if plan_active {
@@ -164,7 +164,7 @@ where
                 }
             };
             let (verifier_output, verdict) =
-                match verify_checkpoint(checkpoint.session.messages(), &criteria) {
+                match verify_goal_checkpoint(checkpoint.session.messages(), &criteria) {
                     Ok(result) => result,
                     Err(error) => {
                         let _ = events.send(ReplEvent::Warning(format!(

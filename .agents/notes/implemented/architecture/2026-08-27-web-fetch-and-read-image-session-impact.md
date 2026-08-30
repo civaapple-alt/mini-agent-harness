@@ -27,7 +27,7 @@ Keep pixels and HTTP bodies out of core. Session lifecycle restores host image b
 
 ### Compaction
 
-The compact auxiliary request sends `tools: []`. Host therefore does not project images and cannot call `web_fetch` / `read_image`. Mentor was already empty-catalog.
+The compact auxiliary request sends `tools: []`. Host therefore does not project images and cannot call `web_fetch` / `read_image`. The Goal verifier is also empty-catalog.
 
 ## Consequences
 
