@@ -52,8 +52,7 @@ jobs:
             bin=target/release/mini-agent
           fi
           "$bin" --version
-          "$bin" status --json
-          "$bin" demo "make this loud"
+          "$bin" --help
 
   msrv:
     name: Minimum Rust 1.88

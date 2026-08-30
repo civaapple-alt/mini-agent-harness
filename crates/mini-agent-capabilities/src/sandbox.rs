@@ -165,6 +165,8 @@ impl ProcessSandbox {
         } else {
             None
         };
+        #[cfg(not(windows))]
+        let _ = kind;
 
         Self {
             #[cfg(windows)]
