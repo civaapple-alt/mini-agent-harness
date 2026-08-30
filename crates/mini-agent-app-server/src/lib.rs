@@ -122,6 +122,7 @@ impl Default for ApprovalBroker {
     }
 }
 
+mod action;
 pub mod client;
 pub mod frontend;
 pub mod json_rpc;
@@ -150,6 +151,7 @@ pub use runtime::{
 pub use workflows::WorkflowService;
 
 mod worker;
+use action::ActionResponse;
 use worker::{Command, worker_loop};
 
 /// A bounded error returned by the in-process control-plane adapter.
@@ -392,7 +394,10 @@ where
             .send(Command::ReadThread { thread_id, reply })
             .await
             .map_err(|_| AppServerError::Disconnected)?;
-        response.await.map_err(|_| AppServerError::Disconnected)?
+        response
+            .await
+            .map_err(|_| AppServerError::Disconnected)?
+            .map(ActionResponse::into_value)
     }
 
     /// Applies a host-side update after all earlier commands for this thread.
@@ -414,7 +419,10 @@ where
             })
             .await
             .map_err(|_| AppServerError::Disconnected)?;
-        response.await.map_err(|_| AppServerError::Disconnected)?
+        response
+            .await
+            .map_err(|_| AppServerError::Disconnected)?
+            .map(ActionResponse::into_value)
     }
 
     /// Reassigns a settled thread identity while keeping its service worker.
@@ -434,7 +442,10 @@ where
             })
             .await
             .map_err(|_| AppServerError::Disconnected)?;
-        response.await.map_err(|_| AppServerError::Disconnected)?
+        response
+            .await
+            .map_err(|_| AppServerError::Disconnected)?
+            .map(ActionResponse::into_value)
     }
 
     /// Closes the configured thread after all active work has settled.
@@ -448,7 +459,10 @@ where
             .send(Command::CloseThread { thread_id, reply })
             .await
             .map_err(|_| AppServerError::Disconnected)?;
-        response.await.map_err(|_| AppServerError::Disconnected)?
+        response
+            .await
+            .map_err(|_| AppServerError::Disconnected)?
+            .map(ActionResponse::into_value)
     }
 
     pub async fn thread_start(&self, thread_id: ThreadId) -> Result<ThreadId, AppServerError> {
@@ -457,7 +471,10 @@ where
             .send(Command::CreateThread { thread_id, reply })
             .await
             .map_err(|_| AppServerError::Disconnected)?;
-        response.await.map_err(|_| AppServerError::Disconnected)?
+        response
+            .await
+            .map_err(|_| AppServerError::Disconnected)?
+            .map(ActionResponse::into_value)
     }
 
     pub async fn thread_fork(
@@ -474,7 +491,10 @@ where
             })
             .await
             .map_err(|_| AppServerError::Disconnected)?;
-        response.await.map_err(|_| AppServerError::Disconnected)?
+        response
+            .await
+            .map_err(|_| AppServerError::Disconnected)?
+            .map(ActionResponse::into_value)
     }
 
     pub async fn thread_resume(
@@ -491,7 +511,10 @@ where
             })
             .await
             .map_err(|_| AppServerError::Disconnected)?;
-        response.await.map_err(|_| AppServerError::Disconnected)?
+        response
+            .await
+            .map_err(|_| AppServerError::Disconnected)?
+            .map(ActionResponse::into_value)
     }
 
     /// Returns a completed turn result retained by the service.
@@ -505,6 +528,7 @@ where
         response
             .await
             .map_err(|_| AppServerError::Disconnected)?
+            .map(ActionResponse::into_value)
             .and_then(|result| result.ok_or(AppServerError::TurnNotFound(missing_id)))
     }
 
@@ -566,7 +590,10 @@ where
             })
             .await
             .map_err(|_| AppServerError::Disconnected)?;
-        response.await.map_err(|_| AppServerError::Disconnected)?
+        response
+            .await
+            .map_err(|_| AppServerError::Disconnected)?
+            .map(ActionResponse::into_value)
     }
 
     /// Requests cooperative cancellation of the active turn.
@@ -588,6 +615,9 @@ where
             })
             .await
             .map_err(|_| AppServerError::Disconnected)?;
-        response.await.map_err(|_| AppServerError::Disconnected)?
+        response
+            .await
+            .map_err(|_| AppServerError::Disconnected)?
+            .map(ActionResponse::into_value)
     }
 }

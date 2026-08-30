@@ -2,6 +2,7 @@ use super::AppServer;
 use super::AppServerError;
 use super::ApprovalBroker;
 use super::ThreadUpdate;
+use super::worker::Command;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
@@ -21,6 +22,7 @@ use mini_agent_protocol::TurnSubmission;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::Notify;
+use tokio::sync::oneshot;
 
 struct DoneModel;
 
@@ -69,6 +71,40 @@ fn server<M: Model + Send + 'static>(model: M) -> AppServer<M> {
         ThreadStart::new(ThreadId::new("thread-1")),
         Thread::new(ThreadId::new("initial"), harness),
     )
+}
+
+#[tokio::test]
+async fn concurrent_commands_receive_unique_server_admission_metadata() {
+    let server = server(DoneModel);
+    let mut tasks = Vec::new();
+    for _ in 0..4 {
+        let commands = server.commands.clone();
+        tasks.push(tokio::spawn(async move {
+            let (reply, response) = oneshot::channel();
+            commands
+                .send(Command::ReadThread {
+                    thread_id: ThreadId::new("thread-1"),
+                    reply,
+                })
+                .await
+                .unwrap();
+            response.await.unwrap().unwrap()
+        }));
+    }
+
+    let mut sequences = Vec::new();
+    let mut ids = Vec::new();
+    for task in tasks {
+        let response = task.await.unwrap();
+        sequences.push(response.receipt.sequence);
+        ids.push(response.receipt.id);
+    }
+    sequences.sort_unstable();
+    ids.sort_unstable();
+    assert_eq!(sequences.len(), 4);
+    assert_eq!(ids.len(), 4);
+    assert!(sequences.windows(2).all(|pair| pair[0] != pair[1]));
+    assert!(ids.windows(2).all(|pair| pair[0] != pair[1]));
 }
 
 #[tokio::test]

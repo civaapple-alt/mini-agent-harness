@@ -1,4 +1,9 @@
 use super::*;
+use crate::action::ActionEnvelope;
+use crate::action::ActionReceipt;
+use crate::action::ActionResponse;
+use crate::action::ActionResult;
+use crate::action::ActionSequencer;
 use mini_agent_core::SteeringMode;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::EventSink;
@@ -8,49 +13,49 @@ pub(super) enum Command {
         thread_id: ThreadId,
         request: TurnStart,
         expected_turn_id: Option<TurnId>,
-        reply: oneshot::Sender<Result<TurnSubmission, AppServerError>>,
+        reply: oneshot::Sender<ActionResult<TurnSubmission>>,
     },
     Cancel {
         thread_id: ThreadId,
         request: TurnCancel,
-        reply: oneshot::Sender<Result<(), AppServerError>>,
+        reply: oneshot::Sender<ActionResult<()>>,
     },
     ReadThread {
         thread_id: ThreadId,
-        reply: oneshot::Sender<Result<ThreadCheckpoint, AppServerError>>,
+        reply: oneshot::Sender<ActionResult<ThreadCheckpoint>>,
     },
     UpdateThread {
         thread_id: ThreadId,
         update: ThreadUpdate,
-        reply: oneshot::Sender<Result<(), AppServerError>>,
+        reply: oneshot::Sender<ActionResult<()>>,
     },
     ResetThread {
         thread_id: ThreadId,
         new_thread_id: ThreadId,
         next_turn_number: u64,
-        reply: oneshot::Sender<Result<ThreadId, AppServerError>>,
+        reply: oneshot::Sender<ActionResult<ThreadId>>,
     },
     CloseThread {
         thread_id: ThreadId,
-        reply: oneshot::Sender<Result<(), AppServerError>>,
+        reply: oneshot::Sender<ActionResult<()>>,
     },
     ReadTurn {
         turn_id: TurnId,
-        reply: oneshot::Sender<Result<Option<SettledTurn>, AppServerError>>,
+        reply: oneshot::Sender<ActionResult<Option<SettledTurn>>>,
     },
     CreateThread {
         thread_id: ThreadId,
-        reply: oneshot::Sender<Result<ThreadId, AppServerError>>,
+        reply: oneshot::Sender<ActionResult<ThreadId>>,
     },
     ForkThread {
         source_thread_id: ThreadId,
         new_thread_id: ThreadId,
-        reply: oneshot::Sender<Result<ThreadId, AppServerError>>,
+        reply: oneshot::Sender<ActionResult<ThreadId>>,
     },
     ResumeThread {
         thread_id: ThreadId,
         checkpoint: ThreadCheckpoint,
-        reply: oneshot::Sender<Result<ThreadId, AppServerError>>,
+        reply: oneshot::Sender<ActionResult<ThreadId>>,
     },
 }
 
@@ -74,13 +79,16 @@ pub(super) async fn worker_loop<M>(
 ) where
     M: Model + Send + 'static,
 {
+    let mut action_sequencer = ActionSequencer::new();
     let mut threads = threads
         .into_iter()
         .map(|thread| (thread.id().as_str().to_string(), thread))
         .collect::<HashMap<_, _>>();
     let mut settled_turns = HashMap::new();
     while let Some(command) = commands.recv().await {
-        match command {
+        let action = action_sequencer.admit(command);
+        let receipt = action.receipt();
+        match action.command {
             Command::Start {
                 thread_id,
                 request,
@@ -88,29 +96,37 @@ pub(super) async fn worker_loop<M>(
                 reply,
             } => {
                 if expected_turn_id.is_some() {
-                    let _ = reply.send(Err(AppServerError::NoActiveTurn));
+                    respond(reply, receipt, Err(AppServerError::NoActiveTurn));
                     continue;
                 }
                 let key = thread_id.as_str().to_string();
                 let Some(mut thread) = threads.remove(&key) else {
-                    let _ = reply.send(Err(AppServerError::ThreadNotFound(thread_id)));
+                    respond(
+                        reply,
+                        receipt,
+                        Err(AppServerError::ThreadNotFound(thread_id)),
+                    );
                     continue;
                 };
                 if !matches!(
                     request.input.mode,
                     TurnInputMode::Start | TurnInputMode::StartIfIdle
                 ) {
-                    let _ = reply.send(Err(AppServerError::InvalidInputMode(request.input.mode)));
+                    respond(
+                        reply,
+                        receipt,
+                        Err(AppServerError::InvalidInputMode(request.input.mode)),
+                    );
                     threads.insert(key, thread);
                     continue;
                 }
                 if thread.status() == mini_agent_protocol::ThreadStatus::Closed {
-                    let _ = reply.send(Err(AppServerError::Closed));
+                    respond(reply, receipt, Err(AppServerError::Closed));
                     threads.insert(key, thread);
                     continue;
                 }
                 if thread.status() == mini_agent_protocol::ThreadStatus::Running {
-                    let _ = reply.send(Err(AppServerError::Busy));
+                    respond(reply, receipt, Err(AppServerError::Busy));
                     threads.insert(key, thread);
                     continue;
                 }
@@ -123,9 +139,13 @@ pub(super) async fn worker_loop<M>(
                         .expect("app-server turn input must exist before execution");
                     let turn_id = thread.next_turn_id();
                     if let Some(reply) = initial_reply.take() {
-                        let _ = reply.send(Ok(TurnSubmission::Started {
-                            turn_id: turn_id.clone(),
-                        }));
+                        respond(
+                            reply,
+                            receipt,
+                            Ok(TurnSubmission::Started {
+                                turn_id: turn_id.clone(),
+                            }),
+                        );
                     }
                     let input = TurnInput::new(TurnInputMode::Start, input.text);
                     let mut sink = BroadcastSink {
@@ -140,7 +160,10 @@ pub(super) async fn worker_loop<M>(
                     let turn_result = loop {
                         tokio::select! {
                             result = &mut turn => break result,
-                            Some(command) = commands.recv() => handle_running_command(command, &control, &thread_id, &turn_id),
+                            Some(command) = commands.recv() => {
+                                let action = action_sequencer.admit(command);
+                                handle_running_command(action, &control, &thread_id, &turn_id);
+                            },
                             else => {
                                 drop(turn);
                                 threads.insert(key.clone(), thread);
@@ -182,7 +205,7 @@ pub(super) async fn worker_loop<M>(
                 threads.insert(key, thread);
             }
             Command::Cancel { reply, .. } => {
-                let _ = reply.send(Err(AppServerError::NoActiveTurn));
+                respond(reply, receipt, Err(AppServerError::NoActiveTurn));
             }
             Command::ReadThread { thread_id, reply } => {
                 let result = threads
@@ -193,7 +216,7 @@ pub(super) async fn worker_loop<M>(
                             .checkpoint()
                             .map_err(|error| AppServerError::Checkpoint(error.to_string()))
                     });
-                let _ = reply.send(result);
+                respond(reply, receipt, result);
             }
             Command::UpdateThread {
                 thread_id,
@@ -204,7 +227,7 @@ pub(super) async fn worker_loop<M>(
                     .get_mut(thread_id.as_str())
                     .ok_or(AppServerError::ThreadNotFound(thread_id))
                     .and_then(|thread| apply_thread_update(thread, update));
-                let _ = reply.send(result);
+                respond(reply, receipt, result);
             }
             Command::ResetThread {
                 thread_id,
@@ -231,7 +254,7 @@ pub(super) async fn worker_loop<M>(
                 } else {
                     Err(AppServerError::ThreadNotFound(thread_id))
                 };
-                let _ = reply.send(result);
+                respond(reply, receipt, result);
             }
             Command::CloseThread { thread_id, reply } => {
                 let result = threads
@@ -242,14 +265,18 @@ pub(super) async fn worker_loop<M>(
                             .close()
                             .map_err(|error| AppServerError::Checkpoint(error.to_string()))
                     });
-                let _ = reply.send(result);
+                respond(reply, receipt, result);
             }
             Command::ReadTurn { turn_id, reply } => {
-                let _ = reply.send(Ok(settled_turns.get(turn_id.as_str()).cloned()));
+                respond(
+                    reply,
+                    receipt,
+                    Ok(settled_turns.get(turn_id.as_str()).cloned()),
+                );
             }
             Command::CreateThread { thread_id, reply } => {
                 let result = create_thread(&mut threads, &thread_ids, factory.as_ref(), thread_id);
-                let _ = reply.send(result);
+                respond(reply, receipt, result);
             }
             Command::ForkThread {
                 source_thread_id,
@@ -263,7 +290,7 @@ pub(super) async fn worker_loop<M>(
                     source_thread_id,
                     new_thread_id,
                 );
-                let _ = reply.send(result);
+                respond(reply, receipt, result);
             }
             Command::ResumeThread {
                 thread_id,
@@ -277,7 +304,7 @@ pub(super) async fn worker_loop<M>(
                     thread_id,
                     checkpoint,
                 );
-                let _ = reply.send(result);
+                respond(reply, receipt, result);
             }
         }
     }
@@ -384,13 +411,22 @@ where
     Ok(thread_id)
 }
 
+fn respond<T>(
+    reply: oneshot::Sender<ActionResult<T>>,
+    receipt: ActionReceipt,
+    result: Result<T, AppServerError>,
+) {
+    let _ = reply.send(result.map(|value| ActionResponse { value, receipt }));
+}
+
 fn handle_running_command(
-    command: Command,
+    action: ActionEnvelope<Command>,
     control: &RunControl,
     active_thread_id: &ThreadId,
     turn_id: &TurnId,
 ) {
-    match command {
+    let receipt = action.receipt();
+    match action.command {
         Command::Start {
             thread_id,
             request,
@@ -398,13 +434,17 @@ fn handle_running_command(
             reply,
         } => {
             if thread_id != *active_thread_id {
-                let _ = reply.send(Err(AppServerError::Busy));
+                respond(reply, receipt, Err(AppServerError::Busy));
                 return;
             }
             if let Some(expected_turn_id) = expected_turn_id
                 && expected_turn_id != *turn_id
             {
-                let _ = reply.send(Err(AppServerError::TurnNotActive(expected_turn_id)));
+                respond(
+                    reply,
+                    receipt,
+                    Err(AppServerError::TurnNotActive(expected_turn_id)),
+                );
                 return;
             }
             let result = match request.input.mode {
@@ -422,7 +462,7 @@ fn handle_running_command(
                     reason: format!("thread is busy; cannot submit {mode:?}"),
                 }),
             };
-            let _ = reply.send(result);
+            respond(reply, receipt, result);
         }
         Command::Cancel {
             thread_id,
@@ -430,7 +470,7 @@ fn handle_running_command(
             reply,
         } => {
             if thread_id != *active_thread_id {
-                let _ = reply.send(Err(AppServerError::Busy));
+                respond(reply, receipt, Err(AppServerError::Busy));
                 return;
             }
             let result = if request.turn_id == *turn_id {
@@ -439,31 +479,31 @@ fn handle_running_command(
             } else {
                 Err(AppServerError::TurnNotActive(request.turn_id))
             };
-            let _ = reply.send(result);
+            respond(reply, receipt, result);
         }
         Command::ReadThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
+            respond(reply, receipt, Err(AppServerError::Busy));
         }
         Command::UpdateThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
+            respond(reply, receipt, Err(AppServerError::Busy));
         }
         Command::ResetThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
+            respond(reply, receipt, Err(AppServerError::Busy));
         }
         Command::CloseThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
+            respond(reply, receipt, Err(AppServerError::Busy));
         }
         Command::ReadTurn { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
+            respond(reply, receipt, Err(AppServerError::Busy));
         }
         Command::CreateThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
+            respond(reply, receipt, Err(AppServerError::Busy));
         }
         Command::ForkThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
+            respond(reply, receipt, Err(AppServerError::Busy));
         }
         Command::ResumeThread { reply, .. } => {
-            let _ = reply.send(Err(AppServerError::Busy));
+            respond(reply, receipt, Err(AppServerError::Busy));
         }
     }
 }
