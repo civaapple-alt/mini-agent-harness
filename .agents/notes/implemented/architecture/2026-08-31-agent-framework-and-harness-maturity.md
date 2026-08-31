@@ -369,15 +369,15 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 
 | 范围 | 当前 / 上限 | 使用率 | 剩余 |
 | :--- | ---: | ---: | ---: |
-| runtime（`core + protocol + host + app-server`） | 15,236 / 20,000 | 76.2% | 4,764 |
-| all Rust source | 28,255 / 30,000 | 94.2% | 1,745 |
+| runtime（`core + protocol + host + app-server`） | 15,286 / 20,000 | 76.4% | 4,714 |
+| all Rust source | 28,306 / 30,000 | 94.4% | 1,694 |
 
 组成明细：
 
-- runtime：production 11,719，unit 3,517，integration 0；合计 15,236。
-- all Rust source：production 21,255，unit 5,859，integration 1,141；合计 28,255。
+- runtime：production 11,769，unit 3,517，integration 0；合计 15,286。
+- all Rust source：production 21,306，unit 5,859，integration 1,141；合计 28,306。
 
-全 workspace 的 30,000 行门禁已经是当前实际瓶颈：可用余量只有 1,528 行，约为总预算的 5.1%。因此后续新增能力不能只看 runtime 还剩 4,633 行，还必须同时计入 CLI、测试和 integration 的全局增长。
+全 workspace 的 30,000 行门禁已经是当前实际瓶颈：可用余量只有 1,694 行，约为总预算的 5.6%。因此后续新增能力不能只看 runtime 还剩 4,714 行，还必须同时计入 CLI、测试和 integration 的全局增长。
 
 ### 简化方案推进状态
 
@@ -385,7 +385,7 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 
 1. **阶段 0：临时冻结——已执行**。本轮没有新增能力，只做重复测试支持、重复请求构造和无行为变化的运行时分支收敛。
 2. **阶段 1：先释放全局预算——低风险审计完成，目标未达成**。目标是净减少约 2,000 行，将全 Rust 总量降至约 26,900 行。相对本次整理前的 28,934 行，已释放 679 行，仍差约 1,355 行。剩余候选集中在有意保留的 frontend facade、配置输入兼容、Provider/协议测试，以及可能触及状态权威的大型重构；不再以无行为变化的小批次强行削减。
-3. **阶段 2：保护核心边界——开始验收**。在阶段 1 低风险候选耗尽后，开始逐项确认 Core loop、硬限制、协议边界、App Server Actor/CAS、Session 持久化和被动事件观察；这些边界仍保持不变，预算门禁继续生效。
+3. **阶段 2：保护核心边界——定向验收通过**。在阶段 1 低风险候选耗尽后，逐项确认 Core loop、硬限制、协议边界、App Server Actor/CAS、Session 持久化和被动事件观察；另修复了 goal timeout 在活动 turn 尚未收敛时直接写 goal 状态的时序缺陷，现由 Local App Server Client 发起 `turn/interrupt`，等待 `TurnFinished`、idle checkpoint 和 settled turn 后再交给 workflow actor 写入 `failed`。这些边界仍保持不变，预算门禁继续生效。
 4. **阶段 3：恢复预算门禁——尚未开始**。20,000/30,000 行上限持续生效，没有放宽预算；待阶段 1、2 完成后再恢复正常功能准入。
 
 当前每个变更至少需要说明：删除或替换的旧概念、净行数影响、是否触及 Core/Protocol/Actor/Session 边界，以及对应的定向测试和 `python scripts/line_budget.py` 结果。
@@ -416,6 +416,7 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 | App Server frontend workflow projection | `WorkflowScope` 在 frontend 重复声明并仅做 Host enum 映射 | 改为同路径 re-export，启动结果直接复用 Host 类型；净释放 24 行 | 不改变 CLI 入口或 JSON-RPC 协议 |
 | Capabilities / Host static-value tests | ImageStore 内部投影测试与 `read_image` 公共路径重复；Host 仅断言静态默认步数 | 删除重复测试，保留 Image/Host 公共行为、配置覆盖和错误路径测试；净释放 22 行 | 不改变能力实现、CLI 公共路径或 Core/Actor/CAS/Session 边界 |
 | Capabilities duplicate Python fixtures | MCP 与 Skills 测试重复探测 Python 3 可执行文件 | 复用已有测试支持 helper；净释放 15 行 | 不改变 MCP/Skills 行为或公共路径 |
+| Goal timeout lifecycle | CLI timeout 直接调用 `goal/fail`，活动 turn 使该 mutation 被 App Server 以 `Busy` 拒绝 | deadline client 先发 `turn/interrupt`，等待 `TurnFinished`、idle checkpoint 和 settled turn，再返回 timeout 让 workflow actor 持久化 failed；净增加 51 行 | 不改变 Core loop、协作式中断、Actor/CAS、Session 或事件顺序；避免用 sleep/放宽断言掩盖竞态 |
 | MCP / profile 配置别名 | `parse` 中的旧拼写和 transport 字段别名属于输入兼容 | 暂缓删除 | 删除会改变已有配置行为，保留并纳入后续兼容策略 |
 | App Server frontend/runtime 便捷包装 | CLI/embedding 使用的 facade、profile、approval 和 runtime 转换入口 | 暂缓删除 | 这些是有意的依赖边界，不是内部重复执行逻辑 |
 
@@ -430,9 +431,9 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 - OpenAI Provider、App Server 协议和 CLI 公共路径测试；
 - App Server thread index、runtime management 或 Session/Actor 状态权威的重构。
 
-这些不是当前“小批次无行为变化”准入项。因此当前状态是：阶段 1 目标尚未达到，但低风险释放阶段结束；阶段 2 开始做核心边界验收，阶段 3（恢复常规预算准入）尚未开始。
+这些不是当前“小批次无行为变化”准入项。因此当前状态是：阶段 1 目标尚未达到，但低风险释放阶段结束；阶段 2 的定向核心边界验收已完成，阶段 3（恢复常规预算准入）尚未开始。
 
-阶段 2 的定向验收已通过：`cargo test -p mini-agent-core -p mini-agent-protocol -p mini-agent-app-server-protocol` 共通过 Core 28、Protocol 7、App Server Protocol 5；此前同轮的 App Server 23、Capabilities 61、Host 40 和 CLI binary 14 也通过。未运行需额外审批的完整 workspace 测试。CLI 集成用例 `goal_mode_timeout_is_deterministic_and_keeps_repl_alive` 仍是独立的既有时序失败，当前状态检查读到 `running` 而不是预期的 `failed`，不属于本轮边界变更。
+阶段 2 的定向验收已通过：Core 28、Protocol 7、App Server Protocol 5、App Server 23、Capabilities 61、Host 40，以及 CLI `interactive` 集成 11 项全部通过；`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --all`、`python scripts/line_budget.py` 也通过。goal timeout 回归已关闭：状态落盘前先完成 `turn/interrupt`、`TurnFinished`、idle checkpoint 和 settled turn，随后 `workflow/goal/fail` 成功写入 `failed`。未运行需额外审批的完整 workspace 测试。
 
 工程含义：
 

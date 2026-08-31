@@ -52,21 +52,22 @@ where
         None
     };
     let result = if let Some(timeout) = goal_timeout {
-        match model_runtime.block_on(async {
-            tokio::time::timeout(
-                timeout,
-                runtime
-                    .client_mut()
-                    .run_turn_batch(prompt.clone(), &mut observer),
-            )
-            .await
-        }) {
-            Ok(result) => result,
-            Err(_) => {
+        match model_runtime.block_on(runtime.client_mut().run_turn_batch_with_timeout(
+            prompt.clone(),
+            timeout,
+            &mut observer,
+        )) {
+            Ok(Some(result)) => Ok(result),
+            Ok(None) => {
                 let _ = events.send(ReplEvent::Warning(format!(
                     "goal> milestone timed out after {} seconds",
                     timeout.as_secs()
                 )));
+                fail_active_goal(runtime, model_runtime, approval, goal_objective);
+                return PromptOutcome::Finished;
+            }
+            Err(error) => {
+                report_run_error(events, &error);
                 fail_active_goal(runtime, model_runtime, approval, goal_objective);
                 return PromptOutcome::Finished;
             }

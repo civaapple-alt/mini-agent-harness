@@ -7,17 +7,17 @@ This directory records architectural decision records (ADRs), technology selecti
 
 ## Current Maintenance Gate (2026-08-31)
 
-The line-budget release work has completed its low-risk Stage 1 audit and is entering **Stage 2: protect core boundaries**, with the hard gates still active:
+The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `15,236 / 20,000` lines (76.2%; 4,764 remaining)
-- all Rust source: `28,255 / 30,000` lines (94.2%; 1,745 remaining)
-- released against the Stage 1 baseline: `679` lines; `1,355` more lines would be needed to reach the Stage 1 target of approximately `26,900`
+- runtime (`core + protocol + host + app-server`): `15,286 / 20,000` lines (76.4%; 4,714 remaining)
+- all Rust source: `28,306 / 30,000` lines (94.4%; 1,694 remaining)
+- Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines, leaving `1,406` lines to reach the approximate `26,900` target
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, and duplicate Python test fixture probing. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
-The low-risk Stage 1 candidates are now exhausted. The remaining reduction candidates are intentional frontend facades, input-compatibility aliases, provider/protocol coverage, or larger state-boundary changes; they require an explicit design decision. Stage 2 therefore begins as a boundary review while the budget gates remain active. The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
+The low-risk Stage 1 candidates are now exhausted. The remaining reduction candidates are intentional frontend facades, input-compatibility aliases, provider/protocol coverage, or larger state-boundary changes; they require an explicit design decision. Stage 2 remains the active boundary guard while the budget gates stay active. The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
 
-Stage 2 boundary checks currently pass for the Core, Protocol, App Server Protocol, App Server, Capabilities, Host, and CLI binary test targets. The full CLI integration target still has the known goal-timeout ordering failure recorded in the implementation note.
+Stage 2 targeted boundary checks pass for Core, Protocol, App Server Protocol, App Server, Capabilities, Host, and the complete CLI interactive integration target. The goal-timeout lifecycle now settles `turn/interrupt` and durable checkpoint state before marking the goal failed. The full workspace test suite remains unrun pending explicit approval.
 
 ---
 

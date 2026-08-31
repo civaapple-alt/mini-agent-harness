@@ -78,6 +78,8 @@ use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnSubmission;
 use serde::de::DeserializeOwned;
 use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
 
 /// A local client that exercises the app-server protocol without a transport.
 ///
@@ -258,19 +260,60 @@ where
         prompt: impl Into<String>,
         sink: &mut S,
     ) -> Result<RuntimeTurnBatch, String> {
+        self.run_turn_batch_until(prompt, sink, None)
+            .await?
+            .ok_or_else(|| "turn timed out".to_string())
+    }
+
+    /// Runs a turn with a frontend deadline and settles a timed-out turn
+    /// before returning. The App Server remains the owner of cancellation,
+    /// event ordering, and durable checkpoint persistence.
+    pub async fn run_turn_batch_with_timeout<S: EventSink + Send>(
+        &mut self,
+        prompt: impl Into<String>,
+        timeout: Duration,
+        sink: &mut S,
+    ) -> Result<Option<RuntimeTurnBatch>, String> {
+        self.run_turn_batch_until(prompt, sink, Some(Instant::now() + timeout))
+            .await
+    }
+
+    async fn run_turn_batch_until<S: EventSink + Send>(
+        &mut self,
+        prompt: impl Into<String>,
+        sink: &mut S,
+        deadline: Option<Instant>,
+    ) -> Result<Option<RuntimeTurnBatch>, String> {
+        let thread_id = self.connection.thread_id().await;
         let submission = self
             .start_turn(
-                self.connection.thread_id().await,
+                thread_id.clone(),
                 TurnInput::new(TurnInputMode::Start, prompt.into()),
             )
             .await
             .map_err(|error| error.message)?;
-        if !matches!(submission, TurnSubmission::Started { .. }) {
-            return Err(format!("turn was not started: {submission:?}"));
-        }
+        let turn_id = match submission {
+            TurnSubmission::Started { turn_id } => turn_id,
+            other => return Err(format!("turn was not started: {other:?}")),
+        };
         let mut finished_turn_ids = Vec::new();
+        let mut timed_out = false;
         loop {
-            let event = self.next_event().await.map_err(|error| error.message)?;
+            let event = match deadline {
+                Some(deadline) if !timed_out => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    match tokio::time::timeout(remaining, self.next_event()).await {
+                        Ok(event) => event,
+                        Err(_) => {
+                            let _ = self.interrupt(thread_id.clone(), turn_id.clone()).await;
+                            timed_out = true;
+                            self.next_event().await
+                        }
+                    }
+                }
+                _ => self.next_event().await,
+            }
+            .map_err(|error| error.message)?;
             let finished = matches!(event.event, Event::TurnFinished { .. });
             let finished_turn_id = event.turn_id.clone();
             sink.emit(event);
@@ -290,20 +333,27 @@ where
         for turn_id in finished_turn_ids {
             turns.push(self.read_settled_turn(turn_id).await?);
         }
+        if timed_out {
+            self.control.clear_cancel();
+            return Ok(None);
+        }
         for _ in 0..8 {
             if let Some(input) = self
                 .control
                 .take_steer_input()
                 .or_else(|| self.control.take_follow_up_input())
             {
-                let mut next = Box::pin(self.run_turn_batch(input.text, sink)).await?;
+                let next = Box::pin(self.run_turn_batch_until(input.text, sink, deadline)).await?;
+                let Some(mut next) = next else {
+                    return Ok(None);
+                };
                 let mut turns = turns;
                 turns.append(&mut next.turns);
-                return Ok(RuntimeTurnBatch { turns });
+                return Ok(Some(RuntimeTurnBatch { turns }));
             }
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
-        Ok(RuntimeTurnBatch { turns })
+        Ok(Some(RuntimeTurnBatch { turns }))
     }
 
     /// Applies a host-side update through the local App Server service.
