@@ -59,17 +59,19 @@ pub trait ToolProvider: Send + Sync {
     fn build_tools(&self, request: ToolBuildRequest) -> Result<Vec<Box<dyn Tool>>, ToolError>;
 }
 
+const BUILTIN_TOOL_DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
+    id: crate::BUILTIN_TOOL_PROVIDER,
+    kind: CapabilityKind::Tool,
+    description: "Built-in workspace, process, web, and image tools",
+};
+
 const BUILTIN_DESCRIPTORS: [CapabilityDescriptor; 4] = [
     CapabilityDescriptor {
         id: crate::OPENAI_MODEL_PROVIDER,
         kind: CapabilityKind::Model,
         description: "OpenAI-compatible Responses model provider",
     },
-    CapabilityDescriptor {
-        id: crate::BUILTIN_TOOL_PROVIDER,
-        kind: CapabilityKind::Tool,
-        description: "Built-in workspace, process, web, and image tools",
-    },
+    BUILTIN_TOOL_DESCRIPTOR,
     CapabilityDescriptor {
         id: crate::BUILTIN_EXTENSION_PROVIDER,
         kind: CapabilityKind::Extension,
@@ -86,11 +88,7 @@ struct BuiltinToolProvider;
 
 impl ToolProvider for BuiltinToolProvider {
     fn descriptor(&self) -> CapabilityDescriptor {
-        CapabilityDescriptor {
-            id: crate::BUILTIN_TOOL_PROVIDER,
-            kind: CapabilityKind::Tool,
-            description: "Built-in workspace, process, web, and image tools",
-        }
+        BUILTIN_TOOL_DESCRIPTOR
     }
 
     fn build_tools(&self, request: ToolBuildRequest) -> Result<Vec<Box<dyn Tool>>, ToolError> {
