@@ -66,7 +66,7 @@ VS Code 文章最重要的结论是：模型只是引擎，harness 才是把上�
 cargo test -p mini-agent-cli --test interactive <scenario> -- --exact
 ```
 
-本批 8/8 通过。该第一版 baseline 已证明现有公共路径可承载基础 harness evidence；当时尚未包含跨文件重构、CLI 公共路径的工具失败恢复、MCP/approval/sandbox 拒绝和独立的 model/provider 对比，不将后续补充结果倒填为第一版基线。阶段 2/3 后续批次已分别补上部分边界证据，详见下文。
+本批 8/8 通过。该第一版 baseline 已证明现有公共路径可承载基础 harness evidence；当时尚未包含跨文件重构、CLI 公共路径的工具失败恢复、MCP/approval/sandbox 拒绝和独立的 model/provider 对比，不将后续补充结果倒填为第一版基线。阶段 2/3 后续批次已分别补上部分边界证据，详见下文；当前仍未覆盖的项目以 Note 末尾清单为准。
 
 同日回归也通过：`cargo test -p mini-agent-app-server` 为 28/28，
 `cargo test -p mini-agent-cli --test interactive -- --test-threads=1` 为
