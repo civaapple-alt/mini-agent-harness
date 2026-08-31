@@ -66,7 +66,7 @@ VS Code 文章最重要的结论是：模型只是引擎，harness 才是把上�
 cargo test -p mini-agent-cli --test interactive <scenario> -- --exact
 ```
 
-本批 8/8 通过。该 baseline 已证明现有公共路径可承载第一轮 harness evidence；跨文件重构、CLI 公共路径的工具失败恢复、MCP/approval/sandbox 拒绝和独立的 model/provider 对比仍是待补场景，不将它们伪装成已覆盖。阶段 2 本批另以 Core/Capabilities 边界测试补上了 test-only 故障恢复证据，详见下文。
+本批 8/8 通过。该第一版 baseline 已证明现有公共路径可承载基础 harness evidence；当时尚未包含跨文件重构、CLI 公共路径的工具失败恢复、MCP/approval/sandbox 拒绝和独立的 model/provider 对比，不将后续补充结果倒填为第一版基线。阶段 2/3 后续批次已分别补上部分边界证据，详见下文。
 
 同日回归也通过：`cargo test -p mini-agent-app-server` 为 28/28，
 `cargo test -p mini-agent-cli --test interactive -- --test-threads=1` 为
@@ -83,7 +83,7 @@ Compaction、显式权限拒绝结果和 timeout/steer 并发证据。以下取�
 
 | 评审建议 | 当前判断 | 下一迭代准入条件 |
 | :--- | :--- | :--- |
-| 每个 Round 导出 JSONL Trace 并记录哈希 | 已实现本地诊断 API | `mini_agent_app_server::JsonlTrace` 复用 App Server 事件，记录 `trace_id`、`turn_id`、`round_index`、事件类型、完整 bounded model-input 哈希、工具 manifest 哈希、字节计数和 payload 哈希；原始 prompt、工具参数和结果不写入。当前不重新引入已退役的外部 `--trace` 开关；CLI 便捷入口仍需单独评估。 |
+| 每个 Round 导出 JSONL Trace 并记录哈希 | 已实现本地诊断 API；CLI 自动接入暂缓 | `mini_agent_app_server::JsonlTrace` 复用 App Server 事件，记录 `trace_id`、`turn_id`、`round_index`、事件类型、完整 bounded model-input 哈希、工具 manifest 哈希、字节计数和 payload 哈希；原始 prompt、工具参数和结果不写入。Stage 3 暂不自动写入 session 目录，也不重新引入已退役的外部 `--trace` 开关，避免扩大持久化和公共 CLI 语义。 |
 | Fault Injection Provider | 首版已实现，限定为测试设施 | `mini-agent-core` 的 `FaultInjectionModel` 覆盖缺少必要工具参数、部分流失败和 `Retryable` 工具结果；`mini-agent-capabilities` 的 Responses 解析测试覆盖畸形 JSON 和缺字段。HTTP 429 provider 适配语义仍单独待补；不增加生产 provider、不调用付费服务、不另起执行循环。 |
 | 超过 5 秒的场景移出日常 CI | 部分接受 | 5 秒是 CI 调度策略，不是运行时语义；只有经确认的确定性慢场景才允许显式 `#[ignore]`，并提供定时或手动命令。不能按一次机器墙钟测量自动改变门禁。 |
 | Compaction 在 70% 触发 | 暂不改变当前行为 | 当前实现和 `docs/limits.md` 的确定性触发点是最大上下文的 50%；下一场景在 70% 记录预警、最近 3 轮保留和压缩前后预算，只有证据证明 50% 不合适时才改阈值。 |
@@ -92,7 +92,9 @@ Compaction、显式权限拒绝结果和 timeout/steer 并发证据。以下取�
 
 当前 baseline 已有稳定的本地 JSONL Trace artifact；README 中的快捷命令仍只捕获
 测试输出和预算快照，尚未自动把 `JsonlTrace` 接入 CLI 基线报告。Trace 只用于证明
-事件/输入摘要变化，不将 mock provider 的通过结果等同于真实模型质量。
+事件/输入摘要变化，不将 mock provider 的通过结果等同于真实模型质量。Stage 3
+审计暂缓 CLI 自动 Trace：需要先明确 artifact 生命周期、session 单一权威和用户可见
+CLI 选项，再以独立变更重新评估。
 
 ### 3.2 把 6 项准入问题变成验证记录
 
@@ -179,6 +181,39 @@ Decision: accept
    cargo test -p mini-agent-core (28 passed)
    cargo test -p mini-agent-protocol (7 passed)
    cargo clippy --workspace --all-targets -- -D warnings
+   cargo fmt --all
+   python scripts/line_budget.py
+
+Decision: accept
+```
+
+#### Stage 3 本轮实践的六项验证：bounded cross-file refactor
+
+```text
+1. Layer: CLI（通过现有 App Server/Host/Core 主路径验证）
+   rationale: 场景从 `mini-agent ask --json --auto-approve` 进入，连续读取并编辑两个
+   workspace 文件，验证 CLI 公共入口承载跨文件上下文与 settled 文件结果，不调用私有
+   Core/Host API。
+2. Duplicate responsibility:
+   searched `crates/mini-agent-cli/tests/interactive.rs` 的现有 ask、read/write、
+   approval 和 unknown-tool 场景，以及 Capabilities workspace tool tests；没有现有
+   公共场景同时验证两个文件的读取结果进入后续模型 round 并完成两个精确编辑。
+3. Replace vs add:
+   复用现有临时 workspace、TCP Mock Provider、SSE function-call helper 和真实
+   `read_file`/`edit_file` 工具；只增加一个 bounded scenario，不增加生产重构器、文件
+   批处理 API、备用 CLI 路径或第二套 Harness loop。
+4. Net line delta:
+   expected: runtime +0; all Rust +~100
+   actual: runtime 16,074 -> 16,074 (+0); all Rust 29,203 -> 29,288 (+85)
+   （CLI integration test net +85）。
+5. Visible surface:
+   no production model input, event type, persistence schema, or public protocol change;
+   the provider receives only the existing bounded tool results and the scenario asserts the
+   two final file contents. `--auto-approve` is an existing test invocation option; no new
+   permission behavior is introduced.
+6. Boundary evidence:
+   cargo test -p mini-agent-cli --test interactive -- --test-threads=1 (13 passed)
+   cargo clippy -p mini-agent-cli --all-targets -- -D warnings
    cargo fmt --all
    python scripts/line_budget.py
 
@@ -317,11 +352,11 @@ Decision: accept
 4. test-only FaultInjectionModel 和 Responses parser fault cases 已覆盖缺字段、畸形 JSON、
    部分流和 retryable tool result；CLI public-path scenario 已验证未知工具失败后的下一轮恢复，
    App Server public scenario 已验证 NeedsApproval 拒绝在事件、checkpoint 和下一轮模型输入中
-   保持非空；且没有改变生产执行路径；
+   保持非空；cross-file refactor scenario 已验证两个文件的读取、编辑和最终落盘；且没有改变生产执行路径；
 5. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
 6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
-后续仍需补充 CLI 自动接入 Trace 报告、跨文件重构、HTTP 429 provider 适配、MCP/sandbox
-拒绝和独立 model/provider 对比场景；CLI public-path 的未知工具恢复和 App Server 的
+后续仍需补充 CLI 自动接入 Trace 报告、HTTP 429 provider 适配、MCP/sandbox 拒绝和独立
+model/provider 对比场景；CLI public-path 的未知工具恢复、cross-file refactor 和 App Server 的
 NeedsApproval 拒绝已覆盖，但更完整的工具失败/超时/重试矩阵仍是证据缺口，
 不是当前实现的已覆盖能力。

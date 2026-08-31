@@ -863,6 +863,91 @@ fn ask_recovers_from_unknown_tool_on_public_path() {
 }
 
 #[test]
+fn ask_completes_bounded_cross_file_refactor_on_public_path() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let calls = [
+            ("read-a", "read_file", json!({"path": "src/a.txt"})),
+            ("read-b", "read_file", json!({"path": "src/b.txt"})),
+            (
+                "edit-a",
+                "edit_file",
+                json!({
+                    "path": "src/a.txt",
+                    "old_text": "shared_name",
+                    "new_text": "renamed_name"
+                }),
+            ),
+            (
+                "edit-b",
+                "edit_file",
+                json!({
+                    "path": "src/b.txt",
+                    "old_text": "shared_name",
+                    "new_text": "renamed_name"
+                }),
+            ),
+        ];
+        for (call_id, name, arguments) in calls {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            requests_tx.send(read_request_body(&mut stream)).unwrap();
+            write_function_call_sse_response(&mut stream, call_id, name, arguments);
+        }
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        requests_tx.send(read_request_body(&mut stream)).unwrap();
+        write_sse_response(&mut stream, "refactored both files");
+    });
+    let root = test_root();
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(root.join("src/a.txt"), "use shared_name here\n").unwrap();
+    fs::write(root.join("src/b.txt"), "also uses shared_name\n").unwrap();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+
+    let output = mini_agent(&root)
+        .args([
+            "ask",
+            "--json",
+            "--auto-approve",
+            "rename shared_name in both files",
+        ])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .output()
+        .unwrap();
+    let requests = (0..5)
+        .map(|_| requests_rx.recv().unwrap())
+        .collect::<Vec<_>>();
+    server.join().unwrap();
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let first = fs::read_to_string(root.join("src/a.txt")).unwrap();
+    let second = fs::read_to_string(root.join("src/b.txt")).unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    assert_eq!(response["output"], "refactored both files");
+    assert_eq!(first, "use renamed_name here\n");
+    assert_eq!(second, "also uses renamed_name\n");
+    let combined_reads = String::from_utf8_lossy(&requests[2]);
+    assert!(combined_reads.contains("use shared_name here"));
+    assert!(combined_reads.contains("also uses shared_name"));
+}
+
+#[test]
 fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();

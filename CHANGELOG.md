@@ -26,15 +26,18 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   change affects prompt, tool schema, loop-control, context, events, or
   persistence; public unit tests alone are not sufficient for those changes.
 - Added the first bounded harness scenario baseline: 8 representative CLI
-  scenarios pass, backed by App Server 28/28 and CLI interactive 12/12
-  regression evidence. Cross-file refactoring, broader tool-failure/retry
-  coverage, and provider comparison remain tracked as follow-up gaps.
+  scenarios pass, backed by App Server 28/28 and CLI interactive 13/13
+  regression evidence. Broader tool-failure/retry coverage and provider
+  comparison remain tracked as follow-up gaps.
 - Added CLI public-path evidence for unknown-tool recovery: the existing
   bounded tool failure is projected into the next provider request and the
   settled answer completes through `mini-agent ask --json`.
 - Added App Server public-boundary evidence for approval denial: existing
   `NeedsApproval` status and non-empty reason are preserved in `ToolFinished`,
   the settled checkpoint, and the next model round without a new protocol type.
+- Added a bounded CLI public-path cross-file refactor scenario that reads and
+  edits two workspace files through the canonical tool path and verifies both
+  settled file results without adding a production refactorer.
 - Added the local App Server `JsonlTrace` sink and redacted JSONL records with
   bounded model-input, tool-manifest, event-payload, and output-size metadata;
   the JSON-RPC wire shape and retired external `--trace` path remain unchanged.
@@ -47,7 +50,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   slow-scenario scheduling, Compaction measurement, structured permission
   rejection, and timeout/steer race ordering. The retired external `--trace`
   path and current 50% Compaction trigger remain unchanged.
-- Documented the current budget snapshot (`16,074` runtime lines and `29,203`
+- Documented the current budget snapshot (`16,074` runtime lines and `29,288`
   total Rust lines) in the README and Agent Notes.
 
 ### Fixed
