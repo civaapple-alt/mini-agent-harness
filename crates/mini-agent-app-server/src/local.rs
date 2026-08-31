@@ -67,7 +67,7 @@ impl LocalRuntimeLaunch {
     }
 
     pub fn workflow_scope(&self) -> crate::frontend::WorkflowScope {
-        self.profile.workflows.into()
+        self.profile.workflows
     }
 
     pub fn security_preset(&self) -> SecurityPreset {

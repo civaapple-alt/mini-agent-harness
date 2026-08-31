@@ -19,6 +19,7 @@ pub use mini_agent_capabilities::SecurityPreset;
 pub use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
 pub use mini_agent_core::InputQueueError;
 pub use mini_agent_core::RunControl;
+pub use mini_agent_host::WorkflowScope;
 pub use mini_agent_host::harness_config_auto;
 pub use mini_agent_host::print_auto_warning;
 pub use mini_agent_protocol::EventEnvelope;
@@ -29,26 +30,6 @@ pub use mini_agent_protocol::ToolError;
 pub use mini_agent_protocol::TurnInput;
 pub use mini_agent_protocol::TurnInputMode;
 pub use mini_agent_protocol::TurnStatus;
-
-/// Workflow capabilities selected by an App Server launch profile.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WorkflowScope {
-    Disabled,
-    Plan,
-    Goal,
-    PlanAndGoal,
-}
-
-impl From<mini_agent_host::WorkflowScope> for WorkflowScope {
-    fn from(scope: mini_agent_host::WorkflowScope) -> Self {
-        match scope {
-            mini_agent_host::WorkflowScope::Disabled => Self::Disabled,
-            mini_agent_host::WorkflowScope::Plan => Self::Plan,
-            mini_agent_host::WorkflowScope::Goal => Self::Goal,
-            mini_agent_host::WorkflowScope::PlanAndGoal => Self::PlanAndGoal,
-        }
-    }
-}
 
 /// App Server owned profile selector used by local frontend startup.
 #[derive(Clone, Debug, PartialEq, Eq)]
