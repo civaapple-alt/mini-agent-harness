@@ -23,11 +23,22 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test maintenance scripts
-        run: python3 -m unittest scripts/test_package_release.py scripts/test_line_budget.py
+        run: python3 -m unittest scripts/test_package_release.py scripts/test_line_budget.py scripts/test_pr_admission.py
       - name: Enforce line budget
         run: python3 scripts/line_budget.py
       - name: Validate Cargo packages
         run: cargo package --workspace --locked --no-verify
+
+  admission:
+    name: Check PR admission
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate completed six-question template
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 scripts/check_pr_admission.py
 
   test:
     name: Test (${{ matrix.os }})

@@ -10,6 +10,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Added a repository pull request template that requires every change to
   declare its layer, duplicate-path analysis, replacement strategy, line
   budget, visible-surface impact, and boundary-test evidence.
+- Added a pull-request admission CI check that requires the six-question
+  template, six non-empty answers, replaced placeholders, and six checked
+  confirmations; answer quality remains a reviewer responsibility.
 
 ### Changed
 

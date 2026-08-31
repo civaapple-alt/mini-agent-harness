@@ -44,6 +44,11 @@ questions in `.github/pull_request_template.md` before implementation:
 5. Does it expand model-visible input, events, persistence, or public protocol?
 6. Can existing public boundary tests cover it, and what evidence is missing?
 
+On pull requests, CI mechanically checks that the six-question section is
+present, all answer placeholders are replaced, all six questions have answers,
+and all six admission boxes are checked. The check validates completion only;
+reviewers still judge the answer quality and architecture.
+
 New code defaults to net-zero growth or must identify an explicit offset. Never
 remove Core tests, Actor/CAS/Session authority, or public protocol behavior only
 to satisfy the approximate Stage 1 target. The 20,000-line runtime and

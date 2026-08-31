@@ -528,6 +528,33 @@ Decision: accept
 Decision: accept
 ```
 
+#### Stage 3 本轮实践的六项验证：PR admission mechanical check
+
+```text
+1. Layer: N/A（repository process/CI）
+   rationale: `scripts/check_pr_admission.py` 只验证 PR 描述的准入记录是否完整，
+   不进入 Core、Host、Capabilities、App Server 或 CLI runtime。
+2. Duplicate responsibility:
+   searched `.github/pull_request_template.md`, `AGENTS.md` and `.github/workflows/ci.yml`；
+   原有模板要求人工填写，但没有检查 placeholder、六题回答和六个确认框的自动门禁。
+3. Replace vs add:
+   保留现有模板和 reviewer 判断，新增一个无副作用的 Python completion check 与单测，
+   不新增 Rust helper、runtime hook 或第二套质量门禁。
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,074 -> 16,074 (+0); all Rust 29,378 -> 29,378 (+0)
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. The pull-request job
+   reads only `github.event.pull_request.body` and validates completion; content quality remains
+   a review responsibility. Push, dispatch, and local runtime paths are unchanged.
+6. Boundary evidence:
+   `python -m unittest scripts/test_pr_admission.py scripts/test_line_budget.py
+   scripts/test_package_release.py` (13 passed); CI also runs the new check only for
+   `pull_request` events. `git diff --check` and the Rust budget remain clean.
+
+Decision: accept
+```
+
 ### 3.4 评估自动化的顺序
 
 自动化按以下顺序推进：

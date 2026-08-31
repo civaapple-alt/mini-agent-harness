@@ -269,6 +269,10 @@ test evidence. New code defaults to net-zero growth or must name an explicit
 offset. Do not remove Core tests or Actor/CAS/Session authority merely to fit a
 line target.
 
+Pull-request CI also checks that the six-question section is present, all six
+questions have answers, placeholders are replaced, and all six admission
+confirmations are checked; reviewers remain responsible for answer quality.
+
 The current hard-budget snapshot is runtime `16,074 / 20,000` lines and all
 Rust source `29,378 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
