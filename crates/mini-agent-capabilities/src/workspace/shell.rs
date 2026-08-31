@@ -195,12 +195,12 @@ pub(super) fn run_shell(
     timeout: Duration,
 ) -> Result<CommandOutput, ToolError> {
     if sandbox_kind == SandboxKind::Docker {
-        let docker_check = Command::new("docker")
-            .arg("--version")
+        let docker_available = Command::new("docker")
+            .args(["info", "--format", "{{.ServerVersion}}"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
-        if docker_check.is_err() || !docker_check.unwrap().success() {
+        if !docker_available.is_ok_and(|status| status.success()) {
             return Err(ToolError(
                 "docker sandbox is unavailable on this host; ensure docker daemon is running, or use '--sandbox native'"
                     .to_string(),

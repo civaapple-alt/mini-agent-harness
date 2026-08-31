@@ -451,6 +451,36 @@ Decision: defer
 Decision: accept partial runtime evidence; defer stronger isolation policy.
 ```
 
+#### Stage 3 本轮实践的六项验证：Docker daemon preflight correction
+
+```text
+1. Layer: Capabilities
+   rationale: `workspace::run_shell` owns the Docker availability preflight before
+   constructing the container command.
+2. Duplicate responsibility:
+   searched the existing `docker` check and `run_sandboxed_command`; no second
+   daemon probe or wrapper was introduced.
+3. Replace vs add:
+   replace the CLI-only `docker --version` check with `docker info --format
+   {{.ServerVersion}}`, so the existing fail-closed diagnostic verifies the daemon
+   rather than merely the executable. The container command and sandbox policy
+   remain unchanged.
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,216 -> 16,216 (+0); all Rust 29,560 -> 29,560 (+0).
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. An
+   unavailable Docker daemon now fails before spawning `docker run` with the
+   existing actionable error; native sandbox behavior is unchanged.
+6. Boundary evidence:
+   `cargo test -p mini-agent-capabilities` is 65/65, including the real Docker
+   mount probe; `cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings`,
+   `cargo fmt --all`, and `python scripts/line_budget.py` pass. `docker info` succeeds
+   on this host. Stronger network/capability/resource isolation remains deferred.
+
+Decision: accept
+```
+
 #### Stage 3 本轮实践的六项验证：model/provider comparison audit
 
 ```text

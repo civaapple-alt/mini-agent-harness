@@ -46,6 +46,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   29.6.1 with `alpine` verifies the `/workspace` mount and container-only temporary
   files through the Capabilities path. Network, capability, and resource isolation
   remain unclaimed pending an explicit policy and cross-platform evidence.
+- Corrected Docker preflight to query the daemon with `docker info` instead of only
+  checking the CLI version, so an unavailable daemon fails closed before `docker run`.
 
 ### Changed
 
