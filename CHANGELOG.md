@@ -48,15 +48,17 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   HTTP 429 maps to a bounded API error without implicit retry; provider-level
   retry/backoff policy remains a follow-up.
 - Added explicit MCP/sandbox refusal evidence: denied MCP connections expose no
-  server, tool, or plugin data and retain one bounded diagnostic; denied shell
-  commands retain a structured `Failed` reason before sandbox execution, with
-  no marker side effect. Actual MCP call denial and Docker isolation remain open.
+  server, tool, or plugin data and retain one bounded diagnostic; an already
+  connected tool returns a structured non-empty `Failed` reason before sending
+  its call; denied shell commands retain a structured `Failed` reason before
+  sandbox execution, with no marker side effect. Docker availability and
+  isolation remain open.
 - Added a local baseline rerun/report recipe and recorded the next-iteration
   evidence decisions for bounded JSONL Trace export, test-only fault injection,
   slow-scenario scheduling, Compaction measurement, structured permission
   rejection, and timeout/steer race ordering. The retired external `--trace`
   path and current 50% Compaction trigger remain unchanged.
-- Documented the current budget snapshot (`16,074` runtime lines and `29,360`
+- Documented the current budget snapshot (`16,074` runtime lines and `29,369`
   total Rust lines) in the README and Agent Notes.
 
 ### Fixed

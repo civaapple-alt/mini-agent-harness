@@ -287,6 +287,36 @@ Decision: accept
 Decision: accept
 ```
 
+#### Stage 3 本轮实践的六项验证：MCP call denial
+
+```text
+1. Layer: Capabilities
+   rationale: `mcp::McpTool::execute` 是已加载 MCP tool 的调用授权边界；本轮沿用
+   `loads_and_calls_stdio_server_through_rmcp` 的真实 RMCP/stdio 组装，只验证调用前拒绝。
+2. Duplicate responsibility:
+   searched the existing MCP load/call fixture and CLI/App Server approval scenarios；原有
+   MCP fixture只验证成功调用，连接拒绝与通用敏感工具拒绝不能证明真实 `McpTool` 调用门禁。
+3. Replace vs add:
+   复用同一 stdio server、tool 和 `ApprovalController`，连接完成后切换为 Interactive
+   拒绝；不复制 fixture，不新增 MCP proxy、重试循环或公共拒绝类型。
+4. Net line delta:
+   expected: runtime +0; all Rust +~15
+   actual: runtime 16,074 -> 16,074 (+0); all Rust 29,360 -> 29,369 (+9)
+   （Capabilities unit-test net +9）。
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. The existing
+   `McpTool::execute_outcome` maps the denied call to structured `Failed` with a non-empty
+   reason before it sends `ServerCommand::Call`; successful MCP calls remain covered by the
+   same fixture.
+6. Boundary evidence:
+   cargo test -p mini-agent-capabilities (64 passed)
+   cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings
+   cargo fmt --all
+   python scripts/line_budget.py
+
+Decision: accept
+```
+
 #### 阶段 2 本轮实践的六项验证：structured approval denial
 
 ```text
@@ -423,8 +453,8 @@ Decision: accept
 5. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
 6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
-后续仍需补充 CLI 自动接入 Trace 报告、HTTP 429 retry/backoff 策略、实际 MCP call denial、
-Docker sandbox availability/isolation 和独立 model/provider 对比场景；CLI public-path 的
-未知工具恢复、cross-file refactor、MCP connection refusal、sandbox 前置拒绝和 App Server
-的 NeedsApproval 拒绝已覆盖，但更完整的工具失败/超时/重试矩阵仍是证据缺口，不是当前实现
+后续仍需补充 CLI 自动接入 Trace 报告、HTTP 429 retry/backoff 策略、Docker sandbox
+availability/isolation 和独立 model/provider 对比场景；CLI public-path 的未知工具恢复、
+cross-file refactor、MCP connection/call refusal、sandbox 前置拒绝和 App Server 的
+NeedsApproval 拒绝已覆盖，但更完整的工具失败/超时/重试矩阵仍是证据缺口，不是当前实现
 的已覆盖能力。

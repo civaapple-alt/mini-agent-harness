@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_support::{python_command, remove_test_root, test_root};
 use crate::workspace::ApprovalMode;
+use mini_agent_protocol::ToolExecutionStatus;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
@@ -74,7 +75,8 @@ for line in sys.stdin:
         },
     };
 
-    let mut loaded = load(&[config], ApprovalController::new(ApprovalMode::Automatic));
+    let approval = ApprovalController::with_callback(ApprovalMode::Automatic, |_| Ok(false));
+    let mut loaded = load(&[config], approval.clone());
 
     assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
     assert_eq!(loaded.tools.len(), 1);
@@ -91,6 +93,13 @@ for line in sys.stdin:
     let output = tool.execute(&serde_json::json!({"text": "hello"})).unwrap();
     let value: Value = serde_json::from_str(&output).unwrap();
     assert_eq!(value["content"][0]["text"], "echo:hello");
+    approval.set_mode(ApprovalMode::Interactive);
+    let denied = tool.execute_outcome(&json!({"text": "blocked"}));
+    assert_eq!(denied.status, ToolExecutionStatus::Failed);
+    assert_eq!(
+        denied.content,
+        "user denied: call MCP tool \"echo\" on fixture.tools/fixture"
+    );
     drop(tool);
     remove_test_root(&root);
 }
