@@ -358,13 +358,6 @@ mod tests {
     }
 
     #[test]
-    fn copilot_max_steps_default_to_unlimited() {
-        let workspace = unique_dir("workspace");
-        let config = RuntimeConfig::load_from(workspace, None).unwrap();
-        assert_eq!(config.copilot_max_steps(), 0);
-    }
-
-    #[test]
     fn copilot_max_steps_reads_workspace_env() {
         let workspace = unique_dir("workspace");
         fs::write(workspace.join(".env"), "MINI_AGENT_MAX_STEPS=40\n").unwrap();

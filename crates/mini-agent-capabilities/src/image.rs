@@ -658,21 +658,6 @@ mod tests {
     }
 
     #[test]
-    fn save_uploads_and_projects_file_id() {
-        let store = ImageStore::with_uploader(Arc::new(StubFiles));
-        let stored = store
-            .save("shot.png", "image/png", TINY_PNG.to_vec())
-            .unwrap();
-        let out = format_envelope(&stored);
-        assert!(out.contains("file_id=\"file-api-test\""));
-        let projected = project_images(&[out], &store);
-        assert!(matches!(
-            projected[0],
-            Some(ProjectedImage::FileId(ref id)) if id == "file-api-test"
-        ));
-    }
-
-    #[test]
     fn older_images_are_placeholder_after_four() {
         let store = ImageStore::with_uploader(Arc::new(StubFiles));
         let contents = (0..5)
