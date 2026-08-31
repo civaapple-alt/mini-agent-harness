@@ -306,7 +306,9 @@ level retry/backoff policy remains deferred; the current default is one bounded 
 Docker CLI/server 29.6.1 and the `alpine` image are available, and a runtime probe verifies the
 `/workspace` mount plus container-only temporary files. This is not complete network, capability,
 or resource-isolation proof; the current command still needs an explicit security-policy decision
-before stronger claims or flags are added. The failure/
+before stronger claims or flags are added. A current-host feasibility probe accepted the candidate
+strict flags and observed read-only root, writable `/tmp`, zero effective capabilities, no routes,
+and bounded cgroup values; this is not cross-platform acceptance. The failure/
 timeout/retry evidence matrix distinguishes covered public paths from unit-only and deferred
 evidence; MCP timeout is covered at the capability boundary and its App Server public
 projection, while the CLI public MCP transport projection remains open. CLI public-

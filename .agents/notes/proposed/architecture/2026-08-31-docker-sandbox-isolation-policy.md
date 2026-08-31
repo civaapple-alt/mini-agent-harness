@@ -38,6 +38,23 @@ tool contract and supported Docker implementations before any CLI or configurati
 surface is added. A strict profile must fail closed when Docker cannot honor the
 requested policy; it must never silently fall back to native execution.
 
+### Current-host feasibility evidence
+
+On 2026-08-31, the candidate flag set was run once against the available Docker
+Desktop Linux daemon on Windows with the `alpine` image. Docker accepted all
+requested flags. The bounded probe observed:
+
+- writes to the read-only root filesystem were denied while `/tmp` remained writable;
+- `CapEff` was `0000000000000000`;
+- `/proc/net/route` contained only its header, consistent with `--network none`;
+- cgroup limits reported `memory.max=536870912`, `pids.max=256`, and
+  `cpu.max=200000 100000` (two CPUs).
+
+This is feasibility evidence for one Docker Desktop host only. It does not prove
+workspace mounting under the strict profile, cross-platform behavior, image
+provenance, daemon isolation, or compatibility with real project builds. The
+proposal therefore remains proposed and the runtime defaults remain unchanged.
+
 ## Threat model and support matrix
 
 The policy decision must explicitly state whether the goal is:
