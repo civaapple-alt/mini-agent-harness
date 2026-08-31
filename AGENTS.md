@@ -80,6 +80,13 @@ Additional harness-evidence rules:
   policy, supported-platform evidence, and a boundary test before implementation;
   do not add those flags speculatively.
 
+The canonical architecture record for the framework comparison and next-iteration
+Harness evidence is
+`.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md`.
+Merge later updates into that record instead of creating another same-date maturity
+note, and keep `.agents/notes/README.md`, `README.md`, and `CHANGELOG.md` aligned
+when its status or evidence changes.
+
 ## Change test
 
 Before adding a core concept, identify:
