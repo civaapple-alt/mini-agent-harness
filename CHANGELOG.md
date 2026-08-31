@@ -50,6 +50,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Recorded the Docker security-policy gate: stronger network, capability, privilege,
   read-only, or resource restrictions require an explicit threat model, supported-platform
   policy, compatibility/failure contract, and boundary evidence before implementation.
+- Added a proposed Docker isolation policy note with candidate strict defaults,
+  threat-model choices, cross-platform evidence requirements, and fail-closed behavior;
+  no Docker runtime defaults changed.
 - Added opt-in CLI Trace export through `ask --trace-jsonl PATH`: it creates a new
   file, emits only bounded redacted event metadata, caps each record at 8 KiB and
   the artifact at 256 KiB, and fails on overwrite or finalization errors. CLI public

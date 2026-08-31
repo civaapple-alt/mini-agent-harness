@@ -43,10 +43,9 @@ The first bounded scenario baseline is now implemented and recorded in the [harn
    production remains at the documented 50% trigger unless later evidence proves
    that threshold unsuitable.
 5. Docker availability and workspace-mount evidence are now recorded. The next
-   action is an explicit policy decision covering threat model, supported
-   platforms, defaults/opt-outs, compatibility, and fail-closed behavior; only
-   then may stronger network, capability, privilege, read-only, or resource
-   isolation be implemented and tested.
+   action is to review the [Docker isolation policy proposal](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md),
+   covering threat model, supported platforms, defaults/opt-outs, compatibility,
+   and fail-closed behavior; only then may stronger isolation be implemented.
 6. Defer provider comparison and retry/backoff until a second provider or an
    explicit bounded policy exists; paid-provider CI is not a default gate.
 
@@ -134,6 +133,7 @@ If a proposed approach is rejected during review:
 
 | Date | Title | Focus |
 |---|---|---|
+| 2026-08-31 | [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md) | Threat model, candidate strict profile, compatibility, cross-platform evidence, and fail-closed behavior before Docker flags |
 | 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Make App Server the single CLI, JSON-RPC, and ACP execution base and remove parallel turn orchestration |
 
 #### Bug Fixes (`proposed/bug-fix/`)
