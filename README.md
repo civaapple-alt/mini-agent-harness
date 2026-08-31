@@ -307,8 +307,9 @@ Docker CLI/server 29.6.1 and the `alpine` image are available, and a runtime pro
 `/workspace` mount plus container-only temporary files. This is not complete network, capability,
 or resource-isolation proof; the current command still needs an explicit security-policy decision
 before stronger claims or flags are added. A current-host feasibility probe accepted the candidate
-strict flags and observed read-only root, writable `/tmp`, zero effective capabilities, no routes,
-and bounded cgroup values; this is not cross-platform acceptance. The failure/
+strict flags, verified strict `/workspace` mounting, and observed read-only root, writable `/tmp`,
+zero effective capabilities, no routes, and bounded cgroup values; this is not cross-platform
+acceptance. The failure/
 timeout/retry evidence matrix distinguishes covered public paths from unit-only and deferred
 evidence; MCP timeout is covered at the capability boundary and its App Server public
 projection, while the CLI public MCP transport projection remains open. CLI public-
@@ -332,7 +333,7 @@ The next iteration is evidence-triggered rather than another broad cleanup:
    a trigger at least 70% of the bounded fixture budget and recent-tail retention;
    production remains at the documented 50% trigger unless later evidence proves
    that threshold unsuitable.
-5. Docker availability and workspace-mount evidence are now recorded. Review the
+5. Docker availability and both current and strict workspace-mount evidence are now recorded. Review the
    [Docker isolation policy proposal](.agents/notes/proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
    and accept a threat model, supported platforms, defaults/opt-outs,
    compatibility, and fail-closed behavior before implementing stronger isolation.

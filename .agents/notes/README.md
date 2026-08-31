@@ -46,8 +46,8 @@ The first bounded scenario baseline is now implemented and recorded in the [harn
    action is to review the [Docker isolation policy proposal](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md),
    covering threat model, supported platforms, defaults/opt-outs, compatibility,
    and fail-closed behavior. A current-host feasibility probe accepted the
-   candidate flags, but cross-platform evidence is still required before stronger
-   isolation may be implemented.
+   candidate flags and strict workspace mounting, but cross-platform evidence is
+   still required before stronger isolation may be implemented.
 6. Defer provider comparison and retry/backoff until a second provider or an
    explicit bounded policy exists; paid-provider CI is not a default gate.
 

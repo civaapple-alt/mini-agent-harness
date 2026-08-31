@@ -49,11 +49,14 @@ requested flags. The bounded probe observed:
 - `/proc/net/route` contained only its header, consistent with `--network none`;
 - cgroup limits reported `memory.max=536870912`, `pids.max=256`, and
   `cpu.max=200000 100000` (two CPUs).
+- with the candidate flags and the existing bind mount, a workspace file was
+  created and observed on the host while a container-only `/tmp` file was not
+  observed in the workspace.
 
 This is feasibility evidence for one Docker Desktop host only. It does not prove
-workspace mounting under the strict profile, cross-platform behavior, image
-provenance, daemon isolation, or compatibility with real project builds. The
-proposal therefore remains proposed and the runtime defaults remain unchanged.
+cross-platform behavior, image provenance, daemon isolation, or compatibility
+with real project builds. The proposal therefore remains proposed and the
+runtime defaults remain unchanged.
 
 ## Threat model and support matrix
 

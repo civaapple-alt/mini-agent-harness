@@ -56,6 +56,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Recorded a current-host Docker strict-policy feasibility probe: the candidate flags
   were accepted and produced read-only root, writable `/tmp`, zero effective capabilities,
   no routes, and bounded cgroup values; this remains non-cross-platform evidence only.
+- Extended the current-host Docker strict-policy probe to the existing `/workspace`
+  bind mount: a workspace file reached the host and a container-only `/tmp` file did
+  not reach the workspace; this remains non-cross-platform evidence only.
 - Added opt-in CLI Trace export through `ask --trace-jsonl PATH`: it creates a new
   file, emits only bounded redacted event metadata, caps each record at 8 KiB and
   the artifact at 256 KiB, and fails on overwrite or finalization errors. CLI public
