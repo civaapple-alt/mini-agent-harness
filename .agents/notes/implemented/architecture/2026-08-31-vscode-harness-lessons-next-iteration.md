@@ -892,7 +892,9 @@ Decision: accept
 4. 可量化的 compaction trigger 场景已记录，验证最近轮次保留；只有后续证据证明
    50% 不合适时才改变 context 行为。
 5. Docker daemon 已可达，workspace mount 与 container-only 临时文件场景已记录；
-   只有显式策略和跨平台证据接受后，才增加更强 network/capability/resource isolation。
+   下一步不是直接加 Docker flags，而是先确定 threat model、支持的平台、默认值/opt-out、
+   兼容性和 fail-closed 行为；只有显式策略及跨平台边界证据接受后，才增加更强的
+   network/capability/privilege/read-only/resource isolation。
 6. 第二 provider 或明确的 bounded retry policy 出现后，再做 provider 矩阵和
    retry/backoff；不把付费 provider CI 设为默认门禁。
 
@@ -901,6 +903,30 @@ Decision: accept
 有界 seam 或可复现证据时，停止并 deferred，不增加猜测性的 plumbing。
 
 不要先做一个通用 benchmark platform。mini-agent-harness 当前最有价值的是验证自己的 turn、tool、context、state 和 boundary 语义。
+
+### 3.5 Docker 更强隔离的政策决策门
+
+当前已完成的 Docker 证据只证明 daemon 可达、workspace 挂载和容器临时文件不落入
+宿主 workspace；它没有证明网络、Linux capability、特权、只读文件系统或 CPU/内存/
+进程数限制。为避免把一次运行时探针误写成安全证明，后续 Docker 变更必须先完成以下
+六项准入记录：
+
+```text
+1. Layer: Capabilities runtime boundary; Docker command construction remains in workspace::run_shell.
+2. Duplicate responsibility: inspect the existing docker info preflight, docker run command,
+   and ProcessSandbox; do not add a second daemon wrapper or sandbox abstraction.
+3. Replace vs add: define the required policy before adding flags; replace no existing
+   behavior unless the policy identifies a redundant default or compatibility branch.
+4. Net line delta: keep the implementation net-zero or name an explicit offset; record
+   runtime and all-Rust before/after values.
+5. Visible surface: record workspace, process, failure-result, and any public CLI/config
+   compatibility changes; model context and protocol changes are not implied by isolation.
+6. Boundary evidence: cover daemon unavailable, supported host platforms, each selected
+   restriction, and fail-closed behavior with bounded Capabilities/public-path scenarios.
+```
+
+Decision: defer implementation until the policy is explicitly accepted. The current
+Docker contract and README/SECURITY wording intentionally make no stronger isolation claim.
 
 ## 4. 非目标与风险
 

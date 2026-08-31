@@ -74,6 +74,11 @@ Additional harness-evidence rules:
   trace evidence must reuse existing observation events and Session records,
   remain bounded and redacted, and state whether it is an internal artifact or
   public protocol surface.
+- Docker evidence must distinguish daemon availability, workspace mounting, and
+  container temporary-file behavior from complete security isolation. Network,
+  capability, privilege, read-only, or resource restrictions require an explicit
+  policy, supported-platform evidence, and a boundary test before implementation;
+  do not add those flags speculatively.
 
 ## Change test
 

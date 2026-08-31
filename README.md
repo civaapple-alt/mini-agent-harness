@@ -203,7 +203,9 @@ other live effects are not resumed.
   mounted at `/workspace` when Docker is available. The current contract does
   not claim complete network, capability, or resource isolation. Native process
   handling prevents orphaned process trees, but shell execution is not itself a
-  security boundary.
+  security boundary. Stronger Docker restrictions are policy-gated; see
+  [SECURITY.md](SECURITY.md) for the required threat model, compatibility,
+  failure, and cross-platform evidence before adding them.
 - There is no telemetry, update check, or crash-report service.
 
 Plan Mode (`/plan`) locks workspace mutations while keeping a living session
@@ -319,9 +321,11 @@ The next iteration is evidence-triggered rather than another broad cleanup:
    a trigger at least 70% of the bounded fixture budget and recent-tail retention;
    production remains at the documented 50% trigger unless later evidence proves
    that threshold unsuitable.
-5. Docker availability and workspace-mount evidence are now recorded. Only add
-   stronger network, capability, or resource isolation after an explicit policy
-   and cross-platform evidence are accepted.
+5. Docker availability and workspace-mount evidence are now recorded. The next
+   action is a policy decision covering threat model, supported platforms,
+   defaults/opt-outs, compatibility, and fail-closed behavior; only then may
+   stronger network, capability, privilege, read-only, or resource isolation be
+   implemented and tested.
 6. Consider provider comparison or retry/backoff only after a second provider or
    an explicit retry policy exists; do not use paid-provider CI as a default.
 

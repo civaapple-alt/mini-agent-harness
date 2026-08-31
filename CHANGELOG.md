@@ -48,6 +48,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   remain unclaimed pending an explicit policy and cross-platform evidence.
 - Corrected Docker preflight to query the daemon with `docker info` instead of only
   checking the CLI version, so an unavailable daemon fails closed before `docker run`.
+- Recorded the Docker security-policy gate: stronger network, capability, privilege,
+  read-only, or resource restrictions require an explicit threat model, supported-platform
+  policy, compatibility/failure contract, and boundary evidence before implementation.
 
 ### Changed
 
