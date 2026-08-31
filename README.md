@@ -199,9 +199,11 @@ other live effects are not resumed.
   direct hard limits. See [limits](docs/limits.md).
 - Non-interactive `ask` fails closed for sensitive tools unless
   `--auto-approve` (or `-y`) is explicitly supplied.
-- `--sandbox docker` provides container isolation when Docker is available.
-  Native process handling prevents orphaned process trees, but shell execution
-  is not itself a security boundary.
+- `--sandbox docker` provides bounded container execution with the workspace
+  mounted at `/workspace` when Docker is available. The current contract does
+  not claim complete network, capability, or resource isolation. Native process
+  handling prevents orphaned process trees, but shell execution is not itself a
+  security boundary.
 - There is no telemetry, update check, or crash-report service.
 
 Plan Mode (`/plan`) locks workspace mutations while keeping a living session
@@ -275,7 +277,7 @@ admission confirmations is checked exactly once; reviewers remain responsible fo
 answer quality.
 
 The current hard-budget snapshot is runtime `16,216 / 20,000` lines and all
-Rust source `29,537 / 30,000` lines. The approximate `26,900` Stage 1 target
+Rust source `29,560 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 
@@ -289,9 +291,11 @@ and Responses parser/provider cases for malformed or missing tool arguments, par
 model streams, retryable tool results, bounded HTTP 429 API error classification without
 implicit retry, MCP connection refusal, and shell refusal before sandbox execution. Provider-
 level retry/backoff policy remains deferred; the current default is one bounded fail-fast
-429 failure without implicit retry. Docker sandbox availability/isolation remain open; on the
-current host the Docker CLI is present but its Linux daemon is unavailable, and the Docker smoke
-test only covers preflight/clear-error behavior and is not isolation proof. The failure/
+429 failure without implicit retry. Docker sandbox availability is now verified on this host:
+Docker CLI/server 29.6.1 and the `alpine` image are available, and a runtime probe verifies the
+`/workspace` mount plus container-only temporary files. This is not complete network, capability,
+or resource-isolation proof; the current command still needs an explicit security-policy decision
+before stronger claims or flags are added. The failure/
 timeout/retry evidence matrix distinguishes covered public paths from unit-only and deferred
 evidence; MCP timeout is covered at the capability boundary and its App Server public
 projection, while the CLI public MCP transport projection remains open. CLI public-
@@ -315,8 +319,9 @@ The next iteration is evidence-triggered rather than another broad cleanup:
    a trigger at least 70% of the bounded fixture budget and recent-tail retention;
    production remains at the documented 50% trigger unless later evidence proves
    that threshold unsuitable.
-5. Re-run the Docker isolation audit only when a reachable daemon is available;
-   the current preflight test is not isolation evidence.
+5. Docker availability and workspace-mount evidence are now recorded. Only add
+   stronger network, capability, or resource isolation after an explicit policy
+   and cross-platform evidence are accepted.
 6. Consider provider comparison or retry/backoff only after a second provider or
    an explicit retry policy exists; do not use paid-provider CI as a default.
 

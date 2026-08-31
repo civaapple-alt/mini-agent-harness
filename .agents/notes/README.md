@@ -10,8 +10,10 @@ This directory records architectural decision records (ADRs), technology selecti
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
 - runtime (`core + protocol + host + app-server`): `16,216 / 20,000` lines (81.1%; 3,784 remaining)
-- all Rust source: `29,537 / 30,000` lines (98.5%; 463 remaining)
-- Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines and the bounded Trace batch adds `374`, so the approximate `26,900` target is currently exceeded by `1,780` lines
+- all Rust source: `29,560 / 30,000` lines (98.5%; 440 remaining)
+- Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
+  the bounded Trace batch adds `374`, and the Docker runtime probe adds `23` test lines, so
+  the approximate `26,900` target remains optimization debt
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, and duplicate Python test fixture probing. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
@@ -23,7 +25,7 @@ Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 targe
 
 The six qualitative questions are collected in the repository [PR template](../../.github/pull_request_template.md). Pull-request CI checks that all six questions are answered, placeholders are replaced, and the confirmations are checked; reviewers enforce layer ownership, duplicate-path analysis, replacement-vs-addition reasoning, visible-surface impact, and boundary evidence.
 
-The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative CLI scenarios pass, with the original App Server baseline 28/28 and current App Server 30/30 plus CLI interactive 13/13 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy, CLI automatic Trace report wiring, Docker sandbox availability/isolation, and model/provider comparison remain explicitly open gaps. This host has Docker CLI 29.6.1 but no reachable Linux daemon, so the Docker smoke test remains non-authoritative and only covers preflight/clear-error behavior. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists.
+The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative CLI scenarios pass, with the original App Server baseline 28/28 and current App Server 30/30 plus CLI interactive 13/13 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy, CLI automatic Trace report wiring, and model/provider comparison remain explicitly open gaps. Docker CLI/server 29.6.1 and the `alpine` image are available on this host; a runtime probe verifies the `/workspace` mount and container-only temporary files, but not complete network, capability, or resource isolation. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists.
 
 ### Next iteration order (evidence-triggered)
 
@@ -40,8 +42,9 @@ The first bounded scenario baseline is now implemented and recorded in the [harn
    trigger at least 70% of the bounded fixture budget and recent-tail retention;
    production remains at the documented 50% trigger unless later evidence proves
    that threshold unsuitable.
-5. Repeat Docker isolation checks only after a reachable daemon is available;
-   current preflight/clear-error evidence is non-authoritative for isolation.
+5. Docker availability and workspace-mount evidence are now recorded. Only add
+   stronger network, capability, or resource isolation after an explicit policy
+   and cross-platform evidence are accepted.
 6. Defer provider comparison and retry/backoff until a second provider or an
    explicit bounded policy exists; paid-provider CI is not a default gate.
 

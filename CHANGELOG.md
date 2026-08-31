@@ -21,9 +21,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   redacted `JsonlTrace` remains caller-owned, while implicit Session files and the
   retired external `--trace` option remain out of scope until artifact lifecycle
   and opt-in semantics are specified.
-- Re-ran the Docker sandbox audit: Docker CLI 29.6.1 is installed, but this host
-  cannot reach its Linux daemon. The existing smoke test therefore remains a
-  clear-error/preflight check, not evidence of container isolation or portability.
+- An earlier Docker sandbox audit ran before the Linux daemon was reachable; it
+  recorded the existing smoke test as clear-error/preflight evidence only, not
+  evidence of container isolation or portability.
 - Audited model/provider comparison: the built-in registry currently exposes one
   OpenAI-compatible provider, and the Host model factory is only a composition
   seam. No cross-provider quality claim or paid-provider CI gate was added.
@@ -42,6 +42,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   the existing scenario now asserts a trigger at least 70% of its bounded fixture
   budget, while the production trigger remains 50% and recent-tail retention stays
   protected.
+- Added a real Docker runtime probe after the daemon became reachable: Docker
+  29.6.1 with `alpine` verifies the `/workspace` mount and container-only temporary
+  files through the Capabilities path. Network, capability, and resource isolation
+  remain unclaimed pending an explicit policy and cross-platform evidence.
 
 ### Changed
 
@@ -83,11 +87,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   server, tool, or plugin data and retain one bounded diagnostic; an already
   connected tool returns a structured non-empty `Failed` reason before sending
   its call; denied shell commands retain a structured `Failed` reason before
-  sandbox execution, with no marker side effect. Docker availability and
-  isolation remain open.
-- Audited the Docker sandbox smoke test: it remains a non-authoritative
-  preflight/clear-error check because a present Docker CLI does not prove daemon
-  availability or container isolation; no environment-coupled test was added.
+  sandbox execution, with no marker side effect. At that point Docker
+  availability and isolation remained open.
+- The earlier Docker smoke-test audit was non-authoritative because a present
+  Docker CLI did not prove daemon availability or container isolation; the later
+  runtime probe is recorded above as the current partial evidence.
 - Audited the failure/timeout/retry evidence matrix across Core, Capabilities,
   App Server, and CLI, explicitly separating covered public paths from unit-only
   evidence and deferred CLI MCP timeout projection, provider backoff, and Docker
@@ -108,7 +112,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   slow-scenario scheduling, Compaction measurement, structured permission
   rejection, and timeout/steer race ordering. The retired external `--trace`
   path and current 50% Compaction trigger remain unchanged.
-- Documented the current budget snapshot (`16,216` runtime lines and `29,537`
+- Documented the current budget snapshot (`16,216` runtime lines and `29,560`
   total Rust lines) in the README and Agent Notes.
 
 ### Fixed

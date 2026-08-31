@@ -569,6 +569,29 @@ fn docker_sandbox_checks_availability_or_reports_clear_error() {
 }
 
 #[test]
+fn docker_sandbox_mounts_workspace_and_keeps_container_tmp_ephemeral() {
+    let root = test_root();
+    let command = "printf mounted > /workspace/docker-mounted.txt; printf ephemeral > /tmp/mini-agent-container-only; pwd; cat /workspace/docker-mounted.txt";
+    let result = run_shell(command, &root, SandboxKind::Docker, Duration::from_secs(5));
+
+    match result {
+        Ok(output) => {
+            assert!(output.text.contains("exit: 0"), "{}", output.text);
+            assert!(output.text.contains("/workspace"), "{}", output.text);
+            assert!(output.text.contains("mounted"), "{}", output.text);
+            assert_eq!(
+                fs::read_to_string(root.join("docker-mounted.txt")).unwrap(),
+                "mounted"
+            );
+            assert!(!root.join("mini-agent-container-only").exists());
+        }
+        Err(error) if error.0.contains("docker sandbox is unavailable") => {}
+        Err(error) => panic!("Docker sandbox probe failed: {error}"),
+    }
+    remove_test_root(&root);
+}
+
+#[test]
 fn full_machine_preset_permits_paths_outside_workspace() {
     let root = test_root();
     let outside = test_root();

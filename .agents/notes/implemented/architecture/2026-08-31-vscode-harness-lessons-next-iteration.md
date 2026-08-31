@@ -386,7 +386,7 @@ Decision: accept
 Decision: accept
 ```
 
-#### Stage 3 审计结论：Docker sandbox availability/isolation
+#### Stage 3 初次审计结论（daemon unavailable）：Docker sandbox availability/isolation
 
 ```text
 1. Layer: Capabilities
@@ -411,10 +411,44 @@ Decision: accept
    connect to `dockerDesktopLinuxEngine` because the daemon pipe is absent. The existing
    `workspace::tests::docker_sandbox_checks_availability_or_reports_clear_error` test passed
    through its clear-error branch. `python scripts/line_budget.py` passed. Cross-platform
-   daemon availability and container isolation remain deferred until a controlled test seam
-   or CI capability is available.
+   daemon availability and container isolation were deferred at that time until a controlled
+   test seam or CI capability became available.
 
 Decision: defer
+```
+
+#### Stage 3 复审：Docker runtime mount and ephemeral filesystem evidence
+
+```text
+1. Layer: Capabilities
+   rationale: `workspace::run_shell` owns Docker command construction and process execution;
+   the new scenario exercises that real boundary after a daemon became available.
+2. Duplicate responsibility:
+   searched `workspace::shell::run_shell`, `ProcessSandbox`, and the existing Docker
+   availability test. The existing smoke test checks command/preflight behavior; the new
+   probe adds only the missing runtime mount and container-filesystem observation.
+3. Replace vs add:
+   keep the existing availability test and add one bounded probe in the same test module;
+   do not add a second sandbox abstraction, Docker daemon wrapper, or environment-specific
+   fixture. The probe skips only through the existing clear unavailable error when a host
+   cannot provide Docker.
+4. Net line delta:
+   expected: runtime +0; all Rust +~25 test lines
+   actual: runtime 16,216 -> 16,216 (+0); all Rust 29,537 -> 29,560 (+23).
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. The probe proves
+   the selected workspace is mounted at `/workspace`, writes are visible in that workspace,
+   and a `/tmp` container file is not written into the workspace. It does not claim network,
+   Linux capability, privilege, or resource isolation because the production `docker run`
+   command does not set those policies.
+6. Boundary evidence:
+   `docker --version` and `docker info` report Docker Desktop Linux/server 29.6.1 with
+   `runc`, seccomp, and cgroupns; `docker image inspect alpine` succeeds. The new
+   `workspace::tests::docker_sandbox_mounts_workspace_and_keeps_container_tmp_ephemeral`
+   test passes, and `cargo test -p mini-agent-capabilities` is 65/65. Clippy, fmt, and
+   `python scripts/line_budget.py` pass. Stronger isolation remains a separate policy item.
+
+Decision: accept partial runtime evidence; defer stronger isolation policy.
 ```
 
 #### Stage 3 本轮实践的六项验证：model/provider comparison audit
@@ -598,7 +632,7 @@ Decision: accept
 | approval/MCP refusal | App Server `NeedsApproval`、Capabilities MCP connection/call denial | covered | 无；公共 event projection 仍沿用既有边界 |
 | MCP call timeout | Capabilities `loads_and_calls_stdio_server_through_rmcp` with a controlled slow call; App Server `projects_mcp_timeout_through_public_app_server` | covered at capability and App Server public boundary | CLI public command with actual MCP transport is deferred: the bounded test seam is not available across the dependency boundary |
 | MCP circuit breaker | Capabilities `circuit_breaker_trips_after_failures_and_recovers` | unit-only | 真实 MCP call failure 到 model round 的公共路径未覆盖 |
-| Docker sandbox | existing availability smoke test | defer | daemon/API 差异与 container isolation 无受控跨平台证据 |
+| Docker sandbox | availability smoke test + runtime mount/ephemeral filesystem probe | covered: host runtime path | network/capability/resource isolation still needs an explicit policy and cross-platform evidence |
 
 #### Stage 3 本轮实践的六项验证：MCP call timeout
 
@@ -825,9 +859,10 @@ Decision: accept
    上限和 CLI 场景证据；契约未确定前不接入自动导出。
 3. 只有存在有界故障注入 seam 时，才推进 CLI 公共 MCP timeout projection；
    否则保留 Capabilities/App Server 证据，并将 CLI transport 缺口标为 deferred。
-4. 增加可量化的 compaction trigger 场景，验证最近轮次保留，再改变 context 行为。
-5. Docker daemon 可达后再复做 isolation audit；当前 preflight/clear-error
-   测试不能证明隔离。
+4. 可量化的 compaction trigger 场景已记录，验证最近轮次保留；只有后续证据证明
+   50% 不合适时才改变 context 行为。
+5. Docker daemon 已可达，workspace mount 与 container-only 临时文件场景已记录；
+   只有显式策略和跨平台证据接受后，才增加更强 network/capability/resource isolation。
 6. 第二 provider 或明确的 bounded retry policy 出现后，再做 provider 矩阵和
    retry/backoff；不把付费 provider CI 设为默认门禁。
 
@@ -860,7 +895,7 @@ Decision: accept
 6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
 后续仍需补充 CLI 自动接入 Trace 报告、CLI public MCP transport timeout projection、
-HTTP 429 provider-specific retry/backoff 合同、Docker sandbox availability/isolation 和独立 model/provider
+HTTP 429 provider-specific retry/backoff 合同、Docker sandbox 的更强 network/capability/resource isolation 和独立 model/provider
 对比场景；CLI public-path 的未知工具恢复、cross-file refactor、MCP connection/call refusal、
 sandbox 前置拒绝以及 App Server 的 NeedsApproval/MCP timeout projection 已覆盖，但更完整的
 工具失败/超时/重试矩阵仍是证据缺口，不是当前实现的已覆盖能力。
