@@ -504,7 +504,11 @@ async fn forwards_approval_response_through_json_rpc_connection() {
     let server = connection().server.clone();
     let broker = ApprovalBroker::new();
     let requester = broker.clone();
-    let mut connection = AppServerConnection::with_approval_broker(server, broker.clone());
+    let mut connection = AppServerConnection::with_approval_broker_and_capability_manifest(
+        server,
+        broker.clone(),
+        default_capability_manifest(),
+    );
     let _ = connection
         .handle_request(initialize_request(1, "approval-test"))
         .await;

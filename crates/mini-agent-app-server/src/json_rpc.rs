@@ -157,14 +157,6 @@ where
         Self::with_capability_manifest(server, default_capability_manifest())
     }
 
-    pub fn with_approval_broker(server: AppServer<M>, approval: ApprovalBroker) -> Self {
-        Self::with_approval_broker_and_capability_manifest(
-            server,
-            approval,
-            default_capability_manifest(),
-        )
-    }
-
     pub fn with_capability_manifest(
         server: AppServer<M>,
         capability_manifest: CapabilityManifest,
@@ -425,10 +417,6 @@ where
 
     pub(crate) fn runtime_management(&self) -> Result<&RuntimeManagementService<M>, String> {
         self.management_service().map_err(|error| error.message)
-    }
-
-    pub(crate) fn into_server(self) -> AppServer<M> {
-        self.server
     }
 }
 

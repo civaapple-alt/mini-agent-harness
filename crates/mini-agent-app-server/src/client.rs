@@ -110,17 +110,7 @@ where
         client_name: impl Into<String>,
         client_version: impl Into<String>,
     ) -> Result<InitializeResult, JsonRpcError> {
-        self.initialize_with_profile(client_name, client_version, None)
-            .await
-    }
-
-    pub async fn initialize_with_profile(
-        &mut self,
-        client_name: impl Into<String>,
-        client_version: impl Into<String>,
-        profile: Option<String>,
-    ) -> Result<InitializeResult, JsonRpcError> {
-        self.initialize_with_profile_and_providers(client_name, client_version, profile, None)
+        self.initialize_with_profile_and_providers(client_name, client_version, None, None)
             .await
     }
 
@@ -350,10 +340,6 @@ where
 
     pub async fn thread_id(&self) -> ThreadId {
         self.connection.thread_id().await
-    }
-
-    pub fn into_server(self) -> crate::AppServer<M> {
-        self.connection.into_server()
     }
 
     pub fn into_connection(self) -> AppServerConnection<M> {

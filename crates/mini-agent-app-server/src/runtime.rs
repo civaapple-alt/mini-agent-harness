@@ -226,10 +226,11 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         .with_runtime_services(services);
         let mut client = LocalAppServerClient::with_control(connection, control.clone());
         client
-            .initialize_with_profile(
+            .initialize_with_profile_and_providers(
                 "mini-agent-cli",
                 env!("CARGO_PKG_VERSION"),
                 Some(capability_manifest.profile.clone()),
+                None,
             )
             .await
             .map_err(|error| format!("cannot initialize app server: {}", error.message))?;
@@ -246,14 +247,6 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
 impl<M: Model + Send + 'static> AppServerRuntime<M> {
     pub fn client_mut(&mut self) -> &mut LocalAppServerClient<M> {
         &mut self.client
-    }
-
-    pub fn into_server(self) -> AppServer<M> {
-        self.client.into_server()
-    }
-
-    pub fn into_connection(self) -> AppServerConnection<M> {
-        self.client.into_connection()
     }
 
     pub fn images(&self) -> &ImageStore {

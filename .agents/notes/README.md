@@ -9,9 +9,9 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work is in **Stage 1: release global budget**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `15,347 / 20,000` lines (76.7%; 4,653 remaining)
-- all Rust source: `28,433 / 30,000` lines (94.8%; 1,567 remaining)
-- released against the Stage 1 baseline: `501` lines; `1,533` more lines are needed to reach the Stage 1 target of approximately `26,900`
+- runtime (`core + protocol + host + app-server`): `15,318 / 20,000` lines (76.6%; 4,682 remaining)
+- all Rust source: `28,404 / 30,000` lines (94.7%; 1,596 remaining)
+- released against the Stage 1 baseline: `530` lines; `1,504` more lines are needed to reach the Stage 1 target of approximately `26,900`
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, and duplicate capability argument/error wrappers. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
