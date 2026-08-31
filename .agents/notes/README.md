@@ -23,7 +23,7 @@ Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 targe
 
 The six qualitative questions are collected in the repository [PR template](../../.github/pull_request_template.md). The CI workflow enforces the mechanical checks; reviewers enforce layer ownership, duplicate-path analysis, replacement-vs-addition reasoning, visible-surface impact, and boundary evidence.
 
-The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative CLI scenarios pass, with App Server 23/23 and CLI interactive 11/11 regression evidence. Cross-file refactoring, tool-failure recovery, and model/provider comparison remain explicitly open gaps.
+The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative CLI scenarios pass, with App Server 23/23 and CLI interactive 11/11 regression evidence. Cross-file refactoring, tool-failure recovery, model/provider comparison, and stable per-round Trace artifacts remain explicitly open gaps.
 
 ---
 

@@ -73,6 +73,25 @@ cargo test -p mini-agent-cli --test interactive <scenario> -- --exact
 11/11。App Server 测试覆盖 running turn 中的 cancel、steer、follow-up、
 Actor/CAS 和 settled checkpoint；CLI 场景覆盖真实前端到 App Server 的公共路径。
 
+#### 评审意见吸收与取舍（2026-08-31）
+
+外部审查建议增加可导出的 Trace、故障注入 Provider、长场景调度、量化
+Compaction、显式权限拒绝结果和 timeout/steer 并发证据。以下取舍作为下一
+迭代的前置准入项；它们不会把尚未实现的能力写成当前基线。
+
+| 评审建议 | 当前判断 | 下一迭代准入条件 |
+| :--- | :--- | :--- |
+| 每个 Round 导出 JSONL Trace 并记录哈希 | 接受目标，调整实现路径 | 复用现有 observation event、App Server 事件和 `session.jsonl`；先增加脱敏、bounded 的内部 JSONL 报告，至少包含 `trace_id`、`turn_id`、`round_index`、事件类型、工具清单/模型输入摘要哈希、字节计数和结果哈希。当前不重新引入已退役的外部 `--trace` 开关；基线在该能力完成前不声称拥有 Trace 文件哈希。 |
+| Fault Injection Provider | 接受，限定为测试设施 | 在 `Model`/Provider 适配边界增加 test-only 故障注入 double，覆盖畸形工具参数、缺少必要字段、部分流和 429/可重试错误；不增加生产 provider、不调用付费服务、不另起执行循环。 |
+| 超过 5 秒的场景移出日常 CI | 部分接受 | 5 秒是 CI 调度策略，不是运行时语义；只有经确认的确定性慢场景才允许显式 `#[ignore]`，并提供定时或手动命令。不能按一次机器墙钟测量自动改变门禁。 |
+| Compaction 在 70% 触发 | 暂不改变当前行为 | 当前实现和 `docs/limits.md` 的确定性触发点是最大上下文的 50%；下一场景在 70% 记录预警、最近 3 轮保留和压缩前后预算，只有证据证明 50% 不合适时才改阈值。 |
+| 权限失败返回 `permission_denied`，不能是空结果 | 接受验证要求，协议类型待决 | 当前 `ToolExecutionStatus` 没有专用 `PermissionDenied` 变体；下一次审批/沙箱变更必须断言非空、结构化的拒绝结果和后续模型可见内容，并先决定复用 `Failed` 的 bounded reason 还是增加公共枚举。 |
+| timeout 与 steer 并发时记录确定性优先级 | 接受 | 当前顺序明确为：Core 安全检查点先检查 cancel，再检查 steer；deadline 触发后 App Server 发送 interrupt、等待 `TurnFinished` 和 durable checkpoint，然后返回 timeout，不继续 drain 排队的 steer；普通已 settle batch 才按 steer 优先于 follow-up。修改该顺序前必须增加并发 race scenario。 |
+
+当前 baseline 的报告仍是测试断言、事件/Session 状态和墙钟耗时的可读记录，
+不是稳定的 Trace artifact；这正是下一迭代需要补齐的可观测性基础设施，而不是
+将 mock provider 的通过结果等同于真实模型质量。
+
 ### 3.2 把 6 项准入问题变成验证记录
 
 后续每个实践更新必须附下面的记录，不能只写“测试通过”：
@@ -119,6 +138,9 @@ Decision: accept | revise | defer
    no new model input, event type, persistence schema, or public protocol field;
    existing turn/interrupt is used, TurnFinished/checkpoint ordering is preserved,
    and only the existing goal state changes from running to failed after settlement.
+   Concurrent behavior is deterministic: Core checks cancel before steer at a safe
+   checkpoint; a deadline drains the interrupted turn and returns timeout without
+   consuming a queued steer; an ordinary settled batch consumes steer before follow-up.
 6. Boundary evidence:
    cargo test -p mini-agent-app-server (23 passed)
    cargo test -p mini-agent-cli --test interactive (11 passed)

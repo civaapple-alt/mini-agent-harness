@@ -53,6 +53,23 @@ If a change affects prompt, tool schema, loop-control, context, events, or
 persistence, public unit tests alone are not sufficient: add bounded Harness
 Scenario/Eval evidence as described in the next-iteration note.
 
+Additional harness-evidence rules:
+
+- Approval or sandbox changes must assert an explicit, non-empty structured
+  rejection result visible to the next model step; an absent tool or empty
+  string is not sufficient. If a dedicated `PermissionDenied` protocol status
+  does not exist, record the chosen bounded mapping and its compatibility impact.
+- Timeout, cancel, and steer changes must record the deterministic ordering when
+  controls race. Preserve safe-checkpoint settlement and durable checkpoint
+  ordering; do not infer priority from a flaky wall-clock observation.
+- Scenarios slower than five seconds are not automatically ignored. Only a
+  deterministic slow scenario may use an explicit `#[ignore]`, with a separate
+  scheduled or manual command documented beside it.
+- The retired external `--trace` path must not be restored as a shortcut. New
+  trace evidence must reuse existing observation events and Session records,
+  remain bounded and redacted, and state whether it is an internal artifact or
+  public protocol surface.
+
 ## Change test
 
 Before adding a core concept, identify:

@@ -278,6 +278,23 @@ scenarios pass, with App Server `23/23` and CLI interactive `11/11` regression
 coverage. Changes that affect prompt, tool schema, loop-control, context,
 events, or persistence must add scenario/eval evidence beyond unit tests.
 
+To rerun the baseline locally from the repository root (the first run may spend
+time compiling; warm-cache runs are intended to stay within a few minutes),
+capture a human-readable comparison report with:
+
+```powershell
+$report = ".agents/scratch/harness-baseline-$((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')).txt"
+New-Item -ItemType Directory -Force .agents/scratch | Out-Null
+cargo test -p mini-agent-cli --test interactive -- --test-threads=1 2>&1 |
+  Tee-Object -FilePath $report
+python scripts/line_budget.py 2>&1 | Tee-Object -FilePath $report -Append
+```
+
+The interactive target contains the 8 baseline scenarios plus 3 public CLI
+regressions. The report currently captures test output and the budget snapshot;
+stable per-round JSONL and trace hashes remain a tracked next-iteration task.
+Do not use a paid provider for this baseline.
+
 The line-budget report breaks Rust source down by the runtime layers: `core`,
   `protocol`, `capabilities`, `host`, `app-server`, and `cli`, followed by the enforced
   workspace total. `capabilities` is the separately reported provider
