@@ -7,11 +7,23 @@
 use crate::HostRuntime;
 use crate::RuntimeConfig;
 use crate::RuntimeProfile;
-use crate::harness_builder::prepare_openai_harness_with_profile_and_result_store_and_registry;
+use crate::harness_builder::prepare_harness_with_model_factory;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::CapabilityRegistry;
+use mini_agent_capabilities::ImageStore;
+use mini_agent_capabilities::ModelProviderSettings;
+use mini_agent_capabilities::OpenAiModel;
 use mini_agent_capabilities::ResultStore;
+use mini_agent_capabilities::build_model;
 use mini_agent_core::HarnessConfig;
+
+fn openai_model_factory(
+    provider_id: &str,
+    settings: ModelProviderSettings,
+    images: ImageStore,
+) -> Result<OpenAiModel, String> {
+    build_model(provider_id, settings, images).map_err(|error| error.to_string())
+}
 
 /// Builds a concrete host runtime for an App Server service boundary.
 ///
@@ -53,13 +65,14 @@ impl<'a> HostRuntimeFactory<'a> {
     ) -> Result<HostRuntime, String> {
         self.approval
             .set_read_only_agent(profile.agent.is_read_only());
-        prepare_openai_harness_with_profile_and_result_store_and_registry(
+        prepare_harness_with_model_factory(
             self.runtime_config,
             self.approval.clone(),
             self.config.clone(),
             profile,
             results,
             self.registry.clone(),
+            openai_model_factory,
         )
     }
 }

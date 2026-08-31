@@ -1,7 +1,6 @@
 use mini_agent_capabilities::CapabilityRegistry;
 use mini_agent_capabilities::ModelProviderSettings;
 use mini_agent_capabilities::OpenAiModel;
-use mini_agent_capabilities::build_model;
 use mini_agent_core::ContextLimitBehavior;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
@@ -63,33 +62,6 @@ where
     ) -> Result<M, String> {
         self(provider_id, settings, images)
     }
-}
-
-pub(crate) fn prepare_openai_harness_with_profile_and_result_store_and_registry(
-    runtime_config: &RuntimeConfig,
-    approval: ApprovalController,
-    config: HarnessConfig,
-    profile: RuntimeProfile,
-    results: ResultStore,
-    registry: CapabilityRegistry,
-) -> Result<HarnessBuild<OpenAiModel>, String> {
-    prepare_harness_with_profile_and_result_store_and_registry(
-        runtime_config,
-        approval,
-        config,
-        profile,
-        results,
-        registry,
-        openai_model_factory,
-    )
-}
-
-fn openai_model_factory(
-    provider_id: &str,
-    settings: ModelProviderSettings,
-    images: ImageStore,
-) -> Result<OpenAiModel, String> {
-    build_model(provider_id, settings, images).map_err(|error| error.to_string())
 }
 
 /// Builds a Host runtime with an embedding application's model provider.
