@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_support::{remove_test_root, test_root};
+use mini_agent_protocol::ToolExecutionStatus;
 use std::io::Cursor;
 
 #[test]
@@ -152,6 +153,38 @@ fn read_image_outside_workspace_can_be_denied() {
     assert!(error.0.contains("denied"), "{error:?}");
     remove_test_root(&root);
     remove_test_root(&pictures);
+}
+
+#[test]
+fn shell_denial_is_explicit_before_sandbox_execution() {
+    let root = test_root();
+    let marker = root.join("should-not-run.txt");
+    let marker_text = marker.to_string_lossy();
+    let command = if cfg!(windows) {
+        format!("Set-Content -LiteralPath '{marker_text}' -Value blocked")
+    } else {
+        format!("printf blocked > '{marker_text}'")
+    };
+    let workspace = Arc::new(
+        Workspace::with_read_roots(
+            root.clone(),
+            ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
+            Vec::new(),
+            SandboxKind::Docker,
+        )
+        .unwrap(),
+    );
+    let shell = Shell(workspace, ResultStore::default());
+
+    let outcome = shell.execute_outcome(&json!({"command": &command}));
+
+    assert_eq!(outcome.status, ToolExecutionStatus::Failed);
+    assert_eq!(
+        outcome.content,
+        format!("user denied: shell command `{command}`")
+    );
+    assert!(!marker.exists());
+    remove_test_root(&root);
 }
 
 #[test]

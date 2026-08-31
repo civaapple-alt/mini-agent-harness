@@ -171,11 +171,11 @@ fn approval_denial_prevents_server_start_and_data_creation() {
 
     assert!(loaded.tools.is_empty());
     assert!(loaded.loaded_servers.is_empty());
-    assert!(
-        loaded
-            .diagnostics
-            .iter()
-            .any(|message| message.contains("user denied"))
+    assert_eq!(
+        loaded.diagnostics,
+        vec![
+            "MCP server fixture.tools/fixture was not started: user denied: connect MCP server \"fixture.tools/fixture\""
+        ]
     );
     assert!(!plugin_data.exists());
     fs::remove_dir_all(root).unwrap();

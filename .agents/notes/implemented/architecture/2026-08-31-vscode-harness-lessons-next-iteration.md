@@ -252,6 +252,41 @@ Decision: accept
 Decision: accept
 ```
 
+#### Stage 3 本轮实践的六项验证：explicit MCP/sandbox refusal
+
+```text
+1. Layer: Capabilities
+   rationale: `mcp::load` 是 MCP server admission 边界，`workspace::Shell::execute`
+   是 shell policy 与 ProcessSandbox 之间的边界；本轮只验证拒绝结果和副作用，不改变
+   Core、Host、App Server 或 CLI 的执行路径。
+2. Duplicate responsibility:
+   searched `mcp_tests::approval_denial_prevents_server_start_and_data_creation`,
+   `workspace_tests::read_image_outside_workspace_can_be_denied`, the CLI non-TTY shell
+   scenario, and `Shell::execute_outcome`; MCP 的拒绝断言原先只有模糊文本匹配，sandbox
+   前的 shell 拒绝没有直接断言 structured status 和无副作用。
+3. Replace vs add:
+   保留现有 `ApprovalController`、`ToolExecutionOutcome`、MCP diagnostics 和 sandbox
+   construction；只收紧 MCP 的精确诊断断言，并增加一个 test-only shell marker fixture，
+   不新增 `PermissionDenied` 状态、审批路径或第二套 sandbox 执行器。
+4. Net line delta:
+   expected: runtime +0; all Rust +~40
+   actual: runtime 16,074 -> 16,074 (+0); all Rust 29,327 -> 29,360 (+33)
+   （Capabilities unit-test net +33）。
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. A denied MCP
+   connection produces no exposed tool, no loaded server, no plugin-data directory, and one
+   explicit bounded diagnostic. A denied shell produces the existing structured `Failed`
+   outcome with a non-empty reason before `run_shell`/ProcessSandbox is reached; Docker
+   availability and container-isolation semantics remain separate evidence gaps.
+6. Boundary evidence:
+   cargo test -p mini-agent-capabilities (64 passed)
+   cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings
+   cargo fmt --all
+   python scripts/line_budget.py
+
+Decision: accept
+```
+
 #### 阶段 2 本轮实践的六项验证：structured approval denial
 
 ```text
@@ -388,7 +423,8 @@ Decision: accept
 5. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
 6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
-后续仍需补充 CLI 自动接入 Trace 报告、HTTP 429 retry/backoff 策略、MCP/sandbox 拒绝和独立
-model/provider 对比场景；CLI public-path 的未知工具恢复、cross-file refactor 和 App Server 的
-NeedsApproval 拒绝已覆盖，但更完整的工具失败/超时/重试矩阵仍是证据缺口，
-不是当前实现的已覆盖能力。
+后续仍需补充 CLI 自动接入 Trace 报告、HTTP 429 retry/backoff 策略、实际 MCP call denial、
+Docker sandbox availability/isolation 和独立 model/provider 对比场景；CLI public-path 的
+未知工具恢复、cross-file refactor、MCP connection refusal、sandbox 前置拒绝和 App Server
+的 NeedsApproval 拒绝已覆盖，但更完整的工具失败/超时/重试矩阵仍是证据缺口，不是当前实现
+的已覆盖能力。

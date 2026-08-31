@@ -270,7 +270,7 @@ offset. Do not remove Core tests or Actor/CAS/Session authority merely to fit a
 line target.
 
 The current hard-budget snapshot is runtime `16,074 / 20,000` lines and all
-Rust source `29,327 / 30,000` lines. The approximate `26,900` Stage 1 target
+Rust source `29,360 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 
@@ -281,10 +281,11 @@ events, or persistence must add scenario/eval evidence beyond unit tests.
 
 The Stage 2 boundary evidence also includes a test-only fault-injection model
 and Responses parser/provider cases for malformed or missing tool arguments, partial
-model streams, retryable tool results, and bounded HTTP 429 API error classification
-without implicit retry. Provider-level retry/backoff policy remains open; CLI public-path
-unknown-tool recovery and a bounded cross-file refactor are now covered. Broader
-failure/retry matrices remain open follow-ups. The App Server public boundary also verifies
+model streams, retryable tool results, bounded HTTP 429 API error classification without
+implicit retry, MCP connection refusal, and shell refusal before sandbox execution. Provider-
+level retry/backoff policy, actual MCP call denial, and Docker sandbox availability/isolation
+remain open; CLI public-path unknown-tool recovery and a bounded cross-file refactor are now
+covered. Broader failure/retry matrices remain open follow-ups. The App Server public boundary also verifies
 that `NeedsApproval` results keep a non-empty reason in events, checkpoints,
 and the next model round.
 
