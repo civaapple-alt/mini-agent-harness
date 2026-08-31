@@ -438,11 +438,7 @@ where
         self.factory.is_some()
     }
 
-    /// Returns the settled checkpoint for the configured thread.
-    pub async fn thread_read(&self) -> Result<ThreadCheckpoint, AppServerError> {
-        self.thread_read_for(self.thread_id.clone()).await
-    }
-
+    /// Returns the settled checkpoint for a thread.
     pub async fn thread_read_for(
         &self,
         thread_id: ThreadId,
@@ -461,11 +457,7 @@ where
             .await
     }
 
-    /// Applies a host-side update after all earlier commands for this thread.
-    pub async fn thread_update(&self, update: ThreadUpdate) -> Result<(), AppServerError> {
-        self.thread_update_for(self.thread_id.clone(), update).await
-    }
-
+    /// Applies a host-side update after all earlier commands for a thread.
     pub async fn thread_update_for(
         &self,
         thread_id: ThreadId,
@@ -518,11 +510,7 @@ where
         .await
     }
 
-    /// Closes the configured thread after all active work has settled.
-    pub async fn thread_close(&self) -> Result<(), AppServerError> {
-        self.thread_close_for(self.thread_id.clone()).await
-    }
-
+    /// Closes a thread after all active work has settled.
     pub async fn thread_close_for(&self, thread_id: ThreadId) -> Result<(), AppServerError> {
         self.thread_close_action(thread_id)
             .await
@@ -625,10 +613,6 @@ where
     }
 
     /// Starts, steers, or queues a turn according to the typed input mode.
-    pub async fn turn_start(&self, request: TurnStart) -> Result<TurnSubmission, AppServerError> {
-        self.turn_start_for(self.thread_id.clone(), request).await
-    }
-
     pub async fn turn_start_for(
         &self,
         thread_id: ThreadId,
@@ -641,15 +625,6 @@ where
     }
 
     /// Steers the active turn when `turn_id` still identifies that turn.
-    pub async fn turn_steer(
-        &self,
-        turn_id: TurnId,
-        text: impl Into<String>,
-    ) -> Result<TurnSubmission, AppServerError> {
-        self.turn_steer_for(self.thread_id.clone(), turn_id, text)
-            .await
-    }
-
     pub async fn turn_steer_for(
         &self,
         thread_id: ThreadId,
@@ -682,10 +657,6 @@ where
     }
 
     /// Requests cooperative cancellation of the active turn.
-    pub async fn turn_cancel(&self, request: TurnCancel) -> Result<(), AppServerError> {
-        self.turn_cancel_for(self.thread_id.clone(), request).await
-    }
-
     pub async fn turn_cancel_for(
         &self,
         thread_id: ThreadId,

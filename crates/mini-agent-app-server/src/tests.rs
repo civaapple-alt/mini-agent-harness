@@ -112,10 +112,10 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
     let server = server(DoneModel);
     let mut events = server.subscribe();
     let submission = server
-        .turn_start(TurnStart::new(TurnInput::new(
-            TurnInputMode::Start,
-            "inspect",
-        )))
+        .turn_start_for(
+            ThreadId::new("thread-1"),
+            TurnStart::new(TurnInput::new(TurnInputMode::Start, "inspect")),
+        )
         .await
         .unwrap();
     let turn_id = match submission {
@@ -149,10 +149,10 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
     ));
 
     let second = server
-        .turn_start(TurnStart::new(TurnInput::new(
-            TurnInputMode::StartIfIdle,
-            "again",
-        )))
+        .turn_start_for(
+            ThreadId::new("thread-1"),
+            TurnStart::new(TurnInput::new(TurnInputMode::StartIfIdle, "again")),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -167,10 +167,16 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
 async fn applies_thread_updates_without_exposing_the_harness_to_clients() {
     let server = server(DoneModel);
     server
-        .thread_update(ThreadUpdate::AppendContext("host context".to_string()))
+        .thread_update_for(
+            ThreadId::new("thread-1"),
+            ThreadUpdate::AppendContext("host context".to_string()),
+        )
         .await
         .unwrap();
-    let checkpoint = server.thread_read().await.unwrap();
+    let checkpoint = server
+        .thread_read_for(ThreadId::new("thread-1"))
+        .await
+        .unwrap();
     assert_eq!(
         checkpoint.session.messages(),
         &[mini_agent_protocol::Message::Context {
@@ -179,12 +185,12 @@ async fn applies_thread_updates_without_exposing_the_harness_to_clients() {
     );
 
     server
-        .thread_update(ThreadUpdate::ClearHistory)
+        .thread_update_for(ThreadId::new("thread-1"), ThreadUpdate::ClearHistory)
         .await
         .unwrap();
     assert!(
         server
-            .thread_read()
+            .thread_read_for(ThreadId::new("thread-1"))
             .await
             .unwrap()
             .session
@@ -201,10 +207,10 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
     });
     let mut events = server.subscribe();
     let started = server
-        .turn_start(TurnStart::new(TurnInput::new(
-            TurnInputMode::Start,
-            "long task",
-        )))
+        .turn_start_for(
+            ThreadId::new("thread-1"),
+            TurnStart::new(TurnInput::new(TurnInputMode::Start, "long task")),
+        )
         .await
         .unwrap();
     let turn_id = match started {
@@ -218,27 +224,30 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
 
     assert_eq!(
         server
-            .turn_start(TurnStart::new(TurnInput::new(
-                TurnInputMode::FollowUp,
-                "later",
-            )))
+            .turn_start_for(
+                ThreadId::new("thread-1"),
+                TurnStart::new(TurnInput::new(TurnInputMode::FollowUp, "later")),
+            )
             .await
             .unwrap(),
         TurnSubmission::Queued
     );
     assert_eq!(
         server
-            .turn_start(TurnStart::new(TurnInput::new(
-                TurnInputMode::Steer,
-                "correct now",
-            )))
+            .turn_start_for(
+                ThreadId::new("thread-1"),
+                TurnStart::new(TurnInput::new(TurnInputMode::Steer, "correct now")),
+            )
             .await
             .unwrap(),
         TurnSubmission::Steered {
             turn_id: turn_id.clone()
         }
     );
-    server.turn_cancel(TurnCancel::new(turn_id)).await.unwrap();
+    server
+        .turn_cancel_for(ThreadId::new("thread-1"), TurnCancel::new(turn_id))
+        .await
+        .unwrap();
     release.notify_one();
 
     let mut statuses = Vec::new();
@@ -267,16 +276,19 @@ async fn rejects_idle_steer_and_cancel_without_starting_a_second_loop() {
     let server = server(DoneModel);
     assert_eq!(
         server
-            .turn_start(TurnStart::new(TurnInput::new(
-                TurnInputMode::Steer,
-                "invalid",
-            )))
+            .turn_start_for(
+                ThreadId::new("thread-1"),
+                TurnStart::new(TurnInput::new(TurnInputMode::Steer, "invalid")),
+            )
             .await,
         Err(AppServerError::InvalidInputMode(TurnInputMode::Steer))
     );
     assert_eq!(
         server
-            .turn_cancel(TurnCancel::new(mini_agent_protocol::TurnId::new("turn-1")))
+            .turn_cancel_for(
+                ThreadId::new("thread-1"),
+                TurnCancel::new(mini_agent_protocol::TurnId::new("turn-1")),
+            )
             .await,
         Err(AppServerError::NoActiveTurn)
     );
@@ -306,10 +318,10 @@ async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
 
     assert_eq!(
         server
-            .turn_start(TurnStart::new(TurnInput::new(
-                TurnInputMode::Start,
-                "second",
-            )))
+            .turn_start_for(
+                ThreadId::new("thread-1"),
+                TurnStart::new(TurnInput::new(TurnInputMode::Start, "second")),
+            )
             .await
             .unwrap(),
         TurnSubmission::Started {
