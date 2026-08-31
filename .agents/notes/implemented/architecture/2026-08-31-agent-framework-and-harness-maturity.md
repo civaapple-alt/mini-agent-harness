@@ -432,6 +432,8 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 
 这些不是当前“小批次无行为变化”准入项。因此当前状态是：阶段 1 目标尚未达到，但低风险释放阶段结束；阶段 2 开始做核心边界验收，阶段 3（恢复常规预算准入）尚未开始。
 
+阶段 2 的定向验收已通过：`cargo test -p mini-agent-core -p mini-agent-protocol -p mini-agent-app-server-protocol` 共通过 Core 28、Protocol 7、App Server Protocol 5；此前同轮的 App Server 23、Capabilities 61、Host 40 和 CLI binary 14 也通过。未运行需额外审批的完整 workspace 测试。CLI 集成用例 `goal_mode_timeout_is_deterministic_and_keeps_repl_alive` 仍是独立的既有时序失败，当前状态检查读到 `running` 而不是预期的 `failed`，不属于本轮边界变更。
+
 工程含义：
 
 1. 新增较大功能前应先删除重复抽象、兼容边缘和无效测试，按“净增行数”而不是新增文件大小做预算。

@@ -17,6 +17,8 @@ The latest maintenance batches removed repeated App Server action transport wrap
 
 The low-risk Stage 1 candidates are now exhausted. The remaining reduction candidates are intentional frontend facades, input-compatibility aliases, provider/protocol coverage, or larger state-boundary changes; they require an explicit design decision. Stage 2 therefore begins as a boundary review while the budget gates remain active. The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
 
+Stage 2 boundary checks currently pass for the Core, Protocol, App Server Protocol, App Server, Capabilities, Host, and CLI binary test targets. The full CLI integration target still has the known goal-timeout ordering failure recorded in the implementation note.
+
 ---
 
 ## 1. Multi-Level Directory Semantics & Layout
