@@ -155,6 +155,7 @@ pub use workflows::WorkflowService;
 mod worker;
 use action::ActionFailure;
 use action::ActionResponse;
+use action::ActionResult;
 use action::RuntimeRevision;
 use management::RuntimeActorState;
 use worker::{Command, worker_loop};
@@ -403,6 +404,20 @@ where
         Ok(())
     }
 
+    async fn request_action<T, F>(&self, build: F) -> Result<ActionResponse<T>, ActionFailure>
+    where
+        F: FnOnce(oneshot::Sender<ActionResult<T>>) -> Command,
+    {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(build(reply))
+            .await
+            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
+        response
+            .await
+            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
+    }
+
     pub fn thread_id(&self) -> &ThreadId {
         &self.thread_id
     }
@@ -442,14 +457,8 @@ where
         &self,
         thread_id: ThreadId,
     ) -> Result<ActionResponse<ThreadCheckpoint>, ActionFailure> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::ReadThread { thread_id, reply })
+        self.request_action(|reply| Command::ReadThread { thread_id, reply })
             .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
     }
 
     /// Applies a host-side update after all earlier commands for this thread.
@@ -473,18 +482,12 @@ where
         thread_id: ThreadId,
         update: ThreadUpdate,
     ) -> Result<ActionResponse<()>, ActionFailure> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::UpdateThread {
-                thread_id,
-                update,
-                reply,
-            })
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
+        self.request_action(|reply| Command::UpdateThread {
+            thread_id,
+            update,
+            reply,
+        })
+        .await
     }
 
     /// Reassigns a settled thread identity while keeping its service worker.
@@ -506,19 +509,13 @@ where
         new_thread_id: ThreadId,
         next_turn_number: u64,
     ) -> Result<ActionResponse<ThreadId>, ActionFailure> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::ResetThread {
-                thread_id,
-                new_thread_id,
-                next_turn_number,
-                reply,
-            })
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
+        self.request_action(|reply| Command::ResetThread {
+            thread_id,
+            new_thread_id,
+            next_turn_number,
+            reply,
+        })
+        .await
     }
 
     /// Closes the configured thread after all active work has settled.
@@ -537,14 +534,8 @@ where
         &self,
         thread_id: ThreadId,
     ) -> Result<ActionResponse<()>, ActionFailure> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::CloseThread { thread_id, reply })
+        self.request_action(|reply| Command::CloseThread { thread_id, reply })
             .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
     }
 
     pub async fn thread_start(&self, thread_id: ThreadId) -> Result<ThreadId, AppServerError> {
@@ -558,14 +549,8 @@ where
         &self,
         thread_id: ThreadId,
     ) -> Result<ActionResponse<ThreadId>, ActionFailure> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::CreateThread { thread_id, reply })
+        self.request_action(|reply| Command::CreateThread { thread_id, reply })
             .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
     }
 
     pub async fn thread_fork(
@@ -584,18 +569,12 @@ where
         source_thread_id: ThreadId,
         new_thread_id: ThreadId,
     ) -> Result<ActionResponse<ThreadId>, ActionFailure> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::ForkThread {
-                source_thread_id,
-                new_thread_id,
-                reply,
-            })
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
+        self.request_action(|reply| Command::ForkThread {
+            source_thread_id,
+            new_thread_id,
+            reply,
+        })
+        .await
     }
 
     pub async fn thread_resume(
@@ -614,18 +593,12 @@ where
         thread_id: ThreadId,
         checkpoint: ThreadCheckpoint,
     ) -> Result<ActionResponse<ThreadId>, ActionFailure> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::ResumeThread {
-                thread_id,
-                checkpoint,
-                reply,
-            })
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
+        self.request_action(|reply| Command::ResumeThread {
+            thread_id,
+            checkpoint,
+            reply,
+        })
+        .await
     }
 
     /// Returns a completed turn result retained by the service.
@@ -642,14 +615,8 @@ where
         &self,
         turn_id: TurnId,
     ) -> Result<ActionResponse<Option<SettledTurn>>, ActionFailure> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::ReadTurn { turn_id, reply })
+        self.request_action(|reply| Command::ReadTurn { turn_id, reply })
             .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
     }
 
     /// Subscribes to the ordered event stream emitted by the core Thread.
@@ -705,19 +672,13 @@ where
         request: TurnStart,
         expected_turn_id: Option<TurnId>,
     ) -> Result<ActionResponse<TurnSubmission>, ActionFailure> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::Start {
-                thread_id,
-                request,
-                expected_turn_id,
-                reply,
-            })
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
+        self.request_action(|reply| Command::Start {
+            thread_id,
+            request,
+            expected_turn_id,
+            reply,
+        })
+        .await
     }
 
     /// Requests cooperative cancellation of the active turn.
@@ -741,17 +702,11 @@ where
         thread_id: ThreadId,
         request: TurnCancel,
     ) -> Result<ActionResponse<()>, ActionFailure> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::Cancel {
-                thread_id,
-                request,
-                reply,
-            })
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
+        self.request_action(|reply| Command::Cancel {
+            thread_id,
+            request,
+            reply,
+        })
+        .await
     }
 }
