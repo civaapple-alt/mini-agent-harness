@@ -2,7 +2,9 @@ use crate::result_store::ResultStore;
 use crate::sandbox::ProcessSandbox;
 use crate::sandbox::SandboxKind;
 use crate::workspace::ApprovalController;
+use crate::workspace::io_error;
 use crate::workspace::shell_command;
+use crate::workspace::string_arg;
 use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolError;
 use mini_agent_protocol::ToolSpec;
@@ -449,23 +451,12 @@ fn status_text(code: Option<i32>, fallback: &str) -> String {
     code.map_or_else(|| fallback.to_string(), |code| format!("exited({code})"))
 }
 
-fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, ToolError> {
-    arguments
-        .get(name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| ToolError(format!("{name} must be a string")))
-}
-
 fn process_id(arguments: &Value) -> Result<u64, ToolError> {
     arguments
         .get("process_id")
         .and_then(Value::as_u64)
         .filter(|id| *id > 0)
         .ok_or_else(|| ToolError("process_id must be a positive integer".to_string()))
-}
-
-fn io_error(error: std::io::Error) -> ToolError {
-    ToolError(error.to_string())
 }
 
 #[cfg(test)]

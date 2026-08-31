@@ -384,11 +384,25 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 截至本次整理：
 
 1. **阶段 0：临时冻结——已执行**。本轮没有新增能力，只做重复测试支持、重复请求构造和无行为变化的运行时分支收敛。
-2. **阶段 1：先释放全局预算——进行中**。相对本次整理前的 28,934 行，已释放 462 行；当前仍需继续形成足够的维护余量，不能恢复常规扩展节奏。
+2. **阶段 1：先释放全局预算——进行中**。相对本次整理前的 28,934 行，已释放 471 行；当前仍需继续形成足够的维护余量，不能恢复常规扩展节奏。
 3. **阶段 2：保护核心边界——作为施工约束执行，尚未单独验收**。Core loop、硬限制、协议边界、App Server Actor/CAS、Session 持久化和被动事件观察仍保持不变。
 4. **阶段 3：恢复预算门禁——尚未开始**。20,000/30,000 行上限持续生效，没有放宽预算；待阶段 1、2 完成后再恢复正常功能准入。
 
 当前每个变更至少需要说明：删除或替换的旧概念、净行数影响、是否触及 Core/Protocol/Actor/Session 边界，以及对应的定向测试和 `python scripts/line_budget.py` 结果。
+
+### 最近一批生产包装审计
+
+本轮审计范围限定为 `mini-agent-capabilities` 与 `mini-agent-app-server` 的生产代码：
+
+| 区域 | 已处理 | 结果 | 边界判断 |
+| :--- | :--- | :--- | :--- |
+| App Server action transport | 9 个 action 方法重复创建 oneshot、发送命令、处理 worker 断连并等待响应 | 收敛为私有 `request_action`，不同命令和错误语义仍保持独立；净释放 45 行 | 不改变 Actor 排队、CAS/revision 或 Session 语义 |
+| Capabilities tool helpers | `processes` 重复实现 `string_arg` 与 `io_error` | 复用 `workspace` 的既有辅助函数；净释放 9 行 | 不改变审批、沙箱、进程生命周期或 Result Store |
+| `SandboxKind` / `SecurityPreset` 字符串入口 | `as_str` 是 `name` 的公共别名；Host 仍有调用，且属于 crate 公共 API | 暂缓删除，先保留兼容入口 | 需要单独 API 决策，不为释放少量行数破坏 embedding 面 |
+| MCP / profile 配置别名 | `parse` 中的旧拼写和 transport 字段别名属于输入兼容 | 暂缓删除 | 删除会改变已有配置行为，保留并纳入后续兼容策略 |
+| App Server frontend/runtime 便捷包装 | CLI/embedding 使用的 facade、profile、approval 和 runtime 转换入口 | 暂缓删除 | 这些是有意的依赖边界，不是内部重复执行逻辑 |
+
+本批验证：`cargo test -p mini-agent-capabilities`（63 passed）、`cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings`、`python scripts/line_budget.py` 均通过。累计阶段 1 释放量按门禁脚本从 462 行更新为 471 行；本批不删除 Core 核心测试，也不移动 Actor/CAS/Session 边界。
 
 工程含义：
 

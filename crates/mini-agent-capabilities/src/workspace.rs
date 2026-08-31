@@ -327,6 +327,6 @@ pub(crate) fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str
         .ok_or_else(|| ToolError(format!("{name} must be a string")))
 }
 
-fn io_error(error: io::Error) -> ToolError {
+pub(crate) fn io_error(error: io::Error) -> ToolError {
     ToolError(error.to_string())
 }

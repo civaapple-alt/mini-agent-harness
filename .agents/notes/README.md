@@ -5,6 +5,20 @@ This directory records architectural decision records (ADRs), technology selecti
 
 ---
 
+## Current Maintenance Gate (2026-08-31)
+
+The line-budget release work is in **Stage 1: release global budget**, with the hard gates still active:
+
+- runtime (`core + protocol + host + app-server`): `15,367 / 20,000` lines (76.8%; 4,633 remaining)
+- all Rust source: `28,463 / 30,000` lines (94.9%; 1,537 remaining)
+- released against the Stage 1 baseline: `471` lines
+
+The latest maintenance batches removed repeated App Server action transport wrapping and shared duplicate capability argument/error wrappers. Core tests and the Actor/CAS/Session boundaries remain protected. Public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
+
+The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
+
+---
+
 ## 1. Multi-Level Directory Semantics & Layout
 
 Every Agent Note has two orthogonal axes encoded directly in its file path: `{lifecycle}/{class}/yyyy-mm-dd-topic-title.md`.
@@ -138,7 +152,7 @@ If a proposed approach is rejected during review:
 | 2026-08-27 | [web_fetch / read_image session impact](implemented/architecture/2026-08-27-web-fetch-and-read-image-session-impact.md) | Envelope-only history; resume/fork attachments; compact empty tools; prefix-cache misses |
 | 2026-08-28 | [Interactive Steer and Follow-up Run Control](implemented/architecture/2026-08-28-steer-and-follow-up-run-control.md) | `/steer` priority correction, FIFO follow-up queue, cooperative safe checkpoints, and durable `steered` turns |
 | 2026-08-28 | [Host Capability Profiles and Runtime Seams](implemented/architecture/2026-08-28-host-capability-profiles-and-runtime-seams.md) | CLI/App Server/ACP profile selection, regular-agent prompt/rule scope, bounded manifests, startup profile resolution, and selected MCP loading |
-| 2026-08-31 | [Agent Framework 与 Harness 成熟度分析](implemented/architecture/2026-08-31-agent-framework-and-harness-maturity.md) | mini-agent-harness 与 Codex 原生框架的分层、Turn/Step 流程、steering 边界、硬限制与成熟度评估；当前 runtime 76.8%、全 Rust 94.9% |
+| 2026-08-31 | [Agent Framework 与 Harness 成熟度分析](implemented/architecture/2026-08-31-agent-framework-and-harness-maturity.md) | mini-agent-harness 与 Codex 原生框架的分层、Turn/Step 流程、steering 边界、硬限制、成熟度评估与行数门禁推进 |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |
