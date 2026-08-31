@@ -1,6 +1,9 @@
 use super::AppServer;
+use super::AppServerConnection;
 use super::AppServerError;
 use super::ApprovalBroker;
+use super::JsonlTrace;
+use super::LocalAppServerClient;
 use super::ThreadUpdate;
 use super::worker::Command;
 use mini_agent_core::Harness;
@@ -19,6 +22,7 @@ use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnStart;
 use mini_agent_protocol::TurnSubmission;
+use serde_json::from_str;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -161,6 +165,38 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
             turn_id: mini_agent_protocol::TurnId::new("turn-2")
         }
     );
+}
+
+#[tokio::test]
+async fn local_client_exports_bounded_redacted_trace() {
+    let server = server(DoneModel);
+    let mut client = LocalAppServerClient::new(AppServerConnection::new(server));
+    client.initialize("trace-test", "0").await.unwrap();
+    let mut bytes = Vec::new();
+    let mut trace = JsonlTrace::new("trace-1", &mut bytes).unwrap();
+
+    client
+        .run_turn_batch("secret prompt", &mut trace)
+        .await
+        .unwrap();
+    let _ = trace.finish().unwrap();
+
+    let output = String::from_utf8(bytes).unwrap();
+    assert!(!output.contains("secret prompt"));
+    let records = output
+        .lines()
+        .map(|line| from_str::<super::TraceRecord>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert!(records.iter().any(|record| record.event == "model_started"));
+    let model_started = records
+        .iter()
+        .find(|record| record.event == "model_started")
+        .unwrap();
+    assert_eq!(model_started.round_index, 1);
+    assert!(model_started.input_bytes.is_some());
+    assert!(model_started.input_hash.is_some());
+    assert!(model_started.tool_manifest_hash.is_some());
+    assert!(records.iter().any(|record| record.event == "turn_finished"));
 }
 
 #[tokio::test]

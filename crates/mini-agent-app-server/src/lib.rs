@@ -131,6 +131,7 @@ pub mod management;
 pub mod runtime;
 mod runtime_actor;
 mod runtime_command;
+pub mod trace;
 pub mod verifier;
 mod workflows;
 
@@ -150,6 +151,7 @@ pub use runtime::{
     AppServerRuntime, McpRetryResult, RuntimeSessionInfo, RuntimeStartOptions, RuntimeTurnBatch,
     RuntimeTurnResult, SessionRequest,
 };
+pub use trace::{JsonlTrace, TraceRecord};
 pub use workflows::WorkflowService;
 
 mod worker;

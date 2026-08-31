@@ -68,10 +68,11 @@ cargo test -p mini-agent-cli --test interactive <scenario> -- --exact
 
 本批 8/8 通过。该 baseline 已证明现有公共路径可承载第一轮 harness evidence；跨文件重构、工具失败恢复、MCP/approval/sandbox 拒绝和独立的 model/provider 对比仍是待补场景，不将它们伪装成已覆盖。
 
-同日回归也通过：`cargo test -p mini-agent-app-server` 为 23/23，
+同日回归也通过：`cargo test -p mini-agent-app-server` 为 28/28，
 `cargo test -p mini-agent-cli --test interactive -- --test-threads=1` 为
 11/11。App Server 测试覆盖 running turn 中的 cancel、steer、follow-up、
-Actor/CAS 和 settled checkpoint；CLI 场景覆盖真实前端到 App Server 的公共路径。
+Actor/CAS、settled checkpoint 和 bounded JSONL Trace；CLI 场景覆盖真实
+前端到 App Server 的公共路径。
 
 #### 评审意见吸收与取舍（2026-08-31）
 
@@ -81,16 +82,16 @@ Compaction、显式权限拒绝结果和 timeout/steer 并发证据。以下取�
 
 | 评审建议 | 当前判断 | 下一迭代准入条件 |
 | :--- | :--- | :--- |
-| 每个 Round 导出 JSONL Trace 并记录哈希 | 接受目标，调整实现路径 | 复用现有 observation event、App Server 事件和 `session.jsonl`；先增加脱敏、bounded 的内部 JSONL 报告，至少包含 `trace_id`、`turn_id`、`round_index`、事件类型、工具清单/模型输入摘要哈希、字节计数和结果哈希。当前不重新引入已退役的外部 `--trace` 开关；基线在该能力完成前不声称拥有 Trace 文件哈希。 |
+| 每个 Round 导出 JSONL Trace 并记录哈希 | 已实现本地诊断 API | `mini_agent_app_server::JsonlTrace` 复用 App Server 事件，记录 `trace_id`、`turn_id`、`round_index`、事件类型、完整 bounded model-input 哈希、工具 manifest 哈希、字节计数和 payload 哈希；原始 prompt、工具参数和结果不写入。当前不重新引入已退役的外部 `--trace` 开关；CLI 便捷入口仍需单独评估。 |
 | Fault Injection Provider | 接受，限定为测试设施 | 在 `Model`/Provider 适配边界增加 test-only 故障注入 double，覆盖畸形工具参数、缺少必要字段、部分流和 429/可重试错误；不增加生产 provider、不调用付费服务、不另起执行循环。 |
 | 超过 5 秒的场景移出日常 CI | 部分接受 | 5 秒是 CI 调度策略，不是运行时语义；只有经确认的确定性慢场景才允许显式 `#[ignore]`，并提供定时或手动命令。不能按一次机器墙钟测量自动改变门禁。 |
 | Compaction 在 70% 触发 | 暂不改变当前行为 | 当前实现和 `docs/limits.md` 的确定性触发点是最大上下文的 50%；下一场景在 70% 记录预警、最近 3 轮保留和压缩前后预算，只有证据证明 50% 不合适时才改阈值。 |
 | 权限失败返回 `permission_denied`，不能是空结果 | 接受验证要求，协议类型待决 | 当前 `ToolExecutionStatus` 没有专用 `PermissionDenied` 变体；下一次审批/沙箱变更必须断言非空、结构化的拒绝结果和后续模型可见内容，并先决定复用 `Failed` 的 bounded reason 还是增加公共枚举。 |
 | timeout 与 steer 并发时记录确定性优先级 | 接受 | 当前顺序明确为：Core 安全检查点先检查 cancel，再检查 steer；deadline 触发后 App Server 发送 interrupt、等待 `TurnFinished` 和 durable checkpoint，然后返回 timeout，不继续 drain 排队的 steer；普通已 settle batch 才按 steer 优先于 follow-up。修改该顺序前必须增加并发 race scenario。 |
 
-当前 baseline 的报告仍是测试断言、事件/Session 状态和墙钟耗时的可读记录，
-不是稳定的 Trace artifact；这正是下一迭代需要补齐的可观测性基础设施，而不是
-将 mock provider 的通过结果等同于真实模型质量。
+当前 baseline 已有稳定的本地 JSONL Trace artifact；README 中的快捷命令仍只捕获
+测试输出和预算快照，尚未自动把 `JsonlTrace` 接入 CLI 基线报告。Trace 只用于证明
+事件/输入摘要变化，不将 mock provider 的通过结果等同于真实模型质量。
 
 ### 3.2 把 6 项准入问题变成验证记录
 
@@ -151,6 +152,38 @@ Decision: accept | revise | defer
 Decision: accept
 ```
 
+#### 本轮实践的六项验证：bounded JSONL Trace
+
+```text
+1. Layer: Core + Protocol + App Server
+   rationale: Core 在 ModelStarted 生成输入和工具 manifest 摘要；Protocol 只承载
+   Rust 内部诊断字段并通过 serde(skip) 保持 wire shape；App Server 提供本地 JSONL sink。
+2. Duplicate responsibility:
+   searched EventSink/EventEnvelope、App Server LocalAppServerClient、Host RunObserver、
+   session.jsonl 和历史 --trace/trace replay 路径；没有现行的 bounded round exporter。
+3. Replace vs add:
+   复用现有 EventEnvelope/EventSink 和 App Server turn drain；新增 JsonlTrace 只是
+   被动事件 sink，不新增 event loop、Session authority、外部 --trace 开关或第二条执行路径。
+4. Net line delta:
+   expected: runtime +~380; all Rust +~380
+   actual: runtime 15,286 -> 15,667 (+381); all Rust 28,306 -> 28,687 (+381)
+5. Visible surface:
+   no JSON-RPC wire shape or model-visible input changed. Existing ModelStarted carries
+   Rust-only input_bytes/input_hash/tool_manifest_hash with serde(skip). The local trace
+   exposes only bounded hashes/counts and event metadata; each record is capped at 8 KiB,
+   and raw prompt/tool/result payloads are omitted. JsonlTrace/TraceRecord are a local
+   App Server Rust API, not a public protocol method.
+6. Boundary evidence:
+   cargo test -p mini-agent-app-server (28 passed)
+   cargo test -p mini-agent-core (28 passed)
+   cargo test -p mini-agent-protocol (7 passed)
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo fmt --all
+   python scripts/line_budget.py
+
+Decision: accept
+```
+
 ### 3.3 评估自动化的顺序
 
 自动化按以下顺序推进：
@@ -180,4 +213,5 @@ Decision: accept
 4. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
 5. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
-后续仍需补充跨文件重构、工具失败恢复、MCP/approval/sandbox 拒绝和独立 model/provider 对比场景；这些是证据缺口，不是当前实现的已覆盖能力。
+后续仍需补充 CLI 自动接入 Trace 报告、跨文件重构、工具失败恢复、MCP/approval/sandbox
+拒绝和独立 model/provider 对比场景；这些是证据缺口，不是当前实现的已覆盖能力。

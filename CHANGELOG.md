@@ -26,15 +26,18 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   change affects prompt, tool schema, loop-control, context, events, or
   persistence; public unit tests alone are not sufficient for those changes.
 - Added the first bounded harness scenario baseline: 8 representative CLI
-  scenarios pass, backed by App Server 23/23 and CLI interactive 11/11
+  scenarios pass, backed by App Server 28/28 and CLI interactive 11/11
   regression evidence. Cross-file refactoring, tool-failure recovery, and
   provider comparison remain tracked as follow-up gaps.
+- Added the local App Server `JsonlTrace` sink and redacted JSONL records with
+  bounded model-input, tool-manifest, event-payload, and output-size metadata;
+  the JSON-RPC wire shape and retired external `--trace` path remain unchanged.
 - Added a local baseline rerun/report recipe and recorded the next-iteration
   evidence decisions for bounded JSONL Trace export, test-only fault injection,
   slow-scenario scheduling, Compaction measurement, structured permission
   rejection, and timeout/steer race ordering. The retired external `--trace`
   path and current 50% Compaction trigger remain unchanged.
-- Documented the current budget snapshot (`15,286` runtime lines and `28,306`
+- Documented the current budget snapshot (`15,667` runtime lines and `28,687`
   total Rust lines) in the README and Agent Notes.
 
 ### Fixed

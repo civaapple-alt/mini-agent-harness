@@ -269,12 +269,13 @@ test evidence. New code defaults to net-zero growth or must name an explicit
 offset. Do not remove Core tests or Actor/CAS/Session authority merely to fit a
 line target.
 
-The current hard-budget snapshot is runtime `15,286 / 20,000` lines and all
-Rust source `28,306 / 30,000` lines. The approximate `26,900` Stage 1 target
-is optimization debt rather than a reason to delete protected behavior.
+The current hard-budget snapshot is runtime `15,667 / 20,000` lines and all
+Rust source `28,687 / 30,000` lines. The approximate `26,900` Stage 1 target
+is currently exceeded and remains optimization debt rather than a reason to
+delete protected behavior.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
-scenarios pass, with App Server `23/23` and CLI interactive `11/11` regression
+scenarios pass, with App Server `28/28` and CLI interactive `11/11` regression
 coverage. Changes that affect prompt, tool schema, loop-control, context,
 events, or persistence must add scenario/eval evidence beyond unit tests.
 
@@ -291,8 +292,10 @@ python scripts/line_budget.py 2>&1 | Tee-Object -FilePath $report -Append
 ```
 
 The interactive target contains the 8 baseline scenarios plus 3 public CLI
-regressions. The report currently captures test output and the budget snapshot;
-stable per-round JSONL and trace hashes remain a tracked next-iteration task.
+regressions. The App Server also exposes `JsonlTrace` for local callers; it
+writes bounded, redacted per-round JSONL with input, tool-manifest, and payload
+hashes. The shortcut above currently captures test output and the budget
+snapshot only; automatic CLI Trace wiring remains a tracked next-iteration task.
 Do not use a paid provider for this baseline.
 
 The line-budget report breaks Rust source down by the runtime layers: `core`,

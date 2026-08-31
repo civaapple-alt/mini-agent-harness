@@ -12,6 +12,8 @@ use std::fmt;
 
 use crate::SessionState;
 use crate::context::context_bytes_for;
+use crate::context::model_input_digest;
+use crate::context::tool_manifest_digest;
 use crate::context_controller::COMPACTION_PROMPT;
 use crate::context_controller::assemble_compacted;
 use crate::context_controller::mechanical_compact;
@@ -313,7 +315,16 @@ impl<M: Model> Harness<M> {
                 ));
             }
             self.prepare_context(&tool_specs, observer).await?;
-            observer.observe(&Event::ModelStarted { step });
+            observer.observe(&Event::ModelStarted {
+                step,
+                input_bytes: self.context_bytes(&self.config.system_prompt, &tool_specs),
+                input_hash: model_input_digest(
+                    &self.config.system_prompt,
+                    self.session.messages(),
+                    &tool_specs,
+                ),
+                tool_manifest_hash: tool_manifest_digest(&tool_specs),
+            });
             let mut model_events = ModelEventForwarder {
                 observer,
                 emitted_bytes: 0,

@@ -61,3 +61,27 @@ pub(crate) fn context_bytes_for(
             .expect("tool specs must serialize")
             .len()
 }
+
+pub(crate) fn model_input_digest(
+    system_prompt: &str,
+    messages: &[Message],
+    tool_specs: &[ToolSpec],
+) -> String {
+    let input = serde_json::to_vec(&(system_prompt, messages, tool_specs))
+        .expect("model input must serialize");
+    stable_digest(&input)
+}
+
+pub(crate) fn tool_manifest_digest(tool_specs: &[ToolSpec]) -> String {
+    let manifest = serde_json::to_vec(tool_specs).expect("tool manifest must serialize");
+    stable_digest(&manifest)
+}
+
+fn stable_digest(bytes: &[u8]) -> String {
+    let mut hash = 14_695_981_039_346_656_037u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(1_099_511_628_211);
+    }
+    format!("fnv1a64-{hash:016x}")
+}

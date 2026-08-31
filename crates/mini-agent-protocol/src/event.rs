@@ -22,6 +22,15 @@ pub enum Event {
     },
     ModelStarted {
         step: usize,
+        /// Rust-only diagnostic metadata; omitted from protocol serialization.
+        #[serde(skip)]
+        input_bytes: usize,
+        /// Digest of the complete bounded model input assembled for this round.
+        #[serde(skip)]
+        input_hash: String,
+        /// Digest of the bounded tool manifest supplied for this round.
+        #[serde(skip)]
+        tool_manifest_hash: String,
     },
     AssistantReasoningDelta {
         delta: String,
