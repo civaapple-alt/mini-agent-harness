@@ -1,12 +1,20 @@
-# Real LLM Scenario Runner
+# Historical Real LLM Scenario Runner
 
-Status: implemented
+Status: historical — runner removed from the current mainline
+
+## Current status update (2026-08-31)
+
+The manual runner described below was removed when non-mainline experiments were
+retired. The current workspace has no `crates/mini-agent-cli/examples/real_llm.rs`
+entry point, so this note preserves the former bounded real-provider contract and
+its evidence expectations only. No paid-provider run is implied by this historical
+record; the current next-iteration note tracks real-provider evidence as open.
 
 ## Decision
 
-Real-provider checks live in the manual example
-crates/mini-agent-cli/examples/real_llm.rs rather than in the default test
-suite. The runner requires an explicit --allow-paid acknowledgement and
+At the time of this design, real-provider checks lived in the manual example
+`crates/mini-agent-cli/examples/real_llm.rs` rather than in the default test
+suite. That runner required an explicit `--allow-paid` acknowledgement and
 supports nine bounded scenarios:
 
 - text: one request for authentication, streaming, and final-text parsing;

@@ -41,6 +41,6 @@ Successful stop reasons are `Completed`, `StepLimit`, `Steered`, and `Cancelled`
 - `mini-agent-protocol/src/event.rs`: event and envelope contracts.
 - `mini-agent-protocol/src/turn.rs`: turn input, status, and submission contracts.
 - `mini-agent-app-server/src/lib.rs`: serialized control-plane worker and event broadcast.
-- `mini-agent-host/src/session.rs`: append-only session and checkpoint storage.
+- `mini-agent-capabilities/src/session.rs`: append-only session and checkpoint storage.
 - `mini-agent-host/src/result_store.rs`: session-backed result handles.
 - `mini-agent-cli/src/repl.rs`: interactive worker, input routing, and settled persistence.

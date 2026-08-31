@@ -216,7 +216,7 @@ If a proposed approach is rejected during review:
 #### Testing (`implemented/testing/`)
 | Date | Title | Focus |
 |---|---|---|
-| 2026-08-27 | [Real LLM Scenario Runner](implemented/testing/2026-08-27-real-llm-scenario-runner.md) | Explicit real-provider scenarios with request, output, and wall-time budgets |
+| 2026-08-27 | [Historical Real LLM Scenario Runner](implemented/testing/2026-08-27-real-llm-scenario-runner.md) | Retired bounded real-provider scenario contract; current real-provider evidence remains an explicit open gate |
 
 ---
 

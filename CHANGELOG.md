@@ -71,6 +71,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Repaired documentation links after note consolidation, including the PR
   template and moved Core/Host/Capabilities/App Server source paths; historical
   deleted implementation paths are no longer presented as live links.
+- Marked the retired Real LLM scenario runner as historical and corrected the
+  remaining event-loop note to the current session-storage path; no paid-provider
+  behavior was added.
 - Added opt-in CLI Trace export through `ask --trace-jsonl PATH`: it creates a new
   file, emits only bounded redacted event metadata, caps each record at 8 KiB and
   the artifact at 256 KiB, and fails on overwrite or finalization errors. CLI public
