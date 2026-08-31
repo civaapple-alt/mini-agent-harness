@@ -338,14 +338,6 @@ where
             .flatten()
     }
 
-    pub async fn thread_id(&self) -> ThreadId {
-        self.connection.thread_id().await
-    }
-
-    pub fn into_connection(self) -> AppServerConnection<M> {
-        self.connection
-    }
-
     pub async fn workflow_state(&mut self) -> Result<WorkflowState, JsonRpcError> {
         self.call(METHOD_WORKFLOW_STATE, serde_json::json!({}))
             .await

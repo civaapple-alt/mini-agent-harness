@@ -89,7 +89,6 @@ pub struct McpRetryResult {
 /// A provider-backed App Server plus the host state needed by local clients.
 pub struct AppServerRuntime<M: Model = OpenAiModel> {
     client: LocalAppServerClient<M>,
-    images: ImageStore,
     model_name: String,
     stable_system_prompt: String,
     capability_manifest: CapabilityManifest,
@@ -236,7 +235,6 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             .map_err(|error| format!("cannot initialize app server: {}", error.message))?;
         Ok(AppServerRuntime {
             client,
-            images,
             model_name,
             stable_system_prompt,
             capability_manifest,
@@ -249,16 +247,8 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         &mut self.client
     }
 
-    pub fn images(&self) -> &ImageStore {
-        &self.images
-    }
-
     pub fn model_name(&self) -> &str {
         &self.model_name
-    }
-
-    pub async fn thread_id(&self) -> ThreadId {
-        self.client.thread_id().await
     }
 
     pub fn stable_system_prompt(&self) -> &str {
