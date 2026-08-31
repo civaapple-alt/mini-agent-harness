@@ -53,6 +53,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   its call; denied shell commands retain a structured `Failed` reason before
   sandbox execution, with no marker side effect. Docker availability and
   isolation remain open.
+- Audited the Docker sandbox smoke test: it remains a non-authoritative
+  preflight/clear-error check because a present Docker CLI does not prove daemon
+  availability or container isolation; no environment-coupled test was added.
 - Added a local baseline rerun/report recipe and recorded the next-iteration
   evidence decisions for bounded JSONL Trace export, test-only fault injection,
   slow-scenario scheduling, Compaction measurement, structured permission

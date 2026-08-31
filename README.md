@@ -283,7 +283,8 @@ The Stage 2 boundary evidence also includes a test-only fault-injection model
 and Responses parser/provider cases for malformed or missing tool arguments, partial
 model streams, retryable tool results, bounded HTTP 429 API error classification without
 implicit retry, MCP connection refusal, and shell refusal before sandbox execution. Provider-
-level retry/backoff policy and Docker sandbox availability/isolation remain open; CLI public-
+level retry/backoff policy and Docker sandbox availability/isolation remain open; the Docker
+smoke test only covers preflight/clear-error behavior and is not isolation proof. CLI public-
 path unknown-tool recovery, MCP connection/call refusal, and a bounded cross-file refactor are
 now covered. Broader failure/retry matrices remain open follow-ups. The App Server public boundary also verifies
 that `NeedsApproval` results keep a non-empty reason in events, checkpoints,

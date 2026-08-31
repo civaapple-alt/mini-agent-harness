@@ -287,6 +287,35 @@ Decision: accept
 Decision: accept
 ```
 
+#### Stage 3 审计结论：Docker sandbox availability/isolation
+
+```text
+1. Layer: Capabilities
+   rationale: `workspace::run_shell` owns Docker preflight and process execution; this audit
+   checks the existing sandbox boundary without changing its runtime contract.
+2. Duplicate responsibility:
+   searched `workspace_tests::docker_sandbox_checks_availability_or_reports_clear_error` and
+   `workspace::shell::run_shell`; there is no deterministic cross-platform Docker daemon or
+   container-isolation fixture in the repository.
+3. Replace vs add:
+   保留现有 Docker smoke test，不添加依赖本机 daemon、镜像缓存或宿主机文件布局的测试，
+   也不增加新的 sandbox abstraction。`docker --version` 只能证明 CLI 存在。
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,074 -> 16,074 (+0); all Rust 29,369 -> 29,369 (+0)
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. The existing smoke
+   test accepts either the explicit preflight-unavailable error or a bounded command result;
+   a missing Docker API can appear as an exit-1 stderr result, so this is not isolation proof.
+6. Boundary evidence:
+   `docker --version` succeeded on this host; the existing
+   `docker_sandbox_checks_availability_or_reports_clear_error` test passed; `python
+   scripts/line_budget.py` passed. Cross-platform daemon availability and container isolation
+   remain deferred until a controlled test seam or CI capability is available.
+
+Decision: defer
+```
+
 #### Stage 3 本轮实践的六项验证：MCP call denial
 
 ```text
