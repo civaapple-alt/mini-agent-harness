@@ -29,10 +29,6 @@ impl SandboxKind {
             Self::Docker => "docker",
         }
     }
-
-    pub fn as_str(self) -> &'static str {
-        self.name()
-    }
 }
 
 impl std::fmt::Display for SandboxKind {
@@ -223,7 +219,6 @@ mod tests {
         assert_eq!(SandboxKind::parse("native").unwrap(), SandboxKind::Native);
         assert_eq!(SandboxKind::parse("none").unwrap(), SandboxKind::None);
         assert_eq!(SandboxKind::parse("docker").unwrap(), SandboxKind::Docker);
-        assert_eq!(SandboxKind::Native.name(), "native");
         assert!(SandboxKind::parse("invalid").is_err());
     }
 

@@ -30,10 +30,6 @@ impl SecurityPreset {
             Self::Custom => "custom",
         }
     }
-
-    pub fn as_str(self) -> &'static str {
-        self.name()
-    }
 }
 
 impl std::fmt::Display for SecurityPreset {
@@ -280,7 +276,6 @@ mod tests {
             SecurityPreset::parse("custom").unwrap(),
             SecurityPreset::Custom
         );
-        assert_eq!(SecurityPreset::Default.name(), "default");
         assert!(SecurityPreset::parse("invalid").is_err());
     }
 

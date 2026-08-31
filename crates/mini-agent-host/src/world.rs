@@ -112,7 +112,7 @@ impl WorldState {
         context.push_str("\" approval=\"");
         context.push_str(self.approval_name());
         context.push_str("\" command_sandbox=\"");
-        context.push_str(self.sandbox.as_str());
+        context.push_str(self.sandbox.name());
         context.push_str("\" direct_file_scope=\"workspace\" />");
         push_list_element(&mut context, "project_kinds", &self.project_kinds);
         push_list_element(&mut context, "available_commands", &self.available_commands);
@@ -148,7 +148,7 @@ impl WorldState {
             "shell": self.shell,
             "mode": self.mode_name(),
             "approval": self.approval_name(),
-            "command_sandbox": self.sandbox.as_str(),
+            "command_sandbox": self.sandbox.name(),
             "direct_file_scope": "workspace",
             "project_kinds": self.project_kinds,
             "available_commands": self.available_commands,

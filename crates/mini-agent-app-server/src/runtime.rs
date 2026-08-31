@@ -36,6 +36,7 @@ use mini_agent_host::prepare_harness_with_model_factory;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
+use serde::Serialize;
 use std::path::PathBuf;
 
 fn openai_model_factory(
@@ -298,11 +299,7 @@ pub fn capability_manifest_to_protocol(
                 reason: reason.clone(),
             })
             .collect(),
-        extension_depth: serde_json::to_value(manifest.extension_depth)
-            .expect("extension depth is serializable")
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string(),
+        extension_depth: serialized_name(manifest.extension_depth),
         selected_extensions: manifest.selected_extensions.clone(),
         prompt_sources: manifest.prompt_sources.clone(),
         rule_sources: manifest.rule_sources.clone(),
@@ -311,11 +308,7 @@ pub fn capability_manifest_to_protocol(
             .iter()
             .map(|status| ProtocolRuleSourceStatus {
                 source: status.source.clone(),
-                state: serde_json::to_value(status.state)
-                    .expect("rule source state is serializable")
-                    .as_str()
-                    .unwrap_or("unknown")
-                    .to_string(),
+                state: serialized_name(status.state),
                 reason: status.reason.clone(),
             })
             .collect(),
@@ -342,11 +335,7 @@ pub fn capability_manifest_to_protocol(
             workspace_write: manifest.rule_policy.workspace_write,
             shell_execution: manifest.rule_policy.shell_execution,
             process_execution: manifest.rule_policy.process_execution,
-            workflow_scope: serde_json::to_value(manifest.rule_policy.workflow_scope)
-                .expect("workflow scope is serializable")
-                .as_str()
-                .unwrap_or("unknown")
-                .to_string(),
+            workflow_scope: serialized_name(manifest.rule_policy.workflow_scope),
         },
         context_limits: ProtocolContextLimits {
             max_context_bytes: manifest.context_limits.max_context_bytes,
@@ -359,4 +348,12 @@ pub fn capability_manifest_to_protocol(
         sandbox: manifest.sandbox.clone(),
         security: manifest.security.clone(),
     }
+}
+
+fn serialized_name<T: Serialize>(value: T) -> String {
+    serde_json::to_value(value)
+        .expect("enum value is serializable")
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string()
 }
