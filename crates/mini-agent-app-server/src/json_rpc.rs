@@ -200,14 +200,6 @@ where
         self.initialized
     }
 
-    pub fn has_thread(&self, thread_id: &mini_agent_protocol::ThreadId) -> bool {
-        self.server.has_thread(thread_id)
-    }
-
-    pub fn approval_broker(&self) -> ApprovalBroker {
-        self.approval.clone()
-    }
-
     pub async fn next_approval_request(&self) -> ApprovalRequest {
         self.approval.next_request().await
     }
