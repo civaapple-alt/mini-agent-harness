@@ -115,6 +115,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   Capabilities unit tests, while CLI integration compiles the dependency with its
   118-second production bound. Deferred adding a production-only test option or
   configuration field until a user-facing timeout policy justifies that surface.
+- Reconfirmed the CLI MCP timeout gap after the Trace batch: no bounded cross-layer
+  seam exists, so no production timeout option, test-only runtime flag, or alternate
+  transport was added; the CLI projection remains explicitly deferred.
 - Added a local baseline rerun/report recipe and recorded the next-iteration
   evidence decisions for bounded JSONL Trace export, test-only fault injection,
   slow-scenario scheduling, Compaction measurement, structured permission

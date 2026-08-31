@@ -167,6 +167,39 @@ implicit Session or baseline-file export remains out of scope.
 Decision: accept
 ```
 
+#### Stage 3 本轮实践的六项验证：CLI public MCP timeout seam re-audit
+
+```text
+1. Layer: CLI public path over Capabilities/App Server
+   rationale: the requested evidence must start from `mini-agent ask` and preserve
+   the existing MCP tool result projection through the canonical runtime path.
+2. Duplicate responsibility:
+   searched `mini-agent-capabilities/src/mcp.rs`, CLI interactive MCP coverage,
+   App Server MCP timeout projection, and the existing `McpTool::execute` wait.
+   Capabilities has a 50ms `cfg(test)` protocol seam, but the CLI dependency is
+   compiled without that test configuration and uses the 118-second production
+   bound (with a separate 120-second reply wait).
+3. Replace vs add:
+   no bounded cross-layer seam currently exists. Do not add a production timeout
+   setting, test-only runtime flag, alternate CLI transport, or second MCP loop
+   solely to make this scenario fast; keep the existing capability/App Server
+   evidence and defer the CLI projection.
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,243 / 20,000; all Rust 29,815 / 30,000; no Rust files changed.
+5. Visible surface:
+   no model input, event, persistence schema, CLI option, or public protocol change.
+   A future seam must state timeout ownership, bounded failure text, cancellation,
+   process cleanup, and compatibility before adding any surface.
+6. Boundary evidence:
+   existing Capabilities timeout and App Server public projection tests pass, while
+   CLI interactive 15/15 has no fast MCP-timeout path. A CLI scenario is not accepted
+   until a bounded seam can exercise the actual public transport without a 118-second
+   wait or an external process kill.
+
+Decision: defer
+```
+
 ### 3.2 把 6 项准入问题变成验证记录
 
 后续每个实践更新必须附下面的记录，不能只写“测试通过”：
