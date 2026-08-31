@@ -30,3 +30,16 @@ pub(crate) fn remove_test_root(root: &Path) {
     }
     fs::remove_dir_all(root).unwrap();
 }
+
+pub(crate) fn python_command() -> String {
+    ["python3", "python"]
+        .into_iter()
+        .find(|command| {
+            std::process::Command::new(command)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+        })
+        .expect("Python 3 is required by the repository fixtures")
+        .to_string()
+}

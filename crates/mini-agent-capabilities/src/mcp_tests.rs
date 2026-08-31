@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_support::{remove_test_root, test_root};
+use crate::test_support::{python_command, remove_test_root, test_root};
 use crate::workspace::ApprovalMode;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -7,7 +7,6 @@ use std::fs;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpListener;
-use std::process::Command as StdCommand;
 use std::time::Duration;
 
 #[test]
@@ -180,19 +179,6 @@ fn approval_denial_prevents_server_start_and_data_creation() {
     );
     assert!(!plugin_data.exists());
     fs::remove_dir_all(root).unwrap();
-}
-
-fn python_command() -> String {
-    ["python3", "python"]
-        .into_iter()
-        .find(|command| {
-            StdCommand::new(command)
-                .arg("--version")
-                .output()
-                .is_ok_and(|output| output.status.success())
-        })
-        .expect("Python 3 is required by the repository verification scripts")
-        .to_string()
 }
 
 fn serve_http_mcp(listener: TcpListener) -> bool {

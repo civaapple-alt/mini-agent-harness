@@ -10,10 +10,10 @@ This directory records architectural decision records (ADRs), technology selecti
 The line-budget release work is in **Stage 1: release global budget**, with the hard gates still active:
 
 - runtime (`core + protocol + host + app-server`): `15,236 / 20,000` lines (76.2%; 4,764 remaining)
-- all Rust source: `28,270 / 30,000` lines (94.2%; 1,730 remaining)
-- released against the Stage 1 baseline: `664` lines; `1,370` more lines are needed to reach the Stage 1 target of approximately `26,900`
+- all Rust source: `28,255 / 30,000` lines (94.2%; 1,745 remaining)
+- released against the Stage 1 baseline: `679` lines; `1,355` more lines are needed to reach the Stage 1 target of approximately `26,900`
 
-The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, and a duplicate frontend workflow enum projection. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
+The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, and duplicate Python test fixture probing. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
 The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
 

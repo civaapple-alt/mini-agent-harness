@@ -1,7 +1,6 @@
 use super::*;
-use crate::test_support::{remove_test_root, test_root};
+use crate::test_support::{python_command, remove_test_root, test_root};
 use crate::workspace::ApprovalMode;
-use std::process::Command;
 
 #[test]
 fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
@@ -183,17 +182,4 @@ fn write_skill(root: &Path, name: &str, description: &str, body: &str) {
         format!("---\nname: {name}\ndescription: {description}\n---\n{body}\n"),
     )
     .unwrap();
-}
-
-fn python_command() -> String {
-    ["python3", "python"]
-        .into_iter()
-        .find(|command| {
-            Command::new(command)
-                .arg("--version")
-                .output()
-                .is_ok_and(|output| output.status.success())
-        })
-        .expect("Python 3 is required by the MCP fixture")
-        .to_string()
 }
