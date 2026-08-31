@@ -464,7 +464,7 @@ Decision: accept
 | shell timeout | Capabilities `shell_process_has_a_timeout` | covered at capability boundary | CLI/App Server 公共路径尚未单独覆盖 |
 | turn/goal timeout | App Server/CLI goal timeout scenario | covered at public path | 与 tool timeout 的组合矩阵未覆盖 |
 | approval/MCP refusal | App Server `NeedsApproval`、Capabilities MCP connection/call denial | covered | 无；公共 event projection 仍沿用既有边界 |
-| MCP call timeout | Capabilities `loads_and_calls_stdio_server_through_rmcp` with a controlled slow call; App Server `projects_mcp_timeout_through_public_app_server` | covered at capability and App Server public boundary | CLI public command with actual MCP transport is not covered |
+| MCP call timeout | Capabilities `loads_and_calls_stdio_server_through_rmcp` with a controlled slow call; App Server `projects_mcp_timeout_through_public_app_server` | covered at capability and App Server public boundary | CLI public command with actual MCP transport is deferred: the bounded test seam is not available across the dependency boundary |
 | MCP circuit breaker | Capabilities `circuit_breaker_trips_after_failures_and_recovers` | unit-only | 真实 MCP call failure 到 model round 的公共路径未覆盖 |
 | Docker sandbox | existing availability smoke test | defer | daemon/API 差异与 container isolation 无受控跨平台证据 |
 
@@ -489,8 +489,8 @@ Decision: accept
 5. Visible surface:
    no model input, event, persistence schema, or public protocol change. The existing
    `McpTool::execute_outcome` returns structured `Failed` with the bounded reason
-   `MCP tool call timed out`; production timeout behavior remains unchanged. Public App
-   Server/CLI projection of this timeout is still a separate evidence gap.
+   `MCP tool call timed out`; production timeout behavior remains unchanged. App Server
+   projection is covered separately, while CLI transport projection remains deferred.
 6. Boundary evidence:
    cargo test -p mini-agent-capabilities (64 passed)
    cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings
@@ -530,6 +530,40 @@ Decision: accept
    covered separately by the Capabilities test; CLI transport projection remains open.
 
 Decision: accept
+```
+
+#### Stage 3 本轮实践的六项验证：CLI MCP timeout projection audit
+
+```text
+1. Layer: CLI + Capabilities boundary audit
+   rationale: the requested evidence must run through CLI configuration, Host assembly,
+   the real MCP stdio tool, and the existing App Server turn path; no model or Core
+   behavior needs to change.
+2. Duplicate responsibility:
+   searched the CLI interactive MCP/configuration path, Host `prepare_harness` assembly,
+   Capabilities `PROTOCOL_CALL_TIMEOUT`, and the App Server public projection scenario.
+   Capabilities already has the real RMCP timeout and App Server already has the public
+   outcome projection; only their CLI process-level composition is missing.
+3. Replace vs add:
+   no implementation is added in this audit. A CLI fixture cannot reuse the Capabilities
+   unit-only 50ms `cfg(test)` constant because dependencies are compiled without that cfg;
+   adding a production timeout option or a feature solely for this scenario would expand
+   configuration/API surface without a settled user requirement.
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,216 / 20,000; all Rust 29,537 / 30,000; no Rust files changed.
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. The decision
+   keeps the 118-second production MCP call bound and avoids a test-only configuration
+   contract leaking into the CLI.
+6. Boundary evidence:
+   Capabilities `loads_and_calls_stdio_server_through_rmcp` proves the real bounded timeout;
+   App Server `projects_mcp_timeout_through_public_app_server` proves event/checkpoint/next-
+   round projection; `cargo test -p mini-agent-app-server` (30 passed), its Clippy check,
+   `cargo fmt --all`, and `python scripts/line_budget.py` pass. A real CLI transport test is
+   deferred until a bounded, justified injection seam exists.
+
+Decision: defer
 ```
 
 #### Stage 3 本轮实践的六项验证：failure matrix audit

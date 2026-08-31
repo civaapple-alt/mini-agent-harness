@@ -61,14 +61,19 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   availability or container isolation; no environment-coupled test was added.
 - Audited the failure/timeout/retry evidence matrix across Core, Capabilities,
   App Server, and CLI, explicitly separating covered public paths from unit-only
-  evidence and deferred MCP timeout, provider backoff, and Docker isolation work.
+  evidence and deferred CLI MCP timeout projection, provider backoff, and Docker
+  isolation work.
 - Added a controlled MCP call-timeout check through the real stdio/RMCP capability
   path; production keeps the 118-second bound, while tests use a test-only 50ms
-  seam and assert a bounded structured `Failed` reason. Public timeout projection
-  remains a separate follow-up.
+  seam and assert a bounded structured `Failed` reason. App Server projection is
+  covered separately; CLI transport projection remains a deferred follow-up.
 - Added an App Server public-boundary scenario proving that the structured MCP
   timeout result remains visible in `ToolFinished`, the durable checkpoint, and
   the next model round; the CLI public MCP transport projection remains open.
+- Audited the CLI MCP timeout evidence gap: the fast timeout seam is scoped to
+  Capabilities unit tests, while CLI integration compiles the dependency with its
+  118-second production bound. Deferred adding a production-only test option or
+  configuration field until a user-facing timeout policy justifies that surface.
 - Added a local baseline rerun/report recipe and recorded the next-iteration
   evidence decisions for bounded JSONL Trace export, test-only fault injection,
   slow-scenario scheduling, Compaction measurement, structured permission
