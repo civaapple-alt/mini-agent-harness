@@ -8,6 +8,7 @@ use std::io::Write;
 
 const MAX_TRACE_ID_BYTES: usize = 128;
 const MAX_TRACE_RECORD_BYTES: usize = 8 * 1024;
+const MAX_TRACE_TOTAL_BYTES: usize = 256 * 1024;
 
 /// A redacted, bounded record for comparing one local harness execution.
 ///
@@ -42,6 +43,7 @@ pub struct JsonlTrace<W> {
     input_hash: Option<String>,
     tool_manifest_hash: Option<String>,
     round_index: usize,
+    bytes_written: usize,
     error: Option<String>,
 }
 
@@ -61,6 +63,7 @@ impl<W: Write> JsonlTrace<W> {
             input_hash: None,
             tool_manifest_hash: None,
             round_index: 0,
+            bytes_written: 0,
             error: None,
         })
     }
@@ -114,8 +117,12 @@ impl<W: Write> JsonlTrace<W> {
         line.push(b'\n');
         if line.len() > MAX_TRACE_RECORD_BYTES {
             self.error = Some("trace record exceeded 8 KiB".to_string());
+        } else if self.bytes_written.saturating_add(line.len()) > MAX_TRACE_TOTAL_BYTES {
+            self.error = Some("trace artifact exceeded 256 KiB".to_string());
         } else if let Err(error) = self.writer.write_all(&line) {
             self.error = Some(error.to_string());
+        } else {
+            self.bytes_written = self.bytes_written.saturating_add(line.len());
         }
     }
 }

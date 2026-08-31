@@ -157,6 +157,7 @@ extension settings.
 mini-agent                         # interactive session
 mini-agent ask "summarize this repo"
 mini-agent ask --json "review the current changes"
+mini-agent ask --trace-jsonl .agents/scratch/trace.jsonl "review the current changes"
 mini-agent auto "inspect the repo and run the tests"
 mini-agent resume SESSION_ID
 mini-agent fork SESSION_ID
@@ -180,12 +181,19 @@ Turn commands accept the following options:
 | `--web-search` / `--search` | interactive, `ask`, `auto` | Enable built-in Responses `web_search`. |
 | `--no-web-search` / `--no-search` | interactive, `ask`, `auto` | Disable built-in Responses `web_search`. |
 | `--json` | `ask` | Emit machine-readable output. |
+| `--trace-jsonl PATH` | `ask` | Write an opt-in bounded, redacted event trace; `PATH` must not already exist. |
 
 `ask` reads at most 32 KiB from stdin when no prompt is supplied. `auto PROMPT`
 runs one autonomous turn; bare `auto` opens an interactive copilot.
 `resume SESSION_ID` resumes a session directly, while `fork SESSION_ID` creates
 an independent session. Goal verification is initiated by Goal Mode and is not
 a standalone CLI command.
+
+`--trace-jsonl PATH` is an explicit one-shot diagnostic artifact. The parent directory
+must already exist, the file is created without overwrite, each record is capped at
+8 KiB, and the complete JSONL artifact is capped at 256 KiB. It contains event
+metadata, counts, and hashes only; prompt, tool arguments/results, and Session history
+are not copied. A trace write or finalization error fails the command.
 
 Interactive, one-shot, and auto sessions always append their settled history and
 stored result handles to `~/.mini-agent/sessions/`. Running processes, queued input, and
@@ -278,13 +286,13 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `16,216 / 20,000` lines and all
-Rust source `29,560 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `16,243 / 20,000` lines and all
+Rust source `29,815 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
-scenarios pass, with App Server `30/30` and CLI interactive `13/13` regression
+scenarios pass, with App Server `31/31` and CLI interactive `15/15` regression
 coverage. Changes that affect prompt, tool schema, loop-control, context,
 events, or persistence must add scenario/eval evidence beyond unit tests.
 
@@ -310,10 +318,10 @@ The next iteration is evidence-triggered rather than another broad cleanup:
 
 1. Freeze the two hard ceilings and require the six admission answers for every
    batch; no new Rust feature starts without a net-zero plan or an explicit offset.
-2. Specify and, only if the lifecycle is bounded, implement opt-in CLI Trace
-   export with redaction, artifact ownership, size limits, and a CLI scenario.
-   The current audit accepts the contract direction but keeps implementation
-   deferred: existing `JsonlTrace` is caller-owned and CLI has no automatic export.
+2. The bounded opt-in CLI Trace contract is implemented: `ask --trace-jsonl PATH`
+   creates a new redacted JSONL artifact with per-record and total limits; its
+   public success, redaction, and overwrite-failure scenarios are covered. The
+   baseline recipe remains explicit and does not create trace files implicitly.
 3. Revisit CLI public MCP-timeout projection only when a bounded fault-injection
    seam exists; otherwise keep the capability/App Server evidence and mark the
    CLI transport gap deferred.
@@ -346,11 +354,11 @@ cargo test -p mini-agent-cli --test interactive -- --test-threads=1 2>&1 |
 python scripts/line_budget.py 2>&1 | Tee-Object -FilePath $report -Append
 ```
 
-The interactive target contains the 8 baseline scenarios plus 3 public CLI
-regressions. The App Server also exposes `JsonlTrace` for local callers; it
-writes bounded, redacted per-round JSONL with input, tool-manifest, and payload
-hashes. The shortcut above currently captures test output and the budget
-snapshot only; automatic CLI Trace wiring remains a tracked next-iteration task.
+The interactive target contains the 8 baseline scenarios plus 7 public CLI
+regressions. The App Server exposes `JsonlTrace` for local callers, and `ask`
+now offers explicit `--trace-jsonl PATH` export with the same bounded, redacted
+per-round records. The shortcut above captures test output and the budget
+snapshot only; it does not create an implicit trace artifact.
 Do not use a paid provider for this baseline. The built-in registry currently
 exposes one OpenAI-compatible provider; the external model factory is a Host
 composition seam, not cross-provider quality evidence.

@@ -109,3 +109,23 @@ fn trace_records_bounded_output_without_copying_tool_arguments() {
     );
     assert!(!output.contains("secret"));
 }
+
+#[test]
+fn trace_refuses_to_exceed_total_artifact_limit() {
+    let mut bytes = Vec::new();
+    let mut trace = JsonlTrace::new("trace-1", &mut bytes).unwrap();
+    for sequence in 0..10_000 {
+        trace.emit(EventEnvelope::new(
+            ThreadId::new("thread-1"),
+            None,
+            sequence,
+            Event::RunStarted {
+                prompt: "bounded".to_string(),
+            },
+        ));
+    }
+
+    let error = trace.finish().unwrap_err();
+    assert_eq!(error.to_string(), "trace artifact exceeded 256 KiB");
+    assert!(bytes.len() <= MAX_TRACE_TOTAL_BYTES);
+}

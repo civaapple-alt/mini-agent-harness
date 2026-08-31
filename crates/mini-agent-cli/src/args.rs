@@ -72,7 +72,7 @@ Forks a new independent session from the latest settled checkpoint of an existin
 pub const ASK_HELP: &str = "mini-agent ask
 
 USAGE:
-    mini-agent ask [--session-id SESSION_ID] [--auto-approve|-y] [--max-steps N] [--json] [--no-tools] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
+    mini-agent ask [--session-id SESSION_ID] [--auto-approve|-y] [--max-steps N] [--json] [--trace-jsonl PATH] [--no-tools] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
 
 Runs one script-facing turn (8 steps by default, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.
 On a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).
@@ -88,6 +88,7 @@ OPTIONS:
     --no-web-search, --no-search Disable built-in Responses web_search
     --no-tools                   Disable all host tools and extension loading
     --json                       Emit a machine-readable final result
+    --trace-jsonl PATH            Write a bounded redacted trace; PATH must not exist
 ";
 
 pub const AUTO_HELP: &str = "mini-agent auto
@@ -139,6 +140,7 @@ pub struct Invocation {
     pub sandbox_kind_explicit: bool,
     pub web_search: Option<bool>,
     pub max_steps: Option<usize>,
+    pub trace_path: Option<std::path::PathBuf>,
     pub help_topic: HelpTopic,
 }
 
@@ -227,6 +229,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             sandbox_kind_explicit: false,
             web_search: None,
             max_steps: None,
+            trace_path: None,
             help_topic: HelpTopic::Root,
         });
     }
@@ -243,6 +246,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut sandbox_kind_explicit = false;
     let mut web_search = None;
     let mut max_steps = None;
+    let mut trace_path = None;
     let mut options = true;
     while let Some(argument) = args.next() {
         if options && argument == "--" {
@@ -309,6 +313,14 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                     .parse::<usize>()
                     .map_err(|_| "--max-steps requires a non-negative integer".to_string())?,
             );
+        } else if options && argument == "--trace-jsonl" {
+            if trace_path.is_some() {
+                return Err("--trace-jsonl may be provided only once".to_string());
+            }
+            trace_path =
+                Some(std::path::PathBuf::from(args.next().ok_or_else(|| {
+                    "--trace-jsonl requires a file path".to_string()
+                })?));
         } else if options && argument.starts_with('-') {
             return Err(format!("unknown option: {argument}"));
         } else {
@@ -338,6 +350,9 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if max_steps.is_some() && !matches!(command, Command::Ask) {
         return Err("--max-steps is supported only by ask".to_string());
     }
+    if trace_path.is_some() && !matches!(command, Command::Ask) {
+        return Err("--trace-jsonl is supported only by ask".to_string());
+    }
     if no_tools && !matches!(command, Command::Interactive | Command::Ask | Command::Auto) {
         return Err("--no-tools is supported only by interactive, ask, and auto".to_string());
     }
@@ -354,6 +369,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         sandbox_kind_explicit,
         web_search,
         max_steps,
+        trace_path,
         help_topic: HelpTopic::Root,
     })
 }
@@ -372,6 +388,7 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         sandbox_kind_explicit: false,
         web_search: None,
         max_steps: None,
+        trace_path: None,
         help_topic,
     }
 }
@@ -517,6 +534,27 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(stepped.max_steps, Some(50));
+
+        let traced = parse_args(vec![
+            "ask".to_string(),
+            "--trace-jsonl".to_string(),
+            "trace.jsonl".to_string(),
+            "go".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(
+            traced.trace_path,
+            Some(std::path::PathBuf::from("trace.jsonl"))
+        );
+        assert_eq!(
+            parse_args(vec![
+                "auto".to_string(),
+                "--trace-jsonl".to_string(),
+                "trace.jsonl".to_string(),
+            ])
+            .unwrap_err(),
+            "--trace-jsonl is supported only by ask"
+        );
     }
 
     #[test]

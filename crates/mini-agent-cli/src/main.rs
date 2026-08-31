@@ -66,6 +66,7 @@ async fn main() -> ExitCode {
                 invocation.web_search,
                 request,
                 invocation.max_steps,
+                invocation.trace_path,
             )
             .await
         }
@@ -167,6 +168,7 @@ async fn run_auto(
         sandbox_kind_explicit,
         web_search_override,
         session_request,
+        None,
         None,
     )
     .await

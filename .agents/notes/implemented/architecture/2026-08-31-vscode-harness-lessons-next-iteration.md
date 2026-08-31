@@ -91,8 +91,9 @@ Compaction、显式权限拒绝结果和 timeout/steer 并发证据。以下取�
 | timeout 与 steer 并发时记录确定性优先级 | 接受 | 当前顺序明确为：Core 安全检查点先检查 cancel，再检查 steer；deadline 触发后 App Server 发送 interrupt、等待 `TurnFinished` 和 durable checkpoint，然后返回 timeout，不继续 drain 排队的 steer；普通已 settle batch 才按 steer 优先于 follow-up。修改该顺序前必须增加并发 race scenario。 |
 
 当前 baseline 已有稳定的本地 JSONL Trace artifact；README 中的快捷命令仍只捕获
-测试输出和预算快照，尚未自动把 `JsonlTrace` 接入 CLI 基线报告。Trace 只用于证明
-事件/输入摘要变化，不将 mock provider 的通过结果等同于真实模型质量。
+测试输出和预算快照，不会隐式生成 Trace。CLI 现在支持显式的 `ask --trace-jsonl PATH`
+导出；Trace 只用于证明事件/输入摘要变化，不将 mock provider 的通过结果等同于真实
+模型质量。
 
 #### Stage 3 本轮实践的六项验证：CLI Trace contract audit
 
@@ -126,9 +127,45 @@ Decision: defer implementation; accept the bounded contract direction for the ne
 design review.
 ```
 
-Until the CLI public scenario and artifact lifecycle decision exist, automatic Trace
-export remains deferred; the existing caller-owned `JsonlTrace` is the only supported
-diagnostic path.
+At the time of this audit, automatic Trace export remained deferred; the existing
+caller-owned `JsonlTrace` was the only supported diagnostic path.
+
+The preceding audit is retained as the design-review checkpoint. Its deferred
+automatic-export decision was superseded only for the explicit one-shot option below;
+implicit Session or baseline-file export remains out of scope.
+
+#### Stage 3 本轮实践的六项验证：bounded CLI Trace export
+
+```text
+1. Layer: CLI + App Server local boundary
+   rationale: `ask` owns the explicit artifact path and combines the existing
+   `RunObserver` with App Server `JsonlTrace`; Core and the event loop remain unchanged.
+2. Duplicate responsibility:
+   searched `mini-agent-cli/src/ask.rs`, `args.rs`, App Server `JsonlTrace`,
+   `LocalAppServerClient::run_turn`, and Session JSONL. No other CLI-owned trace
+   writer or event loop exists.
+3. Replace vs add:
+   reuse `JsonlTrace` and the existing observer path; add one passive composite
+   observer and one `--trace-jsonl PATH` option. Do not restore the retired
+   `--trace`, write into Session, create parent directories, or overwrite files.
+4. Net line delta:
+   expected: runtime +~30; all Rust +~270
+   actual: runtime 16,216 -> 16,243 (+27); all Rust 29,560 -> 29,815 (+255).
+5. Visible surface:
+   adds one opt-in `ask` CLI argument and a caller-owned file artifact only. Each
+   JSONL record is capped at 8 KiB and the artifact at 256 KiB; records contain
+   event metadata, counts, and hashes, not prompt/tool payloads. No model input,
+   event type, Session schema, or JSON-RPC field changed. Existing files and trace
+   write/finalization failures fail the command.
+6. Boundary evidence:
+   `cargo test -p mini-agent-app-server` (31 passed),
+   `cargo test -p mini-agent-cli --test interactive -- --test-threads=1`
+   (15 passed), including success/redaction, total-limit, and overwrite-refusal
+   scenarios; both affected-package Clippy checks, `cargo fmt --all`, and
+   `python scripts/line_budget.py` pass.
+
+Decision: accept
+```
 
 ### 3.2 把 6 项准入问题变成验证记录
 
@@ -221,7 +258,7 @@ Decision: accept
 Decision: accept
 ```
 
-#### Stage 3 本轮实践的六项验证：CLI automatic Trace audit
+#### Stage 3 历史审计：CLI automatic Trace（实现前）
 
 ```text
 1. Layer: CLI + App Server boundary audit
@@ -251,7 +288,7 @@ Decision: accept
    change must specify artifact path, retention, redaction, failure handling, and opt-in
    semantics before implementation.
 
-Decision: defer
+Decision: defer（已由上方 bounded CLI Trace export 实践记录取代）
 ```
 
 #### Stage 3 本轮实践的六项验证：bounded HTTP 429 classification
@@ -885,8 +922,8 @@ Decision: accept
 
 1. 冻结两个 line ceilings，要求每批先完成六项准入回答和固定确认项；
    没有净零计划或明确抵扣，不开始新增 Rust 功能。
-2. 先确定 opt-in CLI Trace 的有界契约：artifact ownership、脱敏、单轮/总量
-   上限和 CLI 场景证据；契约未确定前不接入自动导出。
+2. CLI Trace 的有界契约已实现：`ask --trace-jsonl PATH` 显式创建新 artifact，
+   使用脱敏的单轮/总量上限和 CLI 场景证据；baseline 命令不隐式生成 Trace。
 3. 只有存在有界故障注入 seam 时，才推进 CLI 公共 MCP timeout projection；
    否则保留 Capabilities/App Server 证据，并将 CLI transport 缺口标为 deferred。
 4. 可量化的 compaction trigger 场景已记录，验证最近轮次保留；只有后续证据证明
@@ -947,10 +984,11 @@ Docker contract and README/SECURITY wording intentionally make no stronger isola
    部分流和 retryable tool result；CLI public-path scenario 已验证未知工具失败后的下一轮恢复，
    App Server public scenario 已验证 NeedsApproval 拒绝和 MCP timeout failure 在事件、checkpoint
    和下一轮模型输入中保持非空；cross-file refactor scenario 已验证两个文件的读取、编辑和最终落盘；且没有改变生产执行路径；
+   CLI `ask --trace-jsonl PATH` 已验证 bounded redaction、总量上限和 create-new ownership；
 5. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
 6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
-后续仍需补充 CLI 自动接入 Trace 报告、CLI public MCP transport timeout projection、
+后续仍需补充 CLI public MCP transport timeout projection、
 HTTP 429 provider-specific retry/backoff 合同、Docker sandbox 的更强 network/capability/resource isolation 和独立 model/provider
 对比场景；CLI public-path 的未知工具恢复、cross-file refactor、MCP connection/call refusal、
 sandbox 前置拒绝以及 App Server 的 NeedsApproval/MCP timeout projection 已覆盖，但更完整的

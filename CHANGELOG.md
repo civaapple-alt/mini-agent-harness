@@ -17,10 +17,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   one response becomes one `OpenAiError::Api` without implicit retry. Retry count,
   backoff, jitter, `Retry-After`, and cancellation semantics remain a separate
   deferred policy decision.
-- Audited CLI automatic Trace export and deferred it: the existing bounded,
-  redacted `JsonlTrace` remains caller-owned, while implicit Session files and the
-  retired external `--trace` option remain out of scope until artifact lifecycle
-  and opt-in semantics are specified.
+- Audited CLI automatic Trace export and kept implicit Session-file export and the
+  retired external `--trace` option out of scope. The bounded explicit artifact
+  contract is now implemented through `ask --trace-jsonl PATH`.
 - An earlier Docker sandbox audit ran before the Linux daemon was reachable; it
   recorded the existing smoke test as clear-error/preflight evidence only, not
   evidence of container isolation or portability.
@@ -51,6 +50,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Recorded the Docker security-policy gate: stronger network, capability, privilege,
   read-only, or resource restrictions require an explicit threat model, supported-platform
   policy, compatibility/failure contract, and boundary evidence before implementation.
+- Added opt-in CLI Trace export through `ask --trace-jsonl PATH`: it creates a new
+  file, emits only bounded redacted event metadata, caps each record at 8 KiB and
+  the artifact at 256 KiB, and fails on overwrite or finalization errors. CLI public
+  scenarios cover success/redaction and refusal to overwrite an existing artifact.
 
 ### Changed
 
@@ -117,7 +120,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   slow-scenario scheduling, Compaction measurement, structured permission
   rejection, and timeout/steer race ordering. The retired external `--trace`
   path and current 50% Compaction trigger remain unchanged.
-- Documented the current budget snapshot (`16,216` runtime lines and `29,560`
+- Documented the current budget snapshot (`16,243` runtime lines and `29,815`
   total Rust lines) in the README and Agent Notes.
 
 ### Fixed

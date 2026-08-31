@@ -1,6 +1,9 @@
+use mini_agent_app_server::JsonlTrace;
 use mini_agent_app_server::SessionRequest;
 use mini_agent_app_server::frontend::ApprovalController;
 use mini_agent_app_server::frontend::ApprovalMode;
+use mini_agent_app_server::frontend::EventEnvelope;
+use mini_agent_app_server::frontend::EventSink;
 use mini_agent_app_server::frontend::SandboxKind;
 use mini_agent_app_server::frontend::SecurityPreset;
 use mini_agent_app_server::frontend::TurnStatus;
@@ -10,9 +13,13 @@ use mini_agent_app_server::frontend::observer::print_final_answer;
 use mini_agent_app_server::frontend::print_auto_warning;
 use mini_agent_app_server::local::LocalRuntimeRequest;
 use serde_json::json;
+use std::fs::File;
+use std::fs::OpenOptions;
 use std::io;
 use std::io::IsTerminal;
 use std::io::Read;
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 const MAX_STDIN_PROMPT_BYTES: usize = 32 * 1024;
@@ -30,6 +37,7 @@ pub async fn run(
     web_search_override: Option<bool>,
     session_request: SessionRequest,
     max_steps: Option<usize>,
+    trace_path: Option<PathBuf>,
 ) -> ExitCode {
     let prompt = match resolve_prompt(prompt) {
         Ok(prompt) => prompt,
@@ -62,15 +70,14 @@ pub async fn run(
         Err(error) => return preflight_error(json_output, &error),
     };
 
-    let mut observer = if automatic && !json_output {
-        RunObserver::new()
+    let format = if json_output {
+        ScriptFormat::Json
     } else {
-        let format = if json_output {
-            ScriptFormat::Json
-        } else {
-            ScriptFormat::Text
-        };
-        RunObserver::for_script(format)
+        ScriptFormat::Text
+    };
+    let mut observer = match CliObserver::new(automatic, format, trace_path.as_deref()) {
+        Ok(observer) => observer,
+        Err(error) => return preflight_error(json_output, &error),
     };
 
     let result = runtime
@@ -84,10 +91,30 @@ pub async fn run(
         .ok()
         .flatten()
         .map(|session| session.session_id);
+    if let Err(error) = observer.finish() {
+        let error = format!("trace export failed: {error}");
+        eprintln!("error: {error}");
+        if json_output {
+            println!(
+                "{}",
+                json!({
+                    "output": "",
+                    "exit_code": 1,
+                    "model": runtime.model_name(),
+                    "steps": 0,
+                    "session_id": session_id,
+                    "usage": observer.stats_json(),
+                    "tool_calls": observer.tool_calls_json(),
+                    "error": error,
+                    "capabilities": runtime.capability_manifest()
+                })
+            );
+        }
+        return ExitCode::FAILURE;
+    }
 
     match result {
         Ok(outcome) if !matches!(outcome.status, TurnStatus::StepLimit | TurnStatus::Failed) => {
-            observer.finish();
             if json_output {
                 println!(
                     "{}",
@@ -108,7 +135,6 @@ pub async fn run(
             ExitCode::SUCCESS
         }
         Ok(outcome) => {
-            observer.finish();
             let error = format!(
                 "stopped after {} model steps without completing",
                 outcome.steps
@@ -135,7 +161,6 @@ pub async fn run(
             ExitCode::FAILURE
         }
         Err(error) => {
-            observer.finish();
             eprintln!("error: {error}");
             if json_output {
                 println!(
@@ -156,6 +181,73 @@ pub async fn run(
             ExitCode::FAILURE
         }
     }
+}
+
+struct CliObserver {
+    output: RunObserver,
+    trace: Option<JsonlTrace<File>>,
+}
+
+impl CliObserver {
+    fn new(
+        automatic: bool,
+        format: ScriptFormat,
+        trace_path: Option<&Path>,
+    ) -> Result<Self, String> {
+        let output = if automatic && !matches!(format, ScriptFormat::Json) {
+            RunObserver::new()
+        } else {
+            RunObserver::for_script(format)
+        };
+        let trace = trace_path
+            .map(open_trace)
+            .transpose()?
+            .map(|file| JsonlTrace::new(format!("cli-{}", std::process::id()), file))
+            .transpose()
+            .map_err(|error| format!("cannot initialize trace: {error}"))?;
+        Ok(Self { output, trace })
+    }
+
+    fn finish(&mut self) -> Result<(), String> {
+        self.output.finish();
+        if let Some(trace) = self.trace.take() {
+            trace
+                .finish()
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn stats_json(&self) -> serde_json::Value {
+        self.output.stats_json()
+    }
+
+    fn tool_calls_json(&self) -> &[serde_json::Value] {
+        self.output.tool_calls_json()
+    }
+
+    fn assistant_displayed(&self) -> bool {
+        self.output.assistant_displayed()
+    }
+}
+
+impl EventSink for CliObserver {
+    fn emit(&mut self, event: EventEnvelope) {
+        if let Some(trace) = self.trace.as_mut() {
+            trace.emit(event.clone());
+        }
+        self.output.emit(event);
+    }
+}
+
+fn open_trace(path: &Path) -> Result<File, String> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| format!("cannot create trace file {}: {error}", path.display()))
 }
 
 fn resolve_prompt(prompt: String) -> Result<String, String> {

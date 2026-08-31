@@ -116,6 +116,102 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
 }
 
 #[test]
+fn ask_exports_a_bounded_redacted_trace_to_a_new_file() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (request_tx, request_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        request_tx.send(read_request_body(&mut stream)).unwrap();
+        write_reasoning_sse_response(&mut stream, "checking", "secret answer");
+    });
+    let root = test_root();
+    let trace_path = root.join("trace.jsonl");
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+
+    let output = mini_agent(&root)
+        .args([
+            "ask",
+            "--json",
+            "--trace-jsonl",
+            trace_path.to_str().unwrap(),
+            "secret prompt",
+        ])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    let _request = request_rx.recv().unwrap();
+
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let trace = fs::read_to_string(&trace_path).unwrap();
+    let records = trace
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    assert_eq!(response["output"], "secret answer");
+    assert!(
+        records
+            .iter()
+            .any(|record| record["event"] == "model_started")
+    );
+    assert!(
+        records
+            .iter()
+            .any(|record| record["event"] == "turn_finished")
+    );
+    assert!(!trace.contains("secret prompt"));
+    assert!(!trace.contains("secret answer"));
+    assert!(trace.len() <= 256 * 1024);
+}
+
+#[test]
+fn ask_refuses_to_overwrite_an_existing_trace_file() {
+    let root = test_root();
+    let trace_path = root.join("trace.jsonl");
+    fs::write(&trace_path, "keep this artifact\n").unwrap();
+    fs::write(
+        root.join(".env"),
+        "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://127.0.0.1:1/v1\n",
+    )
+    .unwrap();
+
+    let output = mini_agent(&root)
+        .args([
+            "ask",
+            "--json",
+            "--trace-jsonl",
+            trace_path.to_str().unwrap(),
+            "do not run",
+        ])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .output()
+        .unwrap();
+    let contents = fs::read_to_string(&trace_path).unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot create trace file"));
+    assert_eq!(contents, "keep this artifact\n");
+}
+
+#[test]
 fn ask_no_tools_uses_model_only_scope_without_extension_tools() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
