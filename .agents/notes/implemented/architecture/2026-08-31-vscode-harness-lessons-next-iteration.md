@@ -961,7 +961,9 @@ Decision: accept
    否则保留 Capabilities/App Server 证据，并将 CLI transport 缺口标为 deferred。
 4. 可量化的 compaction trigger 场景已记录，验证最近轮次保留；只有后续证据证明
    50% 不合适时才改变 context 行为。
-5. Docker daemon 已可达，workspace mount 与 container-only 临时文件场景已记录；
+5. Docker daemon 已可达，普通 profile 与 candidate strict profile 的 workspace mount
+   和 container-only 临时文件场景已在当前 Docker Desktop Linux host 记录；strict
+   profile 还观察到 read-only root、零有效 capability、无 route 和 bounded cgroup。
    下一步不是直接加 Docker flags，而是先确定 threat model、支持的平台、默认值/opt-out、
    兼容性和 fail-closed 行为；只有显式策略及跨平台边界证据接受后，才增加更强的
    network/capability/privilege/read-only/resource isolation。
@@ -976,10 +978,11 @@ Decision: accept
 
 ### 3.5 Docker 更强隔离的政策决策门
 
-当前已完成的 Docker 证据只证明 daemon 可达、workspace 挂载和容器临时文件不落入
-宿主 workspace；它没有证明网络、Linux capability、特权、只读文件系统或 CPU/内存/
-进程数限制。为避免把一次运行时探针误写成安全证明，后续 Docker 变更必须先完成以下
-六项准入记录：
+当前已完成的 Docker 证据包括 daemon 可达、普通 profile 的 workspace 挂载、strict
+profile 的 workspace 挂载，以及容器临时文件不落入宿主 workspace；当前 host 的 strict
+probe 还观察到网络、capability、只读文件系统和 cgroup 限制行为。它们仍不是跨平台
+安全证明，也不覆盖 image provenance、daemon isolation 或真实项目构建兼容性。为避免
+把一次运行时探针误写成安全证明，后续 Docker 变更必须先完成以下六项准入记录：
 
 ```text
 1. Layer: Capabilities runtime boundary; Docker command construction remains in workspace::run_shell.
