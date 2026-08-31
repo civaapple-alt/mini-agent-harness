@@ -1,8 +1,8 @@
-# VS Code Coding Harness 经验与 mini-agent-harness 下一迭代准入笔记
+# Harness 经验、框架对比与下一迭代准入笔记
 
 Status: implemented
 
-Source: [The Coding Harness Behind GitHub Copilot in VS Code](https://code.visualstudio.com/blogs/2026/05/15/agent-harnesses-github-copilot-vscode)
+Source: [The Coding Harness Behind GitHub Copilot in VS Code](https://code.visualstudio.com/blogs/2026/05/15/agent-harnesses-github-copilot-vscode)。本文同时合并原 `2026-08-31-agent-framework-and-harness-maturity.md` 的框架分层、Turn 流程、Codex 原生对照和成熟度结论。
 
 ## 1. 结论摘要
 
@@ -25,6 +25,156 @@ VS Code 文章最重要的结论是：模型只是引擎，harness 才是把上�
 | 不同模型不应假设完全相同 | 当前主线是一个 Responses provider，Host 有稳定 system prompt 和 capability manifest | 只在两个真实 provider/model 行为确实分叉时引入命名的 provider policy；先用场景数据证明差异 | 不为猜测添加 provider-specific 分支、别名或第二套执行路径 |
 | Benchmarks 要贴近产品工作流 | 当前有 CLI/App Server 公共路径测试，但缺少系统化 harness eval 记录 | 建立小型、可复现、容器/临时 workspace 隔离的 harness scenario 集，衡量正确率、effort、token、latency 和边界违规 | 不调用付费 provider；fixture、输出和模型可见输入必须 bounded；公共边界测试仍是最低证据 |
 | Harness 改动应在合并前评估 | CI 已强制 fmt、Clippy、workspace tests 和 line budget；PR 模板已收集架构问题 | 将“影响 prompt/tool schema/loop/context/event 的变更”标记为需要 scenario/eval 证据；先人工准入，后续再考虑自动化 label | 不把 benchmark 分数替代协议、持久化和安全边界测试 |
+
+## 附录 A：mini-agent-harness 与 Codex 原生框架对照
+
+### A.1 定位与分层
+
+共同的最小闭环是：
+
+```text
+用户输入 → 构造上下文 → 模型生成 → 判断工具调用
+         → 执行工具并写回结果 → 再次请求模型 → 最终回复或停止
+```
+
+mini-agent-harness 的定位是小型、显式、可替换且可观察的 Agent 执行内核；
+Codex 原生框架的定位是生产级、持久化、异步、事件驱动的 Agent Runtime。
+前者适合验证 Harness 行为，后者还要整合 Session、Task、Turn、Item、沙箱、
+MCP、审批、压缩、恢复、分叉和 App Server 生命周期。简化表达为：
+
+```text
+mini-agent-harness = model + bounded tool loop
+Codex native        = durable Session/Task/Turn/Item + tool/event runtime
+```
+
+当前 mini-codex 的边界为：
+
+```text
+CLI / 客户端
+    ↓
+App Server（Actor、CAS/revision、事件与管理控制面）
+    ↓
+Host（runtime/profile/workflow 组合）
+    ↓
+Capabilities（provider、workspace、process、sandbox、MCP、approval）
+    ↓
+Core（Thread、Harness、Turn/Step、limits、control）
+    ↓
+Protocol（消息、工具、事件、停止原因和限制契约）
+```
+
+| 概念 | mini-agent-harness | Codex 原生框架 |
+| --- | --- | --- |
+| 会话 | `Thread`、`SessionState` 与 settled checkpoint | 持久化 `CodexThread`、`Session` 与 rollout |
+| 工作单元 | `Thread::run_turn`；Turn 内有多个 Core Step | `RegularTask` 驱动的持久化 Turn |
+| 一次模型步骤 | `Model::respond`，随后执行有界工具 batch | Responses stream、多个 output Item 与异步工具任务 |
+| 工具路由 | Capabilities 执行，Host/App Server 组合 policy、MCP 和 approval | `ToolRouter`、沙箱、审批、MCP 与 StepContext 协同 |
+| 上下文 | bounded `Message` 列表、压缩和 UTF-8 截断 | Turn/Step context、response item、rollout 和模型相关压缩 |
+| 事件 | 稳定的 `Event`/`EventEnvelope` | Turn/Item lifecycle、delta、diff、MCP 和 raw response 事件 |
+| 持久化 | settled checkpoint、Session JSONL、Result Store handle | thread store、rollout、response item 与恢复/分叉 |
+| 控制 | safe checkpoint 上的 cancel、steer、follow-up | cancellation token、interrupt、mailbox 和 task 生命周期 |
+
+### A.2 mini 的 Turn/Step 流程
+
+一次用户可见 Turn 包含一个或多个模型 Step。每个 Step 都先检查控制状态，
+再组装 bounded context，请求模型，验证响应，必要时执行完整工具 batch，最后
+把工具结果写回下一轮上下文：
+
+```text
+turn/start
+  ↓
+App Server Actor 排队并分配 identity/revision
+  ↓
+Thread.begin_turn → Harness.run_with_control_mode
+  ↓
+追加 User Message，检查/压缩 context
+  ↓
+Model.respond
+  ├─ 无工具调用 → 生成最终回复并结束
+  └─ 有工具调用 → 校验数量 → 完整执行 bounded batch
+                         ↓
+                    追加 Tool Message / result handle
+                         ↓
+                    回到 context 组装和下一次 Model.respond
+  ↓
+TurnFinished → settled checkpoint / Session 持久化
+  ↓
+消费 queued steer/follow-up，必要时启动后续 Turn
+```
+
+关键不变量：响应和工具调用先验证，失败时不执行副作用；工具结果在进入模型
+上下文前截断；连续重复 batch 只产生 bounded warning；cancel 和 steer 只在模型
+步骤之间或完整工具 batch 后观察，不把工具副作用截断在中间状态。
+
+### A.3 Codex 原生 Turn 流程
+
+原生 Codex 的外部 Turn 通常经过以下持久化与异步协调路径：
+
+```text
+JSON-RPC turn/start
+  ↓
+turn processor → CodexThread::start_or_steer_turn
+  ↓
+Session::start_task → RegularTask
+  ↓
+TurnContext / hooks / MCP / AGENTS.md / skills / history
+  ↓
+Responses API stream
+  ├─ 输出 Item/delta 并持久化
+  ├─ ToolRouter 创建异步工具任务
+  └─ stream 完成后 drain 工具 futures
+  ↓
+需要继续？
+  ├─ 是：压缩或处理 pending input，再次 sampling
+  └─ 否：执行 stop hooks，flush rollout，发送 turn-completed
+```
+
+因此 mini 的 Step 更容易逐项观察和测试；原生 Codex 的 Step 更像 provider
+stream、Item 持久化与多个工具 future 的协调过程。两者共享“模型不是控制器”
+这一原则，但原生框架承担了更多持久化和异步生命周期语义。
+
+### A.4 Steering、Cancel 与外部 Turn 边界
+
+mini Core 支持 `StopAtCheckpoint` 和 `ContinueSameTurn`，当前 App Server 主路径
+主要采用前者：
+
+```text
+当前模型步骤完成 → 检查 cancel/steer → 结束当前 Core Turn
+                  → 持久化 checkpoint → 取 queued steer/follow-up
+                  → 必要时启动新的 Core Turn
+```
+
+所以 mini 的默认外部语义更接近“安全停止当前工作单元，再开始下一个”；一次
+App Server `turn/start` 仍可能因 queued input 连续 settle 多个 Core Turn。
+
+Codex 原生通常把 `turn/steer` 放入 Session input queue/mailbox，在同一个外部
+Turn 内继续下一次 sampling：
+
+```text
+Turn 1: sampling → tool execution → steering input → sampling → Turn completed
+```
+
+这不是谁更“正确”，而是边界选择不同：mini 优先让 checkpoint 和测试边界显式，
+原生 Codex 优先保持长任务的连续工作语义。任何变更都必须记录其对事件顺序、
+持久化和取消确定性的影响，不能只比较最终文本。
+
+### A.5 成熟度结论
+
+成熟度应按“聚焦型 coding agent 的可靠运行基础设施”判断，而不是按工具数量
+或模型数量判断：
+
+| 维度 | mini-agent-harness 当前优势 | Codex 原生框架的优势与代价 |
+| --- | --- | --- |
+| 执行内核 | Loop、Step、limits、stop 分类和安全检查点显式，容易做确定性 fixture | 生命周期覆盖更完整，但 Task、Item、stream 和异步工具协调更复杂 |
+| 状态与恢复 | App Server Actor/CAS、Session settled checkpoint 和单一路径边界清楚 | 持久化粒度、恢复/分叉和长任务能力更丰富，状态面更大 |
+| 能力面 | Provider、workspace、sandbox、MCP 和 approval 在 Core 外组合 | 工具、hooks、skills、MCP、沙箱和环境集成更成熟，但兼容性矩阵更宽 |
+| 可验证性 | bounded 输入/输出、被动事件和本地 mock 场景便于隔离验证 | 更接近生产工作流，需要更大的跨平台、真实 provider 和长期运行证据 |
+| 主要风险 | 容易因追求小而漏掉真实 provider、平台和安全策略证据 | 容易因功能面扩大而增加隐式状态、异步竞态和上下文成本 |
+
+结论是：mini 不应复制原生 Codex 的全部对象或工具生态；应继续保持
+`CLI → App Server → Host → Core` 主路径，用 bounded scenario 验证每次改变对
+Turn、Tool、Context、State 和 Boundary 的影响。只有在真实场景和证据都成立时，
+才扩大 provider、retry 或 Docker policy，而不是用抽象数量代替成熟度。
 
 ## 3. 下一迭代建议
 

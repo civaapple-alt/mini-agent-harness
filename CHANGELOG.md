@@ -63,6 +63,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   snapshot (`16,243/20,000` runtime and `29,815/30,000` all Rust); its historical
   over-budget snapshot remains labeled as such, while cross-platform and
   authorized real-provider evidence remain open.
+- Consolidated the framework maturity review and VS Code harness next-iteration
+  note into one canonical architecture note, preserving the mini/Codex layer,
+  Turn/Step, steering, hard-limit, scenario, and six-question evidence records.
 - Added opt-in CLI Trace export through `ask --trace-jsonl PATH`: it creates a new
   file, emits only bounded redacted event metadata, caps each record at 8 KiB and
   the artifact at 256 KiB, and fails on overwrite or finalization errors. CLI public

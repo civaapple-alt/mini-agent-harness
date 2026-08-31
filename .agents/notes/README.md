@@ -169,8 +169,7 @@ If a proposed approach is rejected during review:
 | 2026-08-30 | [Capabilities API Boundaries](implemented/architecture/2026-08-30-capabilities-api-boundaries.md) | Capabilities root facade split into stable contracts, composition seams, and crate-internal implementation |
 | 2026-08-30 | [Goal Verifier Naming Boundary](implemented/architecture/2026-08-30-goal-verifier-naming.md) | Replaced current Mentor implementation names with Goal verifier terminology without retaining legacy environment aliases |
 | 2026-08-31 | [Python SDK Architecture & App Server Integration](implemented/architecture/2026-08-31-python-sdk-architecture-and-app-server-integration.md) | Official Python SDK packaging, async context manager, strongly typed event stream models, and Codex-aligned layered architecture |
-| 2026-08-31 | [Agent Framework and Core Harness Maturity Evaluation](implemented/architecture/2026-08-31-agent-framework-and-harness-maturity.md) | Architectural review, harness execution flow, hard limits design, and production readiness evaluation |
-| 2026-08-31 | [VS Code Harness Lessons for the Next Iteration](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) | Implemented bounded turn/round scenarios, product-specific harness evidence, and six-question validation records |
+| 2026-08-31 | [Harness Framework Comparison and Next-Iteration Admission Note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) | 合并 mini-agent-harness/Codex 原生分层与 Turn 流程对照、VS Code harness 经验、bounded scenario 证据和六项准入记录 |
 | 2026-08-30 | [Runtime Authority and Action Ordering](implemented/architecture/2026-08-30-runtime-authority-and-action-ordering.md) | Core/App Server/Host authority boundaries, internal action envelopes, and separate action/event ordering |
 | 2026-08-30 | [Runtime State Actor Queue](implemented/architecture/2026-08-30-runtime-state-actor-queue.md) | Session, World, MCP, and Workflow state ownership through one App Server actor queue |
 | 2026-08-30 | [Runtime Revision, CAS, and Transaction Boundary](implemented/architecture/2026-08-30-runtime-revision-cas-and-transaction.md) | Unified runtime revisions, stale-write rejection, and the Thread/Session persistence boundary |
@@ -194,7 +193,6 @@ If a proposed approach is rejected during review:
 | 2026-08-27 | [web_fetch / read_image session impact](implemented/architecture/2026-08-27-web-fetch-and-read-image-session-impact.md) | Envelope-only history; resume/fork attachments; compact empty tools; prefix-cache misses |
 | 2026-08-28 | [Interactive Steer and Follow-up Run Control](implemented/architecture/2026-08-28-steer-and-follow-up-run-control.md) | `/steer` priority correction, FIFO follow-up queue, cooperative safe checkpoints, and durable `steered` turns |
 | 2026-08-28 | [Host Capability Profiles and Runtime Seams](implemented/architecture/2026-08-28-host-capability-profiles-and-runtime-seams.md) | CLI/App Server/ACP profile selection, regular-agent prompt/rule scope, bounded manifests, startup profile resolution, and selected MCP loading |
-| 2026-08-31 | [Agent Framework 与 Harness 成熟度分析](implemented/architecture/2026-08-31-agent-framework-and-harness-maturity.md) | mini-agent-harness 与 Codex 原生框架的分层、Turn/Step 流程、steering 边界、硬限制、成熟度评估与行数门禁推进 |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |

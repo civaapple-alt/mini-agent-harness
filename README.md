@@ -253,8 +253,9 @@ nested-agent behavior are not emulated. See the
   verification rules for repository work.
 - [Change admission checklist](.github/pull_request_template.md) — required
   architecture, line-budget, and boundary questions for every change.
-- [Harness iteration notes](.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) — VS Code harness lessons, bounded scenarios, and
-  six-question validation records.
+- [Harness framework and next-iteration note](.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) — mini/Codex
+  framework and Turn-flow comparison, VS Code harness lessons, bounded scenarios,
+  and six-question validation records.
 
 ## Development
 
