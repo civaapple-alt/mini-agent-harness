@@ -187,6 +187,39 @@ Decision: accept
 Decision: accept
 ```
 
+#### Stage 3 本轮实践的六项验证：CLI automatic Trace audit
+
+```text
+1. Layer: CLI + App Server boundary audit
+   rationale: the existing `JsonlTrace` is an App Server local diagnostic sink;
+   automatic CLI use would decide artifact ownership and lifecycle, not add a new
+   Core observation mechanism.
+2. Duplicate responsibility:
+   searched `mini-agent-cli/src/ask.rs`, `repl_worker/prompt.rs`, the App Server
+   `LocalAppServerClient`/`JsonlTrace`, session JSONL storage, and the baseline report
+   recipe. No existing CLI-owned bounded trace file or stable lifecycle contract exists.
+3. Replace vs add:
+   keep the existing caller-provided `JsonlTrace` and manual baseline recipe. Do not
+   write an implicit file into the Session directory and do not restore the retired
+   external `--trace` option; either would add ownership or public CLI semantics before
+   the artifact contract is settled.
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,216 / 20,000; all Rust 29,537 / 30,000; no Rust files changed.
+5. Visible surface:
+   no model input, event, persistence schema, or protocol change. The deferred choice
+   preserves the bounded, redacted local trace and keeps Session as the sole durable
+   history authority.
+6. Boundary evidence:
+   App Server `local_client_exports_bounded_redacted_trace` and the existing Trace tests
+   prove the sink contract; the README baseline recipe proves CLI output and budget
+   capture but intentionally does not claim automatic Trace export. A future CLI trace
+   change must specify artifact path, retention, redaction, failure handling, and opt-in
+   semantics before implementation.
+
+Decision: defer
+```
+
 #### Stage 3 本轮实践的六项验证：bounded HTTP 429 classification
 
 ```text

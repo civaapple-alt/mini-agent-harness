@@ -17,6 +17,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   one response becomes one `OpenAiError::Api` without implicit retry. Retry count,
   backoff, jitter, `Retry-After`, and cancellation semantics remain a separate
   deferred policy decision.
+- Audited CLI automatic Trace export and deferred it: the existing bounded,
+  redacted `JsonlTrace` remains caller-owned, while implicit Session files and the
+  retired external `--trace` option remain out of scope until artifact lifecycle
+  and opt-in semantics are specified.
 
 ### Changed
 
