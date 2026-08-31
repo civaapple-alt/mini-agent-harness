@@ -63,6 +63,11 @@ fn apply_utf8_child_env(cmd: &mut Command) {
     cmd.env("PYTHONIOENCODING", "utf-8");
     cmd.env("PYTHONUTF8", "1");
     cmd.env("PYTHONLEGACYWINDOWSSTDIO", "0");
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+    cmd.env("GIT_PAGER", "cat");
+    cmd.env("PAGER", "cat");
+    cmd.env("CI", "1");
+    cmd.env("TERM", "dumb");
 }
 
 #[cfg(windows)]
@@ -121,6 +126,7 @@ fn run_sandboxed_command(
     apply_utf8_child_env(&mut cmd);
     let mut child = cmd
         .current_dir(root)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
