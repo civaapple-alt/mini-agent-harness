@@ -273,13 +273,13 @@ Pull-request CI also checks that the six-question section is present, all six
 questions have answers, placeholders are replaced, and all six admission
 confirmations are checked; reviewers remain responsible for answer quality.
 
-The current hard-budget snapshot is runtime `16,074 / 20,000` lines and all
-Rust source `29,378 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `16,216 / 20,000` lines and all
+Rust source `29,537 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
-scenarios pass, with App Server `28/28` and CLI interactive `13/13` regression
+scenarios pass, with App Server `30/30` and CLI interactive `13/13` regression
 coverage. Changes that affect prompt, tool schema, loop-control, context,
 events, or persistence must add scenario/eval evidence beyond unit tests.
 
@@ -290,12 +290,12 @@ implicit retry, MCP connection refusal, and shell refusal before sandbox executi
 level retry/backoff policy and Docker sandbox availability/isolation remain open; the Docker
 smoke test only covers preflight/clear-error behavior and is not isolation proof. The failure/
 timeout/retry evidence matrix distinguishes covered public paths from unit-only and deferred
-evidence; MCP timeout is covered at the capability boundary, while App Server/CLI projection
-remains open. CLI public-
+evidence; MCP timeout is covered at the capability boundary and its App Server public
+projection, while the CLI public MCP transport projection remains open. CLI public-
 path unknown-tool recovery, MCP connection/call refusal, and a bounded cross-file refactor are
 now covered. Broader failure/retry matrices remain open follow-ups. The App Server public boundary also verifies
-that `NeedsApproval` results keep a non-empty reason in events, checkpoints,
-and the next model round.
+that `NeedsApproval` and MCP timeout results keep a non-empty reason in events,
+checkpoints, and the next model round.
 
 To rerun the baseline locally from the repository root (the first run may spend
 time compiling; warm-cache runs are intended to stay within a few minutes),

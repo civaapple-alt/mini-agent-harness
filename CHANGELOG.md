@@ -66,12 +66,15 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   path; production keeps the 118-second bound, while tests use a test-only 50ms
   seam and assert a bounded structured `Failed` reason. Public timeout projection
   remains a separate follow-up.
+- Added an App Server public-boundary scenario proving that the structured MCP
+  timeout result remains visible in `ToolFinished`, the durable checkpoint, and
+  the next model round; the CLI public MCP transport projection remains open.
 - Added a local baseline rerun/report recipe and recorded the next-iteration
   evidence decisions for bounded JSONL Trace export, test-only fault injection,
   slow-scenario scheduling, Compaction measurement, structured permission
   rejection, and timeout/steer race ordering. The retired external `--trace`
   path and current 50% Compaction trigger remain unchanged.
-- Documented the current budget snapshot (`16,074` runtime lines and `29,378`
+- Documented the current budget snapshot (`16,216` runtime lines and `29,537`
   total Rust lines) in the README and Agent Notes.
 
 ### Fixed

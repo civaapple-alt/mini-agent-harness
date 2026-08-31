@@ -464,7 +464,7 @@ Decision: accept
 | shell timeout | Capabilities `shell_process_has_a_timeout` | covered at capability boundary | CLI/App Server 公共路径尚未单独覆盖 |
 | turn/goal timeout | App Server/CLI goal timeout scenario | covered at public path | 与 tool timeout 的组合矩阵未覆盖 |
 | approval/MCP refusal | App Server `NeedsApproval`、Capabilities MCP connection/call denial | covered | 无；公共 event projection 仍沿用既有边界 |
-| MCP call timeout | Capabilities `loads_and_calls_stdio_server_through_rmcp` with a controlled slow call | covered at capability boundary | App Server/CLI public-path projection is not covered |
+| MCP call timeout | Capabilities `loads_and_calls_stdio_server_through_rmcp` with a controlled slow call; App Server `projects_mcp_timeout_through_public_app_server` | covered at capability and App Server public boundary | CLI public command with actual MCP transport is not covered |
 | MCP circuit breaker | Capabilities `circuit_breaker_trips_after_failures_and_recovers` | unit-only | 真实 MCP call failure 到 model round 的公共路径未覆盖 |
 | Docker sandbox | existing availability smoke test | defer | daemon/API 差异与 container isolation 无受控跨平台证据 |
 
@@ -496,6 +496,38 @@ Decision: accept
    cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings
    cargo fmt --all
    python scripts/line_budget.py
+
+Decision: accept
+```
+
+#### Stage 3 本轮实践的六项验证：App Server MCP timeout projection
+
+```text
+1. Layer: App Server
+   rationale: the App Server worker owns public event fan-out, checkpoint settlement,
+   and the next model round; it must preserve the structured failure produced by the
+   Capabilities MCP boundary without adding another timeout policy.
+2. Duplicate responsibility:
+   searched the existing `NeedsApproval` public projection test, Core tool-batch
+   execution, and Capabilities `McpTool` timeout evidence; no App Server test previously
+   asserted a timeout result across events, checkpoint, and the next model request.
+3. Replace vs add:
+   reuse the existing `ToolExecutionOutcome` and App Server worker path; add only a
+   deterministic timeout-shaped fixture and public boundary scenario. No production
+   timeout wrapper, retry loop, protocol field, or second MCP path is introduced.
+4. Net line delta:
+   expected: runtime +~142; all Rust +~142
+   actual: runtime +142; all Rust +142 in the changed Rust test file. Current budget
+   snapshot is runtime 16,216 / 20,000 and all Rust 29,537 / 30,000.
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol shape is added. The
+   scenario verifies the existing `Failed` status and bounded `MCP tool call timed out`
+   reason survive `ToolFinished`, the durable checkpoint, and the next model round.
+6. Boundary evidence:
+   `cargo test -p mini-agent-app-server` (30 passed); `cargo clippy -p
+   mini-agent-app-server --all-targets -- -D warnings`; `cargo fmt --all`; and
+   `python scripts/line_budget.py` all pass. The actual RMCP timeout source remains
+   covered separately by the Capabilities test; CLI transport projection remains open.
 
 Decision: accept
 ```
@@ -583,13 +615,13 @@ Decision: accept
 3. timeout、cancel、steer、follow-up、resume 的事件与 durable state 顺序已通过回归；
 4. test-only FaultInjectionModel 和 Responses parser fault cases 已覆盖缺字段、畸形 JSON、
    部分流和 retryable tool result；CLI public-path scenario 已验证未知工具失败后的下一轮恢复，
-   App Server public scenario 已验证 NeedsApproval 拒绝在事件、checkpoint 和下一轮模型输入中
-   保持非空；cross-file refactor scenario 已验证两个文件的读取、编辑和最终落盘；且没有改变生产执行路径；
+   App Server public scenario 已验证 NeedsApproval 拒绝和 MCP timeout failure 在事件、checkpoint
+   和下一轮模型输入中保持非空；cross-file refactor scenario 已验证两个文件的读取、编辑和最终落盘；且没有改变生产执行路径；
 5. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
 6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
-后续仍需补充 CLI 自动接入 Trace 报告、HTTP 429 retry/backoff 策略、Docker sandbox
-availability/isolation 和独立 model/provider 对比场景；CLI public-path 的未知工具恢复、
-cross-file refactor、MCP connection/call refusal、sandbox 前置拒绝和 App Server 的
-NeedsApproval 拒绝已覆盖，但更完整的工具失败/超时/重试矩阵仍是证据缺口，不是当前实现
-的已覆盖能力。
+后续仍需补充 CLI 自动接入 Trace 报告、CLI public MCP transport timeout projection、
+HTTP 429 retry/backoff 策略、Docker sandbox availability/isolation 和独立 model/provider
+对比场景；CLI public-path 的未知工具恢复、cross-file refactor、MCP connection/call refusal、
+sandbox 前置拒绝以及 App Server 的 NeedsApproval/MCP timeout projection 已覆盖，但更完整的
+工具失败/超时/重试矩阵仍是证据缺口，不是当前实现的已覆盖能力。

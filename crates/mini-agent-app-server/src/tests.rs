@@ -62,6 +62,8 @@ struct BlockingModel {
 
 struct ApprovalModel;
 
+struct McpTimeoutModel;
+
 impl Model for ApprovalModel {
     type Error = Infallible;
 
@@ -99,7 +101,48 @@ impl Model for ApprovalModel {
     }
 }
 
+impl Model for McpTimeoutModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        if request.messages.iter().any(|message| {
+            matches!(
+                message,
+                Message::Tool {
+                    name,
+                    content,
+                    outcome: Some(ToolExecutionStatus::Failed),
+                    ..
+                } if name == "mcp__fixture__slow" && content == "MCP tool call timed out"
+            )
+        }) {
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "timeout received".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "mcp-timeout-call".to_string(),
+                name: "mcp__fixture__slow".to_string(),
+                arguments: json!({}),
+            }],
+            usage: None,
+        })
+    }
+}
+
 struct SensitiveFixtureTool;
+
+struct McpTimeoutFixtureTool;
 
 impl Tool for SensitiveFixtureTool {
     fn spec(&self) -> ToolSpec {
@@ -119,6 +162,24 @@ impl Tool for SensitiveFixtureTool {
             status: ToolExecutionStatus::NeedsApproval,
             content: "user denied: sensitive fixture".to_string(),
         }
+    }
+}
+
+impl Tool for McpTimeoutFixtureTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "mcp__fixture__slow".to_string(),
+            description: "A fixture that times out like an MCP call".to_string(),
+            parameters: json!({"type": "object"}),
+        }
+    }
+
+    fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
+        Err(ToolError("MCP tool call timed out".to_string()))
+    }
+
+    fn execute_outcome(&self, _arguments: &Value) -> ToolExecutionOutcome {
+        ToolExecutionOutcome::failed("MCP tool call timed out")
     }
 }
 
@@ -309,6 +370,87 @@ async fn projects_structured_approval_denial_through_public_app_server() {
             message,
             Message::Assistant { text, tool_calls, .. }
                 if text == "denial received" && tool_calls.is_empty()
+        )
+    }));
+}
+
+#[tokio::test]
+async fn projects_mcp_timeout_through_public_app_server() {
+    let harness = Harness::new(
+        McpTimeoutModel,
+        ToolRegistry::new(vec![Box::new(McpTimeoutFixtureTool)]),
+        HarnessConfig::default(),
+    );
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(ThreadId::new("initial"), harness),
+    );
+    let mut events = server.subscribe();
+    assert_eq!(
+        server
+            .turn_start_for(
+                ThreadId::new("thread-1"),
+                TurnStart::new(TurnInput::new(TurnInputMode::Start, "call the MCP tool")),
+            )
+            .await
+            .unwrap(),
+        TurnSubmission::Started {
+            turn_id: mini_agent_protocol::TurnId::new("turn-1")
+        }
+    );
+
+    let mut received = Vec::new();
+    while !received
+        .iter()
+        .any(|event| matches!(event, Event::TurnFinished { .. }))
+    {
+        received.push(events.recv().await.unwrap().event);
+    }
+
+    assert!(received.iter().any(|event| matches!(
+        event,
+        Event::ToolFinished {
+            call_id,
+            name,
+            content,
+            is_error: true,
+            outcome: Some(ToolExecutionStatus::Failed),
+            truncated: false,
+        } if call_id == "mcp-timeout-call"
+            && name == "mcp__fixture__slow"
+            && content == "MCP tool call timed out"
+    )));
+    assert!(received.iter().any(|event| matches!(
+        event,
+        Event::TurnFinished {
+            status: mini_agent_protocol::TurnStatus::Completed
+        }
+    )));
+
+    let checkpoint = server
+        .thread_read_for(ThreadId::new("thread-1"))
+        .await
+        .unwrap();
+    assert!(checkpoint.session.messages().iter().any(|message| {
+        matches!(
+            message,
+            Message::Tool {
+                call_id,
+                name,
+                content,
+                is_error: true,
+                outcome: Some(ToolExecutionStatus::Failed),
+                ..
+            } if call_id == "mcp-timeout-call"
+                && name == "mcp__fixture__slow"
+                && content == "MCP tool call timed out"
+        )
+    }));
+    assert!(checkpoint.session.messages().iter().any(|message| {
+        matches!(
+            message,
+            Message::Assistant { text, tool_calls, .. }
+                if text == "timeout received" && tool_calls.is_empty()
         )
     }));
 }
