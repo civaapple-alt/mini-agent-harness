@@ -305,6 +305,9 @@ mod tests {
     use super::*;
     use mini_agent_core::HarnessConfig;
     use mini_agent_protocol::ToolSpec;
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpListener;
+    use std::thread;
 
     #[derive(Default)]
     struct Deltas {
@@ -590,6 +593,42 @@ mod tests {
         assert!(state.text.is_empty());
         assert_eq!(deltas.reasoning, vec!["why"]);
         assert!(deltas.text.is_empty());
+    }
+
+    #[tokio::test]
+    async fn maps_http_429_to_bounded_api_error_without_retrying() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            let body = "rate limited fixture";
+            let response = format!(
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.flush().unwrap();
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let error = super::super::post_json(
+            &client,
+            &format!("http://127.0.0.1:{}/responses", address.port()),
+            "test-key",
+            &json!({}),
+        )
+        .await
+        .unwrap_err();
+        server.join().unwrap();
+
+        match error {
+            OpenAiError::Api { status, message } => {
+                assert_eq!(status, 429);
+                assert_eq!(message, "rate limited fixture");
+            }
+            error => panic!("unexpected provider error: {error}"),
+        }
     }
 
     #[test]

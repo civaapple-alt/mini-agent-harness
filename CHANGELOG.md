@@ -44,13 +44,15 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Added Stage 2 test-only fault evidence: a Core `FaultInjectionModel` and
   Responses parser cases cover missing or malformed tool arguments, partial
   model streams, and retryable tool results without adding a production
-  provider or execution path. HTTP 429 adaptation remains a follow-up.
+  provider or execution path. Responses now also has boundary evidence that
+  HTTP 429 maps to a bounded API error without implicit retry; provider-level
+  retry/backoff policy remains a follow-up.
 - Added a local baseline rerun/report recipe and recorded the next-iteration
   evidence decisions for bounded JSONL Trace export, test-only fault injection,
   slow-scenario scheduling, Compaction measurement, structured permission
   rejection, and timeout/steer race ordering. The retired external `--trace`
   path and current 50% Compaction trigger remain unchanged.
-- Documented the current budget snapshot (`16,074` runtime lines and `29,288`
+- Documented the current budget snapshot (`16,074` runtime lines and `29,327`
   total Rust lines) in the README and Agent Notes.
 
 ### Fixed

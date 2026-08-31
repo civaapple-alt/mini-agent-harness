@@ -84,7 +84,7 @@ Compaction、显式权限拒绝结果和 timeout/steer 并发证据。以下取�
 | 评审建议 | 当前判断 | 下一迭代准入条件 |
 | :--- | :--- | :--- |
 | 每个 Round 导出 JSONL Trace 并记录哈希 | 已实现本地诊断 API；CLI 自动接入暂缓 | `mini_agent_app_server::JsonlTrace` 复用 App Server 事件，记录 `trace_id`、`turn_id`、`round_index`、事件类型、完整 bounded model-input 哈希、工具 manifest 哈希、字节计数和 payload 哈希；原始 prompt、工具参数和结果不写入。Stage 3 暂不自动写入 session 目录，也不重新引入已退役的外部 `--trace` 开关，避免扩大持久化和公共 CLI 语义。 |
-| Fault Injection Provider | 首版已实现，限定为测试设施 | `mini-agent-core` 的 `FaultInjectionModel` 覆盖缺少必要工具参数、部分流失败和 `Retryable` 工具结果；`mini-agent-capabilities` 的 Responses 解析测试覆盖畸形 JSON 和缺字段。HTTP 429 provider 适配语义仍单独待补；不增加生产 provider、不调用付费服务、不另起执行循环。 |
+| Fault Injection Provider | 首版已实现，限定为测试设施 | `mini-agent-core` 的 `FaultInjectionModel` 覆盖缺少必要工具参数、部分流失败和 `Retryable` 工具结果；`mini-agent-capabilities` 的 Responses 解析测试覆盖畸形 JSON、缺字段和 HTTP 429 的有界 API 错误映射。未增加隐式重试；provider 级 retry/backoff 策略仍单独待补，不增加生产 provider、不调用付费服务、不另起执行循环。 |
 | 超过 5 秒的场景移出日常 CI | 部分接受 | 5 秒是 CI 调度策略，不是运行时语义；只有经确认的确定性慢场景才允许显式 `#[ignore]`，并提供定时或手动命令。不能按一次机器墙钟测量自动改变门禁。 |
 | Compaction 在 70% 触发 | 暂不改变当前行为 | 当前实现和 `docs/limits.md` 的确定性触发点是最大上下文的 50%；下一场景在 70% 记录预警、最近 3 轮保留和压缩前后预算，只有证据证明 50% 不合适时才改阈值。 |
 | 权限失败返回 `permission_denied`，不能是空结果 | 已用现有结构化状态验证 | 当前保留 `ToolExecutionStatus::NeedsApproval`，App Server 公共场景已断言事件、Session checkpoint 和下一轮模型输入均包含非空拒绝 reason；下一次审批/沙箱变更不得把该契约退化为空结果，再单独评估是否需要公共 `PermissionDenied` 变体。 |
@@ -181,6 +181,38 @@ Decision: accept
    cargo test -p mini-agent-core (28 passed)
    cargo test -p mini-agent-protocol (7 passed)
    cargo clippy --workspace --all-targets -- -D warnings
+   cargo fmt --all
+   python scripts/line_budget.py
+
+Decision: accept
+```
+
+#### Stage 3 本轮实践的六项验证：bounded HTTP 429 classification
+
+```text
+1. Layer: Capabilities
+   rationale: `crates/mini-agent-capabilities/src/openai/mod.rs::post_json` 是 Responses
+   provider 的 HTTP 状态边界；本轮只验证 adapter 对 429 的有界错误分类，不改变 Core、
+   Host、App Server 或 CLI 的执行语义。
+2. Duplicate responsibility:
+   searched `post_json`, `OpenAiModel::respond`、Responses SSE tests 和现有 provider
+   error tests；没有现有测试验证 429 status、bounded error body 和 no implicit retry
+   的组合契约。
+3. Replace vs add:
+   复用现有 `post_json`、`OpenAiError::Api` 和 `MAX_ERROR_BODY_BYTES`；只增加一个
+   test-only loopback HTTP fixture，避免新增 retry loop、provider wrapper 或第二套请求路径。
+4. Net line delta:
+   expected: runtime +0; all Rust +~40
+   actual: runtime 16,074 -> 16,074 (+0); all Rust 29,288 -> 29,327 (+39)
+   （Capabilities unit-test net +39，包含 fmt 调整）。
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. HTTP 429 remains
+   a bounded `OpenAiError::Api { status: 429, message }`; the body is capped by the existing
+   4 KiB limit, and the adapter does not retry implicitly. Provider-specific backoff remains
+   an explicit future policy decision.
+6. Boundary evidence:
+   cargo test -p mini-agent-capabilities (63 passed)
+   cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings
    cargo fmt --all
    python scripts/line_budget.py
 
@@ -356,7 +388,7 @@ Decision: accept
 5. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
 6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
-后续仍需补充 CLI 自动接入 Trace 报告、HTTP 429 provider 适配、MCP/sandbox 拒绝和独立
+后续仍需补充 CLI 自动接入 Trace 报告、HTTP 429 retry/backoff 策略、MCP/sandbox 拒绝和独立
 model/provider 对比场景；CLI public-path 的未知工具恢复、cross-file refactor 和 App Server 的
 NeedsApproval 拒绝已覆盖，但更完整的工具失败/超时/重试矩阵仍是证据缺口，
 不是当前实现的已覆盖能力。
