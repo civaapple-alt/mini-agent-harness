@@ -128,6 +128,6 @@ a restart; it never replays an uncertain external tool effect. JSONL session fil
 - `mini-agent-protocol/src/event.rs`: event and envelope contracts.
 - `mini-agent-protocol/src/turn.rs`: turn input, status, and submission contracts.
 - `mini-agent-app-server/src/lib.rs`: serialized control-plane worker and event broadcast.
-- `mini-agent-cli/src/harness_builder.rs`: provider, prompt, workspace tool, MCP, and world assembly.
+- `mini-agent-host/src/harness_builder.rs`: provider, prompt, workspace tool, MCP, and world assembly.
 - `mini-agent-cli/src/repl.rs`: interactive worker, input routing, and settled persistence.
 - `mini-agent-cli/src/ask.rs`: one-shot execution and edge persistence.

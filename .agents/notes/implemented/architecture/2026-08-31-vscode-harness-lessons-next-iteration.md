@@ -2,7 +2,7 @@
 
 Status: implemented
 
-Source: [The Coding Harness Behind GitHub Copilot in VS Code](https://code.visualstudio.com/blogs/2026/05/15/agent-harnesses-github-copilot-vscode)。本文同时合并原 `2026-08-31-agent-framework-and-harness-maturity.md` 的框架分层、Turn 流程、Codex 原生对照和成熟度结论。
+Source: [The Coding Harness Behind GitHub Copilot in VS Code](https://code.visualstudio.com/blogs/2026/05/15/agent-harnesses-github-copilot-vscode)。本文同时合并原 2026-08-31 成熟度分析 note 的框架分层、Turn 流程、Codex 原生对照和成熟度结论。
 
 ## 1. 结论摘要
 

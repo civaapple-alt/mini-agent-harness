@@ -22,13 +22,13 @@ We instituted strict architectural boundaries and refactored core harness algori
 
 ### 1. CLI Decoupling & Modularization
 - **[`crates/mini-agent-cli/src/args.rs`](../../../../crates/mini-agent-cli/src/args.rs)**: Owns `Invocation`, `Command`, `HelpTopic`, `parse_args`, help strings, and argument unit tests. Error messages and help are printed to `stderr` to keep `stdout` machine-readable.
-- **[`crates/mini-agent-cli/src/harness_builder.rs`](../../../../crates/mini-agent-cli/src/harness_builder.rs)**: Owns OpenAI provider harness assembly, tool initialization, security preset application, sandbox configuration, and prompt augmentation.
-- **[`crates/mini-agent-cli/src/session.rs`](../../../../crates/mini-agent-cli/src/session.rs)**: Encapsulates `try_load_session_events` to translate `session.jsonl` into portable `mini_agent_core::Event` streams, freeing [`crates/mini-agent-cli/src/trace.rs`](../../../../crates/mini-agent-cli/src/trace.rs) from storage schema dependencies.
+- **[`crates/mini-agent-host/src/harness_builder.rs`](../../../../crates/mini-agent-host/src/harness_builder.rs)**: Owns OpenAI provider harness assembly, tool initialization, security preset application, sandbox configuration, and prompt augmentation.
+- **[`crates/mini-agent-capabilities/src/session.rs`](../../../../crates/mini-agent-capabilities/src/session.rs)**: Encapsulates session storage integration; App Server owns the current trace projection through [`crates/mini-agent-app-server/src/trace.rs`](../../../../crates/mini-agent-app-server/src/trace.rs).
 - **[`crates/mini-agent-cli/src/main.rs`](../../../../crates/mini-agent-cli/src/main.rs)**: Reduced from 1,404 lines to ~350 lines, serving purely as a top-level dispatcher.
 
 ### 2. Model Item Ceilings & Project Context Bounds
 - `max_model_response_bytes`: Bounded to `64 KiB` (~16K tokens) in [`HarnessConfig`](../../../../crates/mini-agent-core/src/harness.rs).
-- `MAX_PROJECT_INSTRUCTIONS_BYTES`: Bounded to `16 KiB` (~4K tokens) in [`project_context.rs`](../../../../crates/mini-agent-cli/src/project_context.rs) with UTF-8 head and tail retention.
+- `MAX_PROJECT_INSTRUCTIONS_BYTES`: Bounded to `16 KiB` (~4K tokens) in [`project_context.rs`](../../../../crates/mini-agent-host/src/project_context.rs) with UTF-8 head and tail retention.
 - Compaction summary: Explicitly truncated to `max_user_input_bytes` (`32 KiB`).
 
 ### 3. Comprehensive History Validation & Canonical Discovery
@@ -47,8 +47,8 @@ We instituted strict architectural boundaries and refactored core harness algori
 - Loop detector compares `(name, arguments, output_content)` tuples across consecutive steps. Repetitive polling with changing tool output (e.g. process monitoring) is recognized as active progress rather than a stall.
 
 ### 5. Security Normalization & Sandboxing
-- [`crates/mini-agent-cli/src/security.rs`](../../../../crates/mini-agent-cli/src/security.rs) normalizes human-formatted actions into canonical patterns and applies glob wildcard matching (`**/.env*`, `rm -rf /*`, `gh auth *`).
-- [`crates/mini-agent-cli/src/workspace.rs`](../../../../crates/mini-agent-cli/src/workspace.rs) validates `--sandbox docker` availability and executes within containers or fails-closed with clear diagnostics.
+- [`crates/mini-agent-capabilities/src/security.rs`](../../../../crates/mini-agent-capabilities/src/security.rs) normalizes human-formatted actions into canonical patterns and applies glob wildcard matching (`**/.env*`, `rm -rf /*`, `gh auth *`).
+- [`crates/mini-agent-capabilities/src/workspace.rs`](../../../../crates/mini-agent-capabilities/src/workspace.rs) validates `--sandbox docker` availability and executes within containers or fails-closed with clear diagnostics.
 - `terminate_process_tree` invokes `taskkill /PID <pid> /T /F` on Windows to guarantee child tree termination.
 
 ### 6. Persistence & Step Limit Semantics

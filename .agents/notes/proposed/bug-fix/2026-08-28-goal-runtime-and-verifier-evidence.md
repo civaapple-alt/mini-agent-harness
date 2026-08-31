@@ -10,11 +10,11 @@ CI and real-provider evidence remain open)
 ## Current architecture update (2026-08-28)
 
 The Goal state machine, checkpoint persistence, and provider configuration
-remain Host responsibilities. Mentor and Goal verifier turn orchestration now
-lives in `mini-agent-app-server::mentor` and executes through the App Server
-local client, so the verifier no longer owns a separate direct `Harness::run`
-loop. The acceptance evidence below still applies to the Goal behavior; this
-update only records the execution boundary used by the current worktree.
+remain Host responsibilities. Goal verifier turn orchestration now lives in
+the App Server `verifier` boundary and executes through the App Server local
+client, so the verifier no longer owns a separate direct `Harness::run` loop.
+The acceptance evidence below still applies to the Goal behavior; this update
+only records the execution boundary used by the current worktree.
 
 ## Context
 
@@ -199,8 +199,9 @@ there is no reactor running, must be called from the context of a Tokio 1.x runt
 
 ### P1: Tool-free verifier settings reject historical tool evidence
 
-In [mentor.rs](../../../../crates/mini-agent-cli/src/mentor.rs), around lines
-169-178, `verify_checkpoint` configures `max_tool_calls_per_step: 0` before
+In the historical CLI `mentor.rs` path (removed; current verifier code is in
+[`crates/mini-agent-app-server/src/verifier.rs`](../../../../crates/mini-agent-app-server/src/verifier.rs)), around lines
+169-178, `verify_checkpoint` configured `max_tool_calls_per_step: 0` before
 calling `restore_history`. The latter validates historical assistant tool
 calls against the same limit in
 [harness.rs](../../../../crates/mini-agent-core/src/harness.rs).
@@ -218,7 +219,7 @@ ordering and should receive the same narrowly scoped repair.
 
 ### Evidence gap: the Goal scenario bypasses both failing boundaries
 
-The Goal scenario in [real_llm.rs](../../../../crates/mini-agent-cli/examples/real_llm.rs),
+The historical Goal scenario in `crates/mini-agent-cli/examples/real_llm.rs` (removed),
 around lines 1248-1274, constructs its own harness, supplies an artificial
 history without tool calls, and requests the exact outcome `verdict: approved`
 with a score of 100. It does not execute the REPL worker or call the production

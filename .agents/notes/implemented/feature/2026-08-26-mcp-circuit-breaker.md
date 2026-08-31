@@ -8,7 +8,7 @@ Streamable HTTP MCP tools depend on external network stability. When a remote se
 
 ## Decision
 
-Implemented a lightweight fail-fast circuit breaker in [`crates/mini-agent-cli/src/mcp.rs`](../../../../crates/mini-agent-cli/src/mcp.rs):
+Implemented a lightweight fail-fast circuit breaker in [`crates/mini-agent-capabilities/src/mcp.rs`](../../../../crates/mini-agent-capabilities/src/mcp.rs):
 1. **Failure Threshold & Cooldown**: Tracks consecutive transport errors and timeouts (threshold: 3).
 2. **Fail-Fast Open State**: Upon reaching the threshold, trips into an `Open` state for a 30-second cooldown window, immediately failing subsequent calls with a clear diagnostic error:
    `"MCP server circuit breaker is open (failing fast after 3 consecutive errors)"`
@@ -18,4 +18,4 @@ Implemented a lightweight fail-fast circuit breaker in [`crates/mini-agent-cli/s
 
 - Prevents hanging the agent loop and burning step limits on down or lagging remote MCP servers.
 - Fully isolated in the CLI MCP transport layer without adding any complexity to `mini-agent-core`.
-- Automated test coverage in [`crates/mini-agent-cli/src/mcp_tests.rs`](../../../../crates/mini-agent-cli/src/mcp_tests.rs).
+- Automated test coverage in [`crates/mini-agent-capabilities/src/mcp_tests.rs`](../../../../crates/mini-agent-capabilities/src/mcp_tests.rs).

@@ -97,8 +97,8 @@ bounded regression fixture before implementing the fix.
 
 | Priority | Finding and source | Required acceptance evidence |
 | --- | --- | --- |
-| P1 | Plan Mode checks file mutation paths, but `Shell::execute` does not check planning state. `SpawnAgent` starts a child with automatic approval without inheriting the planning restriction. See [workspace.rs](../../../../crates/mini-agent-cli/src/workspace.rs) and [subagent.rs](../../../../crates/mini-agent-cli/src/subagent.rs). | Enter Plan Mode through the CLI. The living plan remains writable; direct edits, mutating shell/process actions, and delegated mutations cannot modify a sentinel workspace file. Check MCP and follow-up delegation paths too. |
-| P1 | `classify_domain` admits public-looking names without checking their resolved addresses. `fetch_admitted` delegates DNS to the HTTP client; redirect checks repeat the textual classification. See [web.rs](../../../../crates/mini-agent-cli/src/web.rs). | A controlled resolver fixture proves that a public-looking hostname cannot reach private, metadata, or loopback addresses, including redirects. Bind the connection to checked addresses so a second lookup cannot bypass the decision. Explicitly allowed loopback URLs must still work. Do not probe real internal services. |
+| P1 | Plan Mode checks file mutation paths, but `Shell::execute` does not check planning state. `SpawnAgent` starts a child with automatic approval without inheriting the planning restriction. See the current [workspace boundary](../../../../crates/mini-agent-capabilities/src/workspace.rs); the former CLI `subagent.rs` path was removed during mainline simplification. | Enter Plan Mode through the CLI. The living plan remains writable; direct edits, mutating shell/process actions, and delegated mutations cannot modify a sentinel workspace file. Check MCP and follow-up delegation paths too. |
+| P1 | `classify_domain` admits public-looking names without checking their resolved addresses. `fetch_admitted` delegates DNS to the HTTP client; redirect checks repeat the textual classification. See [web.rs](../../../../crates/mini-agent-capabilities/src/web.rs). | A controlled resolver fixture proves that a public-looking hostname cannot reach private, metadata, or loopback addresses, including redirects. Bind the connection to checked addresses so a second lookup cannot bypass the decision. Explicitly allowed loopback URLs must still work. Do not probe real internal services. |
 | P2 | `assemble_compacted` truncates summary text to `max_user_input_bytes` before adding its prefix, so the complete generated User item can exceed that limit and fail restoration. See [harness.rs](../../../../crates/mini-agent-core/src/harness.rs). | Summaries at and above the limit, including multibyte UTF-8 and small configured limits, produce complete items within the limit. Persisting and restoring the resulting conversation succeeds without losing history. |
 
 Keep the fixes at their existing boundaries. Planning permissions and network
@@ -124,7 +124,7 @@ Rejection keeps the milestone in place; step, time, and model failures mark the
 goal failed. Stored milestone budgets are now applied to the active harness
 configuration, with the host timeout enforcing the wall-clock bound. See
 [repl.rs](../../../../crates/mini-agent-cli/src/repl.rs) and
-[goal.rs](../../../../crates/mini-agent-cli/src/goal.rs).
+[goal.rs](../../../../crates/mini-agent-host/src/goal.rs).
 
 For Goal Mode, prefer the smallest CLI-host continuation that demonstrates
 execution, settled checkpoint, independent verification, and a persisted
@@ -178,7 +178,7 @@ counts and sampling settings. Do not infer general model quality from a single
 successful run or synthetic fixtures. Real-provider comparisons require
 separate explicit authorization for paid calls; they are not a prerequisite
 for the offline safety fixes. The existing
-[prompt-weight proposal](../feature/2026-08-26-prompt-weight-evaluation.md)
+[prompt-weight proposal](../../rejected/feature/2026-08-26-prompt-weight-evaluation.md)
 can supply a later evaluation without creating another benchmark framework.
 
 ## Delivery and Exit Criteria

@@ -54,4 +54,4 @@
 ### 关联文档
 
 - [Agent Notes README](../.agents/notes/README.md)
-- [Framework and Harness Maturity](../.agents/notes/implemented/architecture/2026-08-31-agent-framework-and-harness-maturity.md)
+- [Harness Framework and Next-Iteration Admission Note](../.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md)
