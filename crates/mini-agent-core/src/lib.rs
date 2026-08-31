@@ -27,3 +27,7 @@ pub use thread::ThreadError;
 pub use thread::TurnResult;
 pub use tool::ToolRegistry;
 pub use tool::ToolRouter;
+
+#[cfg(test)]
+#[path = "fault_injection_tests.rs"]
+mod fault_injection_tests;

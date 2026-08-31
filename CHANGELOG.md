@@ -32,12 +32,16 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Added the local App Server `JsonlTrace` sink and redacted JSONL records with
   bounded model-input, tool-manifest, event-payload, and output-size metadata;
   the JSON-RPC wire shape and retired external `--trace` path remain unchanged.
+- Added Stage 2 test-only fault evidence: a Core `FaultInjectionModel` and
+  Responses parser cases cover missing or malformed tool arguments, partial
+  model streams, and retryable tool results without adding a production
+  provider or execution path. HTTP 429 adaptation remains a follow-up.
 - Added a local baseline rerun/report recipe and recorded the next-iteration
   evidence decisions for bounded JSONL Trace export, test-only fault injection,
   slow-scenario scheduling, Compaction measurement, structured permission
   rejection, and timeout/steer race ordering. The retired external `--trace`
   path and current 50% Compaction trigger remain unchanged.
-- Documented the current budget snapshot (`15,660` runtime lines and `28,680`
+- Documented the current budget snapshot (`15,928` runtime lines and `28,992`
   total Rust lines) in the README and Agent Notes.
 
 ### Fixed

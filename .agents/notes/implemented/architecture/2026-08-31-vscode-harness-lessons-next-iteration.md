@@ -66,7 +66,7 @@ VS Code 文章最重要的结论是：模型只是引擎，harness 才是把上�
 cargo test -p mini-agent-cli --test interactive <scenario> -- --exact
 ```
 
-本批 8/8 通过。该 baseline 已证明现有公共路径可承载第一轮 harness evidence；跨文件重构、工具失败恢复、MCP/approval/sandbox 拒绝和独立的 model/provider 对比仍是待补场景，不将它们伪装成已覆盖。
+本批 8/8 通过。该 baseline 已证明现有公共路径可承载第一轮 harness evidence；跨文件重构、CLI 公共路径的工具失败恢复、MCP/approval/sandbox 拒绝和独立的 model/provider 对比仍是待补场景，不将它们伪装成已覆盖。阶段 2 本批另以 Core/Capabilities 边界测试补上了 test-only 故障恢复证据，详见下文。
 
 同日回归也通过：`cargo test -p mini-agent-app-server` 为 28/28，
 `cargo test -p mini-agent-cli --test interactive -- --test-threads=1` 为
@@ -83,7 +83,7 @@ Compaction、显式权限拒绝结果和 timeout/steer 并发证据。以下取�
 | 评审建议 | 当前判断 | 下一迭代准入条件 |
 | :--- | :--- | :--- |
 | 每个 Round 导出 JSONL Trace 并记录哈希 | 已实现本地诊断 API | `mini_agent_app_server::JsonlTrace` 复用 App Server 事件，记录 `trace_id`、`turn_id`、`round_index`、事件类型、完整 bounded model-input 哈希、工具 manifest 哈希、字节计数和 payload 哈希；原始 prompt、工具参数和结果不写入。当前不重新引入已退役的外部 `--trace` 开关；CLI 便捷入口仍需单独评估。 |
-| Fault Injection Provider | 接受，限定为测试设施 | 在 `Model`/Provider 适配边界增加 test-only 故障注入 double，覆盖畸形工具参数、缺少必要字段、部分流和 429/可重试错误；不增加生产 provider、不调用付费服务、不另起执行循环。 |
+| Fault Injection Provider | 首版已实现，限定为测试设施 | `mini-agent-core` 的 `FaultInjectionModel` 覆盖缺少必要工具参数、部分流失败和 `Retryable` 工具结果；`mini-agent-capabilities` 的 Responses 解析测试覆盖畸形 JSON 和缺字段。HTTP 429 provider 适配语义仍单独待补；不增加生产 provider、不调用付费服务、不另起执行循环。 |
 | 超过 5 秒的场景移出日常 CI | 部分接受 | 5 秒是 CI 调度策略，不是运行时语义；只有经确认的确定性慢场景才允许显式 `#[ignore]`，并提供定时或手动命令。不能按一次机器墙钟测量自动改变门禁。 |
 | Compaction 在 70% 触发 | 暂不改变当前行为 | 当前实现和 `docs/limits.md` 的确定性触发点是最大上下文的 50%；下一场景在 70% 记录预警、最近 3 轮保留和压缩前后预算，只有证据证明 50% 不合适时才改阈值。 |
 | 权限失败返回 `permission_denied`，不能是空结果 | 接受验证要求，协议类型待决 | 当前 `ToolExecutionStatus` 没有专用 `PermissionDenied` 变体；下一次审批/沙箱变更必须断言非空、结构化的拒绝结果和后续模型可见内容，并先决定复用 `Failed` 的 bounded reason 还是增加公共枚举。 |
@@ -184,6 +184,43 @@ Decision: accept
 Decision: accept
 ```
 
+#### 本轮实践的六项验证：test-only fault injection
+
+```text
+1. Layer: Core + Capabilities
+   rationale: Core 的 FaultInjectionModel 验证现有 Model/ModelEventSink、Tool 和
+   Harness 边界；Capabilities 的 Responses 测试验证原始 provider 事件解析。没有修改
+   Protocol、Host、App Server 或 CLI 生产路径。
+2. Duplicate responsibility:
+   searched mini-agent-core/src/harness_tests.rs 的 ScriptedModel/RecordingModel、
+   mini-agent-capabilities/src/openai/responses.rs 的 Accumulator/apply/parse_tool_call；
+   现有 double 只提供正常响应，现有解析测试没有覆盖脏 function-call 事件，没有可复用
+   的故障序列设施。
+3. Replace vs add:
+   保留正常测试 double，新增隔离的 fault_injection_tests.rs 和一个可排队的
+   FaultInjectionModel；它只复用既有 Model、ModelEventSink、Tool 和 Harness loop，
+   不新增生产 provider、重试策略或第二套执行循环。
+4. Net line delta:
+   expected: runtime +~320; all Rust +~320
+   actual: runtime 15,660 -> 15,928 (+268); all Rust 28,680 -> 28,992 (+312)
+   （Core test-only +268，Capabilities parser tests +44）。
+5. Visible surface:
+   no production model input, event type, persistence schema, or public protocol change;
+   partial text is emitted only through the existing ModelEventSink and is followed by the
+   existing RunFailed(Model). Malformed provider JSON is rejected at the existing adapter
+   boundary; missing tool arguments remain a bounded existing Tool result visible to the
+   next model round.
+6. Boundary evidence:
+   cargo test -p mini-agent-core (31 passed)
+   cargo test -p mini-agent-capabilities (62 passed)
+   cargo clippy -p mini-agent-core --all-targets -- -D warnings
+   cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings
+   cargo fmt --all
+   python scripts/line_budget.py
+
+Decision: accept
+```
+
 ### 3.3 评估自动化的顺序
 
 自动化按以下顺序推进：
@@ -210,8 +247,11 @@ Decision: accept
 1. 已有 8 个 bounded harness scenarios 的稳定基线和可审计结果；
 2. `goal timeout lifecycle` 已完成 6 项准入记录，并包含 scenario/eval 证据；
 3. timeout、cancel、steer、follow-up、resume 的事件与 durable state 顺序已通过回归；
-4. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
-5. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
+4. test-only FaultInjectionModel 和 Responses parser fault cases 已覆盖缺字段、畸形 JSON、
+   部分流和 retryable tool result，且没有改变生产执行路径；
+5. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
+6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
-后续仍需补充 CLI 自动接入 Trace 报告、跨文件重构、工具失败恢复、MCP/approval/sandbox
-拒绝和独立 model/provider 对比场景；这些是证据缺口，不是当前实现的已覆盖能力。
+后续仍需补充 CLI 自动接入 Trace 报告、跨文件重构、CLI 公共路径工具失败恢复、HTTP 429
+provider 适配、MCP/approval/sandbox 拒绝和独立 model/provider 对比场景；这些是证据缺口，
+不是当前实现的已覆盖能力。

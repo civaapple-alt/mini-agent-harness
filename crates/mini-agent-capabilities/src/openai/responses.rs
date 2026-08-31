@@ -591,4 +591,48 @@ mod tests {
         assert_eq!(deltas.reasoning, vec!["why"]);
         assert!(deltas.text.is_empty());
     }
+
+    #[test]
+    fn rejects_malformed_or_incomplete_function_call_events() {
+        let mut state = Accumulator::new(1024);
+        let mut deltas = Deltas::default();
+
+        let malformed = apply(
+            &mut state,
+            json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "call-1",
+                    "name": "lookup",
+                    "arguments": "{not-json"
+                }
+            }),
+            &mut deltas,
+        )
+        .unwrap_err();
+        assert!(
+            malformed
+                .to_string()
+                .contains("invalid function call arguments")
+        );
+
+        let missing_field = apply(
+            &mut state,
+            json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "call-2",
+                    "arguments": "{}"
+                }
+            }),
+            &mut deltas,
+        )
+        .unwrap_err();
+        assert_eq!(
+            missing_field.to_string(),
+            "protocol error: function call missing name"
+        );
+    }
 }
