@@ -1,10 +1,18 @@
 # Subprocess CLI Subagent Execution
 
-Status: implemented
+Status: historical — subprocess subagent path retired from the current mainline
+
+## Current status update (2026-08-31)
+
+This note records the former subprocess-subagent design. The current CLI no
+longer contains the `subagent.rs` implementation; the mainline now uses the
+CLI → App Server → Host → Core path, while ACP/subagent experiments remain
+outside the supported runtime. The bounded process and result-recording
+constraints below are retained as historical design rationale only.
 
 ## Decision
 
-Subagent delegation uses a bounded child process rather than an in-process
+Subagent delegation used a bounded child process rather than an in-process
 multi-tenant scheduler. spawn_agent launches the current executable with:
 
     mini-agent ask <prompt> --json --auto --max-steps 50

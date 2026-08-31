@@ -1,10 +1,17 @@
 # Subagent Result Records and Session Lineage
 
-Status: implemented
+Status: historical — child lineage path retired from the current mainline
+
+## Current status update (2026-08-31)
+
+The parent/child result records described here belonged to the retired
+subagent path. Current persistence remains session-scoped at the App Server
+and Host boundaries; this note is retained only to explain why recursive
+trace aggregation was not made part of the mainline.
 
 ## Decision
 
-The current implementation keeps parent and child model histories separate.
+The former implementation kept parent and child model histories separate.
 When a durable parent invokes spawn_agent, the parent records:
 
     <parent-session-dir>/subagents/<child-id>/meta.json

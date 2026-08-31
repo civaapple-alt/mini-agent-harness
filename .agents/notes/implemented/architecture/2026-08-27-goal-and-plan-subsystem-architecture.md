@@ -2,6 +2,14 @@
 
 Status: implemented
 
+## Current ownership update (2026-08-31)
+
+Goal and Plan semantics remain supported, but ownership moved out of the old
+CLI module layout: Goal state and limits live in `mini-agent-host/src/goal.rs`,
+verifier turn orchestration lives in `mini-agent-app-server/src/verifier.rs`,
+and public workflow operations use the App Server client. The original CLI
+paths below are historical implementation references.
+
 ## 1. Context & Problem Statement
 
 In Mini-Agent, we established the session directory layout containing placeholders for `plan.md`, `plan_mode.json`, and `goal/` (`state.json`, `plan.md`, `verifier_verdict.md`). An architectural review identified key ambiguities:
@@ -77,7 +85,7 @@ In Plan Mode (`/plan`, `/plan <prompt>`, or `mini-agent plan`):
 - **Non-Goals**: ...
 
 ## 2. Critical Files
-- `crates/mini-agent-cli/src/goal.rs` [NEW]
+- `crates/mini-agent-host/src/goal.rs` [CURRENT OWNERSHIP; old CLI path retired]
 - `crates/mini-agent-cli/src/repl.rs` [MODIFY]
 
 ## 3. Phased Milestones
@@ -175,7 +183,7 @@ When a user initiates `/goal` in a session where `plan.md` already exists:
 
 ## 3. Implementation Specification
 
-### 3.1 Module `crates/mini-agent-cli/src/goal.rs`
+### 3.1 Module `crates/mini-agent-host/src/goal.rs` (current ownership)
 - Defines `GoalState`, `GoalStatus` (`Running`, `Converged`, `Failed`, `UserPaused`), and `PlanModeState`.
 - Implements `init_plan_mode` and `disable_plan_mode`.
 - Implements `init_goal_workspace`, `advance_goal_milestone`, `pause_goal`, and `parse_verifier_verdict`.

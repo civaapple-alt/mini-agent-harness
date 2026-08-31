@@ -1,10 +1,17 @@
 # Multi-turn Subagent Sessions via Durable Resumption
 
-Status: implemented
+Status: historical — child-session path retired from the current mainline
+
+## Current status update (2026-08-31)
+
+The durable child-session behavior described here was retired with the
+non-mainline subagent implementation. Current session continuity is owned by
+the App Server/Host session boundary; this note preserves the former bounded
+follow-up and persistence design for historical reference.
 
 ## Decision
 
-Phase 2A is implemented through durable child sessions:
+Phase 2A was implemented through durable child sessions:
 
 1. spawn_agent launches a child ask turn and persists it by default.
 2. The returned session_id identifies the child checkpoint.

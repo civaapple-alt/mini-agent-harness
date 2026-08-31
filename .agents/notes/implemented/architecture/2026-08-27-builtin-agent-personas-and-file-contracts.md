@@ -1,10 +1,19 @@
 # Builtin Agent & Persona Prompt System with File-Contract Collaboration
 
-Status: implemented
+Status: historical — persona/subagent path retired from the current mainline
+
+## Current status update (2026-08-31)
+
+This note describes the former built-in persona and subprocess-subagent
+experiment. Those CLI modules were removed during mainline simplification;
+the file-contract and issue-state ideas remain design history, not a current
+tool or protocol contract.
 
 ## 1. Context & Problem Statement
 
-Mini-Agent supports spawning isolated subprocess child agents via `spawn_agent` and resuming multi-turn subagent conversations via `send_subagent_message`. However:
+The pre-simplification Mini-Agent supported spawning isolated subprocess child
+agents via `spawn_agent` and resuming multi-turn subagent conversations via
+`send_subagent_message`. However:
 
 1. **Rudimentary Prompts**: Built-in subagent guidance was minimal, lacking the rigorous constraints, investigation methodologies, and format contracts present in mature harnesses (such as Grok's bundled system).
 2. **Missing Persona Specialization**: Specialized roles (e.g., `reviewer`, `security-auditor`, `implementer`, `test-writer`, `researcher`) require distinct operational disciplines (e.g., reviewer never modifies code; implementer performs minimal edits and runs tests; security auditor follows OWASP vectors and provides reproduction steps).

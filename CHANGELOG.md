@@ -74,6 +74,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Marked the retired Real LLM scenario runner as historical and corrected the
   remaining event-loop note to the current session-storage path; no paid-provider
   behavior was added.
+- Marked retired subagent/persona notes as historical and updated Goal/Plan
+  documentation to the current Host/App Server ownership; no subagent or
+  protocol behavior was reintroduced.
 - Added opt-in CLI Trace export through `ask --trace-jsonl PATH`: it creates a new
   file, emits only bounded redacted event metadata, caps each record at 8 KiB and
   the artifact at 256 KiB, and fails on overwrite or finalization errors. CLI public
