@@ -1,6 +1,6 @@
 # VS Code Coding Harness 经验与 mini-agent-harness 下一迭代准入笔记
 
-Status: proposed
+Status: implemented
 
 Source: [The Coding Harness Behind GitHub Copilot in VS Code](https://code.visualstudio.com/blogs/2026/05/15/agent-harnesses-github-copilot-vscode)
 
@@ -45,6 +45,34 @@ VS Code 文章最重要的结论是：模型只是引擎，harness 才是把上�
 
 首轮只做基线，不设“模型分数达标”这一单一门槛；应同时观察 resolution、round/step 数、tool-call 数、token/byte 使用、latency、失败分类和边界违规。后续 harness 改动与基线进行同场景对比。
 
+#### 第一版 bounded scenario baseline（2026-08-31）
+
+第一版复用了现有 CLI 公共集成测试，没有引入第二套 harness。每个测试都在临时 workspace 中运行，并使用本地 TCP mock provider；测试断言请求内容、工具目录、事件/输出或 durable session 状态。以下耗时是 Windows 本地单测命令的墙钟时间，包含 Cargo 增量检查/启动开销，只用于发现异常，不作为模型质量指标。
+
+| 场景 | 现有公共测试 | 输入与允许面 | 可审计结果 | 耗时 |
+| :--- | :--- | :--- | :--- | ---: |
+| 上下文组装与受限 skill 摘要 | `ask_reads_stdin_and_keeps_machine_output_clean` | `summarize this repository`；允许 ask profile、world、workspace skill 摘要 | mock request 含 user/world/instructions，未泄漏完整 skill body；JSON 输出保持机器可读 | 4,184 ms |
+| 无工具 profile 退化 | `ask_no_tools_uses_model_only_scope_without_extension_tools` | `explain the scope`；tools 必须为空，skill 不加载 | request `tools=[]`，capability profile 为 `ask-no-tools`，disabled 原因可见 | 527 ms |
+| durable session resume | `durable_session_resumes_settled_history_after_restart` | `first question` → 重启 → `second question`；仅 settled session 可恢复 | 第二次 request 同时包含旧问题、旧答案和新问题，session turn-1/turn-2 均落盘 | 884 ms |
+| Goal tool turn 与 verifier | `goal_mode_runs_a_tool_turn_and_verifies_the_settled_history` | `/goal Verify the release`；primary 可用工具，verifier 工具为空 | 7 个 mock request、verifier 输入含 tool evidence，goal 状态为 `converged` | 1,750 ms |
+| timeout → interrupt → failed | `goal_mode_timeout_is_deterministic_and_keeps_repl_alive` | `/goal timeout fixture`；1 秒 deadline，mock provider 延迟 1.5 秒 | timeout 后 turn settled，goal state 为 `failed`，REPL 正常退出；无 `Busy` 状态残留 | 1,926 ms |
+| restart recovery | `running_goal_is_paused_when_a_session_restarts` | 运行中的 Goal 被进程终止后 resume；不重放活动 turn | resume 后状态变为 `user_paused`，并提示重新发起 Goal | 760 ms |
+| steer 安全检查点 | `steer_interrupts_a_running_turn_at_a_checkpoint` | active turn 中提交 `/steer focus on the actual bug` | 第一 turn 保存 `steered`，第二 request 使用新消息，session 记录 settled steered turn | 642 ms |
+| follow-up 排队 | `follow_up_is_queued_until_the_running_turn_finishes` | active turn 中提交 `follow-up request`；只允许 bounded queue | 第一 request 结束后才发第二 request，输出包含 follow-up answer | 550 ms |
+
+执行命令为：
+
+```text
+cargo test -p mini-agent-cli --test interactive <scenario> -- --exact
+```
+
+本批 8/8 通过。该 baseline 已证明现有公共路径可承载第一轮 harness evidence；跨文件重构、工具失败恢复、MCP/approval/sandbox 拒绝和独立的 model/provider 对比仍是待补场景，不将它们伪装成已覆盖。
+
+同日回归也通过：`cargo test -p mini-agent-app-server` 为 23/23，
+`cargo test -p mini-agent-cli --test interactive -- --test-threads=1` 为
+11/11。App Server 测试覆盖 running turn 中的 cancel、steer、follow-up、
+Actor/CAS 和 settled checkpoint；CLI 场景覆盖真实前端到 App Server 的公共路径。
+
 ### 3.2 把 6 项准入问题变成验证记录
 
 后续每个实践更新必须附下面的记录，不能只写“测试通过”：
@@ -62,6 +90,8 @@ VS Code 文章最重要的结论是：模型只是引擎，harness 才是把上�
 Decision: accept | revise | defer
 ```
 
+该记录已用于本轮 `goal timeout lifecycle` 实践，实际结果为 `accept`；它同时说明了为什么要在公共边界测试之外单独保留 bounded scenario evidence。
+
 验证规则：
 
 - 第 1、2、3 项必须给出代码路径或符号，不接受只有模块名称的回答；
@@ -69,6 +99,35 @@ Decision: accept | revise | defer
 - 第 5 项只要有一项为 yes，就必须说明上限、兼容性和回归证据；
 - 第 6 项如果改变 prompt、tool schema、loop-control、context、event 或持久化行为，必须增加 Harness Scenario Evidence，公共单测不能单独作为充分证据；
 - 任何一项无法回答时，状态只能是 `revise` 或 `defer`，不能直接进入实现。
+
+#### 本轮实践的六项验证：goal timeout lifecycle
+
+```text
+1. Layer: App Server（CLI 仅负责调用）
+   rationale: deadline-aware turn drain 属于 LocalAppServerClient 的服务边界；CLI 不直接操作 Thread、Session 或 workflow store。
+2. Duplicate responsibility:
+   searched LocalAppServerClient::run_turn_batch, LocalAppServerClient::interrupt,
+   AppServer::turn_cancel_for, worker::handle_running_command,
+   repl_worker::fail_active_goal；没有另一个已存在的 timeout-and-settle 路径。
+3. Replace vs add:
+   用 LocalAppServerClient::run_turn_batch_until 取代 CLI 外层可丢弃 future 的
+   tokio::time::timeout；普通 run_turn_batch 复用同一 helper，没有新增第二套 turn loop。
+4. Net line delta:
+   expected: runtime +~50; all Rust +~50
+   actual: runtime 15,236 -> 15,286 (+50); all Rust 28,255 -> 28,306 (+51)
+5. Visible surface:
+   no new model input, event type, persistence schema, or public protocol field;
+   existing turn/interrupt is used, TurnFinished/checkpoint ordering is preserved,
+   and only the existing goal state changes from running to failed after settlement.
+6. Boundary evidence:
+   cargo test -p mini-agent-app-server (23 passed)
+   cargo test -p mini-agent-cli --test interactive (11 passed)
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo fmt --all
+   python scripts/line_budget.py
+
+Decision: accept
+```
 
 ### 3.3 评估自动化的顺序
 
@@ -89,13 +148,14 @@ Decision: accept | revise | defer
 - 不把模型差异当作新增兼容 wrapper 的充分理由；必须先有可复现的行为差异和替代方案比较；
 - 不把 scenario/eval 结果当作安全证明，安全和持久化仍需要确定性边界测试。
 
-## 5. 下一迭代完成判定
+## 5. 当前实现状态与后续缺口
 
-下一迭代在以下条件全部满足后，才可把本 note 从 `proposed` 转为 `implemented`：
+第一版 bounded harness scenario 基线已经实现并晋级为本项目的当前准入证据。以下条件均已满足；未覆盖的场景作为下一批 backlog 继续跟踪：
 
-1. 至少 8 个 bounded harness scenarios 有稳定基线和可审计结果；
-2. 至少一个影响模型可见面或 loop-control 的变更完成 6 项准入记录，并包含 scenario/eval 证据；
-3. timeout、cancel、steer、follow-up、resume 的事件与 durable state 顺序没有回归；
-4. runtime 和 all Rust 两个 hard ceilings 均通过，且变更没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
-5. README、CHANGELOG、Agent Notes 和 PR template 对实际流程保持一致。
+1. 已有 8 个 bounded harness scenarios 的稳定基线和可审计结果；
+2. `goal timeout lifecycle` 已完成 6 项准入记录，并包含 scenario/eval 证据；
+3. timeout、cancel、steer、follow-up、resume 的事件与 durable state 顺序已通过回归；
+4. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
+5. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
+后续仍需补充跨文件重构、工具失败恢复、MCP/approval/sandbox 拒绝和独立 model/provider 对比场景；这些是证据缺口，不是当前实现的已覆盖能力。

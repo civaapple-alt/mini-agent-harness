@@ -23,6 +23,8 @@ Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 targe
 
 The six qualitative questions are collected in the repository [PR template](../../.github/pull_request_template.md). The CI workflow enforces the mechanical checks; reviewers enforce layer ownership, duplicate-path analysis, replacement-vs-addition reasoning, visible-surface impact, and boundary evidence.
 
+The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative CLI scenarios pass, with App Server 23/23 and CLI interactive 11/11 regression evidence. Cross-file refactoring, tool-failure recovery, and model/provider comparison remain explicitly open gaps.
+
 ---
 
 ## 1. Multi-Level Directory Semantics & Layout
@@ -103,7 +105,6 @@ If a proposed approach is rejected during review:
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Make App Server the single CLI, JSON-RPC, and ACP execution base and remove parallel turn orchestration |
-| 2026-08-31 | [VS Code Harness Lessons for the Next Iteration](proposed/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) | Harness-as-product lessons, turn/round evidence, product-specific scenarios, and six-question validation records |
 
 #### Bug Fixes (`proposed/bug-fix/`)
 
@@ -136,6 +137,7 @@ If a proposed approach is rejected during review:
 | 2026-08-30 | [Capabilities API Boundaries](implemented/architecture/2026-08-30-capabilities-api-boundaries.md) | Capabilities root facade split into stable contracts, composition seams, and crate-internal implementation |
 | 2026-08-30 | [Goal Verifier Naming Boundary](implemented/architecture/2026-08-30-goal-verifier-naming.md) | Replaced current Mentor implementation names with Goal verifier terminology without retaining legacy environment aliases |
 | 2026-08-30 | [Dead-Code Suppression Audit](implemented/architecture/2026-08-30-dead-code-suppression-audit.md) | Removed stale dead-code suppressions after classifying each item by mainline, embedding, test, or leftover usage |
+| 2026-08-31 | [VS Code Harness Lessons for the Next Iteration](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) | Implemented bounded turn/round scenarios, product-specific harness evidence, and six-question validation records |
 | 2026-08-30 | [Runtime Authority and Action Ordering](implemented/architecture/2026-08-30-runtime-authority-and-action-ordering.md) | Core/App Server/Host authority boundaries, internal action envelopes, and separate action/event ordering |
 | 2026-08-30 | [Runtime State Actor Queue](implemented/architecture/2026-08-30-runtime-state-actor-queue.md) | Session, World, MCP, and Workflow state ownership through one App Server actor queue |
 | 2026-08-30 | [Runtime Revision, CAS, and Transaction Boundary](implemented/architecture/2026-08-30-runtime-revision-cas-and-transaction.md) | Unified runtime revisions, stale-write rejection, and the Thread/Session persistence boundary |

@@ -240,7 +240,7 @@ nested-agent behavior are not emulated. See the
   verification rules for repository work.
 - [Change admission checklist](.github/pull_request_template.md) — required
   architecture, line-budget, and boundary questions for every change.
-- [Next-iteration harness notes](.agents/notes/proposed/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) — VS Code harness lessons, bounded scenarios, and
+- [Harness iteration notes](.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) — VS Code harness lessons, bounded scenarios, and
   six-question validation records.
 
 ## Development
@@ -272,6 +272,11 @@ line target.
 The current hard-budget snapshot is runtime `15,286 / 20,000` lines and all
 Rust source `28,306 / 30,000` lines. The approximate `26,900` Stage 1 target
 is optimization debt rather than a reason to delete protected behavior.
+
+The first bounded harness scenario baseline is active: 8 representative CLI
+scenarios pass, with App Server `23/23` and CLI interactive `11/11` regression
+coverage. Changes that affect prompt, tool schema, loop-control, context,
+events, or persistence must add scenario/eval evidence beyond unit tests.
 
 The line-budget report breaks Rust source down by the runtime layers: `core`,
   `protocol`, `capabilities`, `host`, `app-server`, and `cli`, followed by the enforced
