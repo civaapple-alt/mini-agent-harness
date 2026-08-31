@@ -12,7 +12,6 @@ use mini_agent_core::ToolRegistry;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
 use mini_agent_protocol::TurnInput;
-use std::path::Path;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
@@ -60,13 +59,15 @@ fn rpc_root(name: &str) -> std::path::PathBuf {
     root
 }
 
-fn managed_connection(root: &Path, workflows: WorkflowService) -> AppServerConnection<DoneModel> {
+fn managed_connection(name: &str) -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
+    let root = rpc_root(name);
+    let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
     let server = crate::tests::server(DoneModel);
     let management = RuntimeManagementService::new(
         server.clone(),
         None,
         mini_agent_host::WorldState::detect(
-            root,
+            &root,
             ApprovalMode::Automatic,
             false,
             SandboxKind::Native,
@@ -76,25 +77,16 @@ fn managed_connection(root: &Path, workflows: WorkflowService) -> AppServerConne
         Vec::new(),
         ApprovalController::with_preset(ApprovalMode::Automatic, Default::default()),
     );
-    AppServerConnection::new(server)
-        .with_runtime_services(RuntimeServices::new(management, workflows).unwrap())
-}
-
-fn workflow_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
-    let root = rpc_root("workflow-rpc");
-    let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
-    (managed_connection(&root, workflows), root)
-}
-
-fn management_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
-    let root = rpc_root("management-rpc");
-    let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
-    (managed_connection(&root, workflows), root)
+    (
+        AppServerConnection::new(server)
+            .with_runtime_services(RuntimeServices::new(management, workflows).unwrap()),
+        root,
+    )
 }
 
 #[tokio::test]
 async fn exposes_session_world_and_mcp_management() {
-    let (mut connection, root) = management_connection();
+    let (mut connection, root) = managed_connection("management-rpc");
     let response = connection
         .handle_request(initialize_request(1, "management-test"))
         .await
@@ -153,7 +145,7 @@ async fn exposes_session_world_and_mcp_management() {
 
 #[tokio::test]
 async fn runtime_mutations_reject_stale_revision_tokens() {
-    let (connection, root) = management_connection();
+    let (connection, root) = managed_connection("management-rpc");
     let management = connection.runtime_management().unwrap().clone();
     let commands = management.server.command_sender();
 
@@ -244,7 +236,7 @@ async fn requires_initialize_and_handles_turn_start() {
 
 #[tokio::test]
 async fn exposes_workflow_management_without_host_paths() {
-    let (mut connection, root) = workflow_connection();
+    let (mut connection, root) = managed_connection("workflow-rpc");
     let response = connection
         .handle_request(initialize_request(1, "workflow-test"))
         .await
