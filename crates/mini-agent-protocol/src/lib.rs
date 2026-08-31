@@ -33,6 +33,19 @@ pub use turn::TurnStart;
 pub use turn::TurnStatus;
 pub use turn::TurnSubmission;
 
+/// Returns a deterministic non-cryptographic digest for bounded diagnostics.
+///
+/// Callers must not use this value for secrets, authentication, or integrity
+/// protection. It is intended only for comparing redacted harness records.
+pub fn stable_digest(bytes: &[u8]) -> String {
+    let mut hash = 14_695_981_039_346_656_037u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(1_099_511_628_211);
+    }
+    format!("fnv1a64-{hash:016x}")
+}
+
 pub use run::LimitExceeded;
 pub use run::LimitKind;
 pub use run::StopReason;

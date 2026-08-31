@@ -108,7 +108,7 @@ impl<W: Write> JsonlTrace<W> {
             tool_manifest_hash: self.tool_manifest_hash.clone(),
             output_bytes: output_bytes(&envelope.event),
             payload_bytes: payload.len(),
-            payload_hash: stable_digest(&payload),
+            payload_hash: mini_agent_protocol::stable_digest(&payload),
         };
         let mut line = serde_json::to_vec(&record).expect("trace record must serialize");
         line.push(b'\n');
@@ -172,15 +172,6 @@ fn output_bytes(event: &Event) -> Option<usize> {
         | Event::TurnFinished { .. }
         | Event::RunFailed { .. } => None,
     }
-}
-
-fn stable_digest(bytes: &[u8]) -> String {
-    let mut hash = 14_695_981_039_346_656_037u64;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(1_099_511_628_211);
-    }
-    format!("fnv1a64-{hash:016x}")
 }
 
 #[cfg(test)]

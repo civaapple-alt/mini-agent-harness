@@ -56,12 +56,10 @@ pub struct SourceFingerprint {
 }
 
 pub(crate) fn stable_fingerprint(bytes: &[u8]) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3_u64);
-    }
-    format!("{hash:016x}")
+    mini_agent_protocol::stable_digest(bytes)
+        .strip_prefix("fnv1a64-")
+        .expect("stable digest prefix must remain fixed")
+        .to_string()
 }
 
 impl RuntimeProfile {

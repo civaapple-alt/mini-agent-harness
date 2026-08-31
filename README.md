@@ -269,8 +269,8 @@ test evidence. New code defaults to net-zero growth or must name an explicit
 offset. Do not remove Core tests or Actor/CAS/Session authority merely to fit a
 line target.
 
-The current hard-budget snapshot is runtime `15,667 / 20,000` lines and all
-Rust source `28,687 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `15,660 / 20,000` lines and all
+Rust source `28,680 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 

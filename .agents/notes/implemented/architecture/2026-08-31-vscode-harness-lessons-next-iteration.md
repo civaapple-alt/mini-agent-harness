@@ -166,7 +166,7 @@ Decision: accept
    被动事件 sink，不新增 event loop、Session authority、外部 --trace 开关或第二条执行路径。
 4. Net line delta:
    expected: runtime +~380; all Rust +~380
-   actual: runtime 15,286 -> 15,667 (+381); all Rust 28,306 -> 28,687 (+381)
+   actual: runtime 15,286 -> 15,660 (+374); all Rust 28,306 -> 28,680 (+374)
 5. Visible surface:
    no JSON-RPC wire shape or model-visible input changed. Existing ModelStarted carries
    Rust-only input_bytes/input_hash/tool_manifest_hash with serde(skip). The local trace

@@ -37,7 +37,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   slow-scenario scheduling, Compaction measurement, structured permission
   rejection, and timeout/steer race ordering. The retired external `--trace`
   path and current 50% Compaction trigger remain unchanged.
-- Documented the current budget snapshot (`15,667` runtime lines and `28,687`
+- Documented the current budget snapshot (`15,660` runtime lines and `28,680`
   total Rust lines) in the README and Agent Notes.
 
 ### Fixed

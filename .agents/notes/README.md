@@ -9,9 +9,9 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `15,667 / 20,000` lines (78.3%; 4,333 remaining)
-- all Rust source: `28,687 / 30,000` lines (95.6%; 1,313 remaining)
-- Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines and the bounded Trace batch adds `381`, so the approximate `26,900` target is currently exceeded by `1,787` lines
+- runtime (`core + protocol + host + app-server`): `15,660 / 20,000` lines (78.3%; 4,340 remaining)
+- all Rust source: `28,680 / 30,000` lines (95.6%; 1,320 remaining)
+- Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines and the bounded Trace batch adds `374`, so the approximate `26,900` target is currently exceeded by `1,780` lines
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, and duplicate Python test fixture probing. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
