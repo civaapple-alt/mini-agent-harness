@@ -367,16 +367,18 @@ Decision: accept
    也不增加新的 sandbox abstraction。`docker --version` 只能证明 CLI 存在。
 4. Net line delta:
    expected: runtime +0; all Rust +0
-   actual: runtime 16,074 -> 16,074 (+0); all Rust 29,369 -> 29,369 (+0)
+   actual: runtime 16,216 / 20,000; all Rust 29,537 / 30,000; no Rust files changed.
 5. Visible surface:
    no model input, event, persistence schema, or public protocol change. The existing smoke
    test accepts either the explicit preflight-unavailable error or a bounded command result;
    a missing Docker API can appear as an exit-1 stderr result, so this is not isolation proof.
 6. Boundary evidence:
-   `docker --version` succeeded on this host; the existing
-   `docker_sandbox_checks_availability_or_reports_clear_error` test passed; `python
-   scripts/line_budget.py` passed. Cross-platform daemon availability and container isolation
-   remain deferred until a controlled test seam or CI capability is available.
+   `docker --version` reports Docker 29.6.1 on this Windows host, but `docker info` cannot
+   connect to `dockerDesktopLinuxEngine` because the daemon pipe is absent. The existing
+   `workspace::tests::docker_sandbox_checks_availability_or_reports_clear_error` test passed
+   through its clear-error branch. `python scripts/line_budget.py` passed. Cross-platform
+   daemon availability and container isolation remain deferred until a controlled test seam
+   or CI capability is available.
 
 Decision: defer
 ```

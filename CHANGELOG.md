@@ -21,6 +21,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   redacted `JsonlTrace` remains caller-owned, while implicit Session files and the
   retired external `--trace` option remain out of scope until artifact lifecycle
   and opt-in semantics are specified.
+- Re-ran the Docker sandbox audit: Docker CLI 29.6.1 is installed, but this host
+  cannot reach its Linux daemon. The existing smoke test therefore remains a
+  clear-error/preflight check, not evidence of container isolation or portability.
 
 ### Changed
 
