@@ -386,7 +386,7 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 1. **阶段 0：临时冻结——已执行**。本轮没有新增能力，只做重复测试支持、重复请求构造和无行为变化的运行时分支收敛。
 2. **阶段 1：先释放全局预算——低风险审计完成，目标未达成**。目标是净减少约 2,000 行，将全 Rust 总量降至约 26,900 行。相对本次整理前的 28,934 行，已释放 679 行，仍差约 1,355 行。剩余候选集中在有意保留的 frontend facade、配置输入兼容、Provider/协议测试，以及可能触及状态权威的大型重构；不再以无行为变化的小批次强行削减。
 3. **阶段 2：保护核心边界——定向验收通过**。在阶段 1 低风险候选耗尽后，逐项确认 Core loop、硬限制、协议边界、App Server Actor/CAS、Session 持久化和被动事件观察；另修复了 goal timeout 在活动 turn 尚未收敛时直接写 goal 状态的时序缺陷，现由 Local App Server Client 发起 `turn/interrupt`，等待 `TurnFinished`、idle checkpoint 和 settled turn 后再交给 workflow actor 写入 `failed`。这些边界仍保持不变，预算门禁继续生效。
-4. **阶段 3：恢复预算门禁——尚未开始**。20,000/30,000 行上限持续生效，没有放宽预算；待阶段 1、2 完成后再恢复正常功能准入。
+4. **阶段 3：恢复预算门禁——已启用常规准入**。20,000/30,000 行上限持续生效；阶段 1 的约 26,900 行目标转为优化债务，不再以删除受保护行为为代价追求。新增变更默认要求净零增长或明确抵扣，并报告 runtime 与全 Rust 的行数差；代码变更需跑受影响测试、Clippy、fmt 和 `python scripts/line_budget.py`，触及 Core/Protocol/Actor/CAS/Session 的行为还需架构说明与边界证据。
 
 当前每个变更至少需要说明：删除或替换的旧概念、净行数影响、是否触及 Core/Protocol/Actor/Session 边界，以及对应的定向测试和 `python scripts/line_budget.py` 结果。
 
@@ -431,7 +431,21 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 - OpenAI Provider、App Server 协议和 CLI 公共路径测试；
 - App Server thread index、runtime management 或 Session/Actor 状态权威的重构。
 
-这些不是当前“小批次无行为变化”准入项。因此当前状态是：阶段 1 目标尚未达到，但低风险释放阶段结束；阶段 2 的定向核心边界验收已完成，阶段 3（恢复常规预算准入）尚未开始。
+这些不是当前“小批次无行为变化”准入项。因此当前状态是：阶段 1 目标尚未达到，但低风险释放阶段结束；阶段 2 的定向核心边界验收已完成；阶段 3 已启用，后续按硬门禁和净零/明确抵扣规则进入常规准入。
+
+### 阶段 3 常规准入判定
+
+阶段 3 不代表预算宽松，而是把门禁从专项瘦身切换为每次变更的持续检查：
+
+| 条件 | 当前规则 |
+| :--- | :--- |
+| 硬上限 | runtime 不得超过 20,000 行，全 Rust 不得超过 30,000 行 |
+| 默认增长 | 新增功能、测试或协议字段默认需要净零增长；若无法净零，必须列出抵扣项或明确预算取舍 |
+| 边界保护 | 不为行数删除 Core 核心测试、Actor/CAS/Session 单一权威或公共协议行为 |
+| 证据 | 代码变更提供受影响 crate 测试、Clippy、fmt 和 `python scripts/line_budget.py`；边界变更补架构 note 与集成证据 |
+| 全量测试 | 当前只运行定向验证；完整 workspace 测试需单独获得批准 |
+
+当前余量为 runtime 4,714 行、全 Rust 1,694 行。它们是受硬门禁约束的维护缓冲，不是默认可消费额度；阶段 1 的剩余约 1,406 行只作为未来低风险机会记录。
 
 阶段 2 的定向验收已通过：Core 28、Protocol 7、App Server Protocol 5、App Server 23、Capabilities 61、Host 40，以及 CLI `interactive` 集成 11 项全部通过；`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --all`、`python scripts/line_budget.py` 也通过。goal timeout 回归已关闭：状态落盘前先完成 `turn/interrupt`、`TurnFinished`、idle checkpoint 和 settled turn，随后 `workflow/goal/fail` 成功写入 `failed`。未运行需额外审批的完整 workspace 测试。
 

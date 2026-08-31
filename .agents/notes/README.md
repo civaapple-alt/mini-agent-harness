@@ -7,7 +7,7 @@ This directory records architectural decision records (ADRs), technology selecti
 
 ## Current Maintenance Gate (2026-08-31)
 
-The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance, with the hard gates still active:
+The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
 - runtime (`core + protocol + host + app-server`): `15,286 / 20,000` lines (76.4%; 4,714 remaining)
 - all Rust source: `28,306 / 30,000` lines (94.4%; 1,694 remaining)
@@ -18,6 +18,8 @@ The latest maintenance batches removed repeated App Server action transport wrap
 The low-risk Stage 1 candidates are now exhausted. The remaining reduction candidates are intentional frontend facades, input-compatibility aliases, provider/protocol coverage, or larger state-boundary changes; they require an explicit design decision. Stage 2 remains the active boundary guard while the budget gates stay active. The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
 
 Stage 2 targeted boundary checks pass for Core, Protocol, App Server Protocol, App Server, Capabilities, Host, and the complete CLI interactive integration target. The goal-timeout lifecycle now settles `turn/interrupt` and durable checkpoint state before marking the goal failed. The full workspace test suite remains unrun pending explicit approval.
+
+Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 target is optimization debt, not permission to remove protected behavior. New changes must preserve both hard ceilings, report the runtime and whole-workspace line delta, and default to net-zero growth or identify an explicit offset. Code changes run the affected tests, Clippy, formatting, and `python scripts/line_budget.py`; new Core/Protocol/Actor/CAS/Session behavior also needs an architecture note and boundary-level evidence.
 
 ---
 
