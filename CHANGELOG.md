@@ -16,6 +16,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Activated Stage 3 normal budget admission. The runtime `20,000`-line and
   whole-workspace `30,000`-line ceilings remain hard gates; new changes default
   to net-zero growth or must identify an explicit offset.
+- Aligned `AGENTS.md` with the Stage 3 workflow: affected-package validation is
+  the default, while local full-workspace tests require explicit approval;
+  CI remains responsible for the full matrix.
 - Documented the current budget snapshot (`15,286` runtime lines and `28,306`
   total Rust lines) in the README and Agent Notes.
 

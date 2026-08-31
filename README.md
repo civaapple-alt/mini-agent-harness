@@ -236,6 +236,8 @@ nested-agent behavior are not emulated. See the
 - [Changelog](CHANGELOG.md) — version history.
 - [Agent Notes](.agents/notes/README.md) — architecture decisions and
   experiments.
+- [Agent instructions](AGENTS.md) — change admission, boundary, and
+  verification rules for repository work.
 - [Change admission checklist](.github/pull_request_template.md) — required
   architecture, line-budget, and boundary questions for every change.
 
