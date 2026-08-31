@@ -270,8 +270,9 @@ offset. Do not remove Core tests or Actor/CAS/Session authority merely to fit a
 line target.
 
 Pull-request CI also checks that the six-question section is present, all six
-questions have answers, placeholders are replaced, and all six admission
-confirmations are checked; reviewers remain responsible for answer quality.
+questions have answers, placeholders are replaced, and each of the six designated
+admission confirmations is checked exactly once; reviewers remain responsible for
+answer quality.
 
 The current hard-budget snapshot is runtime `16,216 / 20,000` lines and all
 Rust source `29,537 / 30,000` lines. The approximate `26,900` Stage 1 target

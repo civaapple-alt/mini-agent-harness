@@ -6,9 +6,17 @@ import sys
 
 
 _QUESTION = re.compile(r"(?m)^\s*([1-6])\.\s+\*\*[^\n]*\*\*.*$")
-_CHECKBOX = re.compile(r"(?im)^\s*-\s*\[([ x])\]\s+")
+_CHECKBOX = re.compile(r"(?im)^\s*-\s*\[([ x])\]\s+(.+?)\s*$")
 _PLACEHOLDER = "<!-- answer here -->"
 _REQUIRED_SECTIONS = ("## 变更准入检查", "### 六项必答题", "### 准入确认")
+_CONFIRMATION_LABELS = (
+    "我已确认 runtime 不超过",
+    "新增代码默认满足净零增长",
+    "我没有为了行数删除 Core 核心测试",
+    "若触及模型上下文、事件、持久化或协议",
+    "若影响模型行为或 harness loop",
+    "若这是纯文档变更",
+)
 
 
 def validate_body(body: str) -> list[str]:
@@ -47,8 +55,14 @@ def validate_body(body: str) -> list[str]:
             confirmation = confirmation[: next_heading.start()]
     else:
         confirmation = ""
-    checkboxes = _CHECKBOX.findall(confirmation)
-    if len(checkboxes) < 6 or any(mark.lower() != "x" for mark in checkboxes[:6]):
+    checkboxes = [
+        (mark.lower(), label.strip()) for mark, label in _CHECKBOX.findall(confirmation)
+    ]
+    if any(
+        sum(label.startswith(expected) for _, label in checkboxes) != 1
+        or not any(mark == "x" and label.startswith(expected) for mark, label in checkboxes)
+        for expected in _CONFIRMATION_LABELS
+    ):
         errors.append("check all six admission confirmation boxes")
     return errors
 

@@ -15,7 +15,10 @@ def valid_body() -> str:
         f"{index}. **Question {index}**\n\nanswer {index}"
         for index in range(1, 7)
     )
-    confirmations = "\n".join("- [x] confirmed" for _ in range(6))
+    confirmations = "\n".join(
+        f"- [x] {label} (confirmed)"
+        for label in check_pr_admission._CONFIRMATION_LABELS
+    )
     return f"## 变更准入检查\n\n### 六项必答题\n\n{questions}\n\n### 准入确认\n{confirmations}"
 
 
@@ -36,12 +39,23 @@ class PrAdmissionTests(unittest.TestCase):
         self.assertIn("question 3 has no answer", errors)
 
     def test_rejects_missing_confirmation(self) -> None:
-        body = valid_body().replace("- [x] confirmed", "- [ ] confirmed", 1)
+        body = valid_body().replace("- [x]", "- [ ]", 1)
         self.assertIn("check all six admission confirmation boxes", check_pr_admission.validate_body(body))
 
     def test_ignores_unrelated_checked_boxes_outside_confirmation(self) -> None:
-        body = valid_body().replace("- [x] confirmed", "- [ ] confirmed", 1)
+        body = valid_body().replace("- [x]", "- [ ]", 1)
         body += "\n\n- [x] unrelated checklist item"
+        self.assertIn("check all six admission confirmation boxes", check_pr_admission.validate_body(body))
+
+    def test_rejects_unrelated_checked_boxes_inside_confirmation(self) -> None:
+        body = valid_body()
+        confirmation = "### 准入确认\n- [x] unrelated checklist item\n"
+        body = body.replace("### 准入确认\n", confirmation)
+        body = body.replace(
+            f"- [x] {check_pr_admission._CONFIRMATION_LABELS[0]}",
+            f"- [ ] {check_pr_admission._CONFIRMATION_LABELS[0]}",
+            1,
+        )
         self.assertIn("check all six admission confirmation boxes", check_pr_admission.validate_body(body))
 
 

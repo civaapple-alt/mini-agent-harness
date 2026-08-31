@@ -29,6 +29,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   seam. No cross-provider quality claim or paid-provider CI gate was added.
 - Tightened the PR admission checker to count only the six confirmation boxes
   under `### 准入确认`, so unrelated checklist items cannot satisfy the gate.
+- Tightened the same checker to match each stable confirmation label exactly once,
+  so an unrelated checked item inside that section cannot mask an unchecked
+  admission confirmation.
 
 ### Changed
 

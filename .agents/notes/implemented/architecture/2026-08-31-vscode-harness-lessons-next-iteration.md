@@ -731,8 +731,8 @@ Decision: accept
    body, so unrelated checklists could satisfy an unchecked admission box.
 3. Replace vs add:
    replace the global checkbox count with a bounded scan of the existing `准入确认`
-   section and add one regression case. No second validator, Rust helper, or new gate
-   is introduced.
+   section that matches each of the six stable confirmation labels, and add one
+   regression case. No second validator, Rust helper, or new gate is introduced.
 4. Net line delta:
    expected: runtime +0; all Rust +0
    actual: runtime 16,216 / 20,000; all Rust 29,537 / 30,000; Python-only change.
@@ -742,7 +742,7 @@ Decision: accept
    checked; unrelated PR checklists no longer affect it.
 6. Boundary evidence:
    `python -m unittest scripts/test_pr_admission.py scripts/test_line_budget.py
-   scripts/test_package_release.py` (14 passed), `git diff --check`, and
+   scripts/test_package_release.py` (15 passed), `git diff --check`, and
    `python scripts/line_budget.py` pass. The new regression proves an unrelated
    checked box cannot mask an unchecked admission confirmation.
 
