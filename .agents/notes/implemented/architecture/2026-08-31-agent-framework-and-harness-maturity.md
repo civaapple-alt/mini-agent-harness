@@ -384,7 +384,7 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 截至本次整理：
 
 1. **阶段 0：临时冻结——已执行**。本轮没有新增能力，只做重复测试支持、重复请求构造和无行为变化的运行时分支收敛。
-2. **阶段 1：先释放全局预算——进行中**。目标是净减少约 2,000 行，将全 Rust 总量降至约 26,900 行。相对本次整理前的 28,934 行，已释放 547 行，距离目标还差约 1,487 行；当前仍不能恢复常规扩展节奏。
+2. **阶段 1：先释放全局预算——进行中**。目标是净减少约 2,000 行，将全 Rust 总量降至约 26,900 行。相对本次整理前的 28,934 行，已释放 575 行，距离目标还差约 1,459 行；当前仍不能恢复常规扩展节奏。
 3. **阶段 2：保护核心边界——作为施工约束执行，尚未单独验收**。Core loop、硬限制、协议边界、App Server Actor/CAS、Session 持久化和被动事件观察仍保持不变。
 4. **阶段 3：恢复预算门禁——尚未开始**。20,000/30,000 行上限持续生效，没有放宽预算；待阶段 1、2 完成后再恢复正常功能准入。
 
@@ -406,10 +406,11 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 | Capabilities skill metadata projection | `metadata_catalog` 和有界发现分别构造相同的 skill 元数据 JSON | 复用私有 `skill_metadata` projection；净释放 1 行 | 不改变发现上限、提示词内容或公开协议 |
 | Capabilities result argument validation | `result_store` 重复实现 workspace 已有的 `string_arg` | 复用 workspace helper；净释放 6 行 | 不改变结果句柄、范围读取或持久化语义 |
 | Capabilities built-in provider descriptor | `BuiltinToolProvider::descriptor` 与静态 descriptor 重复定义相同字段 | 共用 `BUILTIN_TOOL_DESCRIPTOR`；净释放 2 行 | 不改变 provider registry 选择或 capability manifest |
+| Capabilities static shell specification test | `shell_matches_the_host_environment` 只断言静态程序名和 tool spec 文案，执行/超时/UTF-8 行为已有覆盖 | 删除重复静态值测试；按门禁净释放 28 行 | 不改变 CLI 公共输出、shell 执行或安全策略 |
 | MCP / profile 配置别名 | `parse` 中的旧拼写和 transport 字段别名属于输入兼容 | 暂缓删除 | 删除会改变已有配置行为，保留并纳入后续兼容策略 |
 | App Server frontend/runtime 便捷包装 | CLI/embedding 使用的 facade、profile、approval 和 runtime 转换入口 | 暂缓删除 | 这些是有意的依赖边界，不是内部重复执行逻辑 |
 
-本批验证：`cargo test -p mini-agent-capabilities`（63 passed）、`cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings`、`cargo fmt --all`、`python scripts/line_budget.py` 均通过。累计阶段 1 释放量按门禁脚本从 545 行更新为 547 行；本批不删除 Core 核心测试，也不移动 Actor/CAS/Session 边界。
+本批验证：`cargo test -p mini-agent-capabilities`（62 passed）、`cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings`、`cargo fmt --all`、`python scripts/line_budget.py` 均通过。累计阶段 1 释放量按门禁脚本从 547 行更新为 575 行；本批不删除 Core 核心测试，也不移动 Actor/CAS/Session 边界。
 
 工程含义：
 

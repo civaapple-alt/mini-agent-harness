@@ -10,10 +10,10 @@ This directory records architectural decision records (ADRs), technology selecti
 The line-budget release work is in **Stage 1: release global budget**, with the hard gates still active:
 
 - runtime (`core + protocol + host + app-server`): `15,310 / 20,000` lines (76.6%; 4,690 remaining)
-- all Rust source: `28,387 / 30,000` lines (94.6%; 1,613 remaining)
-- released against the Stage 1 baseline: `547` lines; `1,487` more lines are needed to reach the Stage 1 target of approximately `26,900`
+- all Rust source: `28,359 / 30,000` lines (94.5%; 1,641 remaining)
+- released against the Stage 1 baseline: `575` lines; `1,459` more lines are needed to reach the Stage 1 target of approximately `26,900`
 
-The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, and duplicated built-in provider descriptors. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
+The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, and a static shell specification test. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
 The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
 

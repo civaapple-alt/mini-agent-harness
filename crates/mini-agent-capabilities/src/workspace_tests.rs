@@ -444,34 +444,6 @@ fn shell_process_has_a_timeout() {
 }
 
 #[test]
-fn shell_matches_the_host_environment() {
-    let root = test_root();
-    let workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::new(ApprovalMode::Automatic),
-            Vec::new(),
-            SandboxKind::Native,
-        )
-        .unwrap(),
-    );
-    let spec = Shell(workspace, ResultStore::default()).spec();
-    let command = shell_command("echo ready");
-
-    if cfg!(windows) {
-        assert_eq!(command.get_program(), "pwsh");
-        assert!(spec.description.contains("PowerShell 7"));
-        assert!(spec.description.contains("Windows"));
-    } else {
-        assert_eq!(command.get_program(), "sh");
-        assert!(spec.description.contains("POSIX sh"));
-    }
-    assert!(spec.description.contains("without per-command approval"));
-
-    remove_test_root(&root);
-}
-
-#[test]
 fn shell_preserves_utf8_from_workspace_files() {
     let root = test_root();
     fs::write(
