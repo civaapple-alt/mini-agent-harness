@@ -59,15 +59,23 @@ pub(super) fn shell_description(approval: ApprovalMode) -> String {
     }
 }
 
-fn apply_utf8_child_env(cmd: &mut Command) {
+fn apply_utf8_env(cmd: &mut Command) {
     cmd.env("PYTHONIOENCODING", "utf-8");
     cmd.env("PYTHONUTF8", "1");
     cmd.env("PYTHONLEGACYWINDOWSSTDIO", "0");
+}
+
+fn apply_non_interactive_env(cmd: &mut Command) {
     cmd.env("GIT_TERMINAL_PROMPT", "0");
     cmd.env("GIT_PAGER", "cat");
     cmd.env("PAGER", "cat");
     cmd.env("CI", "1");
     cmd.env("TERM", "dumb");
+}
+
+fn apply_child_process_env(cmd: &mut Command) {
+    apply_utf8_env(cmd);
+    apply_non_interactive_env(cmd);
 }
 
 #[cfg(windows)]
@@ -91,7 +99,7 @@ pub(crate) fn shell_command(command: &str) -> Command {
     {
         let wrapped = windows_utf8_shell_script(command);
         let mut process = Command::new("pwsh");
-        apply_utf8_child_env(&mut process);
+        apply_child_process_env(&mut process);
         process.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]);
         process.arg(wrapped);
         process
@@ -99,7 +107,7 @@ pub(crate) fn shell_command(command: &str) -> Command {
     #[cfg(not(windows))]
     {
         let mut process = Command::new("sh");
-        apply_utf8_child_env(&mut process);
+        apply_child_process_env(&mut process);
         process.args(["-lc", command]);
         #[cfg(unix)]
         {
@@ -123,7 +131,7 @@ fn run_sandboxed_command(
     timeout: Duration,
 ) -> Result<CommandOutput, ToolError> {
     let sandbox = ProcessSandbox::new(sandbox_kind);
-    apply_utf8_child_env(&mut cmd);
+    apply_child_process_env(&mut cmd);
     let mut child = cmd
         .current_dir(root)
         .stdin(Stdio::null())
