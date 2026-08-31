@@ -691,7 +691,7 @@ async fn compacts_context_and_continues_the_tool_loop() {
             before_bytes,
             after_bytes,
             usage: Some(ModelUsage { input_tokens: 100, .. }),
-        } if after_bytes < before_bytes
+        } if *before_bytes >= 1400 && after_bytes < before_bytes
     )));
 
     let requests = requests.lock().unwrap();

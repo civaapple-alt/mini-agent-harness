@@ -726,6 +726,38 @@ Decision: defer
 Decision: accept
 ```
 
+#### Stage 3 本轮实践的六项验证：Compaction trigger and retention evidence
+
+```text
+1. Layer: Core
+   rationale: compaction threshold, turn-atomic trimming, and recent-tail retention
+   are Core context semantics; no Host, CLI, provider, or persistence path changes.
+2. Duplicate responsibility:
+   searched `Harness::prepare_context`, `compact_context`, `split_prefix_tail`,
+   `trim_prefix_to_fit`, `docs/limits.md`, and the existing Core harness tests.
+   The implementation already has one 50% trigger and one last-two-groups retention
+   rule; this batch adds no second policy.
+3. Replace vs add:
+   strengthen the existing `compacts_context_and_continues_the_tool_loop` scenario
+   with a measurable 70%-of-test-budget precondition, while retaining the existing
+   `split_prefix_tail_keeps_last_two_assistant_groups` behavioral assertion. No
+   runtime threshold, context structure, or compaction path is added.
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,216 -> 16,216 (+0); all Rust 29,537 -> 29,537 (+0).
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. The test
+   records that compaction occurs after the context reaches at least 70% of its
+   bounded 2,000-byte fixture budget; production remains triggered at 50%.
+6. Boundary evidence:
+   `cargo test -p mini-agent-core` (31 passed), `cargo clippy -p mini-agent-core
+   --all-targets -- -D warnings`, `cargo fmt --all`, and `python scripts/line_budget.py`
+   pass. The existing Core test also proves the compaction result is smaller and
+   the latest world-state/tool work remains available; no public path changed.
+
+Decision: accept
+```
+
 #### Stage 3 本轮实践的六项验证：PR admission mechanical check
 
 ```text

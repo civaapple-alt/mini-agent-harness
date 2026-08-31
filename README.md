@@ -311,8 +311,10 @@ The next iteration is evidence-triggered rather than another broad cleanup:
 3. Revisit CLI public MCP-timeout projection only when a bounded fault-injection
    seam exists; otherwise keep the capability/App Server evidence and mark the
    CLI transport gap deferred.
-4. Add a measurable compaction-trigger scenario and verify recent-turn retention
-   before changing context behavior.
+4. The measurable compaction-trigger scenario is now recorded in Core: it checks
+   a trigger at least 70% of the bounded fixture budget and recent-tail retention;
+   production remains at the documented 50% trigger unless later evidence proves
+   that threshold unsuitable.
 5. Re-run the Docker isolation audit only when a reachable daemon is available;
    the current preflight test is not isolation evidence.
 6. Consider provider comparison or retry/backoff only after a second provider or

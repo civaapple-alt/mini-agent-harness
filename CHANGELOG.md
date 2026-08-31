@@ -38,6 +38,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Recorded the CLI Trace contract audit: reuse the bounded caller-owned
   `JsonlTrace`, require an explicit artifact lifecycle and total-size limit, and
   defer automatic CLI export until a public CLI scenario proves the boundary.
+- Added measurable Core compaction evidence without changing runtime behavior:
+  the existing scenario now asserts a trigger at least 70% of its bounded fixture
+  budget, while the production trigger remains 50% and recent-tail retention stays
+  protected.
 
 ### Changed
 

@@ -36,8 +36,10 @@ The first bounded scenario baseline is now implemented and recorded in the [harn
 3. Revisit CLI public MCP-timeout projection only if a bounded fault-injection
    seam can be justified; otherwise keep the current capability/App Server
    coverage and record the CLI transport gap as deferred.
-4. Add a measurable compaction-trigger scenario and recent-turn retention check
-   before changing context behavior.
+4. The measurable Core compaction-trigger scenario is now recorded: it checks a
+   trigger at least 70% of the bounded fixture budget and recent-tail retention;
+   production remains at the documented 50% trigger unless later evidence proves
+   that threshold unsuitable.
 5. Repeat Docker isolation checks only after a reachable daemon is available;
    current preflight/clear-error evidence is non-authoritative for isolation.
 6. Defer provider comparison and retry/backoff until a second provider or an
