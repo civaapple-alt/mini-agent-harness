@@ -111,10 +111,7 @@ fn ceil_char_boundary(text: &str, mut index: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicU64;
-    use std::sync::atomic::Ordering;
-    use std::time::SystemTime;
-    use std::time::UNIX_EPOCH;
+    use crate::test_support::test_root;
 
     #[test]
     fn appends_bounded_project_instructions() {
@@ -165,18 +162,5 @@ mod tests {
 
         assert!(error.contains("must be valid UTF-8"));
         fs::remove_dir_all(root).unwrap();
-    }
-
-    fn test_root() -> std::path::PathBuf {
-        static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let sequence = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
-        let root =
-            std::env::temp_dir().join(format!("mini-agent-project-context-{nonce}-{sequence}"));
-        fs::create_dir(&root).unwrap();
-        root
     }
 }

@@ -1,9 +1,6 @@
 use super::*;
+use crate::test_support::test_root;
 use std::fs;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 #[test]
 fn default_profile_exposes_tools_and_prompt_rule_sources() {
@@ -191,16 +188,4 @@ fn workspace_profile_file_overlays_bounded_selections() {
     assert_eq!(profile.security, SecurityPreset::FullMachine);
 
     fs::remove_dir_all(root).unwrap();
-}
-
-fn test_root() -> std::path::PathBuf {
-    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let sequence = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("mini-agent-profile-{nonce}-{sequence}"));
-    fs::create_dir(&root).unwrap();
-    root
 }

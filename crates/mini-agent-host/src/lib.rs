@@ -16,6 +16,10 @@ pub mod runtime_factory;
 pub mod tool_outcome;
 pub mod world;
 
+#[cfg(test)]
+#[path = "test_support_tests.rs"]
+pub(crate) mod test_support;
+
 /// Build metadata used by host diagnostics and persisted status output.
 pub fn git_sha() -> &'static str {
     option_env!("GIT_SHA").unwrap_or("unknown")

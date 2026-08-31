@@ -1,18 +1,5 @@
 use super::*;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-
-fn test_dir() -> PathBuf {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let seq = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("mini-agent-goal-test-{nonce}-{seq}"));
-    fs::create_dir_all(&dir).unwrap();
-    dir
-}
+use crate::test_support::test_root as test_dir;
 
 #[test]
 fn parse_plan_slash_accepts_prompt_and_ignores_lookalikes() {
