@@ -19,6 +19,8 @@ pub use mini_agent_capabilities::SecurityPreset;
 pub use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
 pub use mini_agent_core::InputQueueError;
 pub use mini_agent_core::RunControl;
+pub use mini_agent_host::harness_config_auto;
+pub use mini_agent_host::print_auto_warning;
 pub use mini_agent_protocol::EventEnvelope;
 pub use mini_agent_protocol::EventSink;
 pub use mini_agent_protocol::Message;
@@ -27,13 +29,6 @@ pub use mini_agent_protocol::ToolError;
 pub use mini_agent_protocol::TurnInput;
 pub use mini_agent_protocol::TurnInputMode;
 pub use mini_agent_protocol::TurnStatus;
-pub fn harness_config_auto(copilot: bool, auto_max_steps: usize) -> mini_agent_core::HarnessConfig {
-    mini_agent_host::harness_config_auto(copilot, auto_max_steps)
-}
-
-pub fn print_auto_warning() {
-    mini_agent_host::print_auto_warning();
-}
 
 /// Workflow capabilities selected by an App Server launch profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

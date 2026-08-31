@@ -369,13 +369,13 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 
 | 范围 | 当前 / 上限 | 使用率 | 剩余 |
 | :--- | ---: | ---: | ---: |
-| runtime（`core + protocol + host + app-server`） | 15,267 / 20,000 | 76.3% | 4,733 |
-| all Rust source | 28,316 / 30,000 | 94.4% | 1,684 |
+| runtime（`core + protocol + host + app-server`） | 15,262 / 20,000 | 76.3% | 4,738 |
+| all Rust source | 28,311 / 30,000 | 94.4% | 1,689 |
 
 组成明细：
 
-- runtime：production 11,743，unit 3,524，integration 0；合计 15,267。
-- all Rust source：production 21,266，unit 5,909，integration 1,141；合计 28,316。
+- runtime：production 11,738，unit 3,524，integration 0；合计 15,262。
+- all Rust source：production 21,261，unit 5,909，integration 1,141；合计 28,311。
 
 全 workspace 的 30,000 行门禁已经是当前实际瓶颈：可用余量只有 1,528 行，约为总预算的 5.1%。因此后续新增能力不能只看 runtime 还剩 4,633 行，还必须同时计入 CLI、测试和 integration 的全局增长。
 
@@ -384,7 +384,7 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 截至本次整理：
 
 1. **阶段 0：临时冻结——已执行**。本轮没有新增能力，只做重复测试支持、重复请求构造和无行为变化的运行时分支收敛。
-2. **阶段 1：先释放全局预算——进行中**。目标是净减少约 2,000 行，将全 Rust 总量降至约 26,900 行。相对本次整理前的 28,934 行，已释放 618 行，距离目标还差约 1,416 行；当前仍不能恢复常规扩展节奏。
+2. **阶段 1：先释放全局预算——进行中**。目标是净减少约 2,000 行，将全 Rust 总量降至约 26,900 行。相对本次整理前的 28,934 行，已释放 623 行，距离目标还差约 1,411 行；当前仍不能恢复常规扩展节奏。
 3. **阶段 2：保护核心边界——作为施工约束执行，尚未单独验收**。Core loop、硬限制、协议边界、App Server Actor/CAS、Session 持久化和被动事件观察仍保持不变。
 4. **阶段 3：恢复预算门禁——尚未开始**。20,000/30,000 行上限持续生效，没有放宽预算；待阶段 1、2 完成后再恢复正常功能准入。
 
@@ -412,10 +412,11 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 | App Server workflow goal response projection | goal start/fail/advance 三个 RPC 分支重复将 `GoalState` 投影为协议状态 | 复用私有 `workflow_goal_response`；按门禁净释放 1 行 | 不改变 goal 状态机、action metadata 或协议字段 |
 | Host OpenAI harness forwarding | `prepare_openai_harness_with_profile_and_result_store_and_registry` 只被 `HostRuntimeFactory` 调用一次 | 直接调用通用 `prepare_harness_with_model_factory`，保留显式类型适配；净释放 15 行 | 不改变 CLI → App Server → Host → Core 组装路径或模型工厂 seam |
 | App Server runtime 镜像与零调用 accessor | `AppServerRuntime` 重复保存已被模型持有的 `ImageStore`，并保留仓内无调用的 `thread_id`、`into_connection` accessor | 删除镜像字段和一次性转发入口；净释放 18 行 | 不改变本地客户端、模型、Actor/CAS、Session 或 JSON-RPC 协议 |
+| App Server frontend forwarding | `harness_config_auto` 与 `print_auto_warning` 仅逐字转发 Host 函数 | 改为同路径 re-export；净释放 5 行 | 不改变 CLI 入口或 JSON-RPC 协议 |
 | MCP / profile 配置别名 | `parse` 中的旧拼写和 transport 字段别名属于输入兼容 | 暂缓删除 | 删除会改变已有配置行为，保留并纳入后续兼容策略 |
 | App Server frontend/runtime 便捷包装 | CLI/embedding 使用的 facade、profile、approval 和 runtime 转换入口 | 暂缓删除 | 这些是有意的依赖边界，不是内部重复执行逻辑 |
 
-本批验证：`cargo test -p mini-agent-app-server`（23 passed）、CLI 单元测试与两包 Clippy、`cargo fmt --all`、`python scripts/line_budget.py` 均通过。CLI 集成用例 `goal_mode_timeout_is_deterministic_and_keeps_repl_alive` 在本地复跑仍报告状态为 `running` 而非 `failed`，与本批仅删除 accessor/镜像字段的变更无逻辑交集，需作为独立既有时序问题处理。累计阶段 1 释放量按门禁脚本从 600 行更新为 618 行；本批不删除 Core 核心测试，也不移动 Actor/CAS/Session 边界。
+本批验证：`cargo test -p mini-agent-app-server --lib`（23 passed）、`cargo test -p mini-agent-cli --bin mini-agent`（14 passed）、两包 Clippy、`cargo fmt --all`、`python scripts/line_budget.py` 均通过。CLI 集成用例 `goal_mode_timeout_is_deterministic_and_keeps_repl_alive` 在本地复跑仍报告状态为 `running` 而非 `failed`，与本批仅删除 accessor/镜像字段和转发函数的变更无逻辑交集，需作为独立既有时序问题处理。累计阶段 1 释放量按门禁脚本从 618 行更新为 623 行；本批不删除 Core 核心测试，也不移动 Actor/CAS/Session 边界。
 
 工程含义：
 
