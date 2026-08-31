@@ -287,7 +287,8 @@ The Stage 2 boundary evidence also includes a test-only fault-injection model
 and Responses parser/provider cases for malformed or missing tool arguments, partial
 model streams, retryable tool results, bounded HTTP 429 API error classification without
 implicit retry, MCP connection refusal, and shell refusal before sandbox execution. Provider-
-level retry/backoff policy and Docker sandbox availability/isolation remain open; the Docker
+level retry/backoff policy remains deferred; the current default is one bounded fail-fast
+429 failure without implicit retry. Docker sandbox availability/isolation remain open; the Docker
 smoke test only covers preflight/clear-error behavior and is not isolation proof. The failure/
 timeout/retry evidence matrix distinguishes covered public paths from unit-only and deferred
 evidence; MCP timeout is covered at the capability boundary and its App Server public

@@ -13,6 +13,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Added a pull-request admission CI check that requires the six-question
   template, six non-empty answers, replaced placeholders, and six checked
   confirmations; answer quality remains a reviewer responsibility.
+- Audited HTTP 429 handling and retained the bounded fail-fast provider policy:
+  one response becomes one `OpenAiError::Api` without implicit retry. Retry count,
+  backoff, jitter, `Retry-After`, and cancellation semantics remain a separate
+  deferred policy decision.
 
 ### Changed
 

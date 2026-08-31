@@ -219,6 +219,38 @@ Decision: accept
 Decision: accept
 ```
 
+#### Stage 3 本轮实践的六项验证：HTTP 429 retry/backoff policy audit
+
+```text
+1. Layer: Capabilities provider boundary
+   rationale: `post_json` owns the HTTP status classification. A retry policy would
+   also affect model request count, latency, cost, and turn settlement, so it must be
+   decided at the provider boundary before changing Core or App Server.
+2. Duplicate responsibility:
+   searched `post_json`, `OpenAiModel::respond`, Core model-error handling, and the
+   existing 429 loopback test. There is no existing retry scheduler, backoff helper, or
+   `Retry-After` contract to reuse.
+3. Replace vs add:
+   retain the existing bounded `OpenAiError::Api` fail-fast path. Do not add an implicit
+   retry loop, provider wrapper, or configuration field until the retry count, jitter,
+   `Retry-After` cap, cancellation behavior, and user-visible semantics are specified.
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,216 / 20,000; all Rust 29,537 / 30,000; no Rust files changed.
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. One 429 remains
+   one bounded model failure; this avoids hidden extra provider requests and preserves
+   deterministic turn failure under the current contract.
+6. Boundary evidence:
+   `maps_http_429_to_bounded_api_error_without_retrying` passes in the Capabilities
+   provider tests, with the existing bounded body assertion and no second request.
+   `cargo test -p mini-agent-capabilities` and Clippy evidence are recorded above;
+   `python scripts/line_budget.py` remains under both ceilings. Retry/backoff behavior
+   is explicitly deferred pending a separate policy decision.
+
+Decision: accept current fail-fast policy; defer retry/backoff implementation
+```
+
 #### Stage 3 本轮实践的六项验证：bounded cross-file refactor
 
 ```text
@@ -460,7 +492,7 @@ Decision: accept
 | 未知工具恢复 | CLI `ask_recovers_from_unknown_tool_on_public_path` | covered | 无；更广泛 provider 脏参数仍未穷举 |
 | 模型部分流失败 | Core `partial_model_stream_is_failed_without_fabricating_completion` | covered | 无；真实 provider 截断仍需独立矩阵 |
 | Retryable 工具结果 | Core `retryable_tool_result_is_preserved_until_model_recovers` | covered | 无隐式重试；策略层仍 deferred |
-| HTTP 429 | Capabilities `maps_http_429_to_bounded_api_error_without_retrying` | covered | retry/backoff policy 未定义 |
+| HTTP 429 | Capabilities `maps_http_429_to_bounded_api_error_without_retrying` | covered: bounded fail-fast default | provider-specific retry/backoff policy remains deferred |
 | shell timeout | Capabilities `shell_process_has_a_timeout` | covered at capability boundary | CLI/App Server 公共路径尚未单独覆盖 |
 | turn/goal timeout | App Server/CLI goal timeout scenario | covered at public path | 与 tool timeout 的组合矩阵未覆盖 |
 | approval/MCP refusal | App Server `NeedsApproval`、Capabilities MCP connection/call denial | covered | 无；公共 event projection 仍沿用既有边界 |
