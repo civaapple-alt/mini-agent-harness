@@ -201,7 +201,7 @@ pub struct SettledTurn {
 
 #[cfg(test)]
 #[path = "tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 impl fmt::Display for AppServerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

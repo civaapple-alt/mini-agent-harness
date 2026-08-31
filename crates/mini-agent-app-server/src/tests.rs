@@ -24,7 +24,7 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::sync::oneshot;
 
-struct DoneModel;
+pub(crate) struct DoneModel;
 
 impl Model for DoneModel {
     type Error = Infallible;
@@ -65,7 +65,7 @@ impl Model for BlockingModel {
     }
 }
 
-fn server<M: Model + Send + 'static>(model: M) -> AppServer<M> {
+pub(crate) fn server<M: Model + Send + 'static>(model: M) -> AppServer<M> {
     let harness = Harness::new(model, ToolRegistry::default(), HarnessConfig::default());
     AppServer::new(
         ThreadStart::new(ThreadId::new("thread-1")),

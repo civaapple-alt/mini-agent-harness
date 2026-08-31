@@ -138,7 +138,7 @@ If a proposed approach is rejected during review:
 | 2026-08-27 | [web_fetch / read_image session impact](implemented/architecture/2026-08-27-web-fetch-and-read-image-session-impact.md) | Envelope-only history; resume/fork attachments; compact empty tools; prefix-cache misses |
 | 2026-08-28 | [Interactive Steer and Follow-up Run Control](implemented/architecture/2026-08-28-steer-and-follow-up-run-control.md) | `/steer` priority correction, FIFO follow-up queue, cooperative safe checkpoints, and durable `steered` turns |
 | 2026-08-28 | [Host Capability Profiles and Runtime Seams](implemented/architecture/2026-08-28-host-capability-profiles-and-runtime-seams.md) | CLI/App Server/ACP profile selection, regular-agent prompt/rule scope, bounded manifests, startup profile resolution, and selected MCP loading |
-| 2026-08-31 | [Agent Framework 与 Harness 成熟度分析](implemented/architecture/2026-08-31-agent-framework-and-harness-maturity.md) | mini-agent-harness 与 Codex 原生框架的分层、Turn/Step 流程、steering 边界、硬限制与成熟度评估；当前 runtime 77.5%、全 Rust 95.3% |
+| 2026-08-31 | [Agent Framework 与 Harness 成熟度分析](implemented/architecture/2026-08-31-agent-framework-and-harness-maturity.md) | mini-agent-harness 与 Codex 原生框架的分层、Turn/Step 流程、steering 边界、硬限制与成熟度评估；当前 runtime 77.2%、全 Rust 95.1% |
 
 #### Features & Extensions (`implemented/feature/`)
 | Date | Title | Focus |

@@ -1,4 +1,5 @@
 use super::*;
+use crate::tests::DoneModel;
 use mini_agent_app_server_protocol::CapabilityProviderSelection;
 use mini_agent_app_server_protocol::ClientCapabilities;
 use mini_agent_capabilities::ApprovalController;
@@ -8,43 +9,16 @@ use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
 use mini_agent_core::ToolRegistry;
-use mini_agent_protocol::ModelEventSink;
-use mini_agent_protocol::ModelRequest;
-use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
 use mini_agent_protocol::TurnInput;
-use std::convert::Infallible;
+use std::path::Path;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 
-struct DoneModel;
-
-impl Model for DoneModel {
-    type Error = Infallible;
-
-    async fn respond<'a>(
-        &'a mut self,
-        _request: ModelRequest<'a>,
-        _events: &'a mut (dyn ModelEventSink + Send),
-    ) -> Result<ModelResponse, Self::Error> {
-        Ok(ModelResponse {
-            reasoning: String::new(),
-            text: "done".to_string(),
-            tool_calls: Vec::new(),
-            usage: None,
-        })
-    }
-}
-
 fn connection() -> AppServerConnection<DoneModel> {
-    let harness = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
-    let server = AppServer::new(
-        ThreadStart::new(ThreadId::new("thread-1")),
-        Thread::new(ThreadId::new("initial"), harness),
-    );
-    AppServerConnection::new(server)
+    AppServerConnection::new(crate::tests::server(DoneModel))
 }
 
 fn initialize_request(id: u64, client_name: &str) -> JsonRpcRequest {
@@ -73,9 +47,9 @@ fn turn_start_request(id: u64, prompt: &str) -> JsonRpcRequest {
     )
 }
 
-fn workflow_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
+fn rpc_root(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!(
-        "mini-agent-workflow-rpc-{}-{}",
+        "mini-agent-{name}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -83,17 +57,16 @@ fn workflow_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf)
             .as_nanos()
     ));
     std::fs::create_dir_all(&root).unwrap();
-    let harness = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
-    let server = AppServer::new(
-        ThreadStart::new(ThreadId::new("thread-1")),
-        Thread::new(ThreadId::new("initial"), harness),
-    );
-    let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
+    root
+}
+
+fn managed_connection(root: &Path, workflows: WorkflowService) -> AppServerConnection<DoneModel> {
+    let server = crate::tests::server(DoneModel);
     let management = RuntimeManagementService::new(
         server.clone(),
         None,
         mini_agent_host::WorldState::detect(
-            &root,
+            root,
             ApprovalMode::Automatic,
             false,
             SandboxKind::Native,
@@ -103,52 +76,20 @@ fn workflow_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf)
         Vec::new(),
         ApprovalController::with_preset(ApprovalMode::Automatic, Default::default()),
     );
-    (
-        AppServerConnection::new(server)
-            .with_runtime_services(RuntimeServices::new(management, workflows).unwrap()),
-        root,
-    )
+    AppServerConnection::new(server)
+        .with_runtime_services(RuntimeServices::new(management, workflows).unwrap())
+}
+
+fn workflow_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
+    let root = rpc_root("workflow-rpc");
+    let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
+    (managed_connection(&root, workflows), root)
 }
 
 fn management_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
-    let root = std::env::temp_dir().join(format!(
-        "mini-agent-management-rpc-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&root).unwrap();
-    let harness = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
-    let server = AppServer::new(
-        ThreadStart::new(ThreadId::new("thread-1")),
-        Thread::new(ThreadId::new("initial"), harness),
-    );
-    let management = RuntimeManagementService::new(
-        server.clone(),
-        None,
-        mini_agent_host::WorldState::detect(
-            &root,
-            ApprovalMode::Automatic,
-            false,
-            SandboxKind::Native,
-        ),
-        Vec::new(),
-        0,
-        Vec::new(),
-        ApprovalController::with_preset(ApprovalMode::Automatic, Default::default()),
-    );
-    (
-        AppServerConnection::new(server).with_runtime_services(
-            RuntimeServices::new(
-                management,
-                WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default()),
-            )
-            .unwrap(),
-        ),
-        root,
-    )
+    let root = rpc_root("management-rpc");
+    let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
+    (managed_connection(&root, workflows), root)
 }
 
 #[tokio::test]
