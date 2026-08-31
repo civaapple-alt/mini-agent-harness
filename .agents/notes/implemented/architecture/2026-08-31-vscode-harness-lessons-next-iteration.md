@@ -383,6 +383,37 @@ Decision: accept
 Decision: defer
 ```
 
+#### Stage 3 本轮实践的六项验证：model/provider comparison audit
+
+```text
+1. Layer: Capabilities + Host composition boundary
+   rationale: model construction is selected by Capabilities and assembled by Host;
+   a comparison must distinguish provider transport behavior from Core turn behavior.
+2. Duplicate responsibility:
+   searched `CapabilityRegistry`, `build_model`, `ModelProviderFactory`, the external
+   model-provider example, and the existing CLI/App Server mock-provider scenarios.
+   The registry has one built-in OpenAI-compatible provider; the factory seam does not
+   provide a second behavioral implementation or a comparable quality dataset.
+3. Replace vs add:
+   do not add a provider-specific branch, compatibility wrapper, benchmark platform, or
+   paid-provider test. Keep the existing provider-selection seam and require a concrete
+   reproducible behavior fork before adding a named provider policy.
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,216 / 20,000; all Rust 29,537 / 30,000; no Rust files changed.
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. Mock provider
+   results remain harness-path evidence only and are not promoted to model-quality claims.
+6. Boundary evidence:
+   existing Host/Capabilities registry and factory tests, the bounded CLI/App Server mock
+   scenarios, `cargo test -p mini-agent-host`, and the no-paid-provider release rule show
+   composition coverage but not cross-provider behavior. A future comparison must define
+   fixed scenarios, model IDs, request/response capture, cost/latency bounds, and privacy
+   handling before it becomes a CI or release gate.
+
+Decision: defer
+```
+
 #### Stage 3 本轮实践的六项验证：MCP call denial
 
 ```text

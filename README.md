@@ -316,7 +316,9 @@ regressions. The App Server also exposes `JsonlTrace` for local callers; it
 writes bounded, redacted per-round JSONL with input, tool-manifest, and payload
 hashes. The shortcut above currently captures test output and the budget
 snapshot only; automatic CLI Trace wiring remains a tracked next-iteration task.
-Do not use a paid provider for this baseline.
+Do not use a paid provider for this baseline. The built-in registry currently
+exposes one OpenAI-compatible provider; the external model factory is a Host
+composition seam, not cross-provider quality evidence.
 
 The line-budget report breaks Rust source down by the runtime layers: `core`,
   `protocol`, `capabilities`, `host`, `app-server`, and `cli`, followed by the enforced

@@ -24,6 +24,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Re-ran the Docker sandbox audit: Docker CLI 29.6.1 is installed, but this host
   cannot reach its Linux daemon. The existing smoke test therefore remains a
   clear-error/preflight check, not evidence of container isolation or portability.
+- Audited model/provider comparison: the built-in registry currently exposes one
+  OpenAI-compatible provider, and the Host model factory is only a composition
+  seam. No cross-provider quality claim or paid-provider CI gate was added.
 
 ### Changed
 
