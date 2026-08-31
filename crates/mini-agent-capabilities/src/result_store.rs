@@ -1,3 +1,4 @@
+use crate::workspace::string_arg;
 use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolError;
 use mini_agent_protocol::ToolSpec;
@@ -348,13 +349,6 @@ fn ceil_boundary(text: &str, mut index: usize) -> usize {
         index += 1;
     }
     index
-}
-
-fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, ToolError> {
-    arguments
-        .get(name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| ToolError(format!("{name} must be a string")))
 }
 
 fn usize_arg(arguments: &Value, name: &str) -> Result<Option<usize>, ToolError> {
