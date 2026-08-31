@@ -35,6 +35,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Documented the evidence-triggered next-iteration order: bounded CLI Trace
   contract, CLI MCP-timeout seam, compaction evidence, Docker isolation, and
   provider/retry policy, with missing evidence treated as a defer condition.
+- Recorded the CLI Trace contract audit: reuse the bounded caller-owned
+  `JsonlTrace`, require an explicit artifact lifecycle and total-size limit, and
+  defer automatic CLI export until a public CLI scenario proves the boundary.
 
 ### Changed
 

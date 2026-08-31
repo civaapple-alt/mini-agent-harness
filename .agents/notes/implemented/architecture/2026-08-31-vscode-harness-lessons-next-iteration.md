@@ -92,9 +92,43 @@ Compaction、显式权限拒绝结果和 timeout/steer 并发证据。以下取�
 
 当前 baseline 已有稳定的本地 JSONL Trace artifact；README 中的快捷命令仍只捕获
 测试输出和预算快照，尚未自动把 `JsonlTrace` 接入 CLI 基线报告。Trace 只用于证明
-事件/输入摘要变化，不将 mock provider 的通过结果等同于真实模型质量。Stage 3
-审计暂缓 CLI 自动 Trace：需要先明确 artifact 生命周期、session 单一权威和用户可见
-CLI 选项，再以独立变更重新评估。
+事件/输入摘要变化，不将 mock provider 的通过结果等同于真实模型质量。
+
+#### Stage 3 本轮实践的六项验证：CLI Trace contract audit
+
+```text
+1. Layer: CLI + App Server local boundary
+   rationale: JsonlTrace 已属于 App Server 的本地诊断能力；CLI 只负责显式选择
+   artifact sink，不复制事件、turn 或 Session 逻辑。
+2. Duplicate responsibility:
+   searched JsonlTrace/TraceRecord、CLI RunObserver/ChannelObserver、Session JSONL、
+   offline trace replay 和历史 --trace 入口。现有事件 sink 可复用，但没有 CLI
+   artifact lifecycle 或总量上限的公共契约。
+3. Replace vs add:
+   复用 JsonlTrace、现有 App Server turn API 和事件 sink；未来最多增加一个显式
+   opt-in 的 CLI sink 配置，不增加第二条执行循环，不把 trace 写入 Session，也不
+   恢复隐式 session trace 或未定义语义的旧 --trace 入口。
+4. Net line delta:
+   audit actual: runtime 16,216 -> 16,216 (+0); all Rust 29,537 -> 29,537 (+0).
+   implementation estimate remains unapproved until the contract and offset are accepted.
+5. Visible surface:
+   accepted contract candidate is one explicitly requested artifact, initially limited
+   to one-shot CLI paths; it must use a caller-provided path, refuse accidental overwrite,
+   cap each record at 8 KiB and the complete artifact at a fixed total limit, and write
+   only event metadata, counts, and hashes. Raw prompt, tool arguments/results, Session
+   history, model input, public events, and JSON-RPC protocol remain unchanged.
+6. Boundary evidence:
+   existing App Server trace tests prove redaction and per-record bounds, but no CLI
+   public-path test proves path ownership, total-size failure, or settled-session
+   behavior. Add that CLI scenario before implementation is accepted.
+
+Decision: defer implementation; accept the bounded contract direction for the next
+design review.
+```
+
+Until the CLI public scenario and artifact lifecycle decision exist, automatic Trace
+export remains deferred; the existing caller-owned `JsonlTrace` is the only supported
+diagnostic path.
 
 ### 3.2 把 6 项准入问题变成验证记录
 

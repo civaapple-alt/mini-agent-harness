@@ -31,7 +31,8 @@ The first bounded scenario baseline is now implemented and recorded in the [harn
    feature starts without net-zero growth or an explicit offset.
 2. Decide the bounded contract for opt-in CLI Trace export first: artifact
    ownership, redaction, per-round/total limits, and a CLI scenario. Implement it
-   only after that contract is accepted.
+   only after that contract is accepted. The current audit accepts the direction
+   but keeps implementation deferred; `JsonlTrace` remains caller-owned.
 3. Revisit CLI public MCP-timeout projection only if a bounded fault-injection
    seam can be justified; otherwise keep the current capability/App Server
    coverage and record the CLI transport gap as deferred.

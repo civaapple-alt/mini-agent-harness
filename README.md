@@ -306,6 +306,8 @@ The next iteration is evidence-triggered rather than another broad cleanup:
    batch; no new Rust feature starts without a net-zero plan or an explicit offset.
 2. Specify and, only if the lifecycle is bounded, implement opt-in CLI Trace
    export with redaction, artifact ownership, size limits, and a CLI scenario.
+   The current audit accepts the contract direction but keeps implementation
+   deferred: existing `JsonlTrace` is caller-owned and CLI has no automatic export.
 3. Revisit CLI public MCP-timeout projection only when a bounded fault-injection
    seam exists; otherwise keep the capability/App Server evidence and mark the
    CLI transport gap deferred.
