@@ -32,6 +32,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Tightened the same checker to match each stable confirmation label exactly once,
   so an unrelated checked item inside that section cannot mask an unchecked
   admission confirmation.
+- Documented the evidence-triggered next-iteration order: bounded CLI Trace
+  contract, CLI MCP-timeout seam, compaction evidence, Docker isolation, and
+  provider/retry policy, with missing evidence treated as a defer condition.
 
 ### Changed
 

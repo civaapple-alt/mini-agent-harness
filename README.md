@@ -300,6 +300,27 @@ now covered. Broader failure/retry matrices remain open follow-ups. The App Serv
 that `NeedsApproval` and MCP timeout results keep a non-empty reason in events,
 checkpoints, and the next model round.
 
+The next iteration is evidence-triggered rather than another broad cleanup:
+
+1. Freeze the two hard ceilings and require the six admission answers for every
+   batch; no new Rust feature starts without a net-zero plan or an explicit offset.
+2. Specify and, only if the lifecycle is bounded, implement opt-in CLI Trace
+   export with redaction, artifact ownership, size limits, and a CLI scenario.
+3. Revisit CLI public MCP-timeout projection only when a bounded fault-injection
+   seam exists; otherwise keep the capability/App Server evidence and mark the
+   CLI transport gap deferred.
+4. Add a measurable compaction-trigger scenario and verify recent-turn retention
+   before changing context behavior.
+5. Re-run the Docker isolation audit only when a reachable daemon is available;
+   the current preflight test is not isolation evidence.
+6. Consider provider comparison or retry/backoff only after a second provider or
+   an explicit retry policy exists; do not use paid-provider CI as a default.
+
+Each batch stays within a few hundred changed lines, runs affected tests and
+Clippy plus `python scripts/line_budget.py`, updates the relevant note and
+CHANGELOG, and lands as a separate commit. A missing bounded seam or evidence
+stops that item rather than triggering speculative plumbing.
+
 To rerun the baseline locally from the repository root (the first run may spend
 time compiling; warm-cache runs are intended to stay within a few minutes),
 capture a human-readable comparison report with:

@@ -25,6 +25,28 @@ The six qualitative questions are collected in the repository [PR template](../.
 
 The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative CLI scenarios pass, with the original App Server baseline 28/28 and current App Server 30/30 plus CLI interactive 13/13 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy, CLI automatic Trace report wiring, Docker sandbox availability/isolation, and model/provider comparison remain explicitly open gaps. This host has Docker CLI 29.6.1 but no reachable Linux daemon, so the Docker smoke test remains non-authoritative and only covers preflight/clear-error behavior. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists.
 
+### Next iteration order (evidence-triggered)
+
+1. Keep both hard ceilings and the six-question admission gate active; no Rust
+   feature starts without net-zero growth or an explicit offset.
+2. Decide the bounded contract for opt-in CLI Trace export first: artifact
+   ownership, redaction, per-round/total limits, and a CLI scenario. Implement it
+   only after that contract is accepted.
+3. Revisit CLI public MCP-timeout projection only if a bounded fault-injection
+   seam can be justified; otherwise keep the current capability/App Server
+   coverage and record the CLI transport gap as deferred.
+4. Add a measurable compaction-trigger scenario and recent-turn retention check
+   before changing context behavior.
+5. Repeat Docker isolation checks only after a reachable daemon is available;
+   current preflight/clear-error evidence is non-authoritative for isolation.
+6. Defer provider comparison and retry/backoff until a second provider or an
+   explicit bounded policy exists; paid-provider CI is not a default gate.
+
+Every item must remain a few-hundred-line batch, pass affected tests and Clippy,
+refresh the budget report, update the relevant note/CHANGELOG, and land in its
+own commit. Missing evidence or a missing bounded seam means stop and defer the
+item, not add speculative plumbing.
+
 ---
 
 ## 1. Multi-Level Directory Semantics & Layout

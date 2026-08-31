@@ -751,12 +751,23 @@ Decision: accept
 
 ### 3.4 评估自动化的顺序
 
-自动化按以下顺序推进：
+自动化和下一迭代按以下顺序推进：
 
-1. 先用 PR 模板人工填写并检查完整性；
-2. 再让 CI 继续验证 fmt、Clippy、测试和两个 line ceilings；
-3. 场景集稳定后，再为高影响变更增加 `requires-harness-eval` 标签或等价的 CI job；
-4. 最后才考虑模型/provider 矩阵和长期趋势报告。
+1. 冻结两个 line ceilings，要求每批先完成六项准入回答和固定确认项；
+   没有净零计划或明确抵扣，不开始新增 Rust 功能。
+2. 先确定 opt-in CLI Trace 的有界契约：artifact ownership、脱敏、单轮/总量
+   上限和 CLI 场景证据；契约未确定前不接入自动导出。
+3. 只有存在有界故障注入 seam 时，才推进 CLI 公共 MCP timeout projection；
+   否则保留 Capabilities/App Server 证据，并将 CLI transport 缺口标为 deferred。
+4. 增加可量化的 compaction trigger 场景，验证最近轮次保留，再改变 context 行为。
+5. Docker daemon 可达后再复做 isolation audit；当前 preflight/clear-error
+   测试不能证明隔离。
+6. 第二 provider 或明确的 bounded retry policy 出现后，再做 provider 矩阵和
+   retry/backoff；不把付费 provider CI 设为默认门禁。
+
+每项控制在几百行以内，执行受影响测试、Clippy、格式化和
+`python scripts/line_budget.py`，同步 note/README/CHANGELOG 后单独提交。缺少
+有界 seam 或可复现证据时，停止并 deferred，不增加猜测性的 plumbing。
 
 不要先做一个通用 benchmark platform。mini-agent-harness 当前最有价值的是验证自己的 turn、tool、context、state 和 boundary 语义。
 
