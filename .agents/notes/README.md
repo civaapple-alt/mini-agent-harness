@@ -136,7 +136,7 @@ If a proposed approach is rejected during review:
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-31 | [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md) | Threat model, candidate strict profile, compatibility, cross-platform evidence, and fail-closed behavior before Docker flags |
-| 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Make App Server the single CLI, JSON-RPC, and ACP execution base and remove parallel turn orchestration |
+| 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Implementation complete locally; cross-platform CI/native-platform and authorized real-provider evidence remain open |
 
 #### Bug Fixes (`proposed/bug-fix/`)
 

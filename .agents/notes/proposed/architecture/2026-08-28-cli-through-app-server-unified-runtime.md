@@ -2,6 +2,18 @@
 
 Status: in-progress
 
+## Current status update (2026-08-31)
+
+The CLI migration and dependency-closure work described by this proposal are
+implemented: CLI turns use the App Server client, the runtime keeps one
+CLI/App Server → Host → Core execution path, and the current hard ceilings are
+within budget. The current report is runtime `16,243/20,000` and all Rust
+source `29,815/30,000`; the older `36,858/30,000` snapshot below is retained as
+historical evidence from 2026-08-29. The remaining acceptance gaps are
+cross-platform CI/native macOS and Linux evidence and an explicitly authorized
+real-provider Goal run. This note remains `in-progress` until those external
+evidence gates are closed; no second CLI orchestration path is being restored.
+
 ## Implementation update (2026-08-28)
 
 The first migration slice is complete:
@@ -326,15 +338,15 @@ turns:
 
 ## Line-budget expectation
 
-At the proposal baseline, the runtime included 2,893 app-server lines while
+At the 2026-08-29 verification snapshot, the runtime included 2,893 app-server lines while
 the CLI did not use that service. After this migration, the duplicate CLI turn
 owner is gone and concrete provider implementations are isolated in the
 separately reported `mini-agent-capabilities` group. The established runtime
-gate is now 14,384/20,000 lines. The full workspace remains
-36,858/30,000 lines, so the next cleanup must remove nonessential duplication
-or explicitly retire optional code without restoring a second CLI orchestration
-path. If the migration leaves both paths in place, the proposal has failed even
-if all tests pass.
+gate was 14,384/20,000 lines. The full workspace was 36,858/30,000 lines, so
+that snapshot required cleanup without restoring a second CLI orchestration
+path. The current report above shows both hard ceilings within budget. If the
+migration leaves both paths in place, the proposal has failed even if all tests
+pass.
 
 ## Acceptance status
 
@@ -345,6 +357,6 @@ if all tests pass.
 | Session, Goal/Plan, MCP, restart behavior | Met by current local CLI integration coverage. |
 | App Server and ACP transport mapping | Met locally: Local-vs-JSON-RPC and ACP-vs-App-Server complete event trace fixtures pass; settled result checks also pass through the existing protocol/CLI tests. |
 | Workspace and lint checks | Met locally: workspace tests and Clippy pass. |
-| Runtime/workspace line budget | Runtime met: `14384/20000`; workspace open: `36858/30000` all Rust source. |
+| Runtime/workspace line budget | Met at the current snapshot: runtime `16243/20000`; all Rust source `29815/30000`. |
 | macOS/Linux/CI evidence | Open; not available from this local run. |
 | Real provider Goal behavior | Open; requires provider credentials and an explicitly authorized run. |
