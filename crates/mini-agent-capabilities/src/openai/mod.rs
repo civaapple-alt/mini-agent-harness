@@ -133,7 +133,7 @@ async fn drain_sse(
     response: reqwest::Response,
     max_event_bytes: usize,
     complete_on_done: bool,
-    mut on_event: impl FnMut(Value) -> Result<(), OpenAiError>,
+    mut on_event: impl FnMut(Value) -> Result<bool, OpenAiError>,
 ) -> Result<bool, OpenAiError> {
     let mut stream = response.bytes_stream().eventsource();
     let mut completed_on_done = false;
@@ -150,7 +150,9 @@ async fn drain_sse(
         }
         let value: Value = serde_json::from_str(&event.data)
             .map_err(|error| OpenAiError::Protocol(format!("invalid SSE JSON: {error}")))?;
-        on_event(value)?;
+        if on_event(value)? {
+            break;
+        }
     }
     Ok(completed_on_done)
 }

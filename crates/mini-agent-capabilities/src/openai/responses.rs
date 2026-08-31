@@ -178,7 +178,7 @@ fn apply(
     state: &mut Accumulator,
     event: Value,
     events: &mut (dyn ModelEventSink + Send),
-) -> Result<(), OpenAiError> {
+) -> Result<bool, OpenAiError> {
     match event.get("type").and_then(Value::as_str) {
         Some("response.reasoning_text.delta") => {
             let delta = event.get("delta").and_then(Value::as_str).ok_or_else(|| {
@@ -218,13 +218,14 @@ fn apply(
         Some("response.completed") => {
             state.usage = parse_usage(&event)?;
             state.completed = true;
+            return Ok(true);
         }
         Some("response.failed" | "response.incomplete") => {
             return Err(OpenAiError::Stream(event_error_message(&event)));
         }
         _ => {}
     }
-    Ok(())
+    Ok(false)
 }
 
 fn parse_usage(event: &Value) -> Result<Option<ModelUsage>, OpenAiError> {

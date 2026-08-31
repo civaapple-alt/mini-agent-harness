@@ -22,7 +22,7 @@ use std::env;
 use std::error::Error;
 use tokio::io::BufReader;
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let runtime_config = RuntimeConfig::load().map_err(std::io::Error::other)?;
     let broker = ApprovalBroker::new();
