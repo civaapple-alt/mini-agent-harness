@@ -5,7 +5,26 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+
+- Added a repository pull request template that requires every change to
+  declare its layer, duplicate-path analysis, replacement strategy, line
+  budget, visible-surface impact, and boundary-test evidence.
+
+### Changed
+
+- Activated Stage 3 normal budget admission. The runtime `20,000`-line and
+  whole-workspace `30,000`-line ceilings remain hard gates; new changes default
+  to net-zero growth or must identify an explicit offset.
+- Documented the current budget snapshot (`15,286` runtime lines and `28,306`
+  total Rust lines) in the README and Agent Notes.
+
+### Fixed
+
+- Goal timeout now requests `turn/interrupt`, waits for the App Server turn to
+  settle and persist its checkpoint, and only then records the workflow goal as
+  failed. This removes the race where `goal/fail` was rejected while the turn
+  was still running.
 
 ## [0.5.0] - 2026-08-30
 

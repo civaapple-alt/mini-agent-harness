@@ -236,6 +236,8 @@ nested-agent behavior are not emulated. See the
 - [Changelog](CHANGELOG.md) — version history.
 - [Agent Notes](.agents/notes/README.md) — architecture decisions and
   experiments.
+- [Change admission checklist](.github/pull_request_template.md) — required
+  architecture, line-budget, and boundary questions for every change.
 
 ## Development
 
@@ -248,7 +250,19 @@ cargo test --workspace
 python3 scripts/line_budget.py
 ```
 
-  The line-budget report breaks Rust source down by the runtime layers: `core`,
+Every change must also answer the six questions in the
+[change admission checklist](.github/pull_request_template.md): ownership
+layer, duplicate responsibility, replace-vs-add reasoning, expected and actual
+net line delta, model-visible/event/persistence/protocol impact, and boundary
+test evidence. New code defaults to net-zero growth or must name an explicit
+offset. Do not remove Core tests or Actor/CAS/Session authority merely to fit a
+line target.
+
+The current hard-budget snapshot is runtime `15,286 / 20,000` lines and all
+Rust source `28,306 / 30,000` lines. The approximate `26,900` Stage 1 target
+is optimization debt rather than a reason to delete protected behavior.
+
+The line-budget report breaks Rust source down by the runtime layers: `core`,
   `protocol`, `capabilities`, `host`, `app-server`, and `cli`, followed by the enforced
   workspace total. `capabilities` is the separately reported provider
   implementation group behind Host and is not part of the runtime-layer gate.
