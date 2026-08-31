@@ -18,6 +18,7 @@ fn loads_and_calls_stdio_server_through_rmcp() {
         &script,
         r#"import json
 import sys
+import time
 
 for line in sys.stdin:
     request = json.loads(line)
@@ -43,6 +44,8 @@ for line in sys.stdin:
         }
     elif method == "tools/call":
         text = request.get("params", {}).get("arguments", {}).get("text", "")
+        if text == "slow":
+            time.sleep(1)
         result = {
             "resultType": "complete",
             "content": [{"type": "text", "text": "echo:" + text}],
@@ -93,6 +96,9 @@ for line in sys.stdin:
     let output = tool.execute(&serde_json::json!({"text": "hello"})).unwrap();
     let value: Value = serde_json::from_str(&output).unwrap();
     assert_eq!(value["content"][0]["text"], "echo:hello");
+    let timed_out = tool.execute_outcome(&json!({"text": "slow"}));
+    assert_eq!(timed_out.status, ToolExecutionStatus::Failed);
+    assert_eq!(timed_out.content, "MCP tool call timed out");
     approval.set_mode(ApprovalMode::Interactive);
     let denied = tool.execute_outcome(&json!({"text": "blocked"}));
     assert_eq!(denied.status, ToolExecutionStatus::Failed);

@@ -59,12 +59,16 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Audited the failure/timeout/retry evidence matrix across Core, Capabilities,
   App Server, and CLI, explicitly separating covered public paths from unit-only
   evidence and deferred MCP timeout, provider backoff, and Docker isolation work.
+- Added a controlled MCP call-timeout check through the real stdio/RMCP capability
+  path; production keeps the 118-second bound, while tests use a test-only 50ms
+  seam and assert a bounded structured `Failed` reason. Public timeout projection
+  remains a separate follow-up.
 - Added a local baseline rerun/report recipe and recorded the next-iteration
   evidence decisions for bounded JSONL Trace export, test-only fault injection,
   slow-scenario scheduling, Compaction measurement, structured permission
   rejection, and timeout/steer race ordering. The retired external `--trace`
   path and current 50% Compaction trigger remain unchanged.
-- Documented the current budget snapshot (`16,074` runtime lines and `29,369`
+- Documented the current budget snapshot (`16,074` runtime lines and `29,378`
   total Rust lines) in the README and Agent Notes.
 
 ### Fixed

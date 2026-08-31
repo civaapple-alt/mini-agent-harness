@@ -463,9 +463,42 @@ Decision: accept
 | HTTP 429 | Capabilities `maps_http_429_to_bounded_api_error_without_retrying` | covered | retry/backoff policy 未定义 |
 | shell timeout | Capabilities `shell_process_has_a_timeout` | covered at capability boundary | CLI/App Server 公共路径尚未单独覆盖 |
 | turn/goal timeout | App Server/CLI goal timeout scenario | covered at public path | 与 tool timeout 的组合矩阵未覆盖 |
-| approval/MCP refusal | App Server `NeedsApproval`、Capabilities MCP connection/call denial | covered | 公共 MCP call timeout 未覆盖 |
+| approval/MCP refusal | App Server `NeedsApproval`、Capabilities MCP connection/call denial | covered | 无；公共 event projection 仍沿用既有边界 |
+| MCP call timeout | Capabilities `loads_and_calls_stdio_server_through_rmcp` with a controlled slow call | covered at capability boundary | App Server/CLI public-path projection is not covered |
 | MCP circuit breaker | Capabilities `circuit_breaker_trips_after_failures_and_recovers` | unit-only | 真实 MCP call failure 到 model round 的公共路径未覆盖 |
 | Docker sandbox | existing availability smoke test | defer | daemon/API 差异与 container isolation 无受控跨平台证据 |
+
+#### Stage 3 本轮实践的六项验证：MCP call timeout
+
+```text
+1. Layer: Capabilities
+   rationale: `mcp::run_server` 的 `PROTOCOL_CALL_TIMEOUT` 是 MCP provider call 的
+   bounded execution boundary；测试沿用真实 `McpTool`/RMCP/stdio 组装，不改变 App Server
+   或 CLI 的公共协议。
+2. Duplicate responsibility:
+   searched the existing stdio MCP success/refusal fixture, circuit-breaker unit test, and
+   `McpTool::execute`;原先只有固定 118 秒生产常量，没有可在测试中快速证明 timeout result
+   的实际 provider call。
+3. Replace vs add:
+   复用已有 stdio fixture，增加一个受控 slow call；仅用 `cfg(test)` 将等待缩短为 50ms，
+   生产仍为 118 秒，不新增 retry loop、timeout wrapper 或第二套 MCP client。
+4. Net line delta:
+   expected: runtime +0; all Rust +~15
+   actual: runtime 16,074 -> 16,074 (+0); all Rust 29,369 -> 29,378 (+9)
+   （Capabilities production/test-only timeout seam and unit fixture net +9）。
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. The existing
+   `McpTool::execute_outcome` returns structured `Failed` with the bounded reason
+   `MCP tool call timed out`; production timeout behavior remains unchanged. Public App
+   Server/CLI projection of this timeout is still a separate evidence gap.
+6. Boundary evidence:
+   cargo test -p mini-agent-capabilities (64 passed)
+   cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings
+   cargo fmt --all
+   python scripts/line_budget.py
+
+Decision: accept
+```
 
 #### Stage 3 本轮实践的六项验证：failure matrix audit
 

@@ -28,7 +28,10 @@ use tokio::sync::mpsc as tokio_mpsc;
 use tokio::time::timeout;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+#[cfg(not(test))]
 const PROTOCOL_CALL_TIMEOUT: Duration = Duration::from_secs(118);
+#[cfg(test)]
+const PROTOCOL_CALL_TIMEOUT: Duration = Duration::from_millis(50);
 const MAX_MCP_TOOLS: usize = 32;
 const MAX_TOOL_SCHEMA_BYTES: usize = 16 * 1024;
 const MAX_TOOL_RESULT_BYTES: usize = 64 * 1024;

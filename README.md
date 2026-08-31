@@ -286,7 +286,8 @@ implicit retry, MCP connection refusal, and shell refusal before sandbox executi
 level retry/backoff policy and Docker sandbox availability/isolation remain open; the Docker
 smoke test only covers preflight/clear-error behavior and is not isolation proof. The failure/
 timeout/retry evidence matrix distinguishes covered public paths from unit-only and deferred
-evidence. CLI public-
+evidence; MCP timeout is covered at the capability boundary, while App Server/CLI projection
+remains open. CLI public-
 path unknown-tool recovery, MCP connection/call refusal, and a bounded cross-file refactor are
 now covered. Broader failure/retry matrices remain open follow-ups. The App Server public boundary also verifies
 that `NeedsApproval` results keep a non-empty reason in events, checkpoints,
