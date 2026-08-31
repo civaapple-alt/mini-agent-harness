@@ -169,23 +169,22 @@ async fn world_state_value<M: Model + Send + 'static>(
     management: &RuntimeManagementService<M>,
 ) -> Result<WorldStateResult, String> {
     let world = management.world().await?;
-    Ok(WorldStateResult {
-        workspace: world.workspace().display().to_string(),
-        status: world.status_json(),
-        lines: world.status_lines(),
-        context: world.model_context().unwrap_or_default(),
-    })
+    Ok(world_state_result(&world))
 }
 
 async fn world_state_result_action<M: Model + Send + 'static>(
     management: &RuntimeManagementService<M>,
 ) -> Result<ActionResponse<WorldStateResult>, ActionFailure> {
     let response = management.world_action().await?;
-    let value = WorldStateResult {
-        workspace: response.value.workspace().display().to_string(),
-        status: response.value.status_json(),
-        lines: response.value.status_lines(),
-        context: response.value.model_context().unwrap_or_default(),
-    };
+    let value = world_state_result(&response.value);
     Ok(response.map_value(value))
+}
+
+fn world_state_result(world: &mini_agent_host::WorldState) -> WorldStateResult {
+    WorldStateResult {
+        workspace: world.workspace().display().to_string(),
+        status: world.status_json(),
+        lines: world.status_lines(),
+        context: world.model_context().unwrap_or_default(),
+    }
 }
