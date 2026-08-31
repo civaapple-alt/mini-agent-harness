@@ -49,6 +49,10 @@ remove Core tests, Actor/CAS/Session authority, or public protocol behavior only
 to satisfy the approximate Stage 1 target. The 20,000-line runtime and
 30,000-line whole-workspace ceilings remain hard gates.
 
+If a change affects prompt, tool schema, loop-control, context, events, or
+persistence, public unit tests alone are not sufficient: add bounded Harness
+Scenario/Eval evidence as described in the next-iteration note.
+
 ## Change test
 
 Before adding a core concept, identify:

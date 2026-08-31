@@ -30,6 +30,8 @@
 
 6. **边界测试**：能否由现有公共边界测试覆盖？列出运行的测试、Clippy、fmt 和预算命令；若不能，说明新增证据。
 
+   如果变更影响 prompt、tool schema、loop-control、context、event 或持久化，必须额外列出 Harness Scenario/Eval 结果；公共单测不能单独作为充分证据。
+
    ```text
    cargo test ...
    cargo clippy ...
@@ -43,6 +45,7 @@
 - [ ] 新增代码默认满足净零增长，或已列出明确抵扣项/预算取舍。
 - [ ] 我没有为了行数删除 Core 核心测试、Actor/CAS/Session 单一权威或公共协议行为。
 - [ ] 若触及模型上下文、事件、持久化或协议，我已补充对应架构说明和集成证据。
+- [ ] 若影响模型行为或 harness loop，我已补充 bounded scenario/eval 证据，或明确说明为何不适用。
 - [ ] 若这是纯文档变更，我已明确写出 `N/A` 的范围。
 
 ### 关联文档

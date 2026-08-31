@@ -19,6 +19,12 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Aligned `AGENTS.md` with the Stage 3 workflow: affected-package validation is
   the default, while local full-workspace tests require explicit approval;
   CI remains responsible for the full matrix.
+- Added proposed next-iteration harness notes based on the VS Code coding
+  harness article, including turn/round evidence, bounded product scenarios,
+  and mandatory six-question validation records for future practice updates.
+- Pull request admission now requires Harness Scenario/Eval evidence when a
+  change affects prompt, tool schema, loop-control, context, events, or
+  persistence; public unit tests alone are not sufficient for those changes.
 - Documented the current budget snapshot (`15,286` runtime lines and `28,306`
   total Rust lines) in the README and Agent Notes.
 

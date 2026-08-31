@@ -103,6 +103,7 @@ If a proposed approach is rejected during review:
 | Date | Title | Focus |
 |---|---|---|
 | 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Make App Server the single CLI, JSON-RPC, and ACP execution base and remove parallel turn orchestration |
+| 2026-08-31 | [VS Code Harness Lessons for the Next Iteration](proposed/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) | Harness-as-product lessons, turn/round evidence, product-specific scenarios, and six-question validation records |
 
 #### Bug Fixes (`proposed/bug-fix/`)
 

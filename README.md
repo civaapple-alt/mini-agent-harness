@@ -240,16 +240,25 @@ nested-agent behavior are not emulated. See the
   verification rules for repository work.
 - [Change admission checklist](.github/pull_request_template.md) — required
   architecture, line-budget, and boundary questions for every change.
+- [Next-iteration harness notes](.agents/notes/proposed/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) — VS Code harness lessons, bounded scenarios, and
+  six-question validation records.
 
 ## Development
 
-Run the complete local contract before submitting Rust changes:
+For normal Rust changes, run the affected package contract before submitting:
 
 ```sh
 cargo fmt --all
+cargo clippy -p <affected-package> --all-targets -- -D warnings
+cargo test -p <affected-package>
+python3 scripts/line_budget.py
+```
+
+For release or explicitly approved full-workspace validation, also run:
+
+```sh
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-python3 scripts/line_budget.py
 ```
 
 Every change must also answer the six questions in the
