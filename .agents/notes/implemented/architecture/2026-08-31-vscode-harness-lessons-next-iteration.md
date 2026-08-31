@@ -72,7 +72,8 @@ cargo test -p mini-agent-cli --test interactive <scenario> -- --exact
 `cargo test -p mini-agent-cli --test interactive -- --test-threads=1` 为
 12/12。App Server 测试覆盖 running turn 中的 cancel、steer、follow-up、
 Actor/CAS、settled checkpoint 和 bounded JSONL Trace；CLI 场景覆盖真实
-前端到 App Server 的公共路径。
+前端到 App Server 的公共路径。阶段 2 追加的结构化权限拒绝场景使 App Server
+当前测试为 29/29。
 
 #### 评审意见吸收与取舍（2026-08-31）
 
@@ -86,7 +87,7 @@ Compaction、显式权限拒绝结果和 timeout/steer 并发证据。以下取�
 | Fault Injection Provider | 首版已实现，限定为测试设施 | `mini-agent-core` 的 `FaultInjectionModel` 覆盖缺少必要工具参数、部分流失败和 `Retryable` 工具结果；`mini-agent-capabilities` 的 Responses 解析测试覆盖畸形 JSON 和缺字段。HTTP 429 provider 适配语义仍单独待补；不增加生产 provider、不调用付费服务、不另起执行循环。 |
 | 超过 5 秒的场景移出日常 CI | 部分接受 | 5 秒是 CI 调度策略，不是运行时语义；只有经确认的确定性慢场景才允许显式 `#[ignore]`，并提供定时或手动命令。不能按一次机器墙钟测量自动改变门禁。 |
 | Compaction 在 70% 触发 | 暂不改变当前行为 | 当前实现和 `docs/limits.md` 的确定性触发点是最大上下文的 50%；下一场景在 70% 记录预警、最近 3 轮保留和压缩前后预算，只有证据证明 50% 不合适时才改阈值。 |
-| 权限失败返回 `permission_denied`，不能是空结果 | 接受验证要求，协议类型待决 | 当前 `ToolExecutionStatus` 没有专用 `PermissionDenied` 变体；下一次审批/沙箱变更必须断言非空、结构化的拒绝结果和后续模型可见内容，并先决定复用 `Failed` 的 bounded reason 还是增加公共枚举。 |
+| 权限失败返回 `permission_denied`，不能是空结果 | 已用现有结构化状态验证 | 当前保留 `ToolExecutionStatus::NeedsApproval`，App Server 公共场景已断言事件、Session checkpoint 和下一轮模型输入均包含非空拒绝 reason；下一次审批/沙箱变更不得把该契约退化为空结果，再单独评估是否需要公共 `PermissionDenied` 变体。 |
 | timeout 与 steer 并发时记录确定性优先级 | 接受 | 当前顺序明确为：Core 安全检查点先检查 cancel，再检查 steer；deadline 触发后 App Server 发送 interrupt、等待 `TurnFinished` 和 durable checkpoint，然后返回 timeout，不继续 drain 排队的 steer；普通已 settle batch 才按 steer 优先于 follow-up。修改该顺序前必须增加并发 race scenario。 |
 
 当前 baseline 已有稳定的本地 JSONL Trace artifact；README 中的快捷命令仍只捕获
@@ -178,6 +179,40 @@ Decision: accept
    cargo test -p mini-agent-core (28 passed)
    cargo test -p mini-agent-protocol (7 passed)
    cargo clippy --workspace --all-targets -- -D warnings
+   cargo fmt --all
+   python scripts/line_budget.py
+
+Decision: accept
+```
+
+#### 阶段 2 本轮实践的六项验证：structured approval denial
+
+```text
+1. Layer: App Server（通过现有 Core Thread/Harness 主路径验证）
+   rationale: 场景调用公开的 `AppServer::turn_start_for`、事件订阅和
+   `thread_read_for`；App Server 负责把 Core 的结构化拒绝事件与 settled checkpoint
+   交给客户端，不新增 Host 或 CLI 私有旁路。
+2. Duplicate responsibility:
+   searched Core 的 ApprovalTool/structured outcome test、Capabilities 的 approval
+   callback tests、CLI 的 non-interactive denial scenario 和 App Server 的
+   ApprovalBroker test；没有现有 App Server 场景同时断言 ToolFinished、Session 和
+   后续模型输入都保留非空拒绝 reason。
+3. Replace vs add:
+   复用现有 `ToolExecutionStatus::NeedsApproval`、Event/Session 投影和 App Server
+   worker；仅增加一个 test-only model/tool 场景，不新增 `PermissionDenied` 枚举、事件、
+   persistence schema、审批 callback 或第二套执行路径。
+4. Net line delta:
+   expected: runtime +~140; all Rust +~140
+   actual: runtime 15,928 -> 16,074 (+146); all Rust 29,057 -> 29,203 (+146)
+   （App Server unit-test net +146）。
+5. Visible surface:
+   no production model input, public protocol, event type, or persistence schema changed;
+   the existing `NeedsApproval` status and bounded non-empty reason are visible only through
+   existing ToolFinished, Message::Tool, and the next model request. The test also proves the
+   settled answer completes after the denial instead of treating it as an absent tool result.
+6. Boundary evidence:
+   cargo test -p mini-agent-app-server (29 passed)
+   cargo clippy -p mini-agent-app-server --all-targets -- -D warnings
    cargo fmt --all
    python scripts/line_budget.py
 
@@ -281,11 +316,12 @@ Decision: accept
 3. timeout、cancel、steer、follow-up、resume 的事件与 durable state 顺序已通过回归；
 4. test-only FaultInjectionModel 和 Responses parser fault cases 已覆盖缺字段、畸形 JSON、
    部分流和 retryable tool result；CLI public-path scenario 已验证未知工具失败后的下一轮恢复，
-   且没有改变生产执行路径；
+   App Server public scenario 已验证 NeedsApproval 拒绝在事件、checkpoint 和下一轮模型输入中
+   保持非空；且没有改变生产执行路径；
 5. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
 6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
-后续仍需补充 CLI 自动接入 Trace 报告、跨文件重构、HTTP 429 provider 适配、MCP/approval/sandbox
-拒绝和独立 model/provider 对比场景；CLI public-path 的未知工具恢复已覆盖，但更完整的工具
-失败/超时/重试矩阵仍是证据缺口，
+后续仍需补充 CLI 自动接入 Trace 报告、跨文件重构、HTTP 429 provider 适配、MCP/sandbox
+拒绝和独立 model/provider 对比场景；CLI public-path 的未知工具恢复和 App Server 的
+NeedsApproval 拒绝已覆盖，但更完整的工具失败/超时/重试矩阵仍是证据缺口，
 不是当前实现的已覆盖能力。

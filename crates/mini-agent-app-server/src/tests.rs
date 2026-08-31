@@ -11,18 +11,27 @@ use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
 use mini_agent_core::ToolRegistry;
 use mini_agent_protocol::Event;
+use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ModelEventSink;
 use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
+use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolCall;
+use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolExecutionOutcome;
+use mini_agent_protocol::ToolExecutionStatus;
+use mini_agent_protocol::ToolSpec;
 use mini_agent_protocol::TurnCancel;
 use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnStart;
 use mini_agent_protocol::TurnSubmission;
+use serde_json::Value;
 use serde_json::from_str;
+use serde_json::json;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -49,6 +58,68 @@ impl Model for DoneModel {
 
 struct BlockingModel {
     release: Arc<Notify>,
+}
+
+struct ApprovalModel;
+
+impl Model for ApprovalModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        if request.messages.iter().any(|message| {
+            matches!(
+                message,
+                Message::Tool {
+                    outcome: Some(ToolExecutionStatus::NeedsApproval),
+                    ..
+                }
+            )
+        }) {
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "denial received".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "approval-call".to_string(),
+                name: "sensitive_fixture".to_string(),
+                arguments: json!({}),
+            }],
+            usage: None,
+        })
+    }
+}
+
+struct SensitiveFixtureTool;
+
+impl Tool for SensitiveFixtureTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "sensitive_fixture".to_string(),
+            description: "A fixture that requires approval".to_string(),
+            parameters: json!({"type": "object"}),
+        }
+    }
+
+    fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
+        Err(ToolError("user denied: sensitive fixture".to_string()))
+    }
+
+    fn execute_outcome(&self, _arguments: &Value) -> ToolExecutionOutcome {
+        ToolExecutionOutcome {
+            status: ToolExecutionStatus::NeedsApproval,
+            content: "user denied: sensitive fixture".to_string(),
+        }
+    }
 }
 
 impl Model for BlockingModel {
@@ -165,6 +236,81 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
             turn_id: mini_agent_protocol::TurnId::new("turn-2")
         }
     );
+}
+
+#[tokio::test]
+async fn projects_structured_approval_denial_through_public_app_server() {
+    let harness = Harness::new(
+        ApprovalModel,
+        ToolRegistry::new(vec![Box::new(SensitiveFixtureTool)]),
+        HarnessConfig::default(),
+    );
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(ThreadId::new("initial"), harness),
+    );
+    let mut events = server.subscribe();
+    assert_eq!(
+        server
+            .turn_start_for(
+                ThreadId::new("thread-1"),
+                TurnStart::new(TurnInput::new(TurnInputMode::Start, "run the fixture")),
+            )
+            .await
+            .unwrap(),
+        TurnSubmission::Started {
+            turn_id: mini_agent_protocol::TurnId::new("turn-1")
+        }
+    );
+
+    let mut received = Vec::new();
+    while !received
+        .iter()
+        .any(|event| matches!(event, Event::TurnFinished { .. }))
+    {
+        received.push(events.recv().await.unwrap().event);
+    }
+
+    assert!(received.iter().any(|event| matches!(
+        event,
+        Event::ToolFinished {
+            call_id,
+            content,
+            is_error: true,
+            outcome: Some(ToolExecutionStatus::NeedsApproval),
+            truncated: false,
+            ..
+        } if call_id == "approval-call" && content == "user denied: sensitive fixture"
+    )));
+    assert!(received.iter().any(|event| matches!(
+        event,
+        Event::TurnFinished {
+            status: mini_agent_protocol::TurnStatus::Completed
+        }
+    )));
+
+    let checkpoint = server
+        .thread_read_for(ThreadId::new("thread-1"))
+        .await
+        .unwrap();
+    assert!(checkpoint.session.messages().iter().any(|message| {
+        matches!(
+            message,
+            Message::Tool {
+                content,
+                is_error: true,
+                outcome: Some(ToolExecutionStatus::NeedsApproval),
+                ..
+            } if content == "user denied: sensitive fixture"
+        )
+    }));
+    assert!(checkpoint.session.messages().iter().any(|message| {
+        matches!(
+            message,
+            Message::Assistant { text, tool_calls, .. }
+                if text == "denial received" && tool_calls.is_empty()
+        )
+    }));
 }
 
 #[tokio::test]

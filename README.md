@@ -269,8 +269,8 @@ test evidence. New code defaults to net-zero growth or must name an explicit
 offset. Do not remove Core tests or Actor/CAS/Session authority merely to fit a
 line target.
 
-The current hard-budget snapshot is runtime `15,928 / 20,000` lines and all
-Rust source `29,057 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `16,074 / 20,000` lines and all
+Rust source `29,203 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 
@@ -283,7 +283,9 @@ The Stage 2 boundary evidence also includes a test-only fault-injection model
 and Responses parser cases for malformed or missing tool arguments, partial
 model streams, and retryable tool results. HTTP 429 provider adaptation and a
 CLI public-path unknown-tool recovery are now covered; broader failure/retry
-matrices remain open follow-ups.
+matrices remain open follow-ups. The App Server public boundary also verifies
+that `NeedsApproval` results keep a non-empty reason in events, checkpoints,
+and the next model round.
 
 To rerun the baseline locally from the repository root (the first run may spend
 time compiling; warm-cache runs are intended to stay within a few minutes),
