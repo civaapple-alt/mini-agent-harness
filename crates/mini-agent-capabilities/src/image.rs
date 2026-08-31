@@ -568,6 +568,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{remove_test_root, test_root};
 
     struct StubFiles;
 
@@ -604,14 +605,7 @@ mod tests {
 
     #[test]
     fn bind_session_reloads_bytes_without_reupload() {
-        let root = std::env::temp_dir().join(format!(
-            "mini-agent-img-reload-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).unwrap();
+        let root = test_root();
         let session = root.join("session.jsonl");
         fs::write(&session, "").unwrap();
         let store = ImageStore::with_uploader(Arc::new(StubFiles));
@@ -635,19 +629,12 @@ mod tests {
             projected[0],
             Some(ProjectedImage::FileId(ref file_id)) if file_id == "file-api-test"
         ));
-        fs::remove_dir_all(root).unwrap();
+        remove_test_root(&root);
     }
 
     #[test]
     fn bind_session_reloads_inline_images_without_file_id() {
-        let root = std::env::temp_dir().join(format!(
-            "mini-agent-img-inline-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).unwrap();
+        let root = test_root();
         let session = root.join("session.jsonl");
         fs::write(&session, "").unwrap();
         let store = ImageStore::memory_only();
@@ -667,7 +654,7 @@ mod tests {
         let envelope = format_envelope(&got);
         let projected = project_images(&[envelope], &restored);
         assert!(matches!(projected[0], Some(ProjectedImage::Inline { .. })));
-        fs::remove_dir_all(root).unwrap();
+        remove_test_root(&root);
     }
 
     #[test]

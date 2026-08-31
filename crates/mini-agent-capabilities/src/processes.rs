@@ -471,20 +471,13 @@ fn io_error(error: std::io::Error) -> ToolError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{remove_test_root, test_root};
     use crate::workspace::ApprovalMode;
-    use std::fs;
     use std::time::Duration;
-    use std::time::SystemTime;
-    use std::time::UNIX_EPOCH;
 
     #[test]
     fn managed_process_returns_immediately_and_exposes_output() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("mini-agent-process-{nonce}"));
-        fs::create_dir(&root).unwrap();
+        let root = test_root();
         let manager = ProcessManager::new(
             root.clone(),
             ApprovalController::new(ApprovalMode::Automatic),
@@ -511,17 +504,12 @@ mod tests {
         assert!(output.contains("exited(0)"), "{output}");
 
         drop(manager);
-        fs::remove_dir_all(root).unwrap();
+        remove_test_root(&root);
     }
 
     #[test]
     fn managed_process_accepts_interactive_stdin() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("mini-agent-process-stdin-{nonce}"));
-        fs::create_dir(&root).unwrap();
+        let root = test_root();
         let manager = ProcessManager::new(
             root.clone(),
             ApprovalController::new(ApprovalMode::Automatic),
@@ -548,17 +536,12 @@ mod tests {
         assert!(output.contains("exited(0)"), "{output}");
 
         drop(manager);
-        fs::remove_dir_all(root).unwrap();
+        remove_test_root(&root);
     }
 
     #[test]
     fn process_stop_terminates_child_and_descendant_processes() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("mini-agent-process-descendant-{nonce}"));
-        fs::create_dir(&root).unwrap();
+        let root = test_root();
         let sentinel = root.join("sentinel.txt");
         let sentinel_str = sentinel.to_string_lossy().replace('\\', "/");
 
@@ -591,17 +574,12 @@ mod tests {
         );
 
         drop(manager);
-        fs::remove_dir_all(root).unwrap();
+        remove_test_root(&root);
     }
 
     #[test]
     fn plan_mode_blocks_managed_process_effects() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("mini-agent-process-plan-{nonce}"));
-        fs::create_dir(&root).unwrap();
+        let root = test_root();
         let approval = ApprovalController::new(ApprovalMode::Automatic);
         approval.set_living_plan(Some(root.join("plan.md")));
         let manager = ProcessManager::new(
@@ -616,6 +594,6 @@ mod tests {
         let stop_error = manager.stop(1).unwrap_err();
         assert!(stop_error.0.contains("Plan Mode"));
 
-        fs::remove_dir_all(root).unwrap();
+        remove_test_root(&root);
     }
 }

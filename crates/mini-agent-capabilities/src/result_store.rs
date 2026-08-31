@@ -374,10 +374,8 @@ mod tests {
     use super::*;
     use crate::session::SessionRequest;
     use crate::session::SessionStore;
-    use crate::test_support::HOME_LOCK;
+    use crate::test_support::{HOME_LOCK, remove_test_root, test_root};
     use mini_agent_protocol::Message;
-    use std::time::SystemTime;
-    use std::time::UNIX_EPOCH;
 
     #[test]
     fn stored_results_support_ranges_queries_and_eviction() {
@@ -424,12 +422,7 @@ mod tests {
         let _home_lock = HOME_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("mini-agent-result-session-{nonce}"));
-        fs::create_dir_all(&root).unwrap();
+        let root = test_root();
         let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
         let session_id = opened.store.session_id().to_string();
         let context = Message::Context {
@@ -451,7 +444,7 @@ mod tests {
         let content = restored.read(&stored.handle, 1, 64, None).unwrap();
         assert!(content.contains("persisted result"));
         drop(resumed);
-        let _ = fs::remove_dir_all(root);
+        remove_test_root(&root);
     }
 
     #[test]
@@ -459,12 +452,7 @@ mod tests {
         let _home_lock = HOME_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("mini-agent-result-limit-{nonce}"));
-        fs::create_dir_all(&root).unwrap();
+        let root = test_root();
         let opened = SessionStore::open(&root, SessionRequest::New).unwrap();
         let store = opened.store.result_store();
         let stored = store
@@ -474,6 +462,6 @@ mod tests {
         assert!(stored.stored_bytes <= MAX_PERSISTED_RESULT_BYTES);
         drop(store);
         drop(opened);
-        let _ = fs::remove_dir_all(root);
+        remove_test_root(&root);
     }
 }
