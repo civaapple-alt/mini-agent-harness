@@ -102,6 +102,14 @@ pub fn discover(workspace: &Path) -> Discovery {
     discovery
 }
 
+fn skill_metadata(skill: &Skill) -> Value {
+    json!({
+        "name": skill.name,
+        "description": skill.description,
+        "location": skill.location,
+    })
+}
+
 impl Discovery {
     pub fn mcp_servers(&self) -> &[McpServerConfig] {
         &self.mcp_servers
@@ -200,13 +208,8 @@ impl Discovery {
     fn metadata_catalog(&self) -> Result<String, String> {
         let mut catalog = String::new();
         for skill in &self.skills {
-            let record = json!({
-                "name": skill.name,
-                "description": skill.description,
-                "location": skill.location,
-            });
             catalog.push_str(
-                &serde_json::to_string(&record)
+                &serde_json::to_string(&skill_metadata(skill))
                     .map_err(|error| format!("cannot serialize skill catalog: {error}"))?,
             );
             catalog.push('\n');

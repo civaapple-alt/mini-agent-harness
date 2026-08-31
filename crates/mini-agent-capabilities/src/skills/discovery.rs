@@ -133,13 +133,9 @@ pub(super) fn bounded_catalog(
     let mut catalog = Vec::new();
     let mut bytes = 0;
     for skill in skills {
-        let record_bytes = serde_json::to_string(&json!({
-            "name": skill.name,
-            "description": skill.description,
-            "location": skill.location,
-        }))
-        .expect("skill catalog metadata must serialize")
-        .len()
+        let record_bytes = serde_json::to_string(&skill_metadata(&skill))
+            .expect("skill catalog metadata must serialize")
+            .len()
             + 1;
         if bytes + record_bytes > MAX_CATALOG_BYTES {
             diagnostics.push(format!(
