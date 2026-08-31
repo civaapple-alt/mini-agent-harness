@@ -384,7 +384,7 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 截至本次整理：
 
 1. **阶段 0：临时冻结——已执行**。本轮没有新增能力，只做重复测试支持、重复请求构造和无行为变化的运行时分支收敛。
-2. **阶段 1：先释放全局预算——进行中**。目标是净减少约 2,000 行，将全 Rust 总量降至约 26,900 行。相对本次整理前的 28,934 行，已释放 584 行，距离目标还差约 1,450 行；当前仍不能恢复常规扩展节奏。
+2. **阶段 1：先释放全局预算——进行中**。目标是净减少约 2,000 行，将全 Rust 总量降至约 26,900 行。相对本次整理前的 28,934 行，已释放 585 行，距离目标还差约 1,449 行；当前仍不能恢复常规扩展节奏。
 3. **阶段 2：保护核心边界——作为施工约束执行，尚未单独验收**。Core loop、硬限制、协议边界、App Server Actor/CAS、Session 持久化和被动事件观察仍保持不变。
 4. **阶段 3：恢复预算门禁——尚未开始**。20,000/30,000 行上限持续生效，没有放宽预算；待阶段 1、2 完成后再恢复正常功能准入。
 
@@ -409,10 +409,11 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 | Capabilities static shell specification test | `shell_matches_the_host_environment` 只断言静态程序名和 tool spec 文案，执行/超时/UTF-8 行为已有覆盖 | 删除重复静态值测试；按门禁净释放 28 行 | 不改变 CLI 公共输出、shell 执行或安全策略 |
 | App Server duplicate test fixtures | `workflow_connection` 和 `management_connection` 仅以不同标签重复创建同一 managed connection | 合并为参数化 fixture；净释放 8 行 | 保留全部 23 个 App Server/JSON-RPC 行为测试 |
 | App Server WorldState projection | `world_state_value` 和 `world_state_result_action` 重复拼装相同 `WorldStateResult` | 复用私有投影函数；按门禁净释放 1 行 | 不改变 action metadata、世界状态字段或错误路径 |
+| App Server workflow goal response projection | goal start/fail/advance 三个 RPC 分支重复将 `GoalState` 投影为协议状态 | 复用私有 `workflow_goal_response`；按门禁净释放 1 行 | 不改变 goal 状态机、action metadata 或协议字段 |
 | MCP / profile 配置别名 | `parse` 中的旧拼写和 transport 字段别名属于输入兼容 | 暂缓删除 | 删除会改变已有配置行为，保留并纳入后续兼容策略 |
 | App Server frontend/runtime 便捷包装 | CLI/embedding 使用的 facade、profile、approval 和 runtime 转换入口 | 暂缓删除 | 这些是有意的依赖边界，不是内部重复执行逻辑 |
 
-本批验证：`cargo test -p mini-agent-app-server`（23 passed）、`cargo clippy -p mini-agent-app-server --all-targets -- -D warnings`、`cargo fmt --all`、`python scripts/line_budget.py` 均通过。累计阶段 1 释放量按门禁脚本从 583 行更新为 584 行；本批不删除 Core 核心测试，也不移动 Actor/CAS/Session 边界。
+本批验证：`cargo test -p mini-agent-app-server`（23 passed）、`cargo clippy -p mini-agent-app-server --all-targets -- -D warnings`、`cargo fmt --all`、`python scripts/line_budget.py` 均通过。累计阶段 1 释放量按门禁脚本从 584 行更新为 585 行；本批不删除 Core 核心测试，也不移动 Actor/CAS/Session 边界。
 
 工程含义：
 

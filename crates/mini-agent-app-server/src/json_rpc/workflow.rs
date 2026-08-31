@@ -74,10 +74,7 @@ where
             Err(error) => return response_error(request.id, error),
         };
         match workflows.init_goal_action(&params.objective).await {
-            Ok(response) => {
-                let state = workflow_goal_state(response.value.clone());
-                response_action_with(request.id, response, state)
-            }
+            Ok(response) => workflow_goal_response(request.id, response),
             Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
@@ -112,10 +109,7 @@ where
             Err(error) => return response_error(request.id, error),
         };
         match workflows.fail_goal_action().await {
-            Ok(response) => {
-                let state = workflow_goal_state(response.value.clone());
-                response_action_with(request.id, response, state)
-            }
+            Ok(response) => workflow_goal_response(request.id, response),
             Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
@@ -155,10 +149,7 @@ where
         };
         let verdict = params.verdict.map(host_verifier_verdict);
         match workflows.advance_goal_action(verdict).await {
-            Ok(response) => {
-                let state = workflow_goal_state(response.value.clone());
-                response_action_with(request.id, response, state)
-            }
+            Ok(response) => workflow_goal_response(request.id, response),
             Err(error) => response_error(request.id, map_action_error(error)),
         }
     }
@@ -214,6 +205,14 @@ fn workflow_goal_state(state: crate::workflows::GoalState) -> WorkflowGoalState 
         last_verifier_score: state.last_verifier_score,
         updated_at_ms: state.updated_at_ms,
     }
+}
+
+fn workflow_goal_response(
+    id: Option<Value>,
+    response: ActionResponse<crate::workflows::GoalState>,
+) -> Option<JsonRpcResponse> {
+    let state = workflow_goal_state(response.value.clone());
+    response_action_with(id, response, state)
 }
 
 fn host_verifier_verdict(verdict: WorkflowVerifierVerdict) -> crate::workflows::VerifierVerdict {

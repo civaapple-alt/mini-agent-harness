@@ -9,11 +9,11 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work is in **Stage 1: release global budget**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `15,301 / 20,000` lines (76.5%; 4,699 remaining)
-- all Rust source: `28,350 / 30,000` lines (94.5%; 1,650 remaining)
-- released against the Stage 1 baseline: `584` lines; `1,450` more lines are needed to reach the Stage 1 target of approximately `26,900`
+- runtime (`core + protocol + host + app-server`): `15,300 / 20,000` lines (76.5%; 4,700 remaining)
+- all Rust source: `28,349 / 30,000` lines (94.5%; 1,651 remaining)
+- released against the Stage 1 baseline: `585` lines; `1,449` more lines are needed to reach the Stage 1 target of approximately `26,900`
 
-The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, a static shell specification test, duplicate App Server test fixtures, and repeated WorldState result projection. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
+The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, a static shell specification test, duplicate App Server test fixtures, repeated WorldState result projection, and repeated workflow goal response projection. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
 The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
 
