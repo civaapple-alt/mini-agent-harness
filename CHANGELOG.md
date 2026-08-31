@@ -27,6 +27,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Audited model/provider comparison: the built-in registry currently exposes one
   OpenAI-compatible provider, and the Host model factory is only a composition
   seam. No cross-provider quality claim or paid-provider CI gate was added.
+- Tightened the PR admission checker to count only the six confirmation boxes
+  under `### 准入确认`, so unrelated checklist items cannot satisfy the gate.
 
 ### Changed
 

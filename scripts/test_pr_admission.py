@@ -39,6 +39,11 @@ class PrAdmissionTests(unittest.TestCase):
         body = valid_body().replace("- [x] confirmed", "- [ ] confirmed", 1)
         self.assertIn("check all six admission confirmation boxes", check_pr_admission.validate_body(body))
 
+    def test_ignores_unrelated_checked_boxes_outside_confirmation(self) -> None:
+        body = valid_body().replace("- [x] confirmed", "- [ ] confirmed", 1)
+        body += "\n\n- [x] unrelated checklist item"
+        self.assertIn("check all six admission confirmation boxes", check_pr_admission.validate_body(body))
+
 
 if __name__ == "__main__":
     unittest.main()

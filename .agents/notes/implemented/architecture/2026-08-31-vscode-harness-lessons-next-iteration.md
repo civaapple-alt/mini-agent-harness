@@ -719,6 +719,36 @@ Decision: accept
 Decision: accept
 ```
 
+#### Stage 3 本轮实践的六项验证：PR admission confirmation scope
+
+```text
+1. Layer: N/A（repository process/CI）
+   rationale: the change tightens the existing PR description validator and does not
+   enter any Core, Host, Capabilities, App Server, or CLI runtime path.
+2. Duplicate responsibility:
+   searched `scripts/check_pr_admission.py`, its maintenance tests, the PR template,
+   and the workflow job. The previous checker counted checked boxes in the whole PR
+   body, so unrelated checklists could satisfy an unchecked admission box.
+3. Replace vs add:
+   replace the global checkbox count with a bounded scan of the existing `准入确认`
+   section and add one regression case. No second validator, Rust helper, or new gate
+   is introduced.
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,216 / 20,000; all Rust 29,537 / 30,000; Python-only change.
+5. Visible surface:
+   no model input, event, persistence, public protocol, or CLI behavior changes. The
+   CI admission decision becomes stricter only when the six designated boxes are not
+   checked; unrelated PR checklists no longer affect it.
+6. Boundary evidence:
+   `python -m unittest scripts/test_pr_admission.py scripts/test_line_budget.py
+   scripts/test_package_release.py` (14 passed), `git diff --check`, and
+   `python scripts/line_budget.py` pass. The new regression proves an unrelated
+   checked box cannot mask an unchecked admission confirmation.
+
+Decision: accept
+```
+
 ### 3.4 评估自动化的顺序
 
 自动化按以下顺序推进：
@@ -753,7 +783,7 @@ Decision: accept
 6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
 后续仍需补充 CLI 自动接入 Trace 报告、CLI public MCP transport timeout projection、
-HTTP 429 retry/backoff 策略、Docker sandbox availability/isolation 和独立 model/provider
+HTTP 429 provider-specific retry/backoff 合同、Docker sandbox availability/isolation 和独立 model/provider
 对比场景；CLI public-path 的未知工具恢复、cross-file refactor、MCP connection/call refusal、
 sandbox 前置拒绝以及 App Server 的 NeedsApproval/MCP timeout projection 已覆盖，但更完整的
 工具失败/超时/重试矩阵仍是证据缺口，不是当前实现的已覆盖能力。

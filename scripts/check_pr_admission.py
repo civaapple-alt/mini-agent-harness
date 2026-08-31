@@ -6,7 +6,7 @@ import sys
 
 
 _QUESTION = re.compile(r"(?m)^\s*([1-6])\.\s+\*\*[^\n]*\*\*.*$")
-_CHECKED = re.compile(r"(?im)^\s*-\s*\[x\]\s+")
+_CHECKBOX = re.compile(r"(?im)^\s*-\s*\[([ x])\]\s+")
 _PLACEHOLDER = "<!-- answer here -->"
 _REQUIRED_SECTIONS = ("## 变更准入检查", "### 六项必答题", "### 准入确认")
 
@@ -39,7 +39,16 @@ def validate_body(body: str) -> list[str]:
             if not answer:
                 errors.append(f"question {index + 1} has no answer")
 
-    if len(_CHECKED.findall(body)) < 6:
+    confirmation_start = body.find("### 准入确认")
+    if confirmation_start >= 0:
+        confirmation = body[confirmation_start + len("### 准入确认") :]
+        next_heading = re.search(r"(?m)^#{1,3}\s+", confirmation)
+        if next_heading:
+            confirmation = confirmation[: next_heading.start()]
+    else:
+        confirmation = ""
+    checkboxes = _CHECKBOX.findall(confirmation)
+    if len(checkboxes) < 6 or any(mark.lower() != "x" for mark in checkboxes[:6]):
         errors.append("check all six admission confirmation boxes")
     return errors
 
