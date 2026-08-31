@@ -21,6 +21,8 @@ Stage 2 targeted boundary checks pass for Core, Protocol, App Server Protocol, A
 
 Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 target is optimization debt, not permission to remove protected behavior. New changes must preserve both hard ceilings, report the runtime and whole-workspace line delta, and default to net-zero growth or identify an explicit offset. Code changes run the affected tests, Clippy, formatting, and `python scripts/line_budget.py`; new Core/Protocol/Actor/CAS/Session behavior also needs an architecture note and boundary-level evidence.
 
+The six qualitative questions are collected in the repository [PR template](../../.github/pull_request_template.md). The CI workflow enforces the mechanical checks; reviewers enforce layer ownership, duplicate-path analysis, replacement-vs-addition reasoning, visible-surface impact, and boundary evidence.
+
 ---
 
 ## 1. Multi-Level Directory Semantics & Layout

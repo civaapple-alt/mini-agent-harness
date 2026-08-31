@@ -447,6 +447,8 @@ mini 的 Step 更容易观察和测试；原生的 Step 更像一次 provider st
 
 当前余量为 runtime 4,714 行、全 Rust 1,694 行。它们是受硬门禁约束的维护缓冲，不是默认可消费额度；阶段 1 的剩余约 1,406 行只作为未来低风险机会记录。
 
+六项定性准入问题已落到仓库级 [PR template](../../../../.github/pull_request_template.md)：变更层级、重复职责、旧概念替换、runtime/全 Rust 净行数、模型可见/事件/持久化/协议面，以及公共边界测试证据。CI 负责 fmt、Clippy、workspace 测试和 `line_budget.py` 等机械检查；reviewer 负责判断这些问题的架构答案是否成立，避免把无法安全自动化的边界判断伪装成脚本规则。
+
 阶段 2 的定向验收已通过：Core 28、Protocol 7、App Server Protocol 5、App Server 23、Capabilities 61、Host 40，以及 CLI `interactive` 集成 11 项全部通过；`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --all`、`python scripts/line_budget.py` 也通过。goal timeout 回归已关闭：状态落盘前先完成 `turn/interrupt`、`TurnFinished`、idle checkpoint 和 settled turn，随后 `workflow/goal/fail` 成功写入 `failed`。未运行需额外审批的完整 workspace 测试。
 
 工程含义：
