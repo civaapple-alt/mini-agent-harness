@@ -56,6 +56,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Audited the Docker sandbox smoke test: it remains a non-authoritative
   preflight/clear-error check because a present Docker CLI does not prove daemon
   availability or container isolation; no environment-coupled test was added.
+- Audited the failure/timeout/retry evidence matrix across Core, Capabilities,
+  App Server, and CLI, explicitly separating covered public paths from unit-only
+  evidence and deferred MCP timeout, provider backoff, and Docker isolation work.
 - Added a local baseline rerun/report recipe and recorded the next-iteration
   evidence decisions for bounded JSONL Trace export, test-only fault injection,
   slow-scenario scheduling, Compaction measurement, structured permission

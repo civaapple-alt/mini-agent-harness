@@ -449,7 +449,53 @@ Decision: accept
 Decision: accept
 ```
 
-### 3.3 评估自动化的顺序
+### 3.3 Tool failure/timeout/retry evidence matrix
+
+本轮审计将已有证据与未覆盖语义分开，避免把单层 unit test 或一次 smoke test
+误写成完整 Harness Scenario：
+
+| Fault class | Existing evidence | Status | Remaining gap |
+| :--- | :--- | :--- | :--- |
+| 缺少必要工具参数 | Core `missing_required_tool_argument_is_projected_for_model_recovery` | covered | 无；继续保持下一轮可见的 bounded Tool result |
+| 未知工具恢复 | CLI `ask_recovers_from_unknown_tool_on_public_path` | covered | 无；更广泛 provider 脏参数仍未穷举 |
+| 模型部分流失败 | Core `partial_model_stream_is_failed_without_fabricating_completion` | covered | 无；真实 provider 截断仍需独立矩阵 |
+| Retryable 工具结果 | Core `retryable_tool_result_is_preserved_until_model_recovers` | covered | 无隐式重试；策略层仍 deferred |
+| HTTP 429 | Capabilities `maps_http_429_to_bounded_api_error_without_retrying` | covered | retry/backoff policy 未定义 |
+| shell timeout | Capabilities `shell_process_has_a_timeout` | covered at capability boundary | CLI/App Server 公共路径尚未单独覆盖 |
+| turn/goal timeout | App Server/CLI goal timeout scenario | covered at public path | 与 tool timeout 的组合矩阵未覆盖 |
+| approval/MCP refusal | App Server `NeedsApproval`、Capabilities MCP connection/call denial | covered | 公共 MCP call timeout 未覆盖 |
+| MCP circuit breaker | Capabilities `circuit_breaker_trips_after_failures_and_recovers` | unit-only | 真实 MCP call failure 到 model round 的公共路径未覆盖 |
+| Docker sandbox | existing availability smoke test | defer | daemon/API 差异与 container isolation 无受控跨平台证据 |
+
+#### Stage 3 本轮实践的六项验证：failure matrix audit
+
+```text
+1. Layer: Core + Capabilities + App Server + CLI
+   rationale: 这是对既有跨层证据的 inventory，不引入新的执行逻辑；每个 fault class
+   仍由拥有其语义的边界负责。
+2. Duplicate responsibility:
+   searched the existing Core fault-injection tests, Responses parser/429 tests, MCP and
+   workspace tests, App Server approval/timeout tests, and CLI interactive scenarios；矩阵
+   标出了 unit-only 与 public-path evidence，未把它们重复实现为新 fixture。
+3. Replace vs add:
+   只整理和分类现有测试与已记录结果，不新增生产代码、测试 double、重试策略或第二套
+   Harness loop；缺口保留为后续独立准入项。
+4. Net line delta:
+   expected: runtime +0; all Rust +0
+   actual: runtime 16,074 -> 16,074 (+0); all Rust 29,369 -> 29,369 (+0)
+5. Visible surface:
+   no model input, event, persistence schema, or public protocol change. The audit explicitly
+   preserves the distinction between bounded adapter errors, structured tool outcomes, public
+   turn settlement, and unproven provider/container behavior.
+6. Boundary evidence:
+   existing recorded Core/App Server/CLI evidence in this note; current
+   `cargo test -p mini-agent-capabilities` (64 passed), the Docker smoke test, and
+   `python scripts/line_budget.py` all pass. No full workspace test was added or run.
+
+Decision: accept
+```
+
+### 3.4 评估自动化的顺序
 
 自动化按以下顺序推进：
 
