@@ -807,6 +807,62 @@ fn ask_without_auto_denies_shell_when_stdin_is_not_a_tty() {
 }
 
 #[test]
+fn ask_recovers_from_unknown_tool_on_public_path() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut first_stream, _) = listener.accept().unwrap();
+        first_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        requests_tx
+            .send(read_request_body(&mut first_stream))
+            .unwrap();
+        write_function_call_sse_response(
+            &mut first_stream,
+            "missing-call",
+            "missing_fixture",
+            json!({}),
+        );
+
+        let (mut second_stream, _) = listener.accept().unwrap();
+        second_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        requests_tx
+            .send(read_request_body(&mut second_stream))
+            .unwrap();
+        write_sse_response(&mut second_stream, "recovered from the tool failure");
+    });
+    let root = test_root();
+    fs::write(
+        root.join(".env"),
+        format!(
+            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
+        ),
+    )
+    .unwrap();
+
+    let output = mini_agent(&root)
+        .args(["ask", "--json", "recover from the missing tool"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_MODEL")
+        .env_remove("OPENAI_BASE_URL")
+        .output()
+        .unwrap();
+    let _first_request = requests_rx.recv().unwrap();
+    let second_request = requests_rx.recv().unwrap();
+    server.join().unwrap();
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    assert_eq!(response["output"], "recovered from the tool failure");
+    assert!(String::from_utf8_lossy(&second_request).contains("unknown tool: missing_fixture"));
+}
+
+#[test]
 fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
@@ -1026,15 +1082,24 @@ fn write_reasoning_sse_response(stream: &mut TcpStream, reasoning: &str, reply: 
 }
 
 fn write_tool_sse_response(stream: &mut TcpStream, command: &str) {
+    write_function_call_sse_response(stream, "shell-call-1", "shell", json!({"command": command}));
+}
+
+fn write_function_call_sse_response(
+    stream: &mut TcpStream,
+    call_id: &str,
+    name: &str,
+    arguments: Value,
+) {
     let body = format!(
         "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
         json!({
             "type": "response.output_item.done",
             "item": {
                 "type": "function_call",
-                "call_id": "shell-call-1",
-                "name": "shell",
-                "arguments": serde_json::to_string(&json!({"command": command})).unwrap()
+                "call_id": call_id,
+                "name": name,
+                "arguments": serde_json::to_string(&arguments).unwrap()
             }
         }),
         json!({

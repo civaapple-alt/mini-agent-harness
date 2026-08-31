@@ -70,7 +70,7 @@ cargo test -p mini-agent-cli --test interactive <scenario> -- --exact
 
 同日回归也通过：`cargo test -p mini-agent-app-server` 为 28/28，
 `cargo test -p mini-agent-cli --test interactive -- --test-threads=1` 为
-11/11。App Server 测试覆盖 running turn 中的 cancel、steer、follow-up、
+12/12。App Server 测试覆盖 running turn 中的 cancel、steer、follow-up、
 Actor/CAS、settled checkpoint 和 bounded JSONL Trace；CLI 场景覆盖真实
 前端到 App Server 的公共路径。
 
@@ -184,6 +184,38 @@ Decision: accept
 Decision: accept
 ```
 
+#### 阶段 2 本轮实践的六项验证：CLI public-path tool recovery
+
+```text
+1. Layer: CLI（通过现有 App Server/Host/Core 主路径验证）
+   rationale: 新场景从 `mini-agent ask --json` 进入，不调用 Core 或 Host 私有接口；
+   Mock Provider 返回未知工具调用，验证 CLI 公共入口能把 Core 的 bounded tool failure
+   送回下一轮模型输入并得到 settled answer。
+2. Duplicate responsibility:
+   searched `crates/mini-agent-cli/tests/interactive.rs` 的现有 ask、tool、approval
+   场景，以及 Core 的 unknown-tool recovery test；没有现有 CLI 公共路径场景同时断言
+   未知工具结果进入下一轮 provider request。
+3. Replace vs add:
+   复用既有 `mini_agent`、临时 workspace、TCP Mock Provider 和 SSE helper；只增加一个
+   public-path scenario，并将固定 shell response helper 委托给通用 function-call helper，
+   不增加生产恢复逻辑、备用 CLI 路径或第二套 Harness loop。
+4. Net line delta:
+   expected: runtime +0; all Rust +~80
+   actual: runtime 15,928 -> 15,928 (+0); all Rust 28,992 -> 29,057 (+65)
+   （CLI integration test net +65）。
+5. Visible surface:
+   no production model input, event type, persistence schema, or public protocol change;
+   the test only verifies the existing bounded `unknown tool: missing_fixture` Tool result
+   is projected into the next provider request before the final answer is settled.
+6. Boundary evidence:
+   cargo test -p mini-agent-cli --test interactive -- --test-threads=1 (12 passed)
+   cargo clippy -p mini-agent-cli --all-targets -- -D warnings
+   cargo fmt --all
+   python scripts/line_budget.py
+
+Decision: accept
+```
+
 #### 本轮实践的六项验证：test-only fault injection
 
 ```text
@@ -248,10 +280,12 @@ Decision: accept
 2. `goal timeout lifecycle` 已完成 6 项准入记录，并包含 scenario/eval 证据；
 3. timeout、cancel、steer、follow-up、resume 的事件与 durable state 顺序已通过回归；
 4. test-only FaultInjectionModel 和 Responses parser fault cases 已覆盖缺字段、畸形 JSON、
-   部分流和 retryable tool result，且没有改变生产执行路径；
+   部分流和 retryable tool result；CLI public-path scenario 已验证未知工具失败后的下一轮恢复，
+   且没有改变生产执行路径；
 5. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
 6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
 
-后续仍需补充 CLI 自动接入 Trace 报告、跨文件重构、CLI 公共路径工具失败恢复、HTTP 429
-provider 适配、MCP/approval/sandbox 拒绝和独立 model/provider 对比场景；这些是证据缺口，
+后续仍需补充 CLI 自动接入 Trace 报告、跨文件重构、HTTP 429 provider 适配、MCP/approval/sandbox
+拒绝和独立 model/provider 对比场景；CLI public-path 的未知工具恢复已覆盖，但更完整的工具
+失败/超时/重试矩阵仍是证据缺口，
 不是当前实现的已覆盖能力。
