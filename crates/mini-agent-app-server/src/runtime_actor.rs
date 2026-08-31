@@ -272,10 +272,6 @@ pub(super) fn handle<M>(
     }
 }
 
-pub(super) fn reject_running(command: RuntimeCommand, receipt: ActionReceipt) {
-    reject_runtime(command, receipt, AppServerError::Busy);
-}
-
 fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppServerError) {
     match command {
         RuntimeCommand::SessionInfo { reply } => respond(reply, receipt, Err(error)),
@@ -317,29 +313,17 @@ pub(super) fn handle_running<M>(
         return;
     }
     let command = request.command;
-    match command {
-        RuntimeCommand::SessionInfo { .. }
-        | RuntimeCommand::CheckpointSeq { .. }
-        | RuntimeCommand::ThreadId { .. }
-        | RuntimeCommand::World { .. }
-        | RuntimeCommand::McpStatus { .. }
-        | RuntimeCommand::WorkflowState { .. }
-        | RuntimeCommand::WorkflowSetPlan { .. }
-        | RuntimeCommand::WorkflowInitGoal { .. }
-        | RuntimeCommand::WorkflowLoadGoal { .. }
-        | RuntimeCommand::WorkflowCriteria { .. }
-        | RuntimeCommand::WorkflowRecordVerdict { .. }
-        | RuntimeCommand::WorkflowAdvance { .. }
-        | RuntimeCommand::WorkflowPause { .. }
-        | RuntimeCommand::WorkflowFail { .. } => handle(
+    if command.is_mutation() {
+        reject_runtime(command, receipt, AppServerError::Busy);
+    } else {
+        handle(
             command,
             receipt,
             runtime,
             threads,
             thread_ids,
             runtime_revision,
-        ),
-        command => reject_running(command, receipt),
+        );
     }
 }
 

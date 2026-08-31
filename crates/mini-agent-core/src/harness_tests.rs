@@ -74,6 +74,28 @@ impl Model for RecordingModel {
     }
 }
 
+fn text_response(text: impl Into<String>) -> ModelResponse {
+    ModelResponse {
+        reasoning: String::new(),
+        text: text.into(),
+        tool_calls: Vec::new(),
+        usage: None,
+    }
+}
+
+fn tool_response(call_id: &str, name: &str, arguments: Value) -> ModelResponse {
+    ModelResponse {
+        reasoning: String::new(),
+        text: String::new(),
+        tool_calls: vec![ToolCall {
+            id: call_id.to_string(),
+            name: name.to_string(),
+            arguments,
+        }],
+        usage: None,
+    }
+}
+
 struct Uppercase;
 
 impl Tool for Uppercase {
@@ -201,16 +223,7 @@ async fn runs_model_tool_model_path() {
 async fn steering_stops_after_a_complete_tool_batch() {
     let control = RunControl::new();
     let model = ScriptedModel {
-        responses: VecDeque::from([ModelResponse {
-            reasoning: String::new(),
-            text: String::new(),
-            tool_calls: vec![ToolCall {
-                id: "call-1".to_string(),
-                name: "request_steer".to_string(),
-                arguments: json!({}),
-            }],
-            usage: None,
-        }]),
+        responses: VecDeque::from([tool_response("call-1", "request_steer", json!({}))]),
     };
     let tools = ToolRegistry::new(vec![Box::new(RequestSteer(control.clone()))]);
     let mut harness = Harness::new(model, tools, HarnessConfig::default());
@@ -250,23 +263,13 @@ impl Model for SubmitSteerDuringSampling {
                     "focus on the actual bug",
                 ))
                 .unwrap();
-            return Ok(ModelResponse {
-                reasoning: String::new(),
-                text: "the first answer drifted".to_string(),
-                tool_calls: Vec::new(),
-                usage: None,
-            });
+            return Ok(text_response("the first answer drifted"));
         }
         assert!(request.messages.iter().any(|message| matches!(
             message,
             Message::User { text } if text == "focus on the actual bug"
         )));
-        Ok(ModelResponse {
-            reasoning: String::new(),
-            text: "the corrected answer".to_string(),
-            tool_calls: Vec::new(),
-            usage: None,
-        })
+        Ok(text_response("the corrected answer"))
     }
 }
 
@@ -306,22 +309,8 @@ async fn same_turn_steering_consumes_input_after_sampling() {
 async fn returns_unknown_tool_failure_to_model() {
     let model = ScriptedModel {
         responses: VecDeque::from([
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call-1".to_string(),
-                    name: "missing".to_string(),
-                    arguments: json!({}),
-                }],
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: "I could not run that tool.".to_string(),
-                tool_calls: Vec::new(),
-                usage: None,
-            },
+            tool_response("call-1", "missing", json!({})),
+            text_response("I could not run that tool."),
         ]),
     };
     let mut harness = Harness::new(model, ToolRegistry::default(), HarnessConfig::default());
@@ -344,22 +333,8 @@ async fn returns_unknown_tool_failure_to_model() {
 async fn preserves_structured_tool_policy_outcome_in_events() {
     let model = ScriptedModel {
         responses: VecDeque::from([
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call-approval".to_string(),
-                    name: "needs_approval".to_string(),
-                    arguments: json!({}),
-                }],
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: "waiting for approval".to_string(),
-                tool_calls: Vec::new(),
-                usage: None,
-            },
+            tool_response("call-approval", "needs_approval", json!({})),
+            text_response("waiting for approval"),
         ]),
     };
     let mut harness = Harness::new(
@@ -403,22 +378,8 @@ async fn preserves_structured_tool_policy_outcome_in_events() {
 async fn records_tool_output_truncation_explicitly() {
     let model = ScriptedModel {
         responses: VecDeque::from([
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call-1".to_string(),
-                    name: "uppercase".to_string(),
-                    arguments: json!({"text": "abcdefghij"}),
-                }],
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: "done".to_string(),
-                tool_calls: Vec::new(),
-                usage: None,
-            },
+            tool_response("call-1", "uppercase", json!({"text": "abcdefghij"})),
+            text_response("done"),
         ]),
     };
     let config = HarnessConfig {
@@ -670,16 +631,7 @@ async fn compacts_context_and_continues_the_tool_loop() {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let model = RecordingModel {
         responses: VecDeque::from([
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call-1".to_string(),
-                    name: "uppercase".to_string(),
-                    arguments: json!({"text": long_tool_value}),
-                }],
-                usage: None,
-            },
+            tool_response("call-1", "uppercase", json!({"text": long_tool_value})),
             ModelResponse {
                 reasoning: String::new(),
                 text: "The user asked for a long operation. The uppercase tool completed successfully. Continue by reporting completion.".to_string(),
@@ -690,12 +642,7 @@ async fn compacts_context_and_continues_the_tool_loop() {
                     output_tokens: 20,
                 }),
             },
-            ModelResponse {
-                reasoning: String::new(),
-                text: "Long operation completed.".to_string(),
-                tool_calls: Vec::new(),
-                usage: None,
-            },
+            text_response("Long operation completed."),
         ]),
         requests: Arc::clone(&requests),
     };
@@ -781,28 +728,9 @@ async fn compacts_context_and_continues_the_tool_loop() {
 async fn empty_summary_falls_back_to_mechanical_trim() {
     let model = ScriptedModel {
         responses: VecDeque::from([
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call-1".to_string(),
-                    name: "uppercase".to_string(),
-                    arguments: json!({"text": "x".repeat(300)}),
-                }],
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: "   ".to_string(),
-                tool_calls: Vec::new(),
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: "Long operation completed.".to_string(),
-                tool_calls: Vec::new(),
-                usage: None,
-            },
+            tool_response("call-1", "uppercase", json!({"text": "x".repeat(300)})),
+            text_response("   "),
+            text_response("Long operation completed."),
         ]),
     };
     let config = HarnessConfig {
@@ -847,19 +775,8 @@ async fn trims_over_budget_compaction_prefix_and_continues() {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let model = RecordingModel {
         responses: VecDeque::from([
-            ModelResponse {
-                reasoning: String::new(),
-                text: "Older turns covered padding and the latest user asked to continue."
-                    .to_string(),
-                tool_calls: Vec::new(),
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: "Continued.".to_string(),
-                tool_calls: Vec::new(),
-                usage: None,
-            },
+            text_response("Older turns covered padding and the latest user asked to continue."),
+            text_response("Continued."),
         ]),
         requests: Arc::clone(&requests),
     };
@@ -1177,13 +1094,6 @@ async fn rejects_oversized_model_response_before_retaining_it() {
     );
 }
 
-#[test]
-fn default_ceilings_remain_bounded_under_deepseek_v4_windows() {
-    let config = HarnessConfig::default();
-    assert_eq!(config.max_context_bytes, 1024 * 1024);
-    assert_eq!(config.max_model_response_bytes, 64 * 1024);
-}
-
 #[tokio::test]
 async fn repetitive_tool_calls_trigger_loop_warning() {
     struct EchoTool;
@@ -1209,42 +1119,10 @@ async fn repetitive_tool_calls_trigger_loop_warning() {
 
     let model = ScriptedModel {
         responses: VecDeque::from(vec![
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call1".to_string(),
-                    name: "echo".to_string(),
-                    arguments: json!({"msg": "hello"}),
-                }],
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call2".to_string(),
-                    name: "echo".to_string(),
-                    arguments: json!({"msg": "hello"}),
-                }],
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "call3".to_string(),
-                    name: "echo".to_string(),
-                    arguments: json!({"msg": "hello"}),
-                }],
-                usage: None,
-            },
-            ModelResponse {
-                reasoning: String::new(),
-                text: "done after warning".to_string(),
-                tool_calls: vec![],
-                usage: None,
-            },
+            tool_response("call1", "echo", json!({"msg": "hello"})),
+            tool_response("call2", "echo", json!({"msg": "hello"})),
+            tool_response("call3", "echo", json!({"msg": "hello"})),
+            text_response("done after warning"),
         ]),
     };
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::{remove_test_root, test_root};
 use crate::workspace::ApprovalMode;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -7,11 +8,7 @@ use std::io::Read;
 use std::io::Write;
 use std::net::TcpListener;
 use std::process::Command as StdCommand;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 #[test]
 fn loads_and_calls_stdio_server_through_rmcp() {
@@ -196,28 +193,6 @@ fn python_command() -> String {
         })
         .expect("Python 3 is required by the repository verification scripts")
         .to_string()
-}
-
-fn test_root() -> PathBuf {
-    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let sequence = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("mini-agent-mcp-{nonce}-{sequence}"));
-    fs::create_dir(&root).unwrap();
-    root
-}
-
-fn remove_test_root(root: &Path) {
-    for _ in 0..50 {
-        match fs::remove_dir_all(root) {
-            Ok(()) => return,
-            Err(_) => std::thread::sleep(Duration::from_millis(20)),
-        }
-    }
-    fs::remove_dir_all(root).unwrap();
 }
 
 fn serve_http_mcp(listener: TcpListener) -> bool {

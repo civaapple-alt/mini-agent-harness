@@ -1,10 +1,7 @@
 use super::*;
+use crate::test_support::{remove_test_root, test_root};
 use crate::workspace::ApprovalMode;
 use std::process::Command;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 #[test]
 fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
@@ -199,26 +196,4 @@ fn python_command() -> String {
         })
         .expect("Python 3 is required by the MCP fixture")
         .to_string()
-}
-
-fn remove_test_root(root: &Path) {
-    for _ in 0..50 {
-        match fs::remove_dir_all(root) {
-            Ok(()) => return,
-            Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
-        }
-    }
-    fs::remove_dir_all(root).unwrap();
-}
-
-fn test_root() -> PathBuf {
-    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let sequence = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("mini-agent-skills-{nonce}-{sequence}"));
-    fs::create_dir(&root).unwrap();
-    root
 }

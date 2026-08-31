@@ -47,6 +47,32 @@ fn connection() -> AppServerConnection<DoneModel> {
     AppServerConnection::new(server)
 }
 
+fn initialize_request(id: u64, client_name: &str) -> JsonRpcRequest {
+    JsonRpcRequest::request(
+        id,
+        METHOD_INITIALIZE,
+        serde_json::json!(InitializeParams {
+            protocol_version: PROTOCOL_VERSION,
+            client_name: client_name.to_string(),
+            client_version: "0".to_string(),
+            capabilities: ClientCapabilities::default(),
+            profile: None,
+            providers: None,
+        }),
+    )
+}
+
+fn turn_start_request(id: u64, prompt: &str) -> JsonRpcRequest {
+    JsonRpcRequest::request(
+        id,
+        METHOD_TURN_START,
+        serde_json::json!(TurnStartParams {
+            thread_id: ThreadId::new("thread-1"),
+            input: TurnInput::new(TurnInputMode::Start, prompt),
+        }),
+    )
+}
+
 fn workflow_connection() -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
     let root = std::env::temp_dir().join(format!(
         "mini-agent-workflow-rpc-{}-{}",
@@ -129,18 +155,7 @@ fn management_connection() -> (AppServerConnection<DoneModel>, std::path::PathBu
 async fn exposes_session_world_and_mcp_management() {
     let (mut connection, root) = management_connection();
     let response = connection
-        .handle_request(JsonRpcRequest::request(
-            1,
-            METHOD_INITIALIZE,
-            serde_json::json!(InitializeParams {
-                protocol_version: PROTOCOL_VERSION,
-                client_name: "management-test".to_string(),
-                client_version: "0".to_string(),
-                capabilities: ClientCapabilities::default(),
-                profile: None,
-                providers: None,
-            }),
-        ))
+        .handle_request(initialize_request(1, "management-test"))
         .await
         .unwrap();
     assert_eq!(
@@ -252,18 +267,7 @@ async fn requires_initialize_and_handles_turn_start() {
     assert_eq!(response.error.unwrap().code, -32000);
 
     let response = connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_INITIALIZE,
-            serde_json::json!(InitializeParams {
-                protocol_version: PROTOCOL_VERSION,
-                client_name: "test".to_string(),
-                client_version: "0".to_string(),
-                capabilities: ClientCapabilities::default(),
-                profile: None,
-                providers: None,
-            }),
-        ))
+        .handle_request(initialize_request(2, "test"))
         .await
         .unwrap();
     assert!(response.error.is_none());
@@ -286,14 +290,7 @@ async fn requires_initialize_and_handles_turn_start() {
     assert!(connection.initialized());
 
     let response = connection
-        .handle_request(JsonRpcRequest::request(
-            3,
-            METHOD_TURN_START,
-            serde_json::json!(TurnStartParams {
-                thread_id: ThreadId::new("thread-1"),
-                input: TurnInput::new(TurnInputMode::Start, "hello"),
-            }),
-        ))
+        .handle_request(turn_start_request(3, "hello"))
         .await
         .unwrap();
     assert!(response.error.is_none());
@@ -308,18 +305,7 @@ async fn requires_initialize_and_handles_turn_start() {
 async fn exposes_workflow_management_without_host_paths() {
     let (mut connection, root) = workflow_connection();
     let response = connection
-        .handle_request(JsonRpcRequest::request(
-            1,
-            METHOD_INITIALIZE,
-            serde_json::json!(InitializeParams {
-                protocol_version: PROTOCOL_VERSION,
-                client_name: "workflow-test".to_string(),
-                client_version: "0".to_string(),
-                capabilities: ClientCapabilities::default(),
-                profile: None,
-                providers: None,
-            }),
-        ))
+        .handle_request(initialize_request(1, "workflow-test"))
         .await
         .unwrap();
     assert_eq!(response.result.unwrap()["capabilities"]["workflows"], true);
@@ -415,28 +401,10 @@ async fn rejects_an_unavailable_requested_provider() {
 async fn projects_core_events_as_notifications() {
     let mut connection = connection();
     let _ = connection
-        .handle_request(JsonRpcRequest::request(
-            1,
-            METHOD_INITIALIZE,
-            serde_json::json!(InitializeParams {
-                protocol_version: PROTOCOL_VERSION,
-                client_name: "test".to_string(),
-                client_version: "0".to_string(),
-                capabilities: ClientCapabilities::default(),
-                profile: None,
-                providers: None,
-            }),
-        ))
+        .handle_request(initialize_request(1, "test"))
         .await;
     let _ = connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_TURN_START,
-            serde_json::json!(TurnStartParams {
-                thread_id: ThreadId::new("thread-1"),
-                input: TurnInput::new(TurnInputMode::Start, "hello"),
-            }),
-        ))
+        .handle_request(turn_start_request(2, "hello"))
         .await;
     let notification = connection.next_notification().await.unwrap();
     assert_eq!(notification.method, METHOD_TURN_EVENT);
@@ -454,18 +422,7 @@ async fn serves_initialize_over_jsonl_stdio() {
         tokio::io::BufReader::new(server_input),
         server_output,
     ));
-    let request = JsonRpcRequest::request(
-        1,
-        METHOD_INITIALIZE,
-        serde_json::json!(InitializeParams {
-            protocol_version: PROTOCOL_VERSION,
-            client_name: "jsonl-test".to_string(),
-            client_version: "0".to_string(),
-            capabilities: ClientCapabilities::default(),
-            profile: None,
-            providers: None,
-        }),
-    );
+    let request = initialize_request(1, "jsonl-test");
     input
         .write_all(format!("{}\n", serde_json::to_string(&request).unwrap()).as_bytes())
         .await
@@ -534,31 +491,11 @@ async fn local_and_json_rpc_clients_preserve_the_same_event_trace() {
 
     let mut json_rpc = connection();
     json_rpc
-        .handle_request(JsonRpcRequest::request(
-            1,
-            METHOD_INITIALIZE,
-            serde_json::to_value(InitializeParams {
-                protocol_version: PROTOCOL_VERSION,
-                client_name: "json-rpc-trace".to_string(),
-                client_version: "0".to_string(),
-                capabilities: ClientCapabilities::default(),
-                profile: None,
-                providers: None,
-            })
-            .unwrap(),
-        ))
+        .handle_request(initialize_request(1, "json-rpc-trace"))
         .await
         .unwrap();
     json_rpc
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_TURN_START,
-            serde_json::to_value(TurnStartParams {
-                thread_id: ThreadId::new("thread-1"),
-                input: TurnInput::new(TurnInputMode::Start, "hello"),
-            })
-            .unwrap(),
-        ))
+        .handle_request(turn_start_request(2, "hello"))
         .await
         .unwrap();
     let mut json_events = Vec::new();
@@ -585,28 +522,10 @@ async fn local_and_json_rpc_clients_preserve_the_same_event_trace() {
 async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
     let mut connection = connection();
     let _ = connection
-        .handle_request(JsonRpcRequest::request(
-            1,
-            METHOD_INITIALIZE,
-            serde_json::json!(InitializeParams {
-                protocol_version: PROTOCOL_VERSION,
-                client_name: "checkpoint-test".to_string(),
-                client_version: "0".to_string(),
-                capabilities: ClientCapabilities::default(),
-                profile: None,
-                providers: None,
-            }),
-        ))
+        .handle_request(initialize_request(1, "checkpoint-test"))
         .await;
     let started = connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_TURN_START,
-            serde_json::json!(TurnStartParams {
-                thread_id: ThreadId::new("thread-1"),
-                input: TurnInput::new(TurnInputMode::Start, "hello"),
-            }),
-        ))
+        .handle_request(turn_start_request(2, "hello"))
         .await
         .unwrap();
     let turn_id: mini_agent_protocol::TurnId =
@@ -646,18 +565,7 @@ async fn forwards_approval_response_through_json_rpc_connection() {
     let requester = broker.clone();
     let mut connection = AppServerConnection::with_approval_broker(server, broker.clone());
     let _ = connection
-        .handle_request(JsonRpcRequest::request(
-            1,
-            METHOD_INITIALIZE,
-            serde_json::json!(InitializeParams {
-                protocol_version: PROTOCOL_VERSION,
-                client_name: "approval-test".to_string(),
-                client_version: "0".to_string(),
-                capabilities: ClientCapabilities::default(),
-                profile: None,
-                providers: None,
-            }),
-        ))
+        .handle_request(initialize_request(1, "approval-test"))
         .await;
     let task = tokio::task::spawn_blocking(move || requester.request("edit file"));
     let pending = connection.next_approval_request().await;
@@ -692,18 +600,7 @@ async fn exposes_factory_backed_thread_lifecycle_methods() {
     );
     let mut connection = AppServerConnection::new(server);
     let _ = connection
-        .handle_request(JsonRpcRequest::request(
-            1,
-            METHOD_INITIALIZE,
-            serde_json::json!(InitializeParams {
-                protocol_version: PROTOCOL_VERSION,
-                client_name: "lifecycle-test".to_string(),
-                client_version: "0".to_string(),
-                capabilities: ClientCapabilities::default(),
-                profile: None,
-                providers: None,
-            }),
-        ))
+        .handle_request(initialize_request(1, "lifecycle-test"))
         .await;
     let created = connection
         .handle_request(JsonRpcRequest::request(
@@ -751,18 +648,7 @@ async fn exposes_factory_backed_thread_lifecycle_methods() {
 async fn suppresses_responses_for_json_rpc_notifications() {
     let mut connection = connection();
     let _ = connection
-        .handle_request(JsonRpcRequest::request(
-            1,
-            METHOD_INITIALIZE,
-            serde_json::json!(InitializeParams {
-                protocol_version: PROTOCOL_VERSION,
-                client_name: "notification-test".to_string(),
-                client_version: "0".to_string(),
-                capabilities: ClientCapabilities::default(),
-                profile: None,
-                providers: None,
-            }),
-        ))
+        .handle_request(initialize_request(1, "notification-test"))
         .await;
     assert!(
         connection

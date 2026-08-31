@@ -1,9 +1,6 @@
 use super::*;
+use crate::test_support::{remove_test_root, test_root};
 use std::io::Cursor;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 #[test]
 fn policy_can_be_replaced_after_frontend_callback_creation() {
@@ -14,18 +11,6 @@ fn policy_can_be_replaced_after_frontend_callback_creation() {
 
     assert_eq!(approval.preset(), SecurityPreset::Turbomode);
     approval.approve("shell:echo profile").unwrap();
-}
-
-pub(super) fn test_root() -> PathBuf {
-    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let sequence = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("mini-agent-{nonce}-{sequence}"));
-    fs::create_dir(&root).unwrap();
-    root
 }
 
 #[test]
@@ -64,7 +49,7 @@ fn reads_and_edits_inside_workspace() {
         "hello agent"
     );
 
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&root);
 }
 
 #[test]
@@ -100,7 +85,7 @@ fn read_image_uploads_and_rejects_type_mismatch() {
     };
     let error = mismatch.execute(&json!({"path": "shot.jpg"})).unwrap_err();
     assert!(error.0.contains("extension declares"));
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&root);
 }
 
 #[test]
@@ -138,8 +123,8 @@ fn read_image_accepts_absolute_path_outside_workspace_after_approval() {
             .execute(&json!({"path": abs.to_string_lossy().to_string()}))
             .is_err()
     );
-    fs::remove_dir_all(root).unwrap();
-    fs::remove_dir_all(pictures).unwrap();
+    remove_test_root(&root);
+    remove_test_root(&pictures);
 }
 
 #[test]
@@ -165,8 +150,8 @@ fn read_image_outside_workspace_can_be_denied() {
         .execute(&json!({"path": abs.to_string_lossy().to_string()}))
         .unwrap_err();
     assert!(error.0.contains("denied"), "{error:?}");
-    fs::remove_dir_all(root).unwrap();
-    fs::remove_dir_all(pictures).unwrap();
+    remove_test_root(&root);
+    remove_test_root(&pictures);
 }
 
 #[test]
@@ -202,8 +187,8 @@ fn rejects_escape_and_git_paths() {
     let err = read.execute(&json!({"path": outside_abs})).unwrap_err();
     assert!(err.0.contains("escapes the workspace"));
 
-    fs::remove_dir_all(root).unwrap();
-    fs::remove_dir_all(other).unwrap();
+    remove_test_root(&root);
+    remove_test_root(&other);
 }
 
 #[test]
@@ -243,8 +228,8 @@ fn read_file_accepts_configured_extension_roots() {
         "extension body"
     );
 
-    fs::remove_dir_all(extra).unwrap();
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&extra);
+    remove_test_root(&root);
 }
 
 #[test]
@@ -313,8 +298,8 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
             .contains("workspace mutations locked in Plan Mode")
     );
 
-    fs::remove_dir_all(session).unwrap();
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&session);
+    remove_test_root(&root);
 }
 
 #[test]
@@ -336,7 +321,7 @@ fn read_only_agent_rule_locks_workspace_mutations() {
         error.0,
         "workspace mutations disabled by the active agent profile"
     );
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&root);
 }
 
 #[test]
@@ -389,8 +374,8 @@ fn goal_mode_allows_session_goal_plan_reads_and_workspace_writes() {
         "<html></html>"
     );
 
-    fs::remove_dir_all(session).unwrap();
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&session);
+    remove_test_root(&root);
 }
 
 #[test]
@@ -425,7 +410,7 @@ fn write_file_creates_but_does_not_replace() {
         "keep me"
     );
 
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&root);
 }
 
 #[test]
@@ -455,7 +440,7 @@ fn shell_process_has_a_timeout() {
     .unwrap();
 
     assert!(output.text.contains("timed out"));
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&root);
 }
 
 #[test]
@@ -483,7 +468,7 @@ fn shell_matches_the_host_environment() {
     }
     assert!(spec.description.contains("without per-command approval"));
 
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&root);
 }
 
 #[test]
@@ -529,7 +514,7 @@ fn shell_preserves_utf8_from_workspace_files() {
         );
     }
 
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&root);
 }
 
 #[test]
@@ -560,7 +545,7 @@ fn large_shell_output_is_available_through_a_result_handle() {
     assert!(read.contains("stored_bytes="));
     assert!(read.len() >= 128);
 
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&root);
 }
 
 #[test]
@@ -575,7 +560,7 @@ fn docker_sandbox_checks_availability_or_reports_clear_error() {
     if let Err(err) = result {
         assert!(err.0.contains("docker sandbox is unavailable"));
     }
-    fs::remove_dir_all(root).unwrap();
+    remove_test_root(&root);
 }
 
 #[test]
@@ -616,6 +601,6 @@ fn full_machine_preset_permits_paths_outside_workspace() {
         "outside data"
     );
 
-    fs::remove_dir_all(root).unwrap();
-    fs::remove_dir_all(outside).unwrap();
+    remove_test_root(&root);
+    remove_test_root(&outside);
 }
