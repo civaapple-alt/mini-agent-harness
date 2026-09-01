@@ -18,6 +18,7 @@ use mini_agent_host::RuntimeProfile;
 use mini_agent_host::load_workspace_profile;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
+use mini_agent_protocol::ToolApprovalRequest;
 use std::env;
 use std::error::Error;
 use tokio::io::BufReader;
@@ -123,12 +124,12 @@ fn apply_provider_selection(
 }
 
 fn approval_for(broker: ApprovalBroker) -> ApprovalController {
-    ApprovalController::with_policy_and_callback(
+    ApprovalController::with_policy_and_context_callback(
         ApprovalMode::Interactive,
         SecurityPolicy::for_preset(SecurityPreset::Default),
-        move |action| {
+        move |request: &ToolApprovalRequest| {
             broker
-                .request(action)
+                .request_with_context(request)
                 .map_err(mini_agent_protocol::ToolError)
         },
     )

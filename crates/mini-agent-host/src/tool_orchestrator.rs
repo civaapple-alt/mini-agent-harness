@@ -1,23 +1,22 @@
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolAdmission;
+use mini_agent_protocol::ToolApprovalRequest;
 use mini_agent_protocol::ToolExecutionDelegate;
 use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionRequest;
 use mini_agent_protocol::ToolExecutionStatus;
 
-/// Owns the host-side execution boundary while legacy tools are migrated.
-///
-/// This first slice delegates the actual call to the existing tool and keeps
-/// outcome classification in one place. Approval and sandbox admission move
-/// here in later slices; the tool remains the source of tool-specific parsing
-/// and side-effect behavior until then.
-pub(crate) struct ToolOrchestrator {
+/// Typed tools perform bounded validation and describe their admission need;
+/// this orchestrator owns approval and the post-admission execution boundary.
+/// Tools that still return `Legacy` retain their existing lifecycle until a
+/// later migration slice.
+pub struct ToolOrchestrator {
     approval: ApprovalController,
 }
 
 impl ToolOrchestrator {
-    pub(crate) fn new(approval: ApprovalController) -> Self {
+    pub fn new(approval: ApprovalController) -> Self {
         Self { approval }
     }
 }
@@ -27,7 +26,8 @@ impl ToolExecutionDelegate for ToolOrchestrator {
         let outcome = match tool.admission(request) {
             Ok(ToolAdmission::Legacy) => tool.execute_outcome(&request.arguments),
             Ok(ToolAdmission::ApprovalRequired { action }) => {
-                match self.approval.approve(&action) {
+                let approval_request = ToolApprovalRequest::from_execution(action, request);
+                match self.approval.approve_request(&approval_request) {
                     Ok(()) => tool.execute_after_admission(request),
                     Err(error) => ToolExecutionOutcome::failed(error.to_string()),
                 }

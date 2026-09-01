@@ -54,8 +54,10 @@ settled result and messages. When the host runtime is wired with
 an `ApprovalBroker`, sensitive tool calls emit an `approval/request`
 notification, then emit `approval/resolved` after the client replies with
 `approval/respond`. The resolution carries the request ID, action, and final
-approved boolean, so clients can record `requested → resolved → tool result`
-without inferring approval from `tool/finished` content.
+approved boolean, as well as the optional `turnId` and `callId` for the built-in
+Shell path. Clients can correlate `requestId`/`turnId`/`callId` from
+`approval/request` through `approval/respond`, `approval/resolved`, and the
+matching `turn/event`, without inferring approval from `tool/finished` content.
 
 The Rust `LocalAppServerClient` uses the same DTOs and dispatch without stdio,
 which lets an embedded frontend migrate to the service boundary before it

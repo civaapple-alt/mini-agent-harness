@@ -1355,6 +1355,71 @@ model tool call
 scenario，并补齐 approval 与 `requestId`/`turnId`/`callId` 的关联；在该证据和预算
 抵扣明确前，不迁移 Edit/Write、Process 或 MCP，也不把 `Legacy` 默认改成隐式 allow。
 
+#### 阶段 3 第三个改造批次：App Server 公共 Shell approval correlation
+
+本批补齐了真实的 App Server 公共 Shell approval 场景，并把一次工具调用的身份
+从 Core 传到 App Server approval broker。`Thread::run_turn` 生成
+`ToolExecutionContext { thread_id, turn_id }`，Core 将它附加到
+`ToolExecutionRequest`；Host `ToolOrchestrator` 据此构造 typed
+`ToolApprovalRequest`。App Server `ApprovalBroker` 为请求分配有界的
+`request_id`，并在请求与 resolved 事件中保留 `thread_id`、`turn_id` 和
+`call_id`。
+
+```text
+public turn/start
+  → model: shell-call-1
+  → Core Thread: turn-1
+  → ToolRouter → Host ToolOrchestrator
+  → Shell admission → ApprovalController
+  → App Server ApprovalBroker: approval-1
+  → approval/request notification
+  → public approval/respond(approval-1, approved=true)
+  → approval/resolved(approval-1, turn-1, shell-call-1)
+  → Shell execution
+  → turn/event: tool_finished → turn_finished
+```
+
+六项准入验证：
+
+```text
+1. Layer:
+   Core/Protocol 只负责携带 Thread/Turn execution context；Host 负责把 typed
+   tool request 投影为 ToolApprovalRequest；Capabilities 继续提供 Shell
+   admission；App Server 负责 requestId 分配、approval broker 和 JSON-RPC
+   request/resolved projection；CLI 不增加第二条执行路径。
+2. Duplicate responsibility:
+   复用 ToolExecutionRequest、ToolAdmission、ToolOrchestrator、
+   ApprovalController、ApprovalBroker 和 EventEnvelope；没有新增 Router、
+   Orchestrator、Session 写入或第二个 approval authority。requestId 只由
+   App Server broker 生成，turnId/callId 只从已有 Core 调用身份传递。
+3. Replace vs add:
+   用 contextual approval callback 替换 Shell 主路径中无上下文的 action-only
+   callback；保留 legacy callback/execute 作为兼容安全路径，其他敏感工具仍为
+   Legacy。没有在该批次迁移 Edit/Write、Process 或 MCP。
+4. Net line delta:
+   baseline: runtime 16,556、all Rust 29,258；actual: runtime 16,940
+   (+384)、all Rust 29,676 (+418)。剩余预算为 3,060 和 324 行；下一敏感
+   工具迁移必须净零或提供明确抵扣。
+5. Visible surface:
+   App Server approval request/resolved notification 新增可选 `callId`；已有
+   `requestId`、`threadId`、`turnId` 继续公开并形成关联。模型输入、Shell
+   schema、Session 持久化格式和 turn event 的既有结构不变；审批仍是同步
+   callback，因此非阻塞 approval 行为尚未被宣称或迁移。
+6. Boundary evidence:
+   `cargo test -p mini-agent-app-server`（33 passed）覆盖公共 JSON-RPC
+   initialize、turn/start、approval/respond、broker resolved 和 turn/event；
+   `cargo test -p mini-agent-protocol`（7）、`cargo test -p mini-agent-core`
+   （32）、`cargo test -p mini-agent-capabilities`（66）和
+   `cargo test -p mini-agent-host`（42）均通过；另有 fmt、跨包 Clippy、
+   diff check 和 line budget 证据。测试使用真实内建 Shell 工具装配和公共
+   AppServerConnection，不是 fake approval-only 检查。
+```
+
+判定：**App Server 公共 Shell approval correlation 接受**。Shell 是当前唯一
+完成 typed admission 和公共 approval correlation 的敏感工具。下一步若迁移其他
+敏感工具，必须先定义同步 callback 如何在 App Server worker 中实现非阻塞等待，或
+明确一个等量/更大的 Rust 抵扣；在此之前保持其他工具的 `Legacy` 路径。
+
 ### 3.4 评估自动化的顺序
 
 自动化和下一迭代按以下顺序推进：

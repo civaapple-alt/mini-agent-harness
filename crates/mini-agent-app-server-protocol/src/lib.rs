@@ -609,6 +609,7 @@ pub struct ApprovalRequestNotification {
     pub action: String,
     pub thread_id: ThreadId,
     pub turn_id: Option<TurnId>,
+    pub call_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -619,6 +620,7 @@ pub struct ApprovalResolvedNotification {
     pub approved: bool,
     pub thread_id: ThreadId,
     pub turn_id: Option<TurnId>,
+    pub call_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -679,6 +681,34 @@ mod tests {
         let request = JsonRpcRequest::notification(METHOD_INITIALIZED, None);
         let value = serde_json::to_value(request).unwrap();
         assert!(value.get("id").is_none());
+    }
+
+    #[test]
+    fn approval_notifications_preserve_turn_and_call_correlation() {
+        let request = serde_json::to_value(ApprovalRequestNotification {
+            request_id: "approval-1".to_string(),
+            action: "shell command `pwd`".to_string(),
+            thread_id: ThreadId::new("thread-1"),
+            turn_id: Some(TurnId::new("turn-1")),
+            call_id: Some("shell-call-1".to_string()),
+        })
+        .unwrap();
+        assert_eq!(request["requestId"], "approval-1");
+        assert_eq!(request["turnId"], "turn-1");
+        assert_eq!(request["callId"], "shell-call-1");
+
+        let resolved = serde_json::to_value(ApprovalResolvedNotification {
+            request_id: "approval-1".to_string(),
+            action: "shell command `pwd`".to_string(),
+            approved: true,
+            thread_id: ThreadId::new("thread-1"),
+            turn_id: Some(TurnId::new("turn-1")),
+            call_id: Some("shell-call-1".to_string()),
+        })
+        .unwrap();
+        assert_eq!(resolved["requestId"], "approval-1");
+        assert_eq!(resolved["turnId"], "turn-1");
+        assert_eq!(resolved["callId"], "shell-call-1");
     }
 
     #[test]

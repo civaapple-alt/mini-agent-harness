@@ -10,6 +10,7 @@ use mini_agent_protocol::Model;
 use mini_agent_protocol::Observer;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStatus;
+use mini_agent_protocol::ToolExecutionContext;
 use mini_agent_protocol::TurnCancel;
 use mini_agent_protocol::TurnId;
 use mini_agent_protocol::TurnInput;
@@ -211,7 +212,16 @@ impl<M: Model> Thread<M> {
         });
         let outcome = self
             .harness
-            .run_with_control_mode(input.text, observer, control, steering_mode)
+            .run_with_control_mode_and_tool_context(
+                input.text,
+                observer,
+                control,
+                steering_mode,
+                Some(ToolExecutionContext {
+                    thread_id: self.id.clone(),
+                    turn_id: id.clone(),
+                }),
+            )
             .await;
         observer.observe(&Event::TurnFinished {
             status: outcome
@@ -242,7 +252,16 @@ impl<M: Model> Thread<M> {
         });
         let outcome = self
             .harness
-            .run_with_control_mode(input.text, &mut observer, control, steering_mode)
+            .run_with_control_mode_and_tool_context(
+                input.text,
+                &mut observer,
+                control,
+                steering_mode,
+                Some(ToolExecutionContext {
+                    thread_id: self.id.clone(),
+                    turn_id: id.clone(),
+                }),
+            )
             .await;
         observer.observe(&Event::TurnFinished {
             status: outcome

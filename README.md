@@ -81,7 +81,10 @@ dispatches through the protocol-level `ToolExecutionDelegate`; the Host
 `ToolOrchestrator` owns the typed admission and approval decision for the migrated
 Shell tool, while the remaining built-in Capabilities still use the legacy
 tool-owned approval path. App Server transports approval notifications and
-persists settled results. Approval correlation remains a separate migration step.
+persists settled results. The public Shell path correlates `requestId`, `turnId`,
+and `callId` from `turn/start` through `approval/request`, `approval/respond`,
+`approval/resolved`, and `turn/event`. Approval remains synchronous internally;
+other sensitive tools are not migrated until non-blocking behavior is defined.
 
 Runtime state has one authority: the App Server Runtime Actor orders Thread,
 World, Workflow, MCP, Session, and revision changes. Host implements the
@@ -300,8 +303,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `16,556 / 20,000` lines and all
-Rust source `29,258 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `16,940 / 20,000` lines and all
+Rust source `29,676 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 
@@ -339,18 +342,21 @@ The next iteration is evidence-triggered rather than another broad cleanup:
    creates a new redacted JSONL artifact with per-record and total limits; its
    public success, redaction, and overwrite-failure scenarios are covered. The
    baseline recipe remains explicit and does not create trace files implicitly.
-3. Revisit CLI public MCP-timeout projection only when a bounded fault-injection
+3. Preserve the completed Shell typed-admission and App Server public approval
+   correlation path. Before migrating another sensitive tool, define non-blocking
+   approval behavior and provide net-zero growth or an explicit line-budget offset.
+4. Revisit CLI public MCP-timeout projection only when a bounded fault-injection
    seam exists; otherwise keep the capability/App Server evidence and mark the
    CLI transport gap deferred.
-4. The measurable compaction-trigger scenario is now recorded in Core: it checks
+5. The measurable compaction-trigger scenario is now recorded in Core: it checks
    a trigger at least 70% of the bounded fixture budget and recent-tail retention;
    production remains at the documented 50% trigger unless later evidence proves
    that threshold unsuitable.
-5. Docker availability and both current and strict workspace-mount evidence are now recorded. Review the
+6. Docker availability and both current and strict workspace-mount evidence are now recorded. Review the
    [Docker isolation policy proposal](.agents/notes/proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
    and accept a threat model, supported platforms, defaults/opt-outs,
    compatibility, and fail-closed behavior before implementing stronger isolation.
-6. Consider provider comparison or retry/backoff only after a second provider or
+7. Consider provider comparison or retry/backoff only after a second provider or
    an explicit retry policy exists; do not use paid-provider CI as a default.
 
 Each batch stays within a few hundred changed lines, runs affected tests and

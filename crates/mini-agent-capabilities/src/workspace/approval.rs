@@ -1,4 +1,5 @@
 use super::*;
+use mini_agent_protocol::ToolApprovalRequest;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApprovalMode {
@@ -7,6 +8,8 @@ pub enum ApprovalMode {
 }
 
 type ApprovalCallback = dyn Fn(&str) -> Result<bool, ToolError> + Send + Sync;
+type ContextualApprovalCallback =
+    dyn Fn(&ToolApprovalRequest) -> Result<bool, ToolError> + Send + Sync;
 
 #[derive(Clone)]
 pub struct ApprovalController {
@@ -14,6 +17,7 @@ pub struct ApprovalController {
     policy: Arc<RwLock<SecurityPolicy>>,
     store: ApprovalStore,
     callback: Arc<ApprovalCallback>,
+    context_callback: Option<Arc<ContextualApprovalCallback>>,
     living_plan: Arc<Mutex<Option<PathBuf>>>,
     read_only_agent: Arc<AtomicBool>,
     goal_dir: Arc<Mutex<Option<PathBuf>>>,
@@ -54,6 +58,25 @@ impl ApprovalController {
             policy: Arc::new(RwLock::new(policy)),
             store: ApprovalStore::new(),
             callback: Arc::new(callback),
+            context_callback: None,
+            living_plan: Arc::new(Mutex::new(None)),
+            read_only_agent: Arc::new(AtomicBool::new(false)),
+            goal_dir: Arc::new(Mutex::new(None)),
+            session_dir: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn with_policy_and_context_callback(
+        mode: ApprovalMode,
+        policy: SecurityPolicy,
+        callback: impl Fn(&ToolApprovalRequest) -> Result<bool, ToolError> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            automatic: Arc::new(AtomicBool::new(matches!(mode, ApprovalMode::Automatic))),
+            policy: Arc::new(RwLock::new(policy)),
+            store: ApprovalStore::new(),
+            callback: Arc::new(terminal_approval),
+            context_callback: Some(Arc::new(callback)),
             living_plan: Arc::new(Mutex::new(None)),
             read_only_agent: Arc::new(AtomicBool::new(false)),
             goal_dir: Arc::new(Mutex::new(None)),
@@ -135,25 +158,36 @@ impl ApprovalController {
     }
 
     pub fn approve(&self, action: &str) -> Result<(), ToolError> {
-        match self.policy.read().unwrap().evaluate(action) {
+        self.approve_request(&ToolApprovalRequest::legacy(action))
+    }
+
+    pub fn approve_request(&self, request: &ToolApprovalRequest) -> Result<(), ToolError> {
+        match self.policy.read().unwrap().evaluate(&request.action) {
             SecurityDecision::Deny => {
-                return Err(ToolError(format!("forbidden by security policy: {action}")));
+                return Err(ToolError(format!(
+                    "forbidden by security policy: {}",
+                    request.action
+                )));
             }
             SecurityDecision::Allow => return Ok(()),
             SecurityDecision::Ask => {}
         }
-        if self.store.is_approved(action) {
+        if self.store.is_approved(&request.action) {
             return Ok(());
         }
         match self.mode() {
             ApprovalMode::Automatic => return Ok(()),
             ApprovalMode::Interactive => {}
         }
-        if (self.callback)(action)? {
-            self.store.remember_approval(action);
+        let approved = match self.context_callback.as_ref() {
+            Some(callback) => callback(request)?,
+            None => (self.callback)(&request.action)?,
+        };
+        if approved {
+            self.store.remember_approval(&request.action);
             Ok(())
         } else {
-            Err(ToolError(format!("user denied: {action}")))
+            Err(ToolError(format!("user denied: {}", request.action)))
         }
     }
 }

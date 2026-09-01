@@ -5,6 +5,7 @@ use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
+use mini_agent_protocol::ToolApprovalRequest;
 use mini_agent_protocol::TurnCancel;
 use mini_agent_protocol::TurnId;
 use mini_agent_protocol::TurnInput;
@@ -35,19 +36,25 @@ pub struct ApprovalBroker {
 struct ApprovalState {
     queued: std::collections::VecDeque<ApprovalRequest>,
     resolved: std::collections::VecDeque<ApprovalResolution>,
-    responders: HashMap<String, (String, std::sync::mpsc::Sender<bool>)>,
+    responders: HashMap<String, (ApprovalRequest, std::sync::mpsc::Sender<bool>)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApprovalRequest {
     pub request_id: String,
     pub action: String,
+    pub call_id: Option<String>,
+    pub thread_id: Option<ThreadId>,
+    pub turn_id: Option<TurnId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApprovalResolution {
     pub request_id: String,
     pub action: String,
+    pub call_id: Option<String>,
+    pub thread_id: Option<ThreadId>,
+    pub turn_id: Option<TurnId>,
     pub approved: bool,
 }
 
@@ -91,17 +98,28 @@ impl ApprovalBroker {
     /// Called by a synchronous host approval callback. The callback waits
     /// until the external client answers the corresponding request.
     pub fn request(&self, action: &str) -> Result<bool, String> {
+        self.request_with_context(&ToolApprovalRequest::legacy(action))
+    }
+
+    /// Called by a synchronous Host approval callback with tool identity.
+    ///
+    /// The broker assigns `request_id`; the caller-provided Thread, Turn, and
+    /// call IDs remain attached to both request and resolution events.
+    pub fn request_with_context(&self, approval: &ToolApprovalRequest) -> Result<bool, String> {
         let request_id = format!("approval-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
         let (sender, receiver) = std::sync::mpsc::channel();
         let request = ApprovalRequest {
             request_id: request_id.clone(),
-            action: action.to_string(),
+            action: approval.action.clone(),
+            call_id: approval.call_id.clone(),
+            thread_id: approval.thread_id.clone(),
+            turn_id: approval.turn_id.clone(),
         };
         {
             let mut state = self.state.lock().unwrap();
             state
                 .responders
-                .insert(request_id, (action.to_string(), sender));
+                .insert(request_id, (request.clone(), sender));
             state.queued.push_back(request);
         }
         self.notify.notify_one();
@@ -137,7 +155,7 @@ impl ApprovalBroker {
     }
 
     pub fn respond(&self, request_id: &str, approved: bool) -> Result<(), String> {
-        let (action, sender) = self
+        let (request, sender) = self
             .state
             .lock()
             .unwrap()
@@ -153,7 +171,10 @@ impl ApprovalBroker {
             .resolved
             .push_back(ApprovalResolution {
                 request_id: request_id.to_string(),
-                action,
+                action: request.action,
+                call_id: request.call_id,
+                thread_id: request.thread_id,
+                turn_id: request.turn_id,
                 approved,
             });
         self.notify.notify_one();

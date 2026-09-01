@@ -7,6 +7,7 @@ use mini_agent_protocol::Model;
 use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::Observer;
 use mini_agent_protocol::StopReason;
+use mini_agent_protocol::ToolExecutionContext;
 use std::error::Error;
 use std::fmt;
 
@@ -247,6 +248,18 @@ impl<M: Model> Harness<M> {
         control: &RunControl,
         steering_mode: SteeringMode,
     ) -> Result<RunOutcome, HarnessError<M::Error>> {
+        self.run_with_control_mode_and_tool_context(prompt, observer, control, steering_mode, None)
+            .await
+    }
+
+    pub(crate) async fn run_with_control_mode_and_tool_context<O: Observer + Send>(
+        &mut self,
+        prompt: impl Into<String>,
+        observer: &mut O,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+        tool_context: Option<ToolExecutionContext>,
+    ) -> Result<RunOutcome, HarnessError<M::Error>> {
         let prompt = prompt.into();
         if prompt.len() > self.config.max_user_input_bytes {
             return Err(fail_limit(
@@ -432,6 +445,7 @@ impl<M: Model> Harness<M> {
                 self.config.max_tool_output_bytes,
                 &mut self.session,
                 observer,
+                tool_context.as_ref(),
             );
 
             if last_tool_batch.as_ref() == Some(&current_executed_batch) {

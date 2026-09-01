@@ -9,8 +9,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 - App Server approval routing now emits a server-owned `approval/resolved`
   notification after `approval/respond`, so clients can observe the complete
-  `requested → resolved → tool result` lifecycle. This is additive to the
-  protocol and does not change approval policy or Session commit semantics.
+  `requested → resolved → tool result` lifecycle. Shell approval requests now
+  preserve `requestId`, `turnId`, and `callId` across that lifecycle. This is
+  additive to the protocol and does not change approval policy or Session commit
+  semantics.
 - Added the first `ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator`
   migration seam. Core resolves a tool and delegates execution lifecycle ownership
   to Host; legacy tool execution and approval behavior remain compatible while
@@ -18,7 +20,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Added typed `ToolAdmission` for the built-in Shell tool. Host now approves the
   bounded command before invoking Shell's post-admission execution hook; other
   tools remain on the explicit legacy path until their own migration evidence is
-  accepted.
+  accepted. Added a public App Server JSON-RPC scenario covering Shell approval
+  request/respond/resolved and the resulting `turn/event` lifecycle.
 
 ### Audited
 
@@ -26,8 +29,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   execution-delegate seam now exists, but there is still no full central approval
   orchestrator: Core dispatches, built-in Capabilities own pre-side-effect approval,
   Host owns the migration-time outcome classification, and App Server owns approval
-  transport plus settled-turn persistence. Typed admission, approval correlation,
-  and a real built-in public approval scenario remain explicitly deferred.
+  transport plus settled-turn persistence. Shell now has typed admission and public
+  approval correlation; other sensitive tools remain explicitly deferred. Approval
+  callbacks are still synchronous, so non-blocking approval is a prerequisite for
+  broadening the migration.
 
 ### Changed
 

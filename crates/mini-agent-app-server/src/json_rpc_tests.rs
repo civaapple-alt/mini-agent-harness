@@ -4,14 +4,29 @@ use mini_agent_app_server_protocol::CapabilityProviderSelection;
 use mini_agent_app_server_protocol::ClientCapabilities;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ApprovalMode;
+use mini_agent_capabilities::ImageStore;
+use mini_agent_capabilities::ResultStore;
 use mini_agent_capabilities::SandboxKind;
+use mini_agent_capabilities::SecurityPolicy;
+use mini_agent_capabilities::SecurityPreset;
+use mini_agent_capabilities::workspace_tools_with_read_roots_and_results;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
 use mini_agent_core::ToolRegistry;
+use mini_agent_protocol::Message;
+use mini_agent_protocol::Model;
+use mini_agent_protocol::ModelEventSink;
+use mini_agent_protocol::ModelRequest;
+use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
+use mini_agent_protocol::ToolCall;
+use mini_agent_protocol::ToolExecutionStatus;
 use mini_agent_protocol::TurnInput;
+use std::convert::Infallible;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
@@ -57,6 +72,57 @@ fn rpc_root(name: &str) -> std::path::PathBuf {
     ));
     std::fs::create_dir_all(&root).unwrap();
     root
+}
+
+struct ShellApprovalModel;
+
+impl Model for ShellApprovalModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        if request.messages.iter().any(|message| {
+            matches!(
+                message,
+                Message::Tool {
+                    name,
+                    outcome: Some(ToolExecutionStatus::Completed),
+                    ..
+                } if name == "shell"
+            )
+        }) {
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "shell completed".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "shell-call-1".to_string(),
+                name: "shell".to_string(),
+                arguments: serde_json::json!({"command": shell_approval_command()}),
+            }],
+            usage: None,
+        })
+    }
+}
+
+fn shell_approval_command() -> &'static str {
+    #[cfg(windows)]
+    {
+        "Write-Output shell-approved"
+    }
+    #[cfg(not(windows))]
+    {
+        "printf shell-approved"
+    }
 }
 
 fn managed_connection(name: &str) -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
@@ -372,6 +438,159 @@ async fn serves_initialize_over_jsonl_stdio() {
         PROTOCOL_VERSION
     );
     task.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
+    let root = rpc_root("shell-approval-rpc");
+    let broker = ApprovalBroker::new();
+    let approval_broker = broker.clone();
+    let approval = ApprovalController::with_policy_and_context_callback(
+        ApprovalMode::Interactive,
+        SecurityPolicy::for_preset(SecurityPreset::Default),
+        move |request| {
+            approval_broker
+                .request_with_context(request)
+                .map_err(mini_agent_protocol::ToolError)
+        },
+    );
+    let tools = workspace_tools_with_read_roots_and_results(
+        root.clone(),
+        approval.clone(),
+        Vec::new(),
+        SandboxKind::Native,
+        ImageStore::memory_only(),
+        ResultStore::default(),
+    )
+    .unwrap();
+    let registry = ToolRegistry::with_executor(
+        tools,
+        Arc::new(mini_agent_host::ToolOrchestrator::new(approval)),
+    );
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(
+            ThreadId::new("initial"),
+            Harness::new(ShellApprovalModel, registry, HarnessConfig::default()),
+        ),
+    );
+
+    let mut control_connection = AppServerConnection::with_approval_broker_and_capability_manifest(
+        server.clone(),
+        broker.clone(),
+        default_capability_manifest(),
+    );
+    let initialize = control_connection
+        .handle_request(initialize_request(1, "shell-rpc"))
+        .await
+        .unwrap();
+    assert_eq!(
+        initialize.result.unwrap()["capabilities"]["approvalRequests"],
+        true
+    );
+
+    let mut events_connection = AppServerConnection::with_approval_broker_and_capability_manifest(
+        server.clone(),
+        broker.clone(),
+        default_capability_manifest(),
+    );
+    events_connection
+        .handle_request(initialize_request(4, "shell-events"))
+        .await;
+
+    let mut turn_connection = AppServerConnection::with_approval_broker_and_capability_manifest(
+        server,
+        broker.clone(),
+        default_capability_manifest(),
+    );
+    turn_connection
+        .handle_request(initialize_request(5, "shell-turn"))
+        .await;
+    let runtime_handle = tokio::runtime::Handle::current();
+    let turn_task = tokio::task::spawn_blocking(move || {
+        runtime_handle.block_on(async move {
+            turn_connection
+                .handle_request(turn_start_request(2, "run shell"))
+                .await
+                .unwrap()
+        })
+    });
+
+    let pending = tokio::time::timeout(Duration::from_secs(3), broker.next_request())
+        .await
+        .expect("Shell approval should reach the App Server broker");
+    assert_eq!(pending.request_id, "approval-1");
+    assert_eq!(
+        pending.action,
+        format!("shell command `{}`", shell_approval_command())
+    );
+    assert_eq!(pending.call_id.as_deref(), Some("shell-call-1"));
+    assert_eq!(pending.thread_id, Some(ThreadId::new("thread-1")));
+    assert_eq!(
+        pending.turn_id,
+        Some(mini_agent_protocol::TurnId::new("turn-1"))
+    );
+
+    let approval_response = control_connection
+        .handle_request(JsonRpcRequest::request(
+            3,
+            METHOD_APPROVAL_RESPOND,
+            serde_json::to_value(ApprovalRespondParams {
+                request_id: pending.request_id.clone(),
+                approved: true,
+                remember: false,
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(approval_response.result.unwrap()["accepted"], true);
+
+    let resolution = tokio::time::timeout(Duration::from_secs(3), broker.next_event())
+        .await
+        .expect("Shell approval resolution should be recorded");
+    let resolution = match resolution {
+        ApprovalEvent::Resolved(resolution) => resolution,
+        ApprovalEvent::Requested(_) => panic!("expected approval resolution"),
+    };
+    assert_eq!(resolution.request_id, "approval-1");
+    assert_eq!(resolution.call_id.as_deref(), Some("shell-call-1"));
+    assert_eq!(resolution.thread_id, Some(ThreadId::new("thread-1")));
+    assert_eq!(
+        resolution.turn_id,
+        Some(mini_agent_protocol::TurnId::new("turn-1"))
+    );
+    assert!(resolution.approved);
+
+    let mut tool_finished_seen = false;
+    loop {
+        let notification = events_connection.next_notification().await.unwrap();
+        assert_eq!(notification.method, METHOD_TURN_EVENT);
+        let params = notification.params.unwrap();
+        let notification: TurnEventNotification = serde_json::from_value(params).unwrap();
+        assert_eq!(
+            notification.turn_id,
+            Some(mini_agent_protocol::TurnId::new("turn-1"))
+        );
+        match notification.event {
+            mini_agent_protocol::Event::ToolFinished {
+                call_id,
+                name,
+                outcome: Some(ToolExecutionStatus::Completed),
+                ..
+            } => {
+                assert_eq!(call_id, "shell-call-1");
+                assert_eq!(name, "shell");
+                tool_finished_seen = true;
+            }
+            mini_agent_protocol::Event::TurnFinished { .. } => break,
+            _ => {}
+        }
+    }
+    assert!(tool_finished_seen);
+    let turn_response = turn_task.await.unwrap();
+    assert_eq!(turn_response.result.unwrap()["value"]["turn_id"], "turn-1");
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]

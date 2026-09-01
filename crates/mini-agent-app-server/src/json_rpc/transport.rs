@@ -145,8 +145,11 @@ where
                         serde_json::to_value(ApprovalRequestNotification {
                             request_id: request.request_id,
                             action: request.action,
-                            thread_id: connection.server.thread_id().clone(),
-                            turn_id: None,
+                            thread_id: request
+                                .thread_id
+                                .unwrap_or_else(|| connection.server.thread_id().clone()),
+                            turn_id: request.turn_id,
+                            call_id: request.call_id,
                         }).expect("approval notification is serializable"),
                     ),
                     ApprovalEvent::Resolved(resolution) => (
@@ -155,8 +158,11 @@ where
                             request_id: resolution.request_id,
                             action: resolution.action,
                             approved: resolution.approved,
-                            thread_id: connection.server.thread_id().clone(),
-                            turn_id: None,
+                            thread_id: resolution
+                                .thread_id
+                                .unwrap_or_else(|| connection.server.thread_id().clone()),
+                            turn_id: resolution.turn_id,
+                            call_id: resolution.call_id,
                         }).expect("approval resolution is serializable"),
                     ),
                 };

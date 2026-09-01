@@ -4,6 +4,9 @@ use serde_json::Value;
 use std::error::Error;
 use std::fmt;
 
+use crate::ThreadId;
+use crate::TurnId;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ToolSpec {
     pub name: String,
@@ -17,6 +20,8 @@ pub struct ToolExecutionRequest {
     pub call_id: String,
     pub name: String,
     pub arguments: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<ToolExecutionContext>,
 }
 
 impl ToolExecutionRequest {
@@ -25,13 +30,72 @@ impl ToolExecutionRequest {
             call_id: call_id.into(),
             name: name.into(),
             arguments,
+            context: None,
         }
+    }
+
+    pub fn with_context(mut self, context: ToolExecutionContext) -> Self {
+        self.context = Some(context);
+        self
     }
 }
 
 impl From<crate::ToolCall> for ToolExecutionRequest {
     fn from(call: crate::ToolCall) -> Self {
         Self::new(call.id, call.name, call.arguments)
+    }
+}
+
+/// Identifies the Thread and Turn that caused a tool call.
+///
+/// Direct Harness callers may omit this context. App Server Thread execution
+/// supplies it so Host approval and public event projections can correlate a
+/// tool call without parsing action text.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct ToolExecutionContext {
+    pub thread_id: ThreadId,
+    pub turn_id: TurnId,
+}
+
+/// The bounded identity and action sent to an approval provider.
+///
+/// The approval provider assigns its own request ID after receiving this
+/// value. Keeping the model call identity here lets a frontend correlate the
+/// approval lifecycle with the later tool event and settled session record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolApprovalRequest {
+    pub action: String,
+    pub tool_name: Option<String>,
+    pub call_id: Option<String>,
+    pub thread_id: Option<ThreadId>,
+    pub turn_id: Option<TurnId>,
+}
+
+impl ToolApprovalRequest {
+    pub fn legacy(action: impl Into<String>) -> Self {
+        Self {
+            action: action.into(),
+            tool_name: None,
+            call_id: None,
+            thread_id: None,
+            turn_id: None,
+        }
+    }
+
+    pub fn from_execution(action: impl Into<String>, request: &ToolExecutionRequest) -> Self {
+        Self {
+            action: action.into(),
+            tool_name: Some(request.name.clone()),
+            call_id: Some(request.call_id.clone()),
+            thread_id: request
+                .context
+                .as_ref()
+                .map(|context| context.thread_id.clone()),
+            turn_id: request
+                .context
+                .as_ref()
+                .map(|context| context.turn_id.clone()),
+        }
     }
 }
 
