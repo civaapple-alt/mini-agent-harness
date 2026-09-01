@@ -17,6 +17,9 @@ the [MIT License](LICENSE).
 - An autonomous `auto` mode with bounded context compaction.
 - Six bounded default Builtin tools: `read_file`, `write_file`, `edit_file`,
   `shell`, `web_fetch`, and `read_image`; MCP remains an explicit extension.
+- Active Threads can select a bounded Builtin subset through
+  `thread/settings/update` `builtinTools`; omission preserves the current
+  selection and external/MCP tools remain separate.
 - App Server workflow APIs for Plan Mode and autonomous Goal Mode.
 - Durable sessions with resume, fork, live events, and bounded result artifacts.
 - Tool-free Goal verification against settled checkpoints.
@@ -56,7 +59,7 @@ limits, failures, and observation events.
   Server owns workflow commands; Host only supplies the wrapped
   `HostWorkflowStore` persistence seam. The
   JSON-RPC surface exposes `thread/settings/update` with the typed
-  `collaborationMode` setting, `workflow/state`, and typed Goal lifecycle
+  `collaborationMode` and bounded `builtinTools` settings, `workflow/state`, and typed Goal lifecycle
   methods. The former `workflow/plan/set` method is intentionally removed;
   clients must use the settings method.
   `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess

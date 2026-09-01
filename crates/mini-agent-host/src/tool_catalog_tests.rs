@@ -91,3 +91,19 @@ fn host_filter_drops_unlisted_builtin_tools() {
         vec!["read_file", "shell"]
     );
 }
+
+#[test]
+fn builtin_selection_is_bounded_and_reversible() {
+    let selection =
+        BuiltinToolSelection::from_names(vec!["shell".to_string(), "read_file".to_string()])
+            .unwrap();
+    assert_eq!(selection.names(), &["shell", "read_file"]);
+    assert_eq!(
+        selection.hidden_names(),
+        vec!["edit_file", "write_file", "web_fetch", "read_image"]
+    );
+    assert!(BuiltinToolSelection::from_names(vec!["unknown".to_string()]).is_err());
+    assert!(
+        BuiltinToolSelection::from_names(vec!["shell".to_string(), "shell".to_string(),]).is_err()
+    );
+}

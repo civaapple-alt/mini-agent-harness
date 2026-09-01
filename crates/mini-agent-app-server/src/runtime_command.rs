@@ -54,7 +54,8 @@ pub(super) enum RuntimeCommand {
     },
     SetCollaborationMode {
         active: bool,
-        reply: oneshot::Sender<ActionResult<()>>,
+        builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
+        reply: oneshot::Sender<ActionResult<Vec<String>>>,
     },
     WorkflowInitGoal {
         objective: String,

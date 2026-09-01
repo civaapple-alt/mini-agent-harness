@@ -122,7 +122,8 @@ pub(super) async fn worker_loop<M>(
                 .as_ref()
                 .is_some_and(|state| state.workflow.plan_active())
                 && let Some(state) = runtime.as_mut()
-                && let Err(error) = runtime_actor::set_collaboration_mode(&mut threads, state, true)
+                && let Err(error) =
+                    runtime_actor::set_collaboration_mode(&mut threads, state, true, None)
             {
                 eprintln!("warning: failed to restore collaboration mode: {error}");
             }

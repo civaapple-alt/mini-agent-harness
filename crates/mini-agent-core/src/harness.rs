@@ -229,6 +229,12 @@ impl<M: Model> Harness<M> {
         self.tools.extend(tools);
     }
 
+    /// Applies a Host-computed visibility filter while retaining the tool
+    /// implementations for later Thread setting changes.
+    pub fn set_hidden_tools(&mut self, names: Vec<String>) {
+        self.tools.set_hidden_tools(names);
+    }
+
     pub async fn run<O: Observer + Send>(
         &mut self,
         prompt: impl Into<String>,

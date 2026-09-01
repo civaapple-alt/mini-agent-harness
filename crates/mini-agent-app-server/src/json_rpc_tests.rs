@@ -315,13 +315,18 @@ async fn exposes_workflow_management_without_host_paths() {
             METHOD_THREAD_SETTINGS_UPDATE,
             serde_json::json!({
                 "threadId": "thread-1",
-                "collaborationMode": {"mode": "plan"}
+                "collaborationMode": {"mode": "plan"},
+                "builtinTools": ["shell", "read_file"]
             }),
         ))
         .await
         .unwrap();
     let result = response.result.unwrap();
     assert_eq!(result["value"]["collaborationMode"]["mode"], "plan");
+    assert_eq!(
+        result["value"]["builtinTools"],
+        serde_json::json!(["shell", "read_file"])
+    );
     assert_eq!(result["actionId"], 1);
     assert_eq!(result["actionSequence"], 1);
     assert_eq!(result["stateRevision"], 1);
@@ -370,6 +375,20 @@ async fn exposes_workflow_management_without_host_paths() {
     assert_eq!(result["actionId"], 4);
     assert_eq!(result["actionSequence"], 4);
     assert_eq!(result["stateRevision"], 3);
+
+    let response = connection
+        .handle_request(JsonRpcRequest::request(
+            6,
+            METHOD_THREAD_SETTINGS_UPDATE,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "collaborationMode": {"mode": "default"},
+                "builtinTools": ["not-a-builtin"]
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.error.unwrap().code, -32602);
     std::fs::remove_dir_all(root).unwrap();
 }
 

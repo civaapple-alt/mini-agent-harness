@@ -48,3 +48,20 @@ fn router_resolves_before_delegating_execution() {
         ToolExecutionOutcome::completed("call-1:echo")
     );
 }
+
+#[test]
+fn hidden_tools_are_not_visible_or_resolvable_and_can_be_restored() {
+    let mut router = ToolRouter::new(vec![Box::new(EchoTool)]);
+    router.set_hidden_tools(vec!["echo".to_string()]);
+
+    assert!(router.specs().is_empty());
+    assert_eq!(
+        router.execute("echo", &serde_json::json!({})),
+        Err(mini_agent_protocol::ToolError(
+            "unknown tool: echo".to_string()
+        ))
+    );
+
+    router.set_hidden_tools(Vec::new());
+    assert_eq!(router.specs().len(), 1);
+}

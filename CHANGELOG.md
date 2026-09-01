@@ -19,7 +19,13 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **Host Tool Catalog:** add the first Host-owned catalog with explicit tool
   origin, exposure, admission class, provider, and stable name. The catalog
   filters only the built-in provider; externally registered providers keep their
-  own tool surface until a later Thread-level selection batch.
+  own tool surface outside the Thread-level Builtin selection.
+- **Thread tool selection:** extend `thread/settings/update` with optional
+  `builtinTools`. Host validates the bounded six-tool subset and Core applies a
+  reversible Router visibility filter; omission preserves the active Thread's
+  selection, an empty list hides all Builtins, and MCP/external tools remain
+  available. Durable capability selection for newly created or forked Threads
+  remains a later persistence batch.
 - **Planning:** add the proposed Goal Runtime next-phase plan covering the
   canonical `thread/goal/set/get/clear` contract, automatic continuation,
   settings/Goal notifications, and retirement of manual Goal controls. This

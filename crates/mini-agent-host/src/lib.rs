@@ -62,5 +62,6 @@ pub use profile::ToolScope;
 pub use profile::WorkflowScope;
 pub use profile::load_workspace_profile;
 pub use runtime_factory::HostRuntimeFactory;
+pub use tool_catalog::BuiltinToolSelection;
 pub use tool_orchestrator::ToolOrchestrator;
 pub use world::WorldState;

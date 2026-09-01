@@ -87,9 +87,14 @@ impl WorkflowService {
     pub(crate) async fn set_collaboration_mode_action(
         &self,
         active: bool,
-    ) -> Result<ActionResponse<()>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::SetCollaborationMode { active, reply })
-            .await
+        builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
+    ) -> Result<ActionResponse<Vec<String>>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::SetCollaborationMode {
+            active,
+            builtin_tools,
+            reply,
+        })
+        .await
     }
 
     pub(crate) async fn init_goal_action(

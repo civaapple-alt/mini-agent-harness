@@ -22,10 +22,11 @@ The alignment covers four related concerns:
    large outputs remain sidecar artifacts referenced by an Item.
 
 This remains a design proposal for the full Thread/Turn/ThreadItem alignment.
-Its initial exposure policy is now implemented as a small Stage 1 preparation
-batch: the default Builtin catalog is limited to six tools. It does not add a
-public protocol or begin Goal Runtime work. The remaining implementation must
-wait for an explicit whole-Rust budget offset.
+Its initial exposure policy is implemented as two small Stage 1 batches: the
+default Builtin catalog is limited to six tools, and the active Thread can
+reversibly select a subset through `thread/settings/update`. Skill, Plugin,
+ThreadItem, Artifact, and Goal Runtime work remain deferred until their own
+bounded contracts and evidence are accepted.
 
 ## Why this direction
 
@@ -391,7 +392,41 @@ This batch applies the six-question gate to the first exposure-policy change:
    No Item, persistence, approval-correlation, or JSON-RPC field is added.
 6. **Boundary evidence:** Host tests cover the typed six-entry catalog and
    removal of unlisted names; Capabilities, Host, App Server, and CLI suites
-   remain green. Thread-level hidden/disabled selection is still deferred.
+   remain green. Thread-level hidden/disabled selection is covered by the
+   subsequent bounded settings batch.
+
+### Stage 1 admission record: Thread-level Builtin selection
+
+1. **Layer:** App Server owns the `thread/settings/update` request and runtime
+   action; Host owns Builtin selection validation and hidden-name calculation;
+   Core only applies the visibility filter inside its existing `ToolRouter`.
+2. **Duplicate responsibility:** Reuse the existing Thread, Harness, Router,
+   Host Catalog, Runtime Actor, and `collaborationMode` action. No Skill,
+   Plugin, ThreadItem, Artifact, or second execution path is introduced.
+3. **Replace vs. add:** Replace the Router's implicit all-visible behavior with
+   a reversible hidden-name filter. Tool implementations stay resident so a
+   later settings update can widen the selection; external/MCP names remain
+   outside the Builtin filter.
+4. **Net line delta:** Before this slice: runtime `17,149/20,000`, all Rust
+   `29,117/30,000`; after: runtime `17,343/20,000`, all Rust `29,311/30,000`.
+   The measured delta is `+194` lines, leaving `689` whole-Rust lines.
+5. **Visible surface:** v2 `thread/settings/update` accepts optional
+   `builtinTools`. Omission keeps the current selection; an empty array hides
+   all six Builtin tools; invalid, duplicate, and over-limit names are rejected.
+   The result returns the effective selection. No arbitrary tool execution,
+   approval bypass, or public system-prompt replacement is added.
+6. **Boundary evidence:** Core verifies hidden tools are absent from the model
+   spec and return an unknown-tool result, then become visible again. Host
+   verifies bounded selection and hidden-name calculation. The App Server
+   public workflow/settings scenario verifies the JSON-RPC field and returned
+   selection; affected tests and Clippy pass.
+
+This is intentionally a live runtime slice, not the final persistence contract:
+the active Thread retains its filter across ordinary turns and the existing
+same-object resume path, while factory-created/forked Threads start from their
+Host default until their own settings are applied. Persisting selected
+capability references as part of a Thread checkpoint belongs with the later
+Thread/ThreadItem persistence batch.
 
 ## Artifact and result contract
 
@@ -500,8 +535,10 @@ and after; no estimate authorizes a budget breach.
 - Landed the first Host-owned bounded catalog over existing ToolSpecs.
 - Record origin, exposure, admission class, provider, and stable name for the
   six default Builtin entries.
-- Filter the default Builtin provider through that catalog; Thread-level
-  selection remains a follow-up batch.
+- Filter the default Builtin provider through that catalog.
+- Apply a bounded Builtin subset to the active Thread through
+  `thread/settings/update`; keep the selection reversible and preserve
+  explicitly registered external providers.
 - Keep the concrete `ToolProvider` construction path and existing Orchestrator.
 - Prove that hidden tools remain callable only through explicitly authorized
   internal paths and that disabled tools cannot be resolved.

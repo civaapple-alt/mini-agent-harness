@@ -288,12 +288,16 @@ pub enum CollaborationModeKind {
 pub struct ThreadSettingsUpdateParams {
     pub thread_id: ThreadId,
     pub collaboration_mode: CollaborationMode,
+    /// Optional replacement for the model-visible Builtin tool selection.
+    /// Omission keeps the current Thread selection unchanged.
+    pub builtin_tools: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSettingsUpdateResult {
     pub collaboration_mode: CollaborationMode,
+    pub builtin_tools: Vec<String>,
 }
 
 /// Secret-free workflow state projected by the App Server.

@@ -31,6 +31,7 @@ pub(crate) struct RuntimeActorState {
     pub(crate) management: RuntimeManagementState,
     pub(crate) workflow: HostWorkflowStore,
     pub(crate) approval: ApprovalController,
+    pub(crate) builtin_tools: mini_agent_host::BuiltinToolSelection,
     pub(crate) stable_system_prompt: Option<String>,
     revision: crate::action::RuntimeRevision,
 }
@@ -122,6 +123,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 management,
                 workflow,
                 approval: approval.clone(),
+                builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
                 stable_system_prompt: stable_system_prompt.clone(),
                 revision: crate::action::RuntimeRevision::default(),
             })

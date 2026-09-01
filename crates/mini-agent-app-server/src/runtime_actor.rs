@@ -174,9 +174,14 @@ pub(super) fn handle<M>(
                     ))
                 }),
         ),
-        RuntimeCommand::SetCollaborationMode { active, reply } => {
+        RuntimeCommand::SetCollaborationMode {
+            active,
+            builtin_tools,
+            reply,
+        } => {
             let result = mutate(runtime, runtime_revision, |state| {
-                set_collaboration_mode(threads, state, active).map(|()| ((), true))
+                set_collaboration_mode(threads, state, active, builtin_tools)
+                    .map(|selection| (selection, true))
             });
             respond(reply, receipt, result);
         }
@@ -340,7 +345,8 @@ pub(super) fn set_collaboration_mode<M>(
     threads: &mut HashMap<String, Thread<M>>,
     state: &mut RuntimeActorState,
     active: bool,
-) -> Result<(), AppServerError>
+    builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
+) -> Result<Vec<String>, AppServerError>
 where
     M: Model,
 {
@@ -372,7 +378,13 @@ where
             thread.harness_mut().set_system_prompt(prompt);
         }
     }
-    Ok(())
+    if let Some(selection) = builtin_tools {
+        thread
+            .harness_mut()
+            .set_hidden_tools(selection.hidden_names());
+        state.builtin_tools = selection;
+    }
+    Ok(state.builtin_tools.names().to_vec())
 }
 
 fn update_world<M>(

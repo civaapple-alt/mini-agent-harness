@@ -1,4 +1,5 @@
 use super::*;
+use mini_agent_host::BuiltinToolSelection;
 
 impl<M> AppServerConnection<M>
 where
@@ -19,15 +20,31 @@ where
             Ok(workflows) => workflows,
             Err(error) => return response_error(request.id, error),
         };
+        let builtin_tools = match params.builtin_tools {
+            Some(names) => match BuiltinToolSelection::from_names(names) {
+                Ok(selection) => Some(selection),
+                Err(error) => {
+                    return response_error(request.id, JsonRpcError::invalid_params(error));
+                }
+            },
+            None => None,
+        };
         let active = matches!(params.collaboration_mode.mode, CollaborationModeKind::Plan);
-        match workflows.set_collaboration_mode_action(active).await {
-            Ok(response) => response_action_with(
-                request.id,
-                response,
-                ThreadSettingsUpdateResult {
-                    collaboration_mode: params.collaboration_mode,
-                },
-            ),
+        match workflows
+            .set_collaboration_mode_action(active, builtin_tools)
+            .await
+        {
+            Ok(response) => {
+                let builtin_tools = response.value.clone();
+                response_action_with(
+                    request.id,
+                    response,
+                    ThreadSettingsUpdateResult {
+                        collaboration_mode: params.collaboration_mode,
+                        builtin_tools,
+                    },
+                )
+            }
             Err(error) => response_error(request.id, map_action_error(error)),
         }
     }

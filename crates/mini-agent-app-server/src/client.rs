@@ -400,12 +400,21 @@ where
         &mut self,
         mode: CollaborationModeKind,
     ) -> Result<ThreadSettingsUpdateResult, JsonRpcError> {
+        self.update_thread_settings(mode, None).await
+    }
+
+    pub async fn update_thread_settings(
+        &mut self,
+        mode: CollaborationModeKind,
+        builtin_tools: Option<Vec<String>>,
+    ) -> Result<ThreadSettingsUpdateResult, JsonRpcError> {
         let thread_id = self.connection.thread_id().await;
         self.call(
             METHOD_THREAD_SETTINGS_UPDATE,
             ThreadSettingsUpdateParams {
                 thread_id,
                 collaboration_mode: CollaborationMode { mode },
+                builtin_tools,
             },
         )
         .await
