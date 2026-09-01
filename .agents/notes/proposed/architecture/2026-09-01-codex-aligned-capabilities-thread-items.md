@@ -24,9 +24,10 @@ The alignment covers four related concerns:
 This remains a design proposal for the full Thread/Turn/ThreadItem alignment.
 Its initial exposure policy is implemented as two small Stage 1 batches: the
 default Builtin catalog is limited to six tools, and the active Thread can
-reversibly select a subset through `thread/settings/update`. Skill, Plugin,
-ThreadItem, Artifact, and Goal Runtime work remain deferred until their own
-bounded contracts and evidence are accepted.
+reversibly select a subset through `thread/settings/update`. The first bounded
+Stage 2 Skill slice now parses typed `builtin`/`mcp` dependencies and returns
+explicit local activation metadata; App Server Turn activation and Host
+allowlist resolution remain deferred until their own evidence is accepted.
 
 ## Why this direction
 
@@ -545,10 +546,16 @@ and after; no estimate authorizes a budget breach.
 
 ### Stage 2: Skill dependency and activation
 
-- Extend bounded Skill metadata with optional tool dependencies.
-- Resolve selected dependencies before a Turn, without starting unselected MCP
-  servers or exposing unrelated tools.
-- Add explicit Skill activation to the local and App Server Turn input model.
+- **Landed (bounded first slice):** extend Skill frontmatter with at most 16
+  typed `builtin`/`mcp` dependency references, include non-empty declarations
+  in the bounded metadata catalog, and expose `Discovery::activate_skill` as a
+  typed metadata-only activation result.
+- The activation result does not read the Skill body, start an MCP server,
+  enable a provider, or grant approval; Host policy remains the authority for
+  resolving dependencies.
+- **Next slice:** resolve selected dependencies before a Turn and add explicit
+  Skill activation to the local/App Server Turn input model, without starting
+  unselected MCP servers or exposing unrelated tools.
 - Preserve progressive disclosure and bounded prompt composition.
 
 ### Stage 3: Plugin provider selection
@@ -690,11 +697,37 @@ This proposal is ready for implementation only when:
 
 ## Current decision
 
-**Proposed: accept the direction; implement only the six-tool exposure
-preparation.**
+**Proposed: accept the direction; the six-tool exposure preparation and the
+first bounded Skill dependency/activation metadata slice are implemented.**
 
-The default Builtin catalog, its direct deletion, and the first Host-owned
-Tool Catalog slice are now landed. Thread-level selection is still deferred;
-the next actionable work is whole-Rust budget release followed by bounded Skill
-dependency/activation work. ThreadItem protocol work must follow that catalog
-decision; Artifact APIs and Goal Runtime integration remain later stages.
+The default Builtin catalog, its direct deletion, the first Host-owned Tool
+Catalog slice, Thread-level Builtin selection, and bounded Skill dependency
+metadata/activation are now landed. App Server Turn activation, Host dependency
+allowlist resolution, Plugin provider selection, ThreadItem protocol work,
+Artifact APIs, and Goal Runtime integration remain later stages.
+
+## Implementation record — 2026-09-01 Skill dependency/activation slice
+
+Six-question admission:
+
+1. **Layer:** Capabilities Skill discovery and metadata; this is the owner of
+   frontmatter parsing and bounded Skill declarations.
+2. **Duplicate responsibility:** reuse `Discovery`, `CapabilityRegistry`, the
+   existing Builtin catalog, and the existing MCP loader; no Router or
+   Orchestrator was added.
+3. **Replace vs add:** extend the existing Skill metadata record and add one
+   typed activation projection; provider startup, approval, and execution are
+   still owned by Host/Capabilities.
+4. **Net line delta:** all Rust `28,987 → 29,178` (`+191`); the reported runtime
+   (`core + protocol + host + app-server`) remains `17,343`. The batch stays
+   below the few-hundred-line limit and consumes the remaining budget margin.
+5. **Visible surface:** Skills with dependencies add bounded dependency metadata
+   to the model-visible catalog. No App Server method, event, persistence,
+   approval, or provider surface changes.
+6. **Boundary evidence:** Capabilities tests prove typed activation returns the
+   exact dependency declaration while MCP remains unloaded, and reject an
+   unsupported dependency type. App Server Turn activation and allowlist
+   resolution are intentionally not claimed by this slice.
+
+Decision: **accept the bounded metadata slice and proceed to the next explicit
+Turn/Host resolution batch only with a measured offset or further cleanup.**

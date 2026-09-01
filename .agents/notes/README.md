@@ -10,7 +10,7 @@ This directory records architectural decision records (ADRs), technology selecti
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
 - runtime (`core + protocol + host + app-server`): `17,343 / 20,000` lines (86.7%; 2,657 remaining)
-- all Rust source: `28,987 / 30,000` lines (96.6%; 1,013 remaining)
+- all Rust source: `29,178 / 30,000` lines (97.3%; 822 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -29,7 +29,8 @@ The line-budget release work has completed its low-risk Stage 1 audit and the ta
   removes `78` all-Rust lines, and the REPL 30% compression batch removes `246`
   all-Rust lines. The Host Catalog and reversible
   Thread `builtinTools` selection batches add `404` runtime / `404` all-Rust
-  lines, so the approximate `26,900`
+  lines, and the first typed Skill dependency/activation metadata slice adds
+  `191` all-Rust lines, so the approximate `26,900`
   target remains optimization debt
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, duplicate Python test fixture probing, dead Plan slash-command parsing and prompt facades, dead local WorldState summary accessors, and the REPL `/status`/`/info` management projection. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
@@ -74,6 +75,14 @@ retain the filter, while new/forked factory Threads and durable capability
 checkpointing remain deferred. The batch leaves `1,013` whole-Rust lines;
 automatic Goal continuation and settings notifications remain deferred.
 
+The first Skill dependency/activation slice is implemented in Capabilities.
+Skill frontmatter may declare up to 16 bounded `builtin` or `mcp` references;
+the metadata catalog exposes non-empty declarations, and
+`Discovery::activate_skill` returns a typed metadata-only activation. It does
+not read Skill bodies, start MCP, enable providers, or grant approval. App Server
+Turn activation and Host allowlist resolution remain the next Skill batch; the
+current all-Rust margin is only `822` lines.
+
 The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative historical CLI scenarios pass, with current App Server boundary evidence and CLI interactive 12/12 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy and model/provider comparison remain explicitly open gaps. CLI `ask --trace-jsonl PATH` now has public-path evidence for redaction, per-record/total bounds, and overwrite refusal; implicit baseline export remains off. Docker CLI/server 29.6.1 and the `alpine` image are available on this host; Docker preflight now queries the daemon with `docker info`, and ordinary plus candidate-strict probes verify the `/workspace` mount and container-only temporary files, while the strict probe also observes network, capability, read-only-root, and bounded-cgroup behavior. These are current-host evidence only, not a complete cross-platform security claim. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists. The REPL now omits duplicate World/MCP/extension management; these remain available through App Server clients.
 
 The unfinished Goal work is tracked in the [Goal Runtime and `thread/goal/*` plan](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md). It is a proposed sequence, not an implementation claim: the current Goal lifecycle remains distributed across App Server workflow adapters, Runtime Actor commands, Host persistence, and the verifier module. Automatic continuation, canonical `thread/goal/set/get/clear`, settings/Goal notifications, and final retirement of manual Goal controls remain deferred.
@@ -94,9 +103,11 @@ The unfinished Goal work is tracked in the [Goal Runtime and `thread/goal/*` pla
    line-budget offset. Do not add a generic router/sandbox wrapper or leave two
    approval authorities active.
 4. The active Thread Builtin selection is implemented as the first reversible
-   Catalog consumer. Before adding Skill dependencies, extend selection only
-   with bounded typed provider references and add persistence evidence; do not
-   introduce a second router or let Skills silently enable providers.
+   Catalog consumer. The first Skill dependency/activation metadata slice is
+   also implemented, without provider startup or permission grants. The next
+   Skill batch must add explicit Turn input and Host allowlist resolution only
+   with a measured offset and public boundary evidence; do not introduce a
+   second router or let Skills silently enable providers.
 5. The bounded opt-in CLI Trace contract is implemented and covered by CLI public
    scenarios: explicit `ask --trace-jsonl PATH`, create-new ownership, redaction,
    8 KiB per-record and 256 KiB total limits, and fail-on-write/finalization error.

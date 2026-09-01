@@ -60,6 +60,8 @@ pub use path_policy::normalize_path;
 pub use skills::Discovery;
 pub use skills::McpServerConfig;
 pub use skills::McpTransportConfig;
+pub use skills::SkillActivation;
+pub use skills::SkillDependency;
 pub use skills::discover;
 pub use workspace::ApprovalController;
 pub use workspace::ApprovalMode;

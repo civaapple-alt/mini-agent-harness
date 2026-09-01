@@ -113,6 +113,18 @@ fn parse_instruction(
             path.display()
         ));
     }
+    if metadata.dependencies.tools.len() > MAX_SKILL_DEPENDENCIES {
+        return Err(format!(
+            "{} declares more than {MAX_SKILL_DEPENDENCIES} Skill dependencies",
+            path.display()
+        ));
+    }
+    let dependencies = metadata
+        .dependencies
+        .tools
+        .into_iter()
+        .map(|dependency| parse_skill_dependency(dependency, &path))
+        .collect::<Result<Vec<_>, _>>()?;
     let location = path
         .strip_prefix(workspace)
         .unwrap_or(&path)
@@ -123,6 +135,7 @@ fn parse_instruction(
         description,
         location,
         source: source.to_string(),
+        dependencies,
     })
 }
 

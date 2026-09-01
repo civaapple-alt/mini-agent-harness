@@ -42,6 +42,68 @@ fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
 }
 
 #[test]
+fn activates_typed_skill_dependencies_without_enabling_providers() {
+    let root = test_root();
+    write_skill_with_dependencies(
+        &root.join(".agents/skills/review"),
+        "review",
+        "Review Rust changes.",
+        "  tools:\n    - type: builtin\n      value: read_file\n    - type: mcp\n      value: github\n",
+    );
+
+    let discovery = discover(&root);
+    assert_eq!(
+        discovery.skill_names(),
+        ["review"],
+        "{:?}",
+        discovery.diagnostics()
+    );
+    let activation = discovery.activate_skill("review").unwrap();
+    assert_eq!(
+        activation,
+        SkillActivation {
+            name: "review".to_string(),
+            location: ".agents/skills/review/SKILL.md".to_string(),
+            dependencies: vec![
+                SkillDependency::BuiltinTool("read_file".to_string()),
+                SkillDependency::McpServer("github".to_string()),
+            ],
+        }
+    );
+    let prompt = discovery.augment_system_prompt("base").unwrap();
+    assert!(prompt.contains("\"type\":\"builtin\""));
+    assert!(prompt.contains("\"value\":\"github\""));
+    assert!(discovery.mcp_servers().is_empty());
+    remove_test_root(&root);
+}
+
+#[test]
+fn rejects_unsupported_skill_dependency_types() {
+    let root = test_root();
+    write_skill_with_dependencies(
+        &root.join(".agents/skills/review"),
+        "review",
+        "Review Rust changes.",
+        "  tools:\n    - type: process\n      value: shell\n",
+    );
+
+    let discovery = discover(&root);
+    assert!(
+        !discovery.diagnostics().is_empty(),
+        "{:?}",
+        discovery.diagnostics()
+    );
+    assert!(discovery.skill_names().is_empty());
+    assert!(
+        discovery
+            .diagnostics()
+            .iter()
+            .any(|message| message.contains("unsupported Skill dependency type"))
+    );
+    remove_test_root(&root);
+}
+
+#[test]
 fn selected_extensions_keep_named_entries_and_report_missing_names() {
     let root = test_root();
     write_skill(
@@ -176,10 +238,29 @@ fn write_plugin_manifest(root: &Path, name: &str) {
 }
 
 fn write_skill(root: &Path, name: &str, description: &str, body: &str) {
+    write_skill_frontmatter(root, name, description, "", body);
+}
+
+fn write_skill_with_dependencies(root: &Path, name: &str, description: &str, dependencies: &str) {
+    write_skill_frontmatter(root, name, description, dependencies, "SKILL BODY");
+}
+
+fn write_skill_frontmatter(
+    root: &Path,
+    name: &str,
+    description: &str,
+    dependencies: &str,
+    body: &str,
+) {
     fs::create_dir_all(root).unwrap();
+    let dependency_block = if dependencies.is_empty() {
+        String::new()
+    } else {
+        format!("dependencies:\n{dependencies}")
+    };
     fs::write(
         root.join("SKILL.md"),
-        format!("---\nname: {name}\ndescription: {description}\n---\n{body}\n"),
+        format!("---\nname: {name}\ndescription: {description}\n{dependency_block}---\n{body}\n"),
     )
     .unwrap();
 }

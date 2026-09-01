@@ -291,6 +291,11 @@ nested-agent behavior are not emulated. See the
 [extension examples](examples/extensions/README.md) and
 [configuration](docs/configuration.md).
 
+Skill frontmatter may declare bounded tool dependencies under
+`dependencies.tools` using `type: builtin|mcp`. Discovery and explicit local
+activation expose only this metadata; provider resolution, startup, approval,
+and execution remain Host-owned and are not triggered by Skill discovery.
+
 ## Documentation
 
 - [Configuration](docs/configuration.md) — providers, sessions, extensions,
@@ -350,7 +355,7 @@ admission confirmations is checked exactly once; reviewers remain responsible fo
 answer quality.
 
 The current hard-budget snapshot is runtime `17,343 / 20,000` lines and all
-Rust source `28,987 / 30,000` lines. The approximate `26,900` Stage 1 target
+Rust source `29,178 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 

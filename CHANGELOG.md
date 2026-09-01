@@ -26,6 +26,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   selection, an empty list hides all Builtins, and MCP/external tools remain
   available. Durable capability selection for newly created or forked Threads
   remains a later persistence batch.
+- **Skill dependency/activation:** extend bounded `SKILL.md` frontmatter with
+  optional typed `builtin`/`mcp` dependency references and expose a local
+  `Discovery::activate_skill` metadata result. Activation does not read Skill
+  bodies, start MCP, enable providers, grant approval, or add an App Server
+  method; Turn input and Host allowlist resolution remain deferred.
 - **Planning:** add the proposed Goal Runtime next-phase plan covering the
   canonical `thread/goal/set/get/clear` contract, automatic continuation,
   settings/Goal notifications, and retirement of manual Goal controls. This

@@ -25,6 +25,8 @@ const MAX_DIRECTORY_ENTRIES: usize = 128;
 const MAX_METADATA_BYTES: u64 = 64 * 1024;
 const MAX_INSTRUCTION_FRONTMATTER_BYTES: usize = 16 * 1024;
 const MAX_CATALOG_BYTES: usize = 16 * 1024;
+const MAX_SKILL_DEPENDENCIES: usize = 16;
+const MAX_SKILL_DEPENDENCY_VALUE_BYTES: usize = 64;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_CONNECT_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -67,12 +69,47 @@ struct Skill {
     description: String,
     location: String,
     source: String,
+    dependencies: Vec<SkillDependency>,
 }
 
 #[derive(Deserialize)]
 struct SkillMetadata {
     name: String,
     description: String,
+    #[serde(default)]
+    dependencies: SkillDependenciesMetadata,
+}
+
+#[derive(Default, Deserialize)]
+struct SkillDependenciesMetadata {
+    #[serde(default)]
+    tools: Vec<SkillDependencyMetadata>,
+}
+
+#[derive(Deserialize)]
+struct SkillDependencyMetadata {
+    #[serde(rename = "type")]
+    kind: String,
+    value: String,
+}
+
+/// A capability reference declared by a Skill.
+///
+/// This is metadata only. Resolving or enabling the referenced provider stays
+/// with Host policy and does not happen during discovery or activation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SkillDependency {
+    BuiltinTool(String),
+    McpServer(String),
+}
+
+/// The bounded metadata produced when a discovered Skill is explicitly
+/// activated for a later Host/Turn resolution step.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SkillActivation {
+    pub name: String,
+    pub location: String,
+    pub dependencies: Vec<SkillDependency>,
 }
 
 pub fn discover(workspace: &Path) -> Discovery {
@@ -103,11 +140,30 @@ pub fn discover(workspace: &Path) -> Discovery {
 }
 
 fn skill_metadata(skill: &Skill) -> Value {
-    json!({
+    let mut metadata = json!({
         "name": skill.name,
         "description": skill.description,
         "location": skill.location,
-    })
+    });
+    if !skill.dependencies.is_empty() {
+        metadata["dependencies"] = json!(
+            skill
+                .dependencies
+                .iter()
+                .map(|dependency| match dependency {
+                    SkillDependency::BuiltinTool(value) => json!({
+                        "type": "builtin",
+                        "value": value,
+                    }),
+                    SkillDependency::McpServer(value) => json!({
+                        "type": "mcp",
+                        "value": value,
+                    }),
+                })
+                .collect::<Vec<_>>()
+        );
+    }
+    metadata
 }
 
 impl Discovery {
@@ -117,6 +173,21 @@ impl Discovery {
 
     pub fn skill_names(&self) -> Vec<String> {
         self.skills.iter().map(|skill| skill.name.clone()).collect()
+    }
+
+    /// Returns the bounded declaration for a named Skill without enabling any
+    /// tool provider or reading the Skill body.
+    pub fn activate_skill(&self, name: &str) -> Result<SkillActivation, String> {
+        let skill = self
+            .skills
+            .iter()
+            .find(|skill| skill.name == name)
+            .ok_or_else(|| format!("skill {name:?} was not found"))?;
+        Ok(SkillActivation {
+            name: skill.name.clone(),
+            location: skill.location.clone(),
+            dependencies: skill.dependencies.clone(),
+        })
     }
 
     pub fn plugin_names(&self) -> Vec<String> {
@@ -334,6 +405,30 @@ fn validate_skill_name(name: &str) -> Result<(), String> {
         Err(format!("invalid Agent Skill name {name:?}"))
     } else {
         Ok(())
+    }
+}
+
+fn parse_skill_dependency(
+    dependency: SkillDependencyMetadata,
+    path: &Path,
+) -> Result<SkillDependency, String> {
+    let value = dependency.value.trim();
+    if value.is_empty()
+        || value.len() > MAX_SKILL_DEPENDENCY_VALUE_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(format!(
+            "{} Skill dependency value must contain 1-{MAX_SKILL_DEPENDENCY_VALUE_BYTES} non-control characters",
+            path.display()
+        ));
+    }
+    match dependency.kind.as_str() {
+        "builtin" => Ok(SkillDependency::BuiltinTool(value.to_string())),
+        "mcp" => Ok(SkillDependency::McpServer(value.to_string())),
+        kind => Err(format!(
+            "{} has unsupported Skill dependency type {kind:?}",
+            path.display()
+        )),
     }
 }
 
