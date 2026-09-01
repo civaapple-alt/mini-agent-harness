@@ -11,7 +11,7 @@ Scope: mini-agent App Server / Host workflow control plane
 原先的推荐顺序是：
 
 1. `CollaborationMode` 和线程级设置；
-2. `workflow/plan/set` 兼容适配器；
+2. 保持 `workflow/plan/set` 已移除，不提供兼容适配器；
 3. typed `WorkflowPolicy`；
 4. `thread/goal/set/get/clear`；
 5. `GoalRuntime` 收回 verifier、advance、continuation；
@@ -23,7 +23,7 @@ Scope: mini-agent App Server / Host workflow control plane
 | 原步骤 | 当前状态 | 当前事实与计划处理 |
 |---|---|---|
 | 1. `CollaborationMode` | 已完成 | `thread/settings/update` 使用 typed `collaborationMode`；Runtime Actor 应用 bounded prompt、Plan approval lock 和持久化恢复。 |
-| 2. `workflow/plan/set` 兼容适配器 | 不再实施 | 旧方法已删除且没有 compatibility wrapper。这是有意的 breaking change；后续不得重新引入。 |
+| 2. `workflow/plan/set` | 已明确不保留 | 旧方法已删除，不注册、不暴露，也不提供兼容适配器。这是有意的 breaking change；后续不得重新引入。 |
 | 3. typed `WorkflowPolicy` | 部分完成 | 当前由 `CollaborationMode`、Host `PlanModeState`、`ApprovalController` 和 Runtime Actor 共同形成 typed policy seam；不为形式上的 `WorkflowPolicy` 再增加一层。只有出现第二种 workflow policy 时才考虑提取独立类型。 |
 | 4. `thread/goal/set/get/clear` | 未完成 | 作为新的 Goal canonical control plane，先补 v2 protocol、public JSON-RPC 和 local client。 |
 | 5. `GoalRuntime` | 未完成 | 当前 verifier、criteria、record、advance 仍分散在 `WorkflowService`、Runtime Actor 和 verifier module；需收回到 App Server 内部的 serialized GoalRuntime。 |
