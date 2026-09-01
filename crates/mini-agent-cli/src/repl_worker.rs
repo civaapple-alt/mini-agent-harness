@@ -28,10 +28,7 @@ pub(super) enum WorkerCommand {
     Prompt(String),
     ClearHistory,
     ShowStatus,
-    ShowWorld,
-    RefreshWorld,
     ShowSession,
-    EnableMcp,
     SetExecution {
         approval: ApprovalMode,
         copilot: bool,
@@ -116,16 +113,6 @@ pub(super) fn spawn_worker(
             }
         };
         let stable_system_prompt = runtime.stable_system_prompt().to_string();
-        let mcp_status = match model_runtime.block_on(runtime.client_mut().mcp_status()) {
-            Ok(status) => status,
-            Err(error) => {
-                let _ = events.send(ReplEvent::InitializationFailed(error.message));
-                let _ = events.send(ReplEvent::Exited);
-                return;
-            }
-        };
-        let enabled_mcp_servers = mcp_status.enabled_servers;
-        let mcp_tool_count = mcp_status.tool_count;
         if let Ok(Some(opened)) = model_runtime.block_on(runtime.client_mut().session_info()) {
             if opened.resumed {
                 let _ = model_runtime.block_on(
@@ -143,19 +130,6 @@ pub(super) fn spawn_worker(
             let _ = events.send(ReplEvent::Notice(format!(
                 "session> {label} {} | thread {} | {}",
                 opened.session_id, opened.thread_id, opened.path
-            )));
-        }
-        if !enabled_mcp_servers.is_empty() {
-            let _ = events.send(ReplEvent::Notice(format!(
-                "mcp> enabled — {} ({mcp_tool_count} tool(s))",
-                bounded_names(&enabled_mcp_servers)
-            )));
-        }
-        if !mcp_status.inactive_servers.is_empty() {
-            let inactive = mcp_status.inactive_servers;
-            let _ = events.send(ReplEvent::Notice(format!(
-                "mcp> inactive — {}; use /mcp to retry",
-                bounded_names(&inactive)
             )));
         }
         if events.send(ReplEvent::Ready).is_err() {
@@ -282,82 +256,6 @@ pub(super) fn spawn_worker(
                         let _ = events.send(ReplEvent::Notice(format!(
                             "status> session:          {session_str}"
                         )));
-                    }
-                    WorkerCommand::ShowWorld => {
-                        for line in &world.lines {
-                            let _ = events.send(ReplEvent::Notice(format!("world> {line}")));
-                        }
-                    }
-                    WorkerCommand::RefreshWorld => {
-                        match model_runtime.block_on(runtime.client_mut().refresh_world()) {
-                            Ok(result) if result.changed => {
-                                world = result.state;
-                                let _ = events.send(ReplEvent::Notice(
-                                    "world> refreshed and appended to context".to_string(),
-                                ));
-                            }
-                            Ok(_result) => {
-                                let _ = events.send(ReplEvent::Notice(
-                                    "world> unchanged; no context item appended".to_string(),
-                                ));
-                            }
-                            Err(error) => {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "error: cannot refresh world state: {}",
-                                    error.message
-                                )));
-                            }
-                        }
-                    }
-                    WorkerCommand::EnableMcp => {
-                        let status = match model_runtime.block_on(runtime.client_mut().mcp_status())
-                        {
-                            Ok(status) => status,
-                            Err(error) => {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "mcp> cannot read status: {}",
-                                    error.message
-                                )));
-                                continue;
-                            }
-                        };
-                        if !status.retry_available {
-                            let _ = events.send(ReplEvent::Notice(
-                                "no MCP servers are waiting to be enabled".to_string(),
-                            ));
-                        } else {
-                            let result =
-                                match model_runtime.block_on(runtime.client_mut().retry_mcp()) {
-                                    Ok(result) => result,
-                                    Err(error) => {
-                                        let _ = events.send(ReplEvent::Warning(format!(
-                                            "mcp> cannot enable tools: {}",
-                                            error.message
-                                        )));
-                                        continue;
-                                    }
-                                };
-                            for diagnostic in result.diagnostics {
-                                let _ = events
-                                    .send(ReplEvent::Warning(format!("warning: {diagnostic}")));
-                            }
-                            let message = if result.enabled_servers.is_empty() {
-                                "mcp> inactive — no servers enabled; use /mcp to retry".to_string()
-                            } else {
-                                format!(
-                                    "mcp> enabled — {} ({tool_count} tool(s))",
-                                    bounded_names(&result.enabled_servers),
-                                    tool_count = result.tool_count,
-                                )
-                            };
-                            let _ = events.send(ReplEvent::Notice(message));
-                            if !result.inactive_servers.is_empty() {
-                                let _ = events.send(ReplEvent::Notice(format!(
-                                    "mcp> inactive — {}; use /mcp to retry",
-                                    bounded_names(&result.inactive_servers)
-                                )));
-                            }
-                        }
                     }
                     WorkerCommand::ShowSession => {
                         match model_runtime.block_on(runtime.client_mut().session_info()) {

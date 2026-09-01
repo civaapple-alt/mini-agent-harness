@@ -874,9 +874,7 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     server.join().unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(
-        stdout.contains("mini-agent — /auto /status /world /session /mcp /queue /new /help /exit")
-    );
+    assert!(stdout.contains("mini-agent — /auto /status /session /queue /new /help /exit"));
     assert!(stdout.contains("auto mode on"));
     assert!(stdout.contains("auto-started"));
     assert!(stdout.contains("auto mode off; writes and shell commands require approval"));

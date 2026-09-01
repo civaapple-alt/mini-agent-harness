@@ -1136,9 +1136,42 @@ Decision: accept
 
 This batch establishes the product split for the next iteration: Studio is the
 full user interaction surface, while the REPL demonstrates the harness core
-and its stable public path. Future REPL reduction may remove duplicate World/MCP
-inspection and extension presentation in a separate bounded batch; it must keep
-the world snapshot and capability state authoritative in Host/App Server.
+and its stable public path. The follow-up World/MCP/extension presentation
+reduction is recorded below; it keeps the world snapshot and capability state
+authoritative in Host/App Server.
+
+#### 阶段 1 本轮实践的六项验证：移除 REPL 管理面板
+
+```text
+1. Layer: CLI（通过现有 App Server/Host/Core 主路径执行）
+   rationale: 本批只收缩 REPL 的展示和管理适配；Host 继续发现扩展并构造
+   WorldState，App Server 继续提供 `world/*` 和 `mcp/*` 公共管理方法。
+2. Duplicate responsibility:
+   searched `repl.rs`, `repl_worker.rs`, `HostRuntime` world construction,
+   App Server `world/state`, `world/refresh`, `mcp/status`, `mcp/retry`, and
+   Studio/SDK-facing management contracts. REPL 原先重复展示 world/extension
+   摘要并复制 MCP retry 入口，完整管理职责已经存在于 App Server。
+3. Replace vs add:
+   删除启动扩展摘要、world/mcp welcome/help 文案、`/world`、`/world refresh`、
+   `/mcp` 解析和对应 WorkerCommand 分支；不删除 Host context 注入、MCP 加载，
+   也不新增 CLI 替代入口。
+4. Net line delta:
+   expected: runtime +0; all Rust -100 to -250
+   actual: runtime 16,336 -> 16,336 (+0); all Rust 29,152 -> 28,976 (-176)
+   （CLI 合计从 3,283 降至 3,107）。
+5. Visible surface:
+   REPL 管理命令和启动摘要减少；初始 model context、工具目录、事件、Session
+   schema 和 App Server public protocol 不变。需要刷新 world 或重试 MCP 时，
+   由 App Server client（Studio/SDK）调用对应管理方法。
+6. Boundary evidence:
+   `cargo test -p mini-agent-cli` (14 unit + 12 interactive integration passed),
+   `cargo clippy -p mini-agent-cli --all-targets -- -D warnings`, `cargo fmt --all`,
+   `git diff --check`, and `python scripts/line_budget.py` all pass. The existing
+   public CLI scenarios still cover world context construction, extensions, session
+   resume, and tool execution; Core/Host/App Server management tests remain intact.
+
+Decision: accept
+```
 
 ### 3.4 评估自动化的顺序
 

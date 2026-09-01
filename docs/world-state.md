@@ -26,8 +26,8 @@ The snapshot is sent as a typed `Message::Context` item, mapped to a Responses
 API `developer` message. It is not concatenated into `instructions`. The first
 request therefore keeps project instructions and extension metadata in a
 stable prefix while placing local facts immediately before conversation input.
-`/world` shows the same state to the user. `/world refresh` appends a new full
-snapshot only when detection changed.
+App Server clients can inspect it with `world/state` and refresh it with
+`world/refresh`; the core REPL does not duplicate this management dashboard.
 
 Mode changes are also append-only. `/auto` (copilot loop) and `/auto off`
 (restore prompts) keep `instructions` byte-stable, update execution limits and

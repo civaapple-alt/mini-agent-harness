@@ -18,6 +18,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   turns, streaming events, approval, run control, and session commands, while
   Plan/Goal workflow orchestration is now consumed through the App Server by
   Studio/SDK clients instead of duplicated `/plan` and `/goal` commands.
+- Removed duplicate World/MCP/extension management presentation from the REPL.
+  Host still injects the bounded world context and loads configured capabilities;
+  Studio/SDK clients use the App Server `world/*` and `mcp/*` methods for
+  inspection and retry.
 
 ## [0.6.0] - 2026-09-01
 

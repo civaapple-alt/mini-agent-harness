@@ -66,14 +66,15 @@ plugin manifest, and workspace path.
 ## An MCP server is not discovered
 
 Use plugin-root `mcp.json` for Agent Plugins v1, or
-`.agents/mcp/<server>.json` for a standalone server. `/status` reports the
-currently loaded MCP summary. Legacy SSE is unsupported; use streamable HTTP
-or stdio.
+`.agents/mcp/<server>.json` for a standalone server. App Server `mcp/status`
+reports the currently loaded MCP summary. Legacy SSE is unsupported; use
+streamable HTTP or stdio.
 
 An HTTP server can also fail because a referenced header environment variable
 is missing. Use `${NAME:-}` only when an empty value is valid for that server.
-If a connection was denied or startup failed transiently, enter `/mcp` in the
-same interactive session to retry. Existing conversation history is preserved.
+If a connection was denied or startup failed transiently, call App Server
+`mcp/retry` from Studio or an SDK client. Existing conversation history is
+preserved.
 
 ## File tools and workspace paths
 

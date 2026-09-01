@@ -173,10 +173,12 @@ contract.
 
 World state is not configured through environment variables. Mini-agent
 detects a fixed command catalog, root project markers, host shell, OS,
-architecture, execution mode, and approval behavior. Use `/world` to inspect
-the current snapshot and `/world refresh` after installing a command or
-changing root project files. World-state items are bounded and contain no
-environment values or command output.
+architecture, execution mode, and approval behavior. App Server clients can
+inspect the current snapshot with `world/state` and refresh it with
+`world/refresh` after installing a command or changing root project files. The
+core REPL keeps the snapshot in the model context but does not duplicate this
+management dashboard. World-state items are bounded and contain no environment
+values or command output.
 
 ## Durable sessions
 

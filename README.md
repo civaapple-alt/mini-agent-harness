@@ -294,7 +294,7 @@ admission confirmations is checked exactly once; reviewers remain responsible fo
 answer quality.
 
 The current hard-budget snapshot is runtime `16,336 / 20,000` lines and all
-Rust source `29,152 / 30,000` lines. The approximate `26,900` Stage 1 target
+Rust source `28,976 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 

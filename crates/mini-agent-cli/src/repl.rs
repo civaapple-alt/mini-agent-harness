@@ -21,7 +21,6 @@ use mini_agent_app_server::frontend::harness_config_auto;
 use mini_agent_app_server::frontend::load_workspace_profile;
 use mini_agent_app_server::frontend::observer::RunObserver;
 use mini_agent_app_server::frontend::print_auto_warning;
-use mini_agent_app_server::frontend::skills;
 use mini_agent_app_server::local::LocalRuntimeRequest;
 use std::collections::VecDeque;
 use std::io;
@@ -33,7 +32,6 @@ use std::thread;
 
 const MAX_INPUT_BYTES: usize = 32 * 1024;
 const EVENT_BUFFER: usize = 64;
-const MAX_WELCOME_NAMES: usize = 8;
 
 #[path = "repl_worker.rs"]
 mod repl_worker;
@@ -70,10 +68,6 @@ pub async fn run(
     );
     let mut observer = RunObserver::new();
     let workspace = std::env::current_dir().ok();
-    let startup_extensions = workspace
-        .as_ref()
-        .filter(|_| !no_tools)
-        .map(|workspace| skills::discover(workspace));
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
     let run_control = RunControl::new();
@@ -93,7 +87,7 @@ pub async fn run(
     );
 
     println!("{}", crate::version_line());
-    println!("mini-agent — /auto /status /world /session /mcp /queue /new /help /exit");
+    println!("mini-agent — /auto /status /session /queue /new /help /exit");
     print_auto_warning();
     if copilot {
         println!("auto mode on");
@@ -146,22 +140,6 @@ pub async fn run(
             format!(" disabled={disabled}")
         }
     );
-    if let Some(discovery) = startup_extensions {
-        print_extension_summary(&discovery);
-    }
-    if let Some(workspace) = workspace.as_ref() {
-        println!(
-            "world> {}",
-            mini_agent_app_server::local::world_summary(
-                workspace,
-                initial_approval,
-                copilot,
-                startup_profile.sandbox(),
-            )
-        );
-    }
-    println!("initializing extensions...");
-
     let mut pending_work = 0usize;
     let mut pending_approval: VecDeque<mpsc::SyncSender<bool>> = VecDeque::new();
     let mut ready = false;
@@ -206,14 +184,9 @@ pub async fn run(
                     "/status" | "/info" => {
                         queue_work(&worker_tx, WorkerCommand::ShowStatus, &mut pending_work)
                     }
-                    "/world" => queue_work(&worker_tx, WorkerCommand::ShowWorld, &mut pending_work),
-                    "/world refresh" => {
-                        queue_work(&worker_tx, WorkerCommand::RefreshWorld, &mut pending_work)
-                    }
                     "/session" => {
                         queue_work(&worker_tx, WorkerCommand::ShowSession, &mut pending_work)
                     }
-                    "/mcp" => queue_work(&worker_tx, WorkerCommand::EnableMcp, &mut pending_work),
                     command
                         if command.strip_prefix("/steer").is_some_and(|rest| {
                             rest.is_empty() || rest.starts_with(char::is_whitespace)
@@ -398,48 +371,6 @@ fn queue_work(
     }
 }
 
-fn print_extension_summary(discovery: &skills::Discovery) {
-    print_loaded_extensions("skill", discovery.skill_names());
-    print_loaded_extensions("plugin", discovery.plugin_names());
-    let mut mcp_servers = discovery.mcp_server_labels();
-    mcp_servers.sort();
-    if mcp_servers.is_empty() {
-        println!("mcp> none configured");
-    } else {
-        println!(
-            "mcp> {} configured, inactive — {}",
-            mcp_servers.len(),
-            bounded_names(&mcp_servers)
-        );
-    }
-}
-
-fn print_loaded_extensions(label: &str, mut names: Vec<String>) {
-    names.sort();
-    if names.is_empty() {
-        println!("{label}> none");
-    } else {
-        println!(
-            "{label}> {} loaded — {}",
-            names.len(),
-            bounded_names(&names)
-        );
-    }
-}
-
-fn bounded_names(names: &[String]) -> String {
-    let mut summary = names
-        .iter()
-        .take(MAX_WELCOME_NAMES)
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(", ");
-    if names.len() > MAX_WELCOME_NAMES {
-        summary.push_str(&format!(", +{} more", names.len() - MAX_WELCOME_NAMES));
-    }
-    summary
-}
-
 fn print_help() {
     println!(
         "/auto          Enable autonomous copilot loop (unlimited steps, automatic context compaction)"
@@ -450,10 +381,7 @@ fn print_help() {
     println!(
         "/status        Display runtime status (security preset, sandbox, web search, session, approval)"
     );
-    println!("/world         Show detected host, shell, and command capabilities");
-    println!("/world refresh Re-scan environment and append updated world state to context");
     println!("/session       Show durable session ID, thread ID, and JSONL persistence path");
-    println!("/mcp           Retry connecting configured MCP servers that are currently inactive");
     println!("/queue         Show number of pending operations in input queue");
     println!("/steer <msg>   Stop the running turn at a safe checkpoint, then run <msg>");
     println!("/new           Clear conversation history and start a fresh context");
