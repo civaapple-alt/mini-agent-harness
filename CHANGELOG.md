@@ -7,6 +7,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Test maintenance:** remove duplicate App Server approval-broker coverage
+  already exercised by the public Shell approval scenario, and remove the
+  private image-magic unit check covered by the workspace `read_image` path.
 - **REPL scope:** remove the `/status` and `/info` management display and its
   duplicate local runtime projection. Runtime, capability, world, and MCP
   inspection remains available through App Server clients; REPL session,

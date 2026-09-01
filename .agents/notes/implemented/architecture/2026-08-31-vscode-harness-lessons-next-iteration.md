@@ -1727,7 +1727,7 @@ HTTP 429 provider-specific retry/backoff 合同、Docker sandbox 的更强 netwo
 对比场景；CLI public-path 的未知工具恢复、cross-file refactor、MCP connection/call refusal、
 sandbox 前置拒绝以及 App Server 的 NeedsApproval/MCP timeout projection 已覆盖，但更完整的
 工具失败/超时/重试矩阵仍是证据缺口，不是当前实现的已覆盖能力。全 Rust 预算只剩
-231 行；除非先删除等量冗余或兼容代码，否则下一轮不增加 Rust 生产面。
+248 行；除非先删除等量冗余或兼容代码，否则下一轮不增加 Rust 生产面。
 
 #### 2026-09-01：Plan → `collaborationMode` 第一批落地
 
@@ -1810,3 +1810,40 @@ Decision: **accept and commit this P0 batch**. The next candidate is P1 duplicat
 consolidation only if it can remain a few-hundred-line, public-boundary-preserving batch;
 do not begin automatic Goal continuation or migrate another sensitive tool from this
 margin without a new six-question admission record and an explicit offset.
+
+#### 2026-09-01：P1 重复测试清理——保留公共边界证据
+
+本批只清理了两处已被更高层证据覆盖的 implementation-level 测试：删除
+`approval_broker_round_trips_a_synchronous_host_callback`，因为真实的 App Server
+Shell approval 场景已经通过 `next_request`、同步 Host callback、`approval/respond`
+和工具完成事件验证同一生命周期；删除 `detect_png_magic`，因为 workspace
+`read_image_uploads_and_rejects_type_mismatch` 已经通过真实 ReadImage 路径覆盖 PNG
+识别、上传和声明扩展名不匹配。保留 `approval_broker_exposes_request_and_resolution_events`
+以证明 transport 使用的 `ApprovalEvent::Requested/Resolved` 双态，也保留安全矩阵、
+Session/World 持久化、MCP、Process、Core 和 Actor/CAS/Session 测试。
+
+本批六项准入记录：
+
+```text
+1. Layer: App Server and Capabilities test layers only; no production code, Core loop,
+   Actor/CAS/Session authority, or public protocol implementation changed.
+2. Duplicate responsibility: the broker callback test was subsumed by the real public
+   Shell approval scenario; the private PNG detector test was subsumed by the workspace
+   ReadImage public-path test. The remaining event-variant and image persistence tests
+   cover distinct branches.
+3. Replace vs add: remove redundant lower-level assertions and rely on existing public
+   boundary evidence; add no helper, fixture, wrapper, or second test path.
+4. Net line delta: runtime `16,966 -> 16,955` (`-11`); all Rust
+   `29,769 -> 29,752` (`-17`). Remaining headroom is `3,045` runtime and `248` all Rust.
+5. Visible surface: no model-visible input, event schema, persistence format, or public
+   protocol behavior changed; only redundant test coverage was reduced.
+6. Boundary evidence: Capabilities tests (65 passed) and App Server tests (32 passed),
+   strict Clippy for both packages, `cargo fmt --all`, `git diff --check`, and
+   `python scripts/line_budget.py` all pass. Existing public Shell approval evidence
+   remains in place.
+```
+
+Decision: **accept and commit this P1 batch**. Continue with another duplicate-test
+candidate only after showing the surviving public boundary evidence and a new exact
+line delta; do not trade away Core or lifecycle-boundary coverage for the approximate
+Stage 1 target.

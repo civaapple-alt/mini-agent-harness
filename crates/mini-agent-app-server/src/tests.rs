@@ -715,17 +715,6 @@ async fn routes_multiple_preconfigured_threads_by_identity() {
 }
 
 #[tokio::test]
-async fn approval_broker_round_trips_a_synchronous_host_callback() {
-    let broker = ApprovalBroker::new();
-    let requester = broker.clone();
-    let task = tokio::task::spawn_blocking(move || requester.request("shell command `pwd`"));
-    let request = broker.next_request().await;
-    assert_eq!(request.action, "shell command `pwd`");
-    broker.respond(&request.request_id, true).unwrap();
-    assert!(task.await.unwrap().unwrap());
-}
-
-#[tokio::test]
 async fn approval_broker_exposes_request_and_resolution_events() {
     let broker = ApprovalBroker::new();
     let requester = broker.clone();

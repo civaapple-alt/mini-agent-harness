@@ -579,12 +579,6 @@ mod tests {
     }
 
     #[test]
-    fn detect_png_magic() {
-        assert_eq!(detect_image(TINY_PNG), Some("image/png"));
-        assert_eq!(detect_image(b"not-an-image"), None);
-    }
-
-    #[test]
     fn vision_model_swaps_deepseek_text_routes() {
         assert_eq!(
             vision_model_for("deepseek-v4-flash", true),
