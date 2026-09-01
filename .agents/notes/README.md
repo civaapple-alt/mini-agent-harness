@@ -101,7 +101,12 @@ or specialized source classification is introduced.
 
 The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative historical CLI scenarios pass, with current App Server boundary evidence and CLI interactive 12/12 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy and model/provider comparison remain explicitly open gaps. CLI `ask --trace-jsonl PATH` now has public-path evidence for redaction, per-record/total bounds, and overwrite refusal; implicit baseline export remains off. Docker CLI/server 29.6.1 and the `alpine` image are available on this host; Docker preflight now queries the daemon with `docker info`, and ordinary plus candidate-strict probes verify the `/workspace` mount and container-only temporary files, while the strict probe also observes network, capability, read-only-root, and bounded-cgroup behavior. These are current-host evidence only, not a complete cross-platform security claim. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists. The REPL now omits duplicate World/MCP/extension management; these remain available through App Server clients.
 
-The unfinished Goal work is tracked in the [Goal Runtime and `thread/goal/*` plan](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md). It is a proposed sequence, not an implementation claim: the current Goal lifecycle remains distributed across App Server workflow adapters, Runtime Actor commands, Host persistence, and the verifier module. Automatic continuation, canonical `thread/goal/set/get/clear`, settings/Goal notifications, and final retirement of manual Goal controls remain deferred.
+Goal Runtime is being converged on the Codex Thread/Turn/ThreadItem model. The
+first bounded slice now provides the canonical `thread/goal/set|get|clear`
+contract and an App Server `GoalRuntime` owner over Host durable state. Follow
+the [Goal Runtime implementation appendix](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
+for the remaining automatic continuation, notifications, and final manual-API
+retirement gates; these are not yet claimed as complete.
 
 ### Next iteration order (evidence-triggered)
 
@@ -236,7 +241,7 @@ If a proposed approach is rejected during review:
 | Date | Title | Focus |
 |---|---|---|
 | 2026-09-01 | [Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems](proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md) | 完整对齐 Skill、Plugin、Builtin/Host/MCP/Dynamic Tool、Thread/Turn/ThreadItem、审批和 Artifact 侧车结果的提案；六工具删除与 Host Tool Catalog 首批已落地 |
-| 2026-09-01 | [Goal Runtime and `thread/goal/*` Next-Phase Plan](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) | Canonical Goal lifecycle API, serialized GoalRuntime, automatic continuation, notifications, migration and retirement gates |
+| 2026-09-01 | [Goal Runtime and `thread/goal/*` implementation appendix](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) | Codex-shaped Goal control is landed; serialized owner, automatic continuation, notifications, migration and retirement gates |
 | 2026-08-31 | [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md) | Threat model, candidate strict profile, compatibility, cross-platform evidence, and fail-closed behavior before Docker flags |
 | 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Implementation complete locally; cross-platform CI/native-platform and authorized real-provider evidence remain open |
 

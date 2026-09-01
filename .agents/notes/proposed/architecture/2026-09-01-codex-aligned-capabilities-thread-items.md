@@ -1,6 +1,6 @@
 # Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems
 
-Status: proposed
+Status: proposed — canonical architecture; Goal Runtime implementation in progress
 
 ## Proposal
 
@@ -21,13 +21,17 @@ The alignment covers four related concerns:
 4. `ThreadItem` is the durable/public projection of a user-visible turn unit;
    large outputs remain sidecar artifacts referenced by an Item.
 
-This remains a design proposal for the full Thread/Turn/ThreadItem alignment.
+This is the canonical design record for the full Thread/Turn/ThreadItem alignment.
 Its initial exposure policy is implemented as two small Stage 1 batches: the
 default Builtin catalog is limited to six tools, and the active Thread can
 reversibly select a subset through `thread/settings/update`. The first bounded
 Stage 2 Skill slice now parses typed `builtin`/`mcp` dependencies and returns
-explicit local activation metadata; App Server Turn activation and Host
-allowlist resolution remain deferred until their own evidence is accepted.
+  explicit local activation metadata; App Server Turn activation and Host
+  allowlist resolution remain deferred until their own evidence is accepted.
+  Goal Runtime now follows the execution appendix in
+  `2026-09-01-goal-runtime-thread-goal-plan.md`: the first Codex-shaped
+  `thread/goal/set|get|clear` and serialized owner slice is landed, while
+  automatic continuation and notifications remain gated by the next batch.
 
 ## Why this direction
 
@@ -604,6 +608,11 @@ and after; no estimate authorizes a budget breach.
 
 ### Stage 7: Goal Runtime integration
 
+- **Landed (bounded first slice):** add the Codex-shaped `ThreadGoal` public
+  contract (`thread/goal/set|get|clear`) and make an App Server `GoalRuntime`
+  the serialized owner of Goal state actions while Host remains the persistence
+  primitive. See the execution appendix for the six-question record and exact
+  migration order.
 - Goal Runtime schedules ordinary Thread Turns.
 - Milestone evidence references settled Turn/Item IDs and bounded result handles.
 - Verifier output remains an isolated derived artifact and cannot rewrite the
@@ -709,8 +718,9 @@ This proposal is ready for implementation only when:
 
 ## Current decision
 
-**Proposed: accept the direction; the six-tool exposure preparation and the
-first bounded Skill dependency/activation metadata slice are implemented.**
+**Proposed: accept the direction; implementation is in progress.** The six-tool
+exposure preparation, Skill/Plugin bounded slices, ThreadItem projection, and
+the first Codex-shaped Goal control-plane/owner slice are implemented.
 
 The default Builtin catalog, its direct deletion, the first Host-owned Tool
 Catalog slice, Thread-level Builtin selection, bounded Skill dependency
@@ -718,7 +728,36 @@ metadata/activation, bounded Plugin-to-provider-input selection, and the first
 ThreadItem projection are now landed. App Server Turn activation, Host
 dependency allowlist resolution, Plugin MCP tool loading, full Item lifecycle
 notifications/listing, Artifact APIs, and Goal Runtime integration remain
-later stages.
+later stages. Goal automatic continuation, settings/Goal notifications, and
+retirement of manual Goal controls remain deferred.
+
+## Implementation record — 2026-09-01 Goal Runtime canonical contract
+
+Six-question admission:
+
+1. **Layer:** App Server protocol and Runtime Actor/GoalRuntime, with Host only
+   supplying bounded durable Goal state. Core remains the ordinary Thread/Turn
+   execution kernel.
+2. **Duplicate responsibility:** the new `thread/goal/*` actions and
+   `GoalRuntime` owner are canonical for new Goal control. Existing
+   `WorkflowService` methods remain a temporary migration facade; no second
+   state store or turn loop was added.
+3. **Replace vs add:** replace new callers' dependence on milestone-oriented
+   `workflow/goal/start` with Codex-shaped set/get/clear semantics; retain old
+   manual criteria/verdict/advance calls only until automatic continuation has
+   public evidence.
+4. **Net line delta:** record the measured runtime and release-source values in
+   the commit entry and budget report. The batch is kept below the repository
+   few-hundred-line guidance and does not consume the experimental CLI/REPL
+   budget.
+5. **Visible surface:** add bounded `ThreadGoal` fields and public JSON-RPC
+   methods; no raw plan, verifier prompt, tool arguments, or Session path is
+   exposed. `get` is read-only; set rejects an active replacement; clear
+   removes only the active Goal association.
+6. **Boundary evidence:** App Server public coverage verifies
+   set/get/conflict/clear/get, camelCase wire names, token budget projection,
+   and absence of Host paths. Automatic turn scheduling, notifications, and
+   resume/clear races are explicitly not claimed by this record.
 
 ## Implementation record — 2026-09-01 Skill dependency/activation slice
 

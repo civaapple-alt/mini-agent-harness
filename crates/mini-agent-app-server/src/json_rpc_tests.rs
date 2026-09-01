@@ -393,6 +393,80 @@ async fn exposes_workflow_management_without_host_paths() {
 }
 
 #[tokio::test]
+async fn exposes_codex_shaped_thread_goal_lifecycle() {
+    let (mut connection, root) = managed_connection("thread-goal-rpc");
+    connection
+        .handle_request(initialize_request(1, "thread-goal-test"))
+        .await
+        .unwrap();
+
+    let response = connection
+        .handle_request(JsonRpcRequest::request(
+            2,
+            METHOD_THREAD_GOAL_GET,
+            serde_json::json!({"threadId": "thread-1"}),
+        ))
+        .await
+        .unwrap();
+    assert!(response.result.unwrap()["value"]["goal"].is_null());
+
+    let response = connection
+        .handle_request(JsonRpcRequest::request(
+            3,
+            METHOD_THREAD_GOAL_SET,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "objective": "ship the next iteration",
+                "tokenBudget": 1200
+            }),
+        ))
+        .await
+        .unwrap();
+    let result = response.result.unwrap();
+    assert_eq!(
+        result["value"]["goal"]["objective"],
+        "ship the next iteration"
+    );
+    assert_eq!(result["value"]["goal"]["status"], "active");
+    assert_eq!(result["value"]["goal"]["tokenBudget"], 1200);
+    assert!(result["value"]["goal"].get("path").is_none());
+
+    let response = connection
+        .handle_request(JsonRpcRequest::request(
+            4,
+            METHOD_THREAD_GOAL_SET,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "objective": "replace while running"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.error.unwrap().code, -32000);
+
+    let response = connection
+        .handle_request(JsonRpcRequest::request(
+            5,
+            METHOD_THREAD_GOAL_CLEAR,
+            serde_json::json!({"threadId": "thread-1"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.result.unwrap()["value"]["cleared"], true);
+
+    let response = connection
+        .handle_request(JsonRpcRequest::request(
+            6,
+            METHOD_THREAD_GOAL_GET,
+            serde_json::json!({"threadId": "thread-1"}),
+        ))
+        .await
+        .unwrap();
+    assert!(response.result.unwrap()["value"]["goal"].is_null());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn rejects_an_unavailable_requested_provider() {
     let mut connection = connection();
     let response = connection

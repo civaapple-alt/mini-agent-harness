@@ -29,6 +29,9 @@ use mini_agent_app_server_protocol::METHOD_MCP_STATUS;
 use mini_agent_app_server_protocol::METHOD_SESSION_INFO;
 use mini_agent_app_server_protocol::METHOD_THREAD_CLOSE;
 use mini_agent_app_server_protocol::METHOD_THREAD_FORK;
+use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_CLEAR;
+use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_GET;
+use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_SET;
 use mini_agent_app_server_protocol::METHOD_THREAD_LIST;
 use mini_agent_app_server_protocol::METHOD_THREAD_READ;
 use mini_agent_app_server_protocol::METHOD_THREAD_RESUME;
@@ -57,6 +60,14 @@ use mini_agent_app_server_protocol::SessionInfoResult;
 use mini_agent_app_server_protocol::ThreadCloseParams;
 use mini_agent_app_server_protocol::ThreadForkParams;
 use mini_agent_app_server_protocol::ThreadForkResult;
+use mini_agent_app_server_protocol::ThreadGoal;
+use mini_agent_app_server_protocol::ThreadGoalClearParams;
+use mini_agent_app_server_protocol::ThreadGoalClearResponse;
+use mini_agent_app_server_protocol::ThreadGoalGetParams;
+use mini_agent_app_server_protocol::ThreadGoalGetResponse;
+use mini_agent_app_server_protocol::ThreadGoalSetParams;
+use mini_agent_app_server_protocol::ThreadGoalSetResponse;
+use mini_agent_app_server_protocol::ThreadGoalStatus;
 use mini_agent_app_server_protocol::ThreadListParams;
 use mini_agent_app_server_protocol::ThreadListResult;
 use mini_agent_app_server_protocol::ThreadReadParams;
@@ -259,6 +270,9 @@ where
             METHOD_THREAD_READ => self.handle_thread_read(request).await,
             METHOD_THREAD_CLOSE => self.handle_thread_close(request).await,
             METHOD_THREAD_SETTINGS_UPDATE => self.handle_thread_settings_update(request).await,
+            METHOD_THREAD_GOAL_SET => self.handle_thread_goal_set(request).await,
+            METHOD_THREAD_GOAL_GET => self.handle_thread_goal_get(request).await,
+            METHOD_THREAD_GOAL_CLEAR => self.handle_thread_goal_clear(request).await,
             METHOD_TURN_START => self.handle_turn_start(request).await,
             METHOD_TURN_READ => self.handle_turn_read(request).await,
             METHOD_TURN_STEER => self.handle_turn_steer(request).await,

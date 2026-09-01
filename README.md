@@ -321,12 +321,13 @@ history store.
 - [Harness framework and next-iteration note](.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) — mini/Codex
   framework and Turn-flow comparison, VS Code harness lessons, bounded scenarios,
   and six-question validation records.
-- [Goal Runtime next-phase plan](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) — unfinished
-  `thread/goal/*`, serialized GoalRuntime, automatic continuation, notifications,
-  and retirement order for manual Goal controls.
-- [Codex-aligned capabilities and ThreadItems proposal](.agents/notes/proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md) — proposed
+- [Goal Runtime implementation appendix](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) —
+  Codex-shaped `thread/goal/*` and serialized GoalRuntime owner are landed;
+  automatic continuation, notifications, and manual-API retirement remain gated.
+- [Codex-aligned capabilities and ThreadItems proposal](.agents/notes/proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md) — canonical
   Skill/Plugin/Builtin/Host/MCP/Dynamic Tool boundaries, `Thread` → `Turn` →
-  `ThreadItem` projection, approval correlation, and sidecar Artifact references.
+  `ThreadItem` projection, Goal Runtime integration, approval correlation, and
+  sidecar Artifact references.
 
 ## Development
 
@@ -365,10 +366,11 @@ CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.
 
-The Goal Runtime next phase is planned but not yet implemented. Follow the
-[Goal Runtime next-phase plan](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
-for the required budget release, canonical `thread/goal/set/get/clear` contract,
-automatic continuation, notifications, and final manual-API retirement gates.
+The Goal Runtime is now aligned to the Codex Thread model: the canonical
+`thread/goal/set|get|clear` control plane and serialized App Server owner are
+implemented. Follow the [Goal Runtime implementation appendix](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
+for automatic continuation, notifications, and final manual-API retirement;
+those phases still require public boundary evidence.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
 scenarios pass, with current App Server boundary evidence and CLI interactive

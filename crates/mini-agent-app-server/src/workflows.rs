@@ -11,6 +11,7 @@ use crate::action::ActionResult;
 use crate::runtime_actor::RuntimeCommand;
 use crate::runtime_actor::RuntimeRequest;
 use crate::worker::Command;
+use mini_agent_app_server_protocol::ThreadGoalStatus;
 pub(crate) use mini_agent_host::GoalLimits;
 pub(crate) use mini_agent_host::GoalState;
 pub(crate) use mini_agent_host::GoalStatus;
@@ -103,6 +104,33 @@ impl WorkflowService {
     ) -> Result<ActionResponse<GoalState>, ActionFailure> {
         let objective = objective.to_string();
         self.request_action(|reply| RuntimeCommand::WorkflowInitGoal { objective, reply })
+            .await
+    }
+
+    pub(crate) async fn set_goal_action(
+        &self,
+        objective: Option<String>,
+        status: Option<ThreadGoalStatus>,
+        token_budget: Option<Option<i64>>,
+    ) -> Result<ActionResponse<GoalState>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::GoalSet {
+            objective,
+            status,
+            token_budget,
+            reply,
+        })
+        .await
+    }
+
+    pub(crate) async fn get_goal_action(
+        &self,
+    ) -> Result<ActionResponse<Option<GoalState>>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::GoalGet { reply })
+            .await
+    }
+
+    pub(crate) async fn clear_goal_action(&self) -> Result<ActionResponse<bool>, ActionFailure> {
+        self.request_action(|reply| RuntimeCommand::GoalClear { reply })
             .await
     }
 

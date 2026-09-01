@@ -4,7 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const GOAL_SCHEMA_VERSION: u32 = 1;
+pub const GOAL_SCHEMA_VERSION: u32 = 2;
 pub const MAX_GOAL_PLAN_BYTES: usize = 32 * 1024;
 pub const DEFAULT_GOAL_MAX_LOOPS: usize = 20;
 pub const DEFAULT_GOAL_MILESTONE_STEPS: usize = 50;
@@ -40,6 +40,8 @@ pub enum GoalStatus {
 pub struct GoalState {
     pub schema_version: u32,
     pub goal_id: String,
+    #[serde(default)]
+    pub objective: String,
     pub status: GoalStatus,
     pub current_milestone: usize,
     pub total_milestones: usize,
@@ -49,6 +51,10 @@ pub struct GoalState {
     pub milestone_timeout_secs: u64,
     pub verifier_model: Option<String>,
     pub last_verifier_score: Option<u32>,
+    #[serde(default)]
+    pub token_budget: Option<i64>,
+    #[serde(default)]
+    pub created_at_ms: u64,
     pub updated_at_ms: u64,
 }
 
@@ -115,8 +121,20 @@ impl HostWorkflowStore {
         init_goal_workspace_with_limits(&self.session_dir, objective, self.goal_limits)
     }
 
+    pub fn set_goal(&self, objective: &str, token_budget: Option<i64>) -> io::Result<GoalState> {
+        let mut state =
+            init_goal_workspace_with_limits(&self.session_dir, objective, self.goal_limits)?;
+        state.token_budget = token_budget;
+        write_goal_state(&self.session_dir, &state)?;
+        Ok(state)
+    }
+
     pub fn load_goal_state(&self) -> io::Result<Option<GoalState>> {
         load_goal_state(&self.session_dir)
+    }
+
+    pub fn clear_goal(&self) -> io::Result<bool> {
+        clear_goal(&self.session_dir)
     }
 
     pub fn verification_criteria(&self) -> io::Result<String> {
@@ -256,9 +274,11 @@ pub fn init_goal_workspace_with_limits(
     fs::create_dir_all(&goal_dir)?;
 
     let goal_id = format!("g_{}", current_time_ms() / 1000);
+    let created_at_ms = current_time_ms();
     let state = GoalState {
         schema_version: GOAL_SCHEMA_VERSION,
         goal_id,
+        objective: objective.to_string(),
         status: GoalStatus::Running,
         current_milestone: 1,
         total_milestones: 3,
@@ -274,12 +294,12 @@ pub fn init_goal_workspace_with_limits(
             .ok()
             .filter(|value| !value.trim().is_empty()),
         last_verifier_score: None,
-        updated_at_ms: current_time_ms(),
+        token_budget: None,
+        created_at_ms,
+        updated_at_ms: created_at_ms,
     };
 
-    let state_json = serde_json::to_vec_pretty(&state)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    fs::write(goal_dir.join("state.json"), state_json)?;
+    write_goal_state(session_dir, &state)?;
 
     let root_plan = living_plan_path(session_dir);
     if root_plan.is_file() {
@@ -314,6 +334,21 @@ pub fn load_goal_state(session_dir: &Path) -> io::Result<Option<GoalState>> {
     let state = serde_json::from_str::<GoalState>(&content)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     Ok(Some(state))
+}
+
+fn write_goal_state(session_dir: &Path, state: &GoalState) -> io::Result<()> {
+    let state_json = serde_json::to_vec_pretty(state)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    fs::write(session_dir.join("goal").join("state.json"), state_json)
+}
+
+pub fn clear_goal(session_dir: &Path) -> io::Result<bool> {
+    let state_file = session_dir.join("goal").join("state.json");
+    match fs::remove_file(state_file) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 pub fn goal_verification_criteria(session_dir: &Path) -> io::Result<String> {

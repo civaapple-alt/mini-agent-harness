@@ -120,7 +120,7 @@ pub(super) async fn worker_loop<M>(
             runtime = Some(*state);
             if runtime
                 .as_ref()
-                .is_some_and(|state| state.workflow.plan_active())
+                .is_some_and(|state| state.goal_runtime.plan_active())
                 && let Some(state) = runtime.as_mut()
                 && let Err(error) =
                     runtime_actor::set_collaboration_mode(&mut threads, state, true, None)

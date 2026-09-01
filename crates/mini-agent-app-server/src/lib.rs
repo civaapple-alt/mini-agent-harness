@@ -192,6 +192,7 @@ impl Default for ApprovalBroker {
 mod action;
 pub mod client;
 pub mod frontend;
+mod goal_runtime;
 pub mod json_rpc;
 pub mod local;
 pub mod management;

@@ -17,6 +17,9 @@ use mini_agent_app_server_protocol::METHOD_MCP_STATUS;
 use mini_agent_app_server_protocol::METHOD_SESSION_INFO;
 use mini_agent_app_server_protocol::METHOD_THREAD_CLOSE;
 use mini_agent_app_server_protocol::METHOD_THREAD_FORK;
+use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_CLEAR;
+use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_GET;
+use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_SET;
 use mini_agent_app_server_protocol::METHOD_THREAD_LIST;
 use mini_agent_app_server_protocol::METHOD_THREAD_READ;
 use mini_agent_app_server_protocol::METHOD_THREAD_RESUME;
@@ -42,6 +45,11 @@ use mini_agent_app_server_protocol::SessionInfoResult;
 use mini_agent_app_server_protocol::ThreadCloseParams;
 use mini_agent_app_server_protocol::ThreadForkParams;
 use mini_agent_app_server_protocol::ThreadForkResult;
+use mini_agent_app_server_protocol::ThreadGoalClearResponse;
+use mini_agent_app_server_protocol::ThreadGoalGetResponse;
+use mini_agent_app_server_protocol::ThreadGoalSetParams;
+use mini_agent_app_server_protocol::ThreadGoalSetResponse;
+use mini_agent_app_server_protocol::ThreadGoalStatus;
 use mini_agent_app_server_protocol::ThreadListParams;
 use mini_agent_app_server_protocol::ThreadListResult;
 use mini_agent_app_server_protocol::ThreadReadParams;
@@ -416,6 +424,43 @@ where
                 collaboration_mode: CollaborationMode { mode },
                 builtin_tools,
             },
+        )
+        .await
+    }
+
+    pub async fn set_goal(
+        &mut self,
+        objective: Option<String>,
+        status: Option<ThreadGoalStatus>,
+        token_budget: Option<Option<i64>>,
+    ) -> Result<ThreadGoalSetResponse, JsonRpcError> {
+        let thread_id = self.connection.thread_id().await;
+        self.call(
+            METHOD_THREAD_GOAL_SET,
+            ThreadGoalSetParams {
+                thread_id,
+                objective,
+                status,
+                token_budget,
+            },
+        )
+        .await
+    }
+
+    pub async fn get_goal(&mut self) -> Result<ThreadGoalGetResponse, JsonRpcError> {
+        let thread_id = self.connection.thread_id().await;
+        self.call(
+            METHOD_THREAD_GOAL_GET,
+            mini_agent_app_server_protocol::ThreadGoalGetParams { thread_id },
+        )
+        .await
+    }
+
+    pub async fn clear_goal(&mut self) -> Result<ThreadGoalClearResponse, JsonRpcError> {
+        let thread_id = self.connection.thread_id().await;
+        self.call(
+            METHOD_THREAD_GOAL_CLEAR,
+            mini_agent_app_server_protocol::ThreadGoalClearParams { thread_id },
         )
         .await
     }

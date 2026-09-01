@@ -57,6 +57,18 @@ pub(super) enum RuntimeCommand {
         builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
         reply: oneshot::Sender<ActionResult<Vec<String>>>,
     },
+    GoalSet {
+        objective: Option<String>,
+        status: Option<mini_agent_app_server_protocol::ThreadGoalStatus>,
+        token_budget: Option<Option<i64>>,
+        reply: oneshot::Sender<ActionResult<crate::workflows::GoalState>>,
+    },
+    GoalGet {
+        reply: oneshot::Sender<ActionResult<Option<crate::workflows::GoalState>>>,
+    },
+    GoalClear {
+        reply: oneshot::Sender<ActionResult<bool>>,
+    },
     WorkflowInitGoal {
         objective: String,
         reply: oneshot::Sender<ActionResult<crate::workflows::GoalState>>,
@@ -94,6 +106,8 @@ impl RuntimeCommand {
                 | Self::RetryMcp { .. }
                 | Self::StartNewThread { .. }
                 | Self::SetCollaborationMode { .. }
+                | Self::GoalSet { .. }
+                | Self::GoalClear { .. }
                 | Self::WorkflowInitGoal { .. }
                 | Self::WorkflowRecordVerdict { .. }
                 | Self::WorkflowAdvance { .. }

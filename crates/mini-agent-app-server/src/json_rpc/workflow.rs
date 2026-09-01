@@ -4,6 +4,84 @@ impl<M> AppServerConnection<M>
 where
     M: Model + Send + 'static,
 {
+    pub(super) async fn handle_thread_goal_set(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<ThreadGoalSetParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        match workflows
+            .set_goal_action(params.objective, params.status, params.token_budget)
+            .await
+        {
+            Ok(response) => {
+                let goal = thread_goal_state(params.thread_id, response.value.clone());
+                response_action_with(request.id, response, ThreadGoalSetResponse { goal })
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
+        }
+    }
+
+    pub(super) async fn handle_thread_goal_get(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<ThreadGoalGetParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        match workflows.get_goal_action().await {
+            Ok(response) => {
+                let goal = response
+                    .value
+                    .clone()
+                    .map(|state| thread_goal_state(params.thread_id.clone(), state));
+                response_action_with(request.id, response, ThreadGoalGetResponse { goal })
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
+        }
+    }
+
+    pub(super) async fn handle_thread_goal_clear(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<ThreadGoalClearParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        match workflows.clear_goal_action().await {
+            Ok(response) => {
+                let cleared = response.value;
+                response_action_with(request.id, response, ThreadGoalClearResponse { cleared })
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
+        }
+    }
+
     pub(super) async fn handle_workflow_state(
         &self,
         request: JsonRpcRequest,
@@ -171,6 +249,31 @@ fn workflow_goal_state(state: crate::workflows::GoalState) -> WorkflowGoalState 
         verifier_model: state.verifier_model,
         last_verifier_score: state.last_verifier_score,
         updated_at_ms: state.updated_at_ms,
+    }
+}
+
+fn thread_goal_state(
+    thread_id: mini_agent_protocol::ThreadId,
+    state: crate::workflows::GoalState,
+) -> ThreadGoal {
+    ThreadGoal {
+        thread_id,
+        objective: state.objective,
+        status: match state.status {
+            crate::workflows::GoalStatus::Running => ThreadGoalStatus::Active,
+            crate::workflows::GoalStatus::Converged => ThreadGoalStatus::Complete,
+            crate::workflows::GoalStatus::Failed => ThreadGoalStatus::Blocked,
+            crate::workflows::GoalStatus::UserPaused => ThreadGoalStatus::Paused,
+        },
+        token_budget: state.token_budget,
+        tokens_used: 0,
+        time_used_seconds: if state.created_at_ms == 0 {
+            0
+        } else {
+            state.updated_at_ms.saturating_sub(state.created_at_ms) / 1000
+        } as i64,
+        created_at: (state.created_at_ms / 1000) as i64,
+        updated_at: (state.updated_at_ms / 1000) as i64,
     }
 }
 

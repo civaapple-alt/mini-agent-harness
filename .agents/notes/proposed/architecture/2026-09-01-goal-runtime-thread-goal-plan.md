@@ -1,10 +1,10 @@
-# Goal Runtime 与 `thread/goal/*` 下一阶段实施计划
+# Goal Runtime 与 `thread/goal/*` 实施附录
 
-Status: proposed
+Status: proposed — canonical execution appendix
 Date: 2026-09-01
 Scope: mini-agent App Server / Host workflow control plane
 
-本计划承接 [Harness framework and next-iteration note](../../implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md)，只覆盖尚未落地的 Goal Runtime 自动续跑、Goal 公共控制面和 settings/goal 通知。它不是新的实现决策；每个阶段落地前仍须经过六项变更准入和独立提交。
+本附录承接 [Codex-aligned capabilities and ThreadItems](2026-09-01-codex-aligned-capabilities-thread-items.md) 与 [Harness framework and next-iteration note](../../implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md)，只记录 Goal Runtime 的落地边界、自动续跑和通知。前者是总架构记录；本文件不是第二套 workflow 设计。每个阶段仍须经过六项变更准入和独立提交。
 
 ## 1. 当前结论
 
@@ -25,8 +25,8 @@ Scope: mini-agent App Server / Host workflow control plane
 | 1. `CollaborationMode` | 已完成 | `thread/settings/update` 使用 typed `collaborationMode`；Runtime Actor 应用 bounded prompt、Plan approval lock 和持久化恢复。 |
 | 2. `workflow/plan/set` | 已明确不保留 | 旧方法已删除，不注册、不暴露，也不提供兼容适配器。这是有意的 breaking change；后续不得重新引入。 |
 | 3. typed `WorkflowPolicy` | 部分完成 | 当前由 `CollaborationMode`、Host `PlanModeState`、`ApprovalController` 和 Runtime Actor 共同形成 typed policy seam；不为形式上的 `WorkflowPolicy` 再增加一层。只有出现第二种 workflow policy 时才考虑提取独立类型。 |
-| 4. `thread/goal/set/get/clear` | 未完成 | 作为新的 Goal canonical control plane，先补 v2 protocol、public JSON-RPC 和 local client。 |
-| 5. `GoalRuntime` | 未完成 | 当前 verifier、criteria、record、advance 仍分散在 `WorkflowService`、Runtime Actor 和 verifier module；需收回到 App Server 内部的 serialized GoalRuntime。 |
+| 4. `thread/goal/set/get/clear` | 第一批已完成 | 已补齐 Codex-shaped protocol、public JSON-RPC、local client、bounded Host state 和 set/get/clear 公共场景。 |
+| 5. `GoalRuntime` | owner 已抽出 | `GoalRuntime` 已成为 Runtime Actor 内的串行状态 owner；verifier、criteria、record、advance 仍是迁移中的旧操作，自动续跑尚未接入。 |
 | 6. Goal/settings notifications | 未完成 | 当前只有 action response 和既有 turn/approval 事件；需要在 durable state/revision 提交后发布有界通知。 |
 | 7. 旧手工 Goal API 退役 | 未完成 | `workflow/goal/criteria`、`workflow/goal/record_verdict`、`workflow/goal/advance` 必须等自动续跑和通知证据稳定后再废弃。 |
 
@@ -49,7 +49,7 @@ App Server client
 
 - Core 继续拥有 Thread、turn loop、模型输入、工具结果、事件和 Session conversation writeback；Core 不认识 GoalRuntime。
 - Host `HostWorkflowStore` 继续拥有 `goal/state.json`、`goal/plan.md` 和 verifier artifact 的受限持久化，不负责调度下一轮 turn。
-- App Server 内部 `GoalRuntime` 拥有 Goal 生命周期、verifier 调用、milestone advance/retry、continuation scheduling 和通知时序。它是 Runtime Actor 内的一个串行状态组件，不是另一个独立执行线程或第二个 Runtime。
+- App Server 内部 `GoalRuntime` 拥有 Goal 生命周期、verifier 调用、milestone advance/retry、continuation scheduling 和通知时序。它是 Runtime Actor 内的一个串行状态组件，不是另一个独立执行线程或第二个 Runtime。当前第一批已先收回 durable state 和 public set/get/clear；后续再收回 verifier 与 continuation。
 - JSON-RPC / local client 只负责 decode、调用 canonical GoalRuntime action 和投影 DTO；不在 transport 层做 advance、retry 或重复通知。
 - Host/Capabilities 继续决定审批、sandbox 和工具实际副作用；GoalRuntime 不复制 ToolRouter、ToolOrchestrator 或 approval authority。
 
@@ -193,13 +193,15 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 - 先完成能明确证明公共路径仍覆盖的 P1 test/wrapper 清理；
 - 不添加 `thread/goal/*` 常量、DTO 或 handler，避免先出现未接线的公共 API。
 
-### Batch 1：Goal canonical action 与 public contract
+### Batch 1：Goal canonical action 与 public contract — 已完成
 
 - 在 app-server protocol v2 增加 `thread/goal/set/get/clear` 的 params/result/notification DTO；
-- 在 App Server 增加 typed internal Goal action，但先复用当前 Host store；
+- 在 App Server 增加 typed internal Goal action，并由 `GoalRuntime` 复用 Host store；
 - local client 与 JSON-RPC 共用同一 action；
-- 暂时让旧 `workflow/goal/start/pause/fail` 委托 canonical action，避免两套状态修改逻辑；
-- 加入 public tests：set/get/clear、无 Goal get、running Goal 的 deterministic conflict、无 Host path 泄露。
+- 旧 `workflow/goal/*` 暂时保留为迁移面，但不再作为新实现 owner；
+- public tests 已覆盖 set/get/clear、无 Goal get、running Goal 的 deterministic conflict、无 Host path 泄露。
+
+本批实际变更：新增 `ThreadGoal`、`ThreadGoalSet/Get/Clear*` DTO 与方法常量；Host Goal state 增加 bounded objective、token budget 和时间字段，并为旧 state 提供 serde 默认值；Runtime Actor 内新增 `GoalRuntime` owner。运行时自动首轮、verifier、continuation 和通知不在本批宣称完成。
 
 预期只允许小幅净增；如果 protocol + handler 超过当前预算，应先拆出 offset commit，不得压缩 DTO 或绕过 schema。
 
@@ -294,4 +296,4 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 
 ## 8. 下一步
 
-当前不直接实施 Batch 1。先沿用 P1 预算释放纪律，再为 Batch 1 单独建立六项准入记录和精确 before/after 行数；Batch 1 完成并验证后，才允许进入 GoalRuntime 抽取。自动续跑、Goal/settings notifications 和旧 manual Goal API 退役均保持未完成状态。
+Batch 1 已完成并通过 Host、App Server Protocol、App Server 定向测试。下一批只实现 GoalRuntime 的自动首轮/settled checkpoint 接缝：先验证 `set` 后只启动一个普通 Thread Turn，再接 verifier 与 continuation；不得在 Core 增加第二个 loop。settings/Goal notifications 与旧 manual Goal API 退役继续保持未完成状态。

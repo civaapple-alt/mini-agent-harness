@@ -8,6 +8,7 @@ use crate::RuntimeTurnResult;
 use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
+use crate::goal_runtime::GoalRuntime;
 use crate::runtime_actor::RuntimeCommand;
 use crate::runtime_actor::RuntimeRequest;
 use crate::worker::Command;
@@ -19,7 +20,6 @@ use mini_agent_capabilities::OpenedSession;
 use mini_agent_capabilities::TurnCommit;
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
 use mini_agent_core::ThreadCheckpoint;
-use mini_agent_host::HostWorkflowStore;
 use mini_agent_host::WorldState;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
@@ -29,7 +29,7 @@ use tokio::sync::oneshot;
 
 pub(crate) struct RuntimeActorState {
     pub(crate) management: RuntimeManagementState,
-    pub(crate) workflow: HostWorkflowStore,
+    pub(crate) goal_runtime: GoalRuntime,
     pub(crate) approval: ApprovalController,
     pub(crate) builtin_tools: mini_agent_host::BuiltinToolSelection,
     pub(crate) stable_system_prompt: Option<String>,
@@ -117,11 +117,12 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         } = self;
         let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
         let stable_system_prompt = workflows.stable_system_prompt().map(str::to_string);
-        let workflow = workflows.into_store().map_err(|error| error.to_string())?;
+        let goal_runtime =
+            GoalRuntime::new(workflows.into_store().map_err(|error| error.to_string())?);
         server
             .install_runtime_state(RuntimeActorState {
                 management,
-                workflow,
+                goal_runtime,
                 approval: approval.clone(),
                 builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
                 stable_system_prompt: stable_system_prompt.clone(),

@@ -169,8 +169,11 @@ pub(super) fn handle<M>(
                 .ok_or(AppServerError::RuntimeUnavailable)
                 .and_then(|state| {
                     Ok((
-                        state.workflow.plan_active(),
-                        state.workflow.load_goal_state().map_err(workflow_error)?,
+                        state.goal_runtime.plan_active(),
+                        state
+                            .goal_runtime
+                            .load_goal_state()
+                            .map_err(workflow_error)?,
                     ))
                 }),
         ),
@@ -185,10 +188,43 @@ pub(super) fn handle<M>(
             });
             respond(reply, receipt, result);
         }
+        RuntimeCommand::GoalSet {
+            objective,
+            status,
+            token_budget,
+            reply,
+        } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .goal_runtime
+                    .set_goal(objective.as_deref(), status, token_budget)
+                    .map(|goal| (goal, true))
+                    .map_err(workflow_error)
+            });
+            respond(reply, receipt, result);
+        }
+        RuntimeCommand::GoalGet { reply } => respond(
+            reply,
+            receipt,
+            runtime
+                .as_ref()
+                .ok_or(AppServerError::RuntimeUnavailable)
+                .and_then(|state| state.goal_runtime.load_goal_state().map_err(workflow_error)),
+        ),
+        RuntimeCommand::GoalClear { reply } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .goal_runtime
+                    .clear_goal()
+                    .map(|cleared| (cleared, cleared))
+                    .map_err(workflow_error)
+            });
+            respond(reply, receipt, result);
+        }
         RuntimeCommand::WorkflowInitGoal { objective, reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 state
-                    .workflow
+                    .goal_runtime
                     .init_goal(&objective)
                     .map(|goal| (goal, true))
                     .map_err(workflow_error)
@@ -201,7 +237,7 @@ pub(super) fn handle<M>(
             runtime
                 .as_ref()
                 .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| state.workflow.load_goal_state().map_err(workflow_error)),
+                .and_then(|state| state.goal_runtime.load_goal_state().map_err(workflow_error)),
         ),
         RuntimeCommand::WorkflowCriteria { reply } => respond(
             reply,
@@ -211,7 +247,7 @@ pub(super) fn handle<M>(
                 .ok_or(AppServerError::RuntimeUnavailable)
                 .and_then(|state| {
                     state
-                        .workflow
+                        .goal_runtime
                         .verification_criteria()
                         .map_err(workflow_error)
                 }),
@@ -223,7 +259,7 @@ pub(super) fn handle<M>(
         } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 state
-                    .workflow
+                    .goal_runtime
                     .record_verifier_verdict(checkpoint_seq, &output)
                     .map(|()| ((), true))
                     .map_err(workflow_error)
@@ -233,7 +269,7 @@ pub(super) fn handle<M>(
         RuntimeCommand::WorkflowAdvance { verdict, reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 state
-                    .workflow
+                    .goal_runtime
                     .advance_goal(verdict)
                     .map(|goal| (goal, true))
                     .map_err(workflow_error)
@@ -243,7 +279,7 @@ pub(super) fn handle<M>(
         RuntimeCommand::WorkflowPause { reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 state
-                    .workflow
+                    .goal_runtime
                     .pause_goal()
                     .map(|()| ((), true))
                     .map_err(workflow_error)
@@ -253,7 +289,7 @@ pub(super) fn handle<M>(
         RuntimeCommand::WorkflowFail { reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 state
-                    .workflow
+                    .goal_runtime
                     .fail_goal()
                     .map(|goal| (goal, true))
                     .map_err(workflow_error)
@@ -278,6 +314,9 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::StartNewThread { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowState { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::SetCollaborationMode { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::GoalSet { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::GoalGet { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::GoalClear { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowInitGoal { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowLoadGoal { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowCriteria { reply } => respond(reply, receipt, Err(error)),
@@ -356,7 +395,7 @@ where
         .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
     if active {
         let plan_path = state
-            .workflow
+            .goal_runtime
             .init_plan_mode(None)
             .map_err(workflow_error)?;
         state.approval.set_living_plan(Some(plan_path));
@@ -372,7 +411,10 @@ where
             .harness_mut()
             .set_system_prompt(mini_agent_host::with_plan_mode_overlay(&base_prompt));
     } else {
-        state.workflow.disable_plan_mode().map_err(workflow_error)?;
+        state
+            .goal_runtime
+            .disable_plan_mode()
+            .map_err(workflow_error)?;
         state.approval.set_living_plan(None);
         if let Some(prompt) = state.stable_system_prompt.as_deref() {
             thread.harness_mut().set_system_prompt(prompt);

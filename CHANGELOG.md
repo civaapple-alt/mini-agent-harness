@@ -43,10 +43,17 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   `UserMessage`, `AgentMessage`, `Reasoning`, generic `ToolCall`, and
   `ContextCompaction`; tool items reuse `callId`, and no second history store or
   Artifact API is introduced.
-- **Planning:** add the proposed Goal Runtime next-phase plan covering the
-  canonical `thread/goal/set/get/clear` contract, automatic continuation,
-  settings/Goal notifications, and retirement of manual Goal controls. This
-  documents deferred work and does not change runtime or protocol behavior.
+- **Goal Runtime convergence:** make the Codex-shaped `thread/goal/set|get|clear`
+  contract the canonical new Goal control plane. Host Goal state now carries
+  bounded objective, token budget, and timestamps with old-state defaults, and
+  the App Server Runtime Actor owns a serialized `GoalRuntime` state component.
+  The existing Thread/Turn loop remains the only execution loop; automatic
+  continuation, Goal notifications, and retirement of manual workflow controls
+  remain separately gated.
+- **Planning:** merge the Goal Runtime plan into the Codex-aligned capabilities
+  record as its execution appendix. The remaining automatic continuation,
+  settings/Goal notifications, and retirement of manual Goal controls stay
+  gated by public boundary evidence.
 - **Test maintenance:** remove duplicate App Server approval-broker coverage
   already exercised by the public Shell approval scenario, and remove the
   private image-magic unit check covered by the workspace `read_image` path.

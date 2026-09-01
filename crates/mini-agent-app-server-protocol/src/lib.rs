@@ -41,6 +41,11 @@ pub const METHOD_TURN_EVENT: &str = "turn/event";
 pub const METHOD_APPROVAL_REQUEST: &str = "approval/request";
 pub const METHOD_APPROVAL_RESOLVED: &str = "approval/resolved";
 pub const METHOD_APPROVAL_RESPOND: &str = "approval/respond";
+pub const METHOD_THREAD_GOAL_SET: &str = "thread/goal/set";
+pub const METHOD_THREAD_GOAL_GET: &str = "thread/goal/get";
+pub const METHOD_THREAD_GOAL_CLEAR: &str = "thread/goal/clear";
+pub const METHOD_THREAD_GOAL_UPDATED: &str = "thread/goal/updated";
+pub const METHOD_THREAD_GOAL_CLEARED: &str = "thread/goal/cleared";
 pub const METHOD_WORKFLOW_STATE: &str = "workflow/state";
 pub const METHOD_WORKFLOW_GOAL_START: &str = "workflow/goal/start";
 pub const METHOD_WORKFLOW_GOAL_PAUSE: &str = "workflow/goal/pause";
@@ -303,6 +308,87 @@ pub struct ThreadSettingsUpdateParams {
 pub struct ThreadSettingsUpdateResult {
     pub collaboration_mode: CollaborationMode,
     pub builtin_tools: Vec<String>,
+}
+
+/// The public lifecycle state of one Thread-owned Goal.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadGoalStatus {
+    Active,
+    Paused,
+    Blocked,
+    UsageLimited,
+    BudgetLimited,
+    Complete,
+}
+
+/// Bounded public projection of a Thread Goal.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoal {
+    pub thread_id: ThreadId,
+    pub objective: String,
+    pub status: ThreadGoalStatus,
+    pub token_budget: Option<i64>,
+    pub tokens_used: i64,
+    pub time_used_seconds: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Sets or replaces a Thread Goal. A running Goal cannot be replaced
+/// implicitly; clear it first so the transition remains observable.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalSetParams {
+    pub thread_id: ThreadId,
+    pub objective: Option<String>,
+    pub status: Option<ThreadGoalStatus>,
+    pub token_budget: Option<Option<i64>>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalSetResponse {
+    pub goal: ThreadGoal,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalGetParams {
+    pub thread_id: ThreadId,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalGetResponse {
+    pub goal: Option<ThreadGoal>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalClearParams {
+    pub thread_id: ThreadId,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalClearResponse {
+    pub cleared: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalUpdatedNotification {
+    pub thread_id: ThreadId,
+    pub turn_id: Option<TurnId>,
+    pub goal: ThreadGoal,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalClearedNotification {
+    pub thread_id: ThreadId,
 }
 
 /// Secret-free workflow state projected by the App Server.
@@ -749,6 +835,20 @@ mod tests {
         assert_eq!(resolved["requestId"], "approval-1");
         assert_eq!(resolved["turnId"], "turn-1");
         assert_eq!(resolved["callId"], "shell-call-1");
+    }
+
+    #[test]
+    fn thread_goal_contract_uses_codex_shaped_wire_names() {
+        let params = serde_json::to_value(ThreadGoalSetParams {
+            thread_id: ThreadId::new("thread-1"),
+            objective: Some("ship it".to_string()),
+            status: Some(ThreadGoalStatus::Active),
+            token_budget: Some(Some(1000)),
+        })
+        .unwrap();
+        assert_eq!(params["threadId"], "thread-1");
+        assert_eq!(params["tokenBudget"], 1000);
+        assert_eq!(serde_json::to_value(ThreadGoalStatus::UsageLimited).unwrap(), "usageLimited");
     }
 
     #[test]
