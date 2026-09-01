@@ -33,6 +33,7 @@ pub const METHOD_TURN_STEER: &str = "turn/steer";
 pub const METHOD_TURN_INTERRUPT: &str = "turn/interrupt";
 pub const METHOD_TURN_EVENT: &str = "turn/event";
 pub const METHOD_APPROVAL_REQUEST: &str = "approval/request";
+pub const METHOD_APPROVAL_RESOLVED: &str = "approval/resolved";
 pub const METHOD_APPROVAL_RESPOND: &str = "approval/respond";
 pub const METHOD_WORKFLOW_STATE: &str = "workflow/state";
 pub const METHOD_WORKFLOW_PLAN_SET: &str = "workflow/plan/set";
@@ -606,6 +607,16 @@ pub struct TurnInterruptParams {
 pub struct ApprovalRequestNotification {
     pub request_id: String,
     pub action: String,
+    pub thread_id: ThreadId,
+    pub turn_id: Option<TurnId>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalResolvedNotification {
+    pub request_id: String,
+    pub action: String,
+    pub approved: bool,
     pub thread_id: ThreadId,
     pub turn_id: Option<TurnId>,
 }

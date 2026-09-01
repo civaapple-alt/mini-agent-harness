@@ -5,7 +5,12 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+
+- App Server approval routing now emits a server-owned `approval/resolved`
+  notification after `approval/respond`, so clients can observe the complete
+  `requested → resolved → tool result` lifecycle. This is additive to the
+  protocol and does not change approval policy or Session commit semantics.
 
 ## [0.6.0] - 2026-09-01
 

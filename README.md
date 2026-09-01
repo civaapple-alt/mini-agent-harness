@@ -49,8 +49,8 @@ limits, failures, and observation events.
 - `mini-agent-app-server` is the service boundary over a core `Thread`. Its
   host-backed `AppServerRuntime`, typed facade, and versioned
   `mini-agent-app-server-protocol` support initialization, thread lifecycle,
-  turn commands, steering, interruption, settled results, approval requests,
-  ordered event notifications, tool-free Goal verification turns, and local
+  turn commands, steering, interruption, settled results, approval request and
+  resolution notifications, ordered event notifications, tool-free Goal verification turns, and local
   Session/World/MCP/Goal/Plan management through the runtime service. The App
   Server owns workflow commands; Host only supplies the wrapped
   `HostWorkflowStore` persistence seam. The

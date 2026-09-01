@@ -138,16 +138,29 @@ where
                 };
                 write_json_line(&mut writer, &notification).await?;
             }
-            request = approval.next_request() => {
-                let notification = JsonRpcRequest::notification(
-                    mini_agent_app_server_protocol::METHOD_APPROVAL_REQUEST,
-                    Some(serde_json::to_value(ApprovalRequestNotification {
-                        request_id: request.request_id,
-                        action: request.action,
-                        thread_id: connection.server.thread_id().clone(),
-                        turn_id: None,
-                    }).expect("approval notification is serializable")),
-                );
+            event = approval.next_event() => {
+                let (method, params) = match event {
+                    ApprovalEvent::Requested(request) => (
+                        mini_agent_app_server_protocol::METHOD_APPROVAL_REQUEST,
+                        serde_json::to_value(ApprovalRequestNotification {
+                            request_id: request.request_id,
+                            action: request.action,
+                            thread_id: connection.server.thread_id().clone(),
+                            turn_id: None,
+                        }).expect("approval notification is serializable"),
+                    ),
+                    ApprovalEvent::Resolved(resolution) => (
+                        mini_agent_app_server_protocol::METHOD_APPROVAL_RESOLVED,
+                        serde_json::to_value(ApprovalResolvedNotification {
+                            request_id: resolution.request_id,
+                            action: resolution.action,
+                            approved: resolution.approved,
+                            thread_id: connection.server.thread_id().clone(),
+                            turn_id: None,
+                        }).expect("approval resolution is serializable"),
+                    ),
+                };
+                let notification = JsonRpcRequest::notification(method, Some(params));
                 write_json_line(&mut writer, &notification).await?;
             }
             read = reader.read_line(&mut line) => {

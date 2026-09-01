@@ -34,13 +34,27 @@ pub struct ApprovalBroker {
 
 struct ApprovalState {
     queued: std::collections::VecDeque<ApprovalRequest>,
-    responders: HashMap<String, std::sync::mpsc::Sender<bool>>,
+    resolved: std::collections::VecDeque<ApprovalResolution>,
+    responders: HashMap<String, (String, std::sync::mpsc::Sender<bool>)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApprovalRequest {
     pub request_id: String,
     pub action: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApprovalResolution {
+    pub request_id: String,
+    pub action: String,
+    pub approved: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApprovalEvent {
+    Requested(ApprovalRequest),
+    Resolved(ApprovalResolution),
 }
 
 /// Creates additional core Threads for a service lifecycle request.
@@ -66,6 +80,7 @@ impl ApprovalBroker {
         Self {
             state: Arc::new(Mutex::new(ApprovalState {
                 queued: std::collections::VecDeque::new(),
+                resolved: std::collections::VecDeque::new(),
                 responders: HashMap::new(),
             })),
             notify: Arc::new(Notify::new()),
@@ -84,7 +99,9 @@ impl ApprovalBroker {
         };
         {
             let mut state = self.state.lock().unwrap();
-            state.responders.insert(request_id, sender);
+            state
+                .responders
+                .insert(request_id, (action.to_string(), sender));
             state.queued.push_back(request);
         }
         self.notify.notify_one();
@@ -102,8 +119,25 @@ impl ApprovalBroker {
         }
     }
 
+    pub async fn next_event(&self) -> ApprovalEvent {
+        loop {
+            let event = {
+                let mut state = self.state.lock().unwrap();
+                state
+                    .queued
+                    .pop_front()
+                    .map(ApprovalEvent::Requested)
+                    .or_else(|| state.resolved.pop_front().map(ApprovalEvent::Resolved))
+            };
+            if let Some(event) = event {
+                return event;
+            }
+            self.notify.notified().await;
+        }
+    }
+
     pub fn respond(&self, request_id: &str, approved: bool) -> Result<(), String> {
-        let sender = self
+        let (action, sender) = self
             .state
             .lock()
             .unwrap()
@@ -112,7 +146,18 @@ impl ApprovalBroker {
             .ok_or_else(|| format!("unknown approval request: {request_id}"))?;
         sender
             .send(approved)
-            .map_err(|_| "approval callback is no longer waiting".to_string())
+            .map_err(|_| "approval callback is no longer waiting".to_string())?;
+        self.state
+            .lock()
+            .unwrap()
+            .resolved
+            .push_back(ApprovalResolution {
+                request_id: request_id.to_string(),
+                action,
+                approved,
+            });
+        self.notify.notify_one();
+        Ok(())
     }
 }
 

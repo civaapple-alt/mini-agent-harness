@@ -3,12 +3,14 @@
 use super::AppServer;
 use super::AppServerError;
 use super::ApprovalBroker;
+use super::ApprovalEvent;
 use super::ApprovalRequest;
 use super::RuntimeManagementService;
 use super::WorkflowService;
 use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use mini_agent_app_server_protocol::ApprovalRequestNotification;
+use mini_agent_app_server_protocol::ApprovalResolvedNotification;
 use mini_agent_app_server_protocol::ApprovalRespondParams;
 use mini_agent_app_server_protocol::CapabilityManifest;
 use mini_agent_app_server_protocol::DisabledCapability;

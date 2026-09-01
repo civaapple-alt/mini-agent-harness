@@ -52,7 +52,10 @@ to the Core Thread event stream and is intentionally distinct from
 `turn/interrupt` requests cooperative cancellation; `turn/read` returns the
 settled result and messages. When the host runtime is wired with
 an `ApprovalBroker`, sensitive tool calls emit an `approval/request`
-notification and continue after the client replies with `approval/respond`.
+notification, then emit `approval/resolved` after the client replies with
+`approval/respond`. The resolution carries the request ID, action, and final
+approved boolean, so clients can record `requested → resolved → tool result`
+without inferring approval from `tool/finished` content.
 
 The Rust `LocalAppServerClient` uses the same DTOs and dispatch without stdio,
 which lets an embedded frontend migrate to the service boundary before it
