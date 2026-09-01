@@ -22,6 +22,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   tools remain on the explicit legacy path until their own migration evidence is
   accepted. Added a public App Server JSON-RPC scenario covering Shell approval
   request/respond/resolved and the resulting `turn/event` lifecycle.
+- Migrated `edit_file` and `write_file` to typed admission with approval before
+  file mutation; their direct legacy `execute` entry points remain approval-safe
+  for compatibility.
 
 ### Audited
 

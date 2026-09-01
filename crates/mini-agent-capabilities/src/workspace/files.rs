@@ -102,26 +102,8 @@ impl Tool for ReadFile {
 
 pub(super) struct EditFile(pub(super) Arc<Workspace>);
 
-impl Tool for EditFile {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "edit_file".to_string(),
-            description: "Replace one exact, unique text occurrence in a workspace file"
-                .to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "old_text": {"type": "string"},
-                    "new_text": {"type": "string"}
-                },
-                "required": ["path", "old_text", "new_text"],
-                "additionalProperties": false
-            }),
-        }
-    }
-
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+impl EditFile {
+    fn prepared(&self, arguments: &Value) -> Result<(PathBuf, String), ToolError> {
         let path = self.0.mutate_path(arguments)?;
         let old_text = string_arg(arguments, "old_text")?;
         let new_text = string_arg(arguments, "new_text")?;
@@ -142,13 +124,90 @@ impl Tool for EditFile {
         if updated.len() > MAX_WRITE_BYTES {
             return Err(ToolError("edited file exceeds write limit".to_string()));
         }
-        self.0.approve(&format!("edit {}", path.display()))?;
-        fs::write(&path, updated).map_err(io_error)?;
+        Ok((path, updated))
+    }
+
+    fn write(&self, path: &Path, updated: String) -> Result<String, ToolError> {
+        fs::write(path, updated).map_err(io_error)?;
         Ok(format!("edited {}", path.display()))
     }
 }
 
+impl Tool for EditFile {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "edit_file".to_string(),
+            description: "Replace one exact, unique text occurrence in a workspace file"
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_text": {"type": "string"},
+                    "new_text": {"type": "string"}
+                },
+                "required": ["path", "old_text", "new_text"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let (path, updated) = self.prepared(arguments)?;
+        self.0.approve(&format!("edit {}", path.display()))?;
+        self.write(&path, updated)
+    }
+
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        let (path, _) = self.prepared(&request.arguments)?;
+        Ok(ToolAdmission::ApprovalRequired {
+            action: format!("edit {}", path.display()),
+        })
+    }
+
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        match self.prepared(&request.arguments) {
+            Ok((path, updated)) => self.write(&path, updated).map_or_else(
+                |error| ToolExecutionOutcome::failed(error.to_string()),
+                ToolExecutionOutcome::completed,
+            ),
+            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+        }
+    }
+}
+
 pub(super) struct WriteFile(pub(super) Arc<Workspace>);
+
+impl WriteFile {
+    fn prepared(&self, arguments: &Value) -> Result<(PathBuf, String), ToolError> {
+        let path = self.0.create_path(arguments)?;
+        let content = string_arg(arguments, "content")?;
+        if content.len() > MAX_WRITE_BYTES {
+            return Err(ToolError(format!(
+                "content exceeds {MAX_WRITE_BYTES} byte write limit"
+            )));
+        }
+        Ok((path, content.to_string()))
+    }
+
+    fn write(&self, path: &Path, content: &str) -> Result<String, ToolError> {
+        if self.0.is_session_artifact(path) {
+            fs::write(path, content.as_bytes()).map_err(io_error)?;
+        } else {
+            let mut file = File::options()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .map_err(io_error)?;
+            file.write_all(content.as_bytes()).map_err(io_error)?;
+        }
+        Ok(format!(
+            "wrote {} bytes to {}",
+            content.len(),
+            path.display()
+        ))
+    }
+}
 
 impl Tool for WriteFile {
     fn spec(&self) -> ToolSpec {
@@ -160,32 +219,29 @@ impl Tool for WriteFile {
     }
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let path = self.0.create_path(arguments)?;
-        let content = string_arg(arguments, "content")?;
-        if content.len() > MAX_WRITE_BYTES {
-            return Err(ToolError(format!(
-                "content exceeds {MAX_WRITE_BYTES} byte write limit"
-            )));
-        }
+        let (path, content) = self.prepared(arguments)?;
         self.0.approve(&format!(
             "write {} ({} bytes)",
             path.display(),
             content.len()
         ))?;
-        if self.0.is_session_artifact(&path) {
-            fs::write(&path, content.as_bytes()).map_err(io_error)?;
-        } else {
-            let mut file = File::options()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .map_err(io_error)?;
-            file.write_all(content.as_bytes()).map_err(io_error)?;
+        self.write(&path, &content)
+    }
+
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        let (path, content) = self.prepared(&request.arguments)?;
+        Ok(ToolAdmission::ApprovalRequired {
+            action: format!("write {} ({} bytes)", path.display(), content.len()),
+        })
+    }
+
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        match self.prepared(&request.arguments) {
+            Ok((path, content)) => self.write(&path, &content).map_or_else(
+                |error| ToolExecutionOutcome::failed(error.to_string()),
+                ToolExecutionOutcome::completed,
+            ),
+            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
         }
-        Ok(format!(
-            "wrote {} bytes to {}",
-            content.len(),
-            path.display()
-        ))
     }
 }

@@ -1395,7 +1395,7 @@ public turn/start
 3. Replace vs add:
    用 contextual approval callback 替换 Shell 主路径中无上下文的 action-only
    callback；保留 legacy callback/execute 作为兼容安全路径，其他敏感工具仍为
-   Legacy。没有在该批次迁移 Edit/Write、Process 或 MCP。
+   Legacy。没有在该批次迁移 Process 或 MCP。
 4. Net line delta:
    baseline: runtime 16,556、all Rust 29,258；actual: runtime 16,940
    (+384)、all Rust 29,676 (+418)。剩余预算为 3,060 和 324 行；下一敏感
@@ -1458,6 +1458,38 @@ public turn/start
 approval callback 卡住的问题，但不是完整的异步 Tool API。其他敏感工具现在可以
 按批迁移到已有 typed admission；每批仍须控制在几百行以内，并在全 Rust 预算不足
 时先提供等量抵扣。
+
+#### 阶段 3 第五个改造批次：Edit/Write typed admission
+
+本批迁移 `edit_file` 和 `write_file`。文件路径、Plan Mode、文本唯一性、文件大小
+和 create-new 约束仍由 Capabilities 校验；Host `ToolOrchestrator` 在副作用前
+统一调用 ApprovalController，批准后才进入实际写入。直接 `Tool::execute` 继续
+保留兼容审批，因此旧调用者不会因迁移而失去安全门禁；主运行路径不再发生第二次
+审批。
+
+六项准入验证：
+
+```text
+1. Layer: Capabilities 文件工具提供 typed admission，Host 负责共享审批，Core
+   只记录结果；不改变 App Server/CLI 执行路径。
+2. Duplicate responsibility: 复用现有 Workspace 路径校验、ToolAdmission、
+   ToolOrchestrator 和 ApprovalController；新增的 prepared/write helper 只
+   收拢原有校验与写入，不增加文件 mutation authority。
+3. Replace vs add: 主路径用 admission + execute_after_admission 替换文件工具
+   内部 approval；legacy execute 保留兼容安全入口，未增加第二个审批器。
+4. Net line delta: baseline runtime 16,932、all Rust 29,668；actual runtime
+   16,932 (+0)、all Rust 29,724 (+56)。剩余预算为 3,068 和 276 行。
+5. Visible surface: 不改变工具 schema、模型输入、事件、Session 或公共协议；
+   文件副作用仍只发生在 approval 通过后的 post-admission 分支。
+6. Boundary evidence: `cargo test -p mini-agent-capabilities`（66 passed）、
+   package Clippy、fmt、diff check 和 line budget 通过；既有工作区编辑/写入
+   与拒绝测试继续覆盖兼容路径，Shell/App Server 公共场景覆盖 Host admission
+   事件边界。未迁移 Process 或 MCP。
+```
+
+判定：**Edit/Write typed admission 接受**。下一批迁移 Process 的三个变更工具，
+保持每批几百行以内；全 Rust 预算不足时必须先删除等量兼容/重复概念，而不是
+继续叠加 wrapper。
 
 ### 3.4 评估自动化的顺序
 
