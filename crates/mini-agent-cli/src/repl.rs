@@ -8,7 +8,6 @@ use mini_agent_app_server::frontend::EventEnvelope;
 use mini_agent_app_server::frontend::EventSink;
 use mini_agent_app_server::frontend::InputQueueError;
 use mini_agent_app_server::frontend::RunControl;
-use mini_agent_app_server::frontend::RuntimeProfile;
 use mini_agent_app_server::frontend::SandboxKind;
 use mini_agent_app_server::frontend::SecurityPolicy;
 use mini_agent_app_server::frontend::SecurityPreset;
@@ -18,7 +17,6 @@ use mini_agent_app_server::frontend::TurnInput;
 use mini_agent_app_server::frontend::TurnInputMode;
 use mini_agent_app_server::frontend::TurnStatus;
 use mini_agent_app_server::frontend::harness_config_auto;
-use mini_agent_app_server::frontend::load_workspace_profile;
 use mini_agent_app_server::frontend::observer::RunObserver;
 use mini_agent_app_server::frontend::print_auto_warning;
 use mini_agent_app_server::local::LocalRuntimeRequest;
@@ -67,7 +65,6 @@ pub async fn run(
         },
     );
     let mut observer = RunObserver::new();
-    let workspace = std::env::current_dir().ok();
     spawn_input_reader(event_tx.clone());
     let (worker_tx, worker_rx) = mpsc::channel();
     let run_control = RunControl::new();
@@ -87,59 +84,11 @@ pub async fn run(
     );
 
     println!("{}", crate::version_line());
-    println!("mini-agent — /auto /session /queue /new /help /exit");
+    println!("mini-agent — /auto /queue /new /help /exit");
     print_auto_warning();
     if copilot {
         println!("auto mode on");
     }
-    let startup_profile = if copilot {
-        RuntimeProfile::auto_default()
-    } else {
-        RuntimeProfile::interactive_default()
-    };
-    let startup_profile = match workspace
-        .as_ref()
-        .map(|workspace| load_workspace_profile(workspace, startup_profile.clone()))
-    {
-        Some(Ok(profile)) => profile,
-        Some(Err(error)) => {
-            eprintln!("profile> {error}");
-            startup_profile
-        }
-        None => startup_profile,
-    };
-    let startup_profile = if no_tools {
-        startup_profile.without_tools()
-    } else {
-        startup_profile
-    };
-    let startup_profile = if sandbox_kind_explicit {
-        startup_profile.with_sandbox(sandbox_kind)
-    } else {
-        startup_profile
-    };
-    let startup_profile = if security_preset_explicit {
-        startup_profile.with_security(preset)
-    } else {
-        startup_profile
-    };
-    let manifest = startup_profile.manifest();
-    let disabled = manifest
-        .disabled
-        .iter()
-        .map(|capability| capability.name.as_str())
-        .collect::<Vec<_>>()
-        .join(",");
-    println!(
-        "capabilities> profile={} enabled={}{}",
-        manifest.profile,
-        manifest.enabled.join(","),
-        if disabled.is_empty() {
-            String::new()
-        } else {
-            format!(" disabled={disabled}")
-        }
-    );
     let mut pending_work = 0usize;
     let mut pending_approval: VecDeque<mpsc::SyncSender<bool>> = VecDeque::new();
     let mut ready = false;
@@ -180,9 +129,6 @@ pub async fn run(
                     }
                     "/new" => {
                         queue_work(&worker_tx, WorkerCommand::ClearHistory, &mut pending_work)
-                    }
-                    "/session" => {
-                        queue_work(&worker_tx, WorkerCommand::ShowSession, &mut pending_work)
                     }
                     command
                         if command.strip_prefix("/steer").is_some_and(|rest| {
@@ -375,7 +321,6 @@ fn print_help() {
     println!(
         "/auto off      Switch to manual mode (require per-step approval for writes/shell/MCP)"
     );
-    println!("/session       Show durable session ID, thread ID, and JSONL persistence path");
     println!("/queue         Show number of pending operations in input queue");
     println!("/steer <msg>   Stop the running turn at a safe checkpoint, then run <msg>");
     println!("/new           Clear conversation history and start a fresh context");

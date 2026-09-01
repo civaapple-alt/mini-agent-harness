@@ -27,7 +27,6 @@ pub(super) enum ReplEvent {
 pub(super) enum WorkerCommand {
     Prompt(String),
     ClearHistory,
-    ShowSession,
     SetExecution {
         approval: ApprovalMode,
         copilot: bool,
@@ -110,24 +109,19 @@ pub(super) fn spawn_worker(
             }
         };
         let stable_system_prompt = runtime.stable_system_prompt().to_string();
-        if let Ok(Some(opened)) = model_runtime.block_on(runtime.client_mut().session_info()) {
-            if opened.resumed {
-                let _ = model_runtime.block_on(
-                    runtime.client_mut().update_thread(ThreadUpdate::AppendContext(
-                        "[Session resumed. Note: previously running background processes and result preview handles from prior sessions have expired.]".to_string(),
-                    )),
-                );
-                let _ = model_runtime.block_on(
-                    runtime
-                        .client_mut()
-                        .update_thread(ThreadUpdate::AppendContext(world.context.clone())),
-                );
-            }
-            let label = if opened.resumed { "resumed" } else { "new" };
-            let _ = events.send(ReplEvent::Notice(format!(
-                "session> {label} {} | thread {} | {}",
-                opened.session_id, opened.thread_id, opened.path
-            )));
+        if let Ok(Some(opened)) = model_runtime.block_on(runtime.client_mut().session_info())
+            && opened.resumed
+        {
+            let _ = model_runtime.block_on(
+                runtime.client_mut().update_thread(ThreadUpdate::AppendContext(
+                    "[Session resumed. Note: previously running background processes and result preview handles from prior sessions have expired.]".to_string(),
+                )),
+            );
+            let _ = model_runtime.block_on(
+                runtime
+                    .client_mut()
+                    .update_thread(ThreadUpdate::AppendContext(world.context.clone())),
+            );
         }
         if events.send(ReplEvent::Ready).is_err() {
             return;
@@ -184,27 +178,6 @@ pub(super) fn spawn_worker(
                             Err(error) => {
                                 let _ = events.send(ReplEvent::Warning(format!(
                                     "error: cannot restore world state: {error}"
-                                )));
-                            }
-                        }
-                    }
-                    WorkerCommand::ShowSession => {
-                        match model_runtime.block_on(runtime.client_mut().session_info()) {
-                            Ok(Some(session)) => {
-                                let _ = events.send(ReplEvent::Notice(format!(
-                                    "session> durable {} | thread {} | {}",
-                                    session.session_id, session.thread_id, session.path
-                                )));
-                            }
-                            Ok(None) => {
-                                let _ = events.send(ReplEvent::Notice(
-                                    "session> no durable session is attached".to_string(),
-                                ));
-                            }
-                            Err(error) => {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "session> cannot read session info: {}",
-                                    error.message
                                 )));
                             }
                         }

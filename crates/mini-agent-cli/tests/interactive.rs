@@ -383,26 +383,22 @@ fn durable_session_resumes_settled_history_after_restart() {
         String::from_utf8(output.stdout).unwrap()
     };
 
-    let first_stdout = run(&[], b"first question\n/exit\n");
-    let session_id = first_stdout
-        .lines()
-        .find_map(|line| line.strip_prefix("session> new "))
-        .and_then(|line| line.split_once(" |"))
-        .map(|(id, _)| id)
-        .unwrap();
-    let first_session_records = fs::read_to_string(find_session_file(&root, session_id)).unwrap();
+    let _ = run(&[], b"first question\n/exit\n");
+    let session_id = find_only_session_id(&root);
+    let first_session_records = fs::read_to_string(find_session_file(&root, &session_id)).unwrap();
     assert!(first_session_records.contains("\"turn_id\":\"turn-1\""));
-    let second_stdout = run(&["--session-id", session_id], b"second question\n/exit\n");
+    let second_stdout = run(&["--session-id", &session_id], b"second question\n/exit\n");
 
     server.join().unwrap();
     let first: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
     let second: Value = serde_json::from_slice(&requests_rx.recv().unwrap()).unwrap();
     assert!(first["input"].to_string().contains("first question"));
-    assert!(second_stdout.contains(&format!("session> resumed {session_id}")));
+    assert!(!second_stdout.contains("session> "));
     assert!(second["input"].to_string().contains("first question"));
     assert!(second["input"].to_string().contains("first durable answer"));
     assert!(second["input"].to_string().contains("second question"));
-    let resumed_session_records = fs::read_to_string(find_session_file(&root, session_id)).unwrap();
+    let resumed_session_records =
+        fs::read_to_string(find_session_file(&root, &session_id)).unwrap();
     assert!(resumed_session_records.contains("\"turn_id\":\"turn-2\""));
     fs::remove_dir_all(root).unwrap();
 }
@@ -490,13 +486,8 @@ fn steer_interrupts_a_running_turn_at_a_checkpoint() {
     assert!(stdout.contains("steer requested"), "{stdout}");
     assert!(stdout.contains("checkpoint saved"), "{stdout}");
     assert!(stdout.contains("assistant> corrected answer"), "{stdout}");
-    let session_id = stdout
-        .lines()
-        .find_map(|line| line.strip_prefix("session> new "))
-        .and_then(|line| line.split_once(" |"))
-        .map(|(id, _)| id)
-        .unwrap();
-    let session_file = find_session_file(&root, session_id);
+    let session_id = find_only_session_id(&root);
+    let session_file = find_session_file(&root, &session_id);
     let session_content = fs::read_to_string(session_file).unwrap();
     assert!(session_content.contains("\"status\":\"steered\""));
     fs::remove_dir_all(root).unwrap();
@@ -874,7 +865,7 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
     server.join().unwrap();
 
     assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-agent — /auto /session /queue /new /help /exit"));
+    assert!(stdout.contains("mini-agent — /auto /queue /new /help /exit"));
     assert!(stdout.contains("auto mode on"));
     assert!(stdout.contains("auto-started"));
     assert!(stdout.contains("auto mode off; writes and shell commands require approval"));
@@ -1086,6 +1077,19 @@ fn find_session_file(root: &Path, session_id: &str) -> PathBuf {
         "session {session_id} was not stored under {}",
         sessions.display()
     );
+}
+
+fn find_only_session_id(root: &Path) -> String {
+    let sessions = root.join(".mini-agent").join("sessions");
+    for project in fs::read_dir(&sessions).unwrap() {
+        for session in fs::read_dir(project.unwrap().path()).unwrap() {
+            let session = session.unwrap();
+            if session.path().join("session.jsonl").is_file() {
+                return session.file_name().to_string_lossy().into_owned();
+            }
+        }
+    }
+    panic!("no session was stored under {}", sessions.display());
 }
 
 fn mini_agent(root: &Path) -> Command {

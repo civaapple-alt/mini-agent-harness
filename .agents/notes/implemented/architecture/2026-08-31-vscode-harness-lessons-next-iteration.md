@@ -1847,3 +1847,42 @@ Decision: **accept and commit this P1 batch**. Continue with another duplicate-t
 candidate only after showing the surviving public boundary evidence and a new exact
 line delta; do not trade away Core or lifecycle-boundary coverage for the approximate
 Stage 1 target.
+
+#### 2026-09-01：继续收缩 REPL——移除重复启动摘要和 session 管理展示
+
+本批将 REPL 进一步限定为 Core 能力参考客户端。父线程原先重新解析
+`RuntimeProfile`、workspace profile 和 capability manifest，只为打印启动摘要；实际
+执行线程已经通过 App Server `local::prepare` 完成同一解析，因此删除这段重复投影。
+同时删除 `/session` 和 worker 的 `ShowSession`，以及启动时的 durable session
+身份/path 展示。Session 仍由 Runtime Actor、Session store 和现有 `session_info()`
+负责恢复检测、持久化、`--session-id`/`resume`/`fork` 和 `/new`；Studio/TUI 负责
+用户可见的 session、Thread、Artifact 和管理面展示。
+
+本批六项准入记录：
+
+```text
+1. Layer: CLI REPL presentation and worker command dispatch only; Core, App Server
+   Runtime Actor, Session persistence, approval, and turn/event paths are unchanged.
+2. Duplicate responsibility: the parent-side capability summary duplicated
+   `local::prepare`; `/session` and startup session identity duplicated management
+   information that belongs to App Server clients. Session authority itself has no
+   duplicate and remains in the worker/runtime.
+3. Replace vs add: delete the duplicate projections and the one-shot display command;
+   do not add another REPL management API. Tests discover the persisted session file
+   directly, while production resume and `/new` continue using the existing authority.
+4. Net line delta: runtime `17,343 -> 17,343` (`0`); all Rust
+   `29,311 -> 29,233` (`-78`). Remaining headroom is `2,657` runtime and `767`
+   all-Rust lines.
+5. Visible surface: the REPL no longer prints a capability startup summary or session
+   ID/thread/path metadata and no longer accepts `/session`. Model-visible input,
+   streaming events, approval events, Session JSONL format, public protocol, and turn
+   semantics are unchanged. Studio/TUI is the intended management surface.
+6. Boundary evidence: CLI unit tests (14) and interactive public-path tests (12),
+   strict `cargo clippy -p mini-agent-cli --all-targets -- -D warnings`,
+   `cargo fmt --all`, `git diff --check`, and `python scripts/line_budget.py` pass.
+```
+
+Decision: **accept and commit this REPL simplification batch**. Future REPL changes
+must justify a direct Core turn/execution need; new workflow, session-inspection,
+Thread/Artifact, or other management features belong in the mini-agent-web Studio/TUI
+clients over the App Server protocol.

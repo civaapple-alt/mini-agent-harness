@@ -33,9 +33,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **Test maintenance:** remove duplicate App Server approval-broker coverage
   already exercised by the public Shell approval scenario, and remove the
   private image-magic unit check covered by the workspace `read_image` path.
-- **REPL scope:** remove the `/status` and `/info` management display and its
-  duplicate local runtime projection. Runtime, capability, world, and MCP
-  inspection remains available through App Server clients; REPL session,
+- **REPL scope:** remove the `/status`, `/info`, and `/session` management
+  displays plus the duplicate parent-side capability projection. Runtime,
+  capability, world, MCP, and session metadata inspection remains available
+  through App Server clients; REPL session persistence/resume entry points,
   streaming, approval, steering, queue, and turn execution remain unchanged.
 - **Breaking App Server API:** replace `workflow/plan/set` with the typed
   `thread/settings/update` `collaborationMode` setting. Plan Mode now updates
@@ -100,13 +101,17 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   The callback and single-Thread worker semantics remain explicit; this does not
   claim a fully asynchronous Tool API.
 - Narrowed the interactive REPL to a core-capability reference client. It keeps
-  turns, streaming events, approval, run control, and session commands, while
-  Plan/Goal workflow orchestration is now consumed through the App Server by
-  Studio/SDK clients instead of duplicated `/plan` and `/goal` commands.
+  turns, streaming events, approval, run control, `/queue`, `/steer`, `/auto`,
+  `/new`, and session persistence/resume entry points, while Plan/Goal workflow
+  orchestration and session metadata inspection are consumed through the App
+  Server by Studio/SDK clients instead of duplicated REPL management commands.
 - Removed duplicate World/MCP/extension management presentation from the REPL.
   Host still injects the bounded world context and loads configured capabilities;
   Studio/SDK clients use the App Server `world/*` and `mcp/*` methods for
   inspection and retry.
+- Removed the interactive `/session` metadata display. The worker still uses
+  the existing session authority for resume detection, persistence, and `/new`;
+  Studio/TUI owns user-facing session identity and storage inspection.
 
 ## [0.6.0] - 2026-09-01
 
