@@ -9,6 +9,8 @@ use mini_agent_capabilities::ToolBuildRequest;
 use mini_agent_capabilities::ToolProvider;
 use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
@@ -16,7 +18,7 @@ use std::sync::Arc;
 
 struct EchoTool;
 
-impl Tool for EchoTool {
+impl ToolHandler for EchoTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "external_echo".to_string(),
@@ -28,7 +30,9 @@ impl Tool for EchoTool {
             }),
         }
     }
+}
 
+impl ToolRuntime for EchoTool {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         arguments
             .get("value")

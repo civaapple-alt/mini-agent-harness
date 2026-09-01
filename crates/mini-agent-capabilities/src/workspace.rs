@@ -20,6 +20,8 @@ use mini_agent_protocol::ToolAdmission;
 use mini_agent_protocol::ToolError;
 use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionRequest;
+use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;

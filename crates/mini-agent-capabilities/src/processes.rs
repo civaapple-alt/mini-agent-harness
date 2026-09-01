@@ -10,6 +10,8 @@ use mini_agent_protocol::ToolAdmission;
 use mini_agent_protocol::ToolError;
 use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionRequest;
+use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
@@ -342,7 +344,7 @@ struct ProcessWrite(ProcessManager);
 struct ProcessStop(ProcessManager);
 struct ProcessList(ProcessManager);
 
-impl Tool for ProcessStart {
+impl ToolHandler for ProcessStart {
     fn spec(&self) -> ToolSpec {
         process_spec(
             "process_start",
@@ -351,16 +353,18 @@ impl Tool for ProcessStart {
         )
     }
 
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        self.0.start(string_arg(arguments, "command")?)
-    }
-
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let command = string_arg(&request.arguments, "command")?;
         self.0.validate_start(command)?;
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("start managed process `{command}`"),
         })
+    }
+}
+
+impl ToolRuntime for ProcessStart {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        self.0.start(string_arg(arguments, "command")?)
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
@@ -371,7 +375,7 @@ impl Tool for ProcessStart {
     }
 }
 
-impl Tool for ProcessRead {
+impl ToolHandler for ProcessRead {
     fn spec(&self) -> ToolSpec {
         process_spec(
             "process_read",
@@ -379,13 +383,15 @@ impl Tool for ProcessRead {
             false,
         )
     }
+}
 
+impl ToolRuntime for ProcessRead {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         self.0.read(process_id(arguments)?)
     }
 }
 
-impl Tool for ProcessWrite {
+impl ToolHandler for ProcessWrite {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "process_write".to_string(),
@@ -404,11 +410,6 @@ impl Tool for ProcessWrite {
         }
     }
 
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        self.0
-            .write(process_id(arguments)?, string_arg(arguments, "input")?)
-    }
-
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let id = process_id(&request.arguments)?;
         let input = string_arg(&request.arguments, "input")?;
@@ -416,6 +417,13 @@ impl Tool for ProcessWrite {
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("write to managed process `{id}`"),
         })
+    }
+}
+
+impl ToolRuntime for ProcessWrite {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        self.0
+            .write(process_id(arguments)?, string_arg(arguments, "input")?)
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
@@ -426,17 +434,13 @@ impl Tool for ProcessWrite {
     }
 }
 
-impl Tool for ProcessStop {
+impl ToolHandler for ProcessStop {
     fn spec(&self) -> ToolSpec {
         process_spec(
             "process_stop",
             "Stop one managed process and its process tree",
             false,
         )
-    }
-
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        self.0.stop(process_id(arguments)?)
     }
 
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
@@ -446,13 +450,19 @@ impl Tool for ProcessStop {
             action: format!("stop managed process `{id}`"),
         })
     }
+}
+
+impl ToolRuntime for ProcessStop {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        self.0.stop(process_id(arguments)?)
+    }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
         outcome(process_id(&request.arguments).and_then(|id| self.0.stop_after_admission(id)))
     }
 }
 
-impl Tool for ProcessList {
+impl ToolHandler for ProcessList {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "process_list".to_string(),
@@ -464,7 +474,9 @@ impl Tool for ProcessList {
             }),
         }
     }
+}
 
+impl ToolRuntime for ProcessList {
     fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
         self.0.list()
     }

@@ -4,6 +4,8 @@ use futures_util::StreamExt;
 use htmd::HtmlToMarkdown;
 use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use reqwest::Url;
 use serde_json::Value;
@@ -42,7 +44,7 @@ pub fn web_tools(results: ResultStore) -> Vec<Box<dyn Tool>> {
     })]
 }
 
-impl Tool for WebFetch {
+impl ToolHandler for WebFetch {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "web_fetch".to_string(),
@@ -55,7 +57,9 @@ impl Tool for WebFetch {
             }),
         }
     }
+}
 
+impl ToolRuntime for WebFetch {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let url = string_arg(arguments, "url")?;
         let page = (self.get)(url)?;

@@ -11,6 +11,11 @@ every feature in Codex, Pi, fx, or Qi.
   loop, limits, stop classification, and observation events.
 - Providers, files, processes, approval UI, persistence, and terminal output
   stay outside core.
+- Tool boundaries are explicit: Core `ToolRouter` resolves by name; protocol
+  `ToolHandler` parses/describes admission; Host `ToolOrchestrator` orders
+  admission, approval, and execution; `ToolRuntime` owns the concrete side
+  effect and its configured sandbox. Core still owns the turn loop, events, and
+  conversation-history writeback.
 - Do not add a framework for policies, hooks, plugins, storage, scheduling, or
   dependency injection before a concrete experiment needs it.
 - Passive observers never alter execution.

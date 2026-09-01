@@ -161,15 +161,25 @@ impl fmt::Display for ToolError {
 
 impl Error for ToolError {}
 
-/// A capability that the execution kernel may expose to a model.
-pub trait Tool: Send + Sync {
+/// Describes one tool's model-facing contract and pre-side-effect admission.
+///
+/// Implementations should keep argument parsing, bounded validation, and the
+/// resulting approval action here. They must not perform the tool's side effect.
+pub trait ToolHandler: Send + Sync {
     fn spec(&self) -> ToolSpec;
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError>;
 
     /// Describes host admission for one model-requested call.
     fn admission(&self, _request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         Ok(ToolAdmission::Legacy)
     }
+}
+
+/// Executes a resolved tool after its handler has completed admission.
+///
+/// Implementations own the concrete side effect, while the host orchestrator
+/// owns the common approval and lifecycle ordering around these methods.
+pub trait ToolRuntime: Send + Sync {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError>;
 
     /// Executes a call after the host has completed its typed admission.
     /// Implementations returning `ApprovalRequired` must override this method
@@ -191,6 +201,11 @@ pub trait Tool: Send + Sync {
         }
     }
 }
+
+/// A compatibility object combining a tool handler and its runtime.
+pub trait Tool: ToolHandler + ToolRuntime {}
+
+impl<T: ToolHandler + ToolRuntime> Tool for T {}
 
 /// Delegates one resolved tool call to the owner of its execution lifecycle.
 ///

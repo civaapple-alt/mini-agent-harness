@@ -8,6 +8,8 @@ use mini_agent_protocol::ToolAdmission;
 use mini_agent_protocol::ToolError;
 use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionRequest;
+use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use rmcp::ClientLifecycleMode;
 use rmcp::ClientServiceExt;
@@ -154,15 +156,9 @@ pub fn load(servers: &[McpServerConfig], approval: ApprovalController) -> LoadRe
     }
 }
 
-impl Tool for McpTool {
+impl ToolHandler for McpTool {
     fn spec(&self) -> ToolSpec {
         self.spec.clone()
-    }
-
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        self.approval.ensure_plan_mode_unlocked()?;
-        self.approval.approve(&self.action())?;
-        self.call(arguments)
     }
 
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
@@ -174,6 +170,14 @@ impl Tool for McpTool {
         Ok(ToolAdmission::ApprovalRequired {
             action: self.action(),
         })
+    }
+}
+
+impl ToolRuntime for McpTool {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        self.approval.ensure_plan_mode_unlocked()?;
+        self.approval.approve(&self.action())?;
+        self.call(arguments)
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {

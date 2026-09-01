@@ -10,11 +10,12 @@ use mini_agent_protocol::ModelEventSink;
 use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::Observer;
-use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolCall;
 use mini_agent_protocol::ToolError;
 use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionStatus;
+use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
@@ -106,7 +107,7 @@ fn tool_response(name: &str, arguments: Value) -> ModelResponse {
 
 struct RequiredStringTool;
 
-impl Tool for RequiredStringTool {
+impl ToolHandler for RequiredStringTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "required_string".to_string(),
@@ -119,7 +120,9 @@ impl Tool for RequiredStringTool {
             }),
         }
     }
+}
 
+impl ToolRuntime for RequiredStringTool {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         arguments
             .get("value")
@@ -131,7 +134,7 @@ impl Tool for RequiredStringTool {
 
 struct RetryableTool;
 
-impl Tool for RetryableTool {
+impl ToolHandler for RetryableTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "retryable".to_string(),
@@ -139,7 +142,9 @@ impl Tool for RetryableTool {
             parameters: json!({"type": "object"}),
         }
     }
+}
 
+impl ToolRuntime for RetryableTool {
     fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
         Err(ToolError("temporary failure".to_string()))
     }

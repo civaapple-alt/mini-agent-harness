@@ -8,11 +8,12 @@ use crate::tool_batch_executor::truncate_utf8;
 use mini_agent_protocol::ModelEventSink;
 use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::ModelUsage;
-use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolCall;
 use mini_agent_protocol::ToolError;
 use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionStatus;
+use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
@@ -98,7 +99,7 @@ fn tool_response(call_id: &str, name: &str, arguments: Value) -> ModelResponse {
 
 struct Uppercase;
 
-impl Tool for Uppercase {
+impl ToolHandler for Uppercase {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "uppercase".to_string(),
@@ -111,7 +112,9 @@ impl Tool for Uppercase {
             }),
         }
     }
+}
 
+impl ToolRuntime for Uppercase {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let text = arguments
             .get("text")
@@ -123,7 +126,7 @@ impl Tool for Uppercase {
 
 struct ApprovalTool;
 
-impl Tool for ApprovalTool {
+impl ToolHandler for ApprovalTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "needs_approval".to_string(),
@@ -131,7 +134,9 @@ impl Tool for ApprovalTool {
             parameters: json!({"type": "object"}),
         }
     }
+}
 
+impl ToolRuntime for ApprovalTool {
     fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
         Err(ToolError("approval required".to_string()))
     }
@@ -570,7 +575,7 @@ fn restores_only_history_that_fits_the_current_harness() {
 
 struct RequestSteer(RunControl);
 
-impl Tool for RequestSteer {
+impl ToolHandler for RequestSteer {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "request_steer".to_string(),
@@ -578,7 +583,9 @@ impl Tool for RequestSteer {
             parameters: json!({"type": "object", "additionalProperties": false}),
         }
     }
+}
 
+impl ToolRuntime for RequestSteer {
     fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
         self.0.request_steer();
         Ok("steer requested".to_string())
@@ -1097,7 +1104,7 @@ async fn rejects_oversized_model_response_before_retaining_it() {
 #[tokio::test]
 async fn repetitive_tool_calls_trigger_loop_warning() {
     struct EchoTool;
-    impl Tool for EchoTool {
+    impl ToolHandler for EchoTool {
         fn spec(&self) -> ToolSpec {
             ToolSpec {
                 name: "echo".to_string(),
@@ -1110,6 +1117,8 @@ async fn repetitive_tool_calls_trigger_loop_warning() {
                 }),
             }
         }
+    }
+    impl ToolRuntime for EchoTool {
         fn execute(&self, _args: &Value) -> Result<String, ToolError> {
             Ok("same output".to_string())
         }

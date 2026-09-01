@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) struct Shell(pub(super) Arc<Workspace>, pub(super) ResultStore);
 
-impl Tool for Shell {
+impl ToolHandler for Shell {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "shell".to_string(),
@@ -16,19 +16,21 @@ impl Tool for Shell {
         }
     }
 
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let command = self.validated_command(arguments)?;
-        self.0.approval.ensure_plan_mode_unlocked()?;
-        self.0.approve(&format!("shell command `{command}`"))?;
-        self.run_command(command)
-    }
-
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let command = self.validated_command(&request.arguments)?;
         self.0.approval.ensure_plan_mode_unlocked()?;
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("shell command `{command}`"),
         })
+    }
+}
+
+impl ToolRuntime for Shell {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let command = self.validated_command(arguments)?;
+        self.0.approval.ensure_plan_mode_unlocked()?;
+        self.0.approve(&format!("shell command `{command}`"))?;
+        self.run_command(command)
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {

@@ -19,11 +19,12 @@ use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
-use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolCall;
 use mini_agent_protocol::ToolError;
 use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionStatus;
+use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use mini_agent_protocol::TurnCancel;
 use mini_agent_protocol::TurnInput;
@@ -145,7 +146,7 @@ struct SensitiveFixtureTool;
 
 struct McpTimeoutFixtureTool;
 
-impl Tool for SensitiveFixtureTool {
+impl ToolHandler for SensitiveFixtureTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "sensitive_fixture".to_string(),
@@ -153,7 +154,9 @@ impl Tool for SensitiveFixtureTool {
             parameters: json!({"type": "object"}),
         }
     }
+}
 
+impl ToolRuntime for SensitiveFixtureTool {
     fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
         Err(ToolError("user denied: sensitive fixture".to_string()))
     }
@@ -166,7 +169,7 @@ impl Tool for SensitiveFixtureTool {
     }
 }
 
-impl Tool for McpTimeoutFixtureTool {
+impl ToolHandler for McpTimeoutFixtureTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "mcp__fixture__slow".to_string(),
@@ -174,7 +177,9 @@ impl Tool for McpTimeoutFixtureTool {
             parameters: json!({"type": "object"}),
         }
     }
+}
 
+impl ToolRuntime for McpTimeoutFixtureTool {
     fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
         Err(ToolError("MCP tool call timed out".to_string()))
     }

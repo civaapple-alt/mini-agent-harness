@@ -76,14 +76,18 @@ The mainline is the CLI over the App Server boundary. Other frontends should
 exercise the same App Server management and event contracts rather than add
 another runtime execution path.
 
-Approval is currently a distributed Core/Host boundary. `ToolRouter` resolves and
-dispatches through the protocol-level `ToolExecutionDelegate`; the Host
-`ToolOrchestrator` owns the typed admission and approval decision for the migrated
-Shell, EditFile, WriteFile, ProcessStart, ProcessWrite, ProcessStop, MCP calls,
-and outside-workspace ReadImage paths, while read-only ProcessRead, ProcessList,
-ReadFile, and result retrieval remain on the legacy path. MCP server startup
-approval remains a separate Host assembly gate. App Server transports approval
-notifications and
+Approval is currently a distributed Core/Host boundary. Core `ToolRouter` resolves
+by name and dispatches through the protocol-level `ToolExecutionDelegate`;
+`ToolHandler` owns tool-specific schema, argument parsing, and admission
+description; Host `ToolOrchestrator` owns approval and lifecycle order; and
+`ToolRuntime` owns the concrete side effect. The `Tool` trait composes Handler and
+Runtime for the existing registry/provider/delegate boundary. Typed admission covers Shell, EditFile, WriteFile,
+ProcessStart, ProcessWrite, ProcessStop, MCP calls, and outside-workspace
+ReadImage paths, while read-only tools remain on the Legacy path. Sandbox policy
+is selected by the Host profile/Capabilities assembly and applied by the concrete
+runtime; it is not duplicated in the orchestrator. MCP server startup approval
+remains a separate Host assembly gate. App Server transports approval notifications
+and
 persists settled results. The public Shell path correlates `requestId`, `turnId`,
 and `callId` from `turn/start` through `approval/request`, `approval/respond`,
 `approval/resolved`, and `turn/event`. Approval remains synchronous internally;
@@ -307,8 +311,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `16,932 / 20,000` lines and all
-Rust source `29,867 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `16,975 / 20,000` lines and all
+Rust source `29,949 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 

@@ -1,6 +1,7 @@
 use crate::workspace::string_arg;
-use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
@@ -175,7 +176,7 @@ impl ResultStore {
 
 pub struct ReadToolResult(pub ResultStore);
 
-impl Tool for ReadToolResult {
+impl ToolHandler for ReadToolResult {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "read_tool_result".to_string(),
@@ -195,7 +196,9 @@ impl Tool for ReadToolResult {
             }),
         }
     }
+}
 
+impl ToolRuntime for ReadToolResult {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let handle = string_arg(arguments, "handle")?;
         let start_byte = usize_arg(arguments, "start_byte")?.unwrap_or(1);

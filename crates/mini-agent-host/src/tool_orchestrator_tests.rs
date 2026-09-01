@@ -1,11 +1,12 @@
 use super::ToolOrchestrator;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ApprovalMode;
-use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolAdmission;
 use mini_agent_protocol::ToolExecutionDelegate;
 use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionRequest;
+use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use std::sync::Arc;
@@ -16,17 +17,13 @@ struct AdmittedTool {
     executed: Arc<AtomicBool>,
 }
 
-impl Tool for AdmittedTool {
+impl ToolHandler for AdmittedTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "sensitive".to_string(),
             description: "sensitive".to_string(),
             parameters: serde_json::json!({"type": "object"}),
         }
-    }
-
-    fn execute(&self, _arguments: &Value) -> Result<String, mini_agent_protocol::ToolError> {
-        Ok("legacy execution".to_string())
     }
 
     fn admission(
@@ -36,6 +33,12 @@ impl Tool for AdmittedTool {
         Ok(ToolAdmission::ApprovalRequired {
             action: "sensitive action".to_string(),
         })
+    }
+}
+
+impl ToolRuntime for AdmittedTool {
+    fn execute(&self, _arguments: &Value) -> Result<String, mini_agent_protocol::ToolError> {
+        Ok("legacy execution".to_string())
     }
 
     fn execute_after_admission(&self, _request: &ToolExecutionRequest) -> ToolExecutionOutcome {

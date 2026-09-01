@@ -31,6 +31,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Migrated MCP tool calls and outside-workspace `read_image` to typed admission.
   MCP server startup approval remains a separate Host assembly gate, while
   workspace/session image reads and other read-only tools retain their legacy path.
+- Split the tool contract into `ToolHandler` (schema, argument parsing, and
+  admission) and `ToolRuntime` (legacy and post-admission side effects). `Tool`
+  remains their composition boundary, so Router resolution and Core history
+  handling stay unchanged.
 
 ### Audited
 

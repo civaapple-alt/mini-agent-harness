@@ -1561,6 +1561,42 @@ admission 混为一谈。只读的 `ProcessRead`、`ProcessList`、`ReadFile` �
 入口和 MCP startup assembly gate。由于全 Rust 预算只剩 133 行，下一轮不得继续
 扩展 Rust 生产面，除非先给出等量抵扣。
 
+#### 阶段 3 第八个改造批次：完成 Router/Handler/Orchestrator/Runtime 角色拆分
+
+本批把迁移 seam 收敛为明确的四个职责角色，而不再让一个 `Tool` trait 同时
+表达工具描述、admission 和副作用执行。`ToolHandler` 负责 schema、参数解析和
+admission 描述；`ToolRuntime` 负责 legacy/post-admission 执行；`Tool` 仅作为
+现有 registry/provider/delegate 使用的组合边界。`ToolRouter` 继续只做名称 resolve 和 delegate，
+`ToolOrchestrator` 继续只做通用 approval/lifecycle 编排。Sandbox policy 仍由
+Host profile/Capabilities 装配选择，具体 attach/执行由对应 Runtime 完成，避免
+为了形式上的“集中”再引入一个重复 sandbox wrapper。
+
+六项准入验证：
+
+```text
+1. Layer: protocol 定义 ToolHandler/ToolRuntime 角色，Core 保持 Router 和 turn
+   loop，Host 保持 ToolOrchestrator，Capabilities 实现工具特有 Handler/Runtime。
+2. Duplicate responsibility: 替换原 Tool trait 中混合的职责；没有新增 Router、
+   approval authority、sandbox authority 或 Core session authority。
+3. Replace vs add: 将已有 spec/admission 放入 Handler、已有 execute 方法放入
+   Runtime，并以组合 Tool 保持 registry/provider/delegate 的兼容边界。
+4. Net line delta: baseline runtime 16,932、all Rust 29,867；actual runtime
+   16,975 (+43)、all Rust 29,949 (+82)。剩余预算为 3,025 和 51 行；本批之后
+   不再增加 Rust 抽象，任何新增必须先完成等量抵扣。
+5. Visible surface: 不改变工具 schema、模型输入、approval 事件、Session 写回
+   或公共 App Server 协议；只改变 Rust trait 实现边界，sandbox 行为保持原有
+   Host profile/Capabilities 选择和工具内 attach 语义。
+6. Boundary evidence: protocol 7、Core 32、Capabilities 66、Host 42、
+   App Server 33 项测试均通过；external provider example 可编译；workspace
+   Clippy、fmt、diff check 和 line budget 通过。全 workspace test 仍未运行，
+   需显式批准后再运行。
+```
+
+判定：**四个职责角色完成结构对齐**。当前实现已经满足职责级别的
+`Router → Handler → Orchestrator → Runtime` 约束；其中 Handler 和 Runtime 是
+协议 trait 角色，`Tool` 是组合 trait，而不是第二套执行路径。后续只做
+预算抵扣、边界证据和文档维护，不再继续扩展这一抽象层。
+
 ### 3.4 评估自动化的顺序
 
 自动化和下一迭代按以下顺序推进：

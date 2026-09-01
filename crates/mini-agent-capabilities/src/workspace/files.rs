@@ -53,7 +53,7 @@ impl ReadImage {
     }
 }
 
-impl Tool for ReadImage {
+impl ToolHandler for ReadImage {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "read_image".to_string(),
@@ -67,11 +67,6 @@ impl Tool for ReadImage {
         }
     }
 
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let path = self.workspace.local_file_path(arguments, "read_image")?;
-        self.read(path)
-    }
-
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let (path, requires_approval) = self
             .workspace
@@ -82,6 +77,13 @@ impl Tool for ReadImage {
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("read_image {}", path.display()),
         })
+    }
+}
+
+impl ToolRuntime for ReadImage {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let path = self.workspace.local_file_path(arguments, "read_image")?;
+        self.read(path)
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
@@ -100,7 +102,7 @@ impl Tool for ReadImage {
 
 pub(super) struct ReadFile(pub(super) Arc<Workspace>);
 
-impl Tool for ReadFile {
+impl ToolHandler for ReadFile {
     fn spec(&self) -> ToolSpec {
         file_tool_spec(
             "read_file",
@@ -108,7 +110,9 @@ impl Tool for ReadFile {
             false,
         )
     }
+}
 
+impl ToolRuntime for ReadFile {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let path = self.0.read_path(arguments)?;
         let mut bytes = Vec::new();
@@ -164,7 +168,7 @@ impl EditFile {
     }
 }
 
-impl Tool for EditFile {
+impl ToolHandler for EditFile {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "edit_file".to_string(),
@@ -183,17 +187,19 @@ impl Tool for EditFile {
         }
     }
 
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let (path, updated) = self.prepared(arguments)?;
-        self.0.approve(&format!("edit {}", path.display()))?;
-        self.write(&path, updated)
-    }
-
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let (path, _) = self.prepared(&request.arguments)?;
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("edit {}", path.display()),
         })
+    }
+}
+
+impl ToolRuntime for EditFile {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let (path, updated) = self.prepared(arguments)?;
+        self.0.approve(&format!("edit {}", path.display()))?;
+        self.write(&path, updated)
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
@@ -240,7 +246,7 @@ impl WriteFile {
     }
 }
 
-impl Tool for WriteFile {
+impl ToolHandler for WriteFile {
     fn spec(&self) -> ToolSpec {
         file_tool_spec(
             "write_file",
@@ -249,6 +255,15 @@ impl Tool for WriteFile {
         )
     }
 
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        let (path, content) = self.prepared(&request.arguments)?;
+        Ok(ToolAdmission::ApprovalRequired {
+            action: format!("write {} ({} bytes)", path.display(), content.len()),
+        })
+    }
+}
+
+impl ToolRuntime for WriteFile {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let (path, content) = self.prepared(arguments)?;
         self.0.approve(&format!(
@@ -257,13 +272,6 @@ impl Tool for WriteFile {
             content.len()
         ))?;
         self.write(&path, &content)
-    }
-
-    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
-        let (path, content) = self.prepared(&request.arguments)?;
-        Ok(ToolAdmission::ApprovalRequired {
-            action: format!("write {} ({} bytes)", path.display(), content.len()),
-        })
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
