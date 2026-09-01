@@ -378,7 +378,7 @@ The line-budget report breaks Rust source down by the runtime layers: `core`,
   integration tests. The enforced ceilings are 20,000 lines for the runtime
   layers (`core` + `protocol` + `host` + `app-server`). The 30,000-line
   workspace total is enforced for
-  the 0.5.0 release, including tests. Both ceilings block the release gate.
+  the 0.6.0 release, including tests. Both ceilings block the release gate.
   The report still includes all Rust source, including the CLI, so cleanup
   remains measurable.
 

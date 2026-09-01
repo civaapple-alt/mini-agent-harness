@@ -5,6 +5,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.6.0] - 2026-09-01
+
 ### Added
 
 - Added a repository pull request template that requires every change to
