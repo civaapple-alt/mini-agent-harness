@@ -79,8 +79,9 @@ another runtime execution path.
 Approval is currently a distributed Core/Host boundary. `ToolRouter` resolves and
 dispatches through the protocol-level `ToolExecutionDelegate`; the Host
 `ToolOrchestrator` owns the typed admission and approval decision for the migrated
-Shell, EditFile, and WriteFile tools, while Process and MCP remain on the legacy
-tool-owned approval path. App Server transports approval notifications and
+Shell, EditFile, WriteFile, ProcessStart, ProcessWrite, and ProcessStop tools,
+while ProcessRead, ProcessList, and MCP remain on the legacy tool-owned approval
+path. App Server transports approval notifications and
 persists settled results. The public Shell path correlates `requestId`, `turnId`,
 and `callId` from `turn/start` through `approval/request`, `approval/respond`,
 `approval/resolved`, and `turn/event`. Approval remains synchronous internally;
@@ -305,7 +306,7 @@ admission confirmations is checked exactly once; reviewers remain responsible fo
 answer quality.
 
 The current hard-budget snapshot is runtime `16,932 / 20,000` lines and all
-Rust source `29,724 / 30,000` lines. The approximate `26,900` Stage 1 target
+Rust source `29,798 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 

@@ -1491,6 +1491,36 @@ approval callback 卡住的问题，但不是完整的异步 Tool API。其他�
 保持每批几百行以内；全 Rust 预算不足时必须先删除等量兼容/重复概念，而不是
 继续叠加 wrapper。
 
+#### 阶段 3 第六个改造批次：Process typed admission
+
+本批迁移 `process_start`、`process_write` 和 `process_stop`。ProcessManager
+继续负责进程状态、sandbox attach、日志和进程树操作；三个会产生副作用的入口
+现在先由 typed admission 完成参数/Plan Mode 校验并描述审批 action，再由 Host
+审批后调用 post-admission 方法。`process_read` 和 `process_list` 保持只读
+Legacy 路径，直接 `execute` 入口继续保留原审批行为。
+
+六项准入验证：
+
+```text
+1. Layer: Capabilities Process tools 描述参数和副作用 admission，Host 复用
+   ToolOrchestrator 审批，Core/App Server 不增加新的进程执行路径。
+2. Duplicate responsibility: 复用现有 ProcessManager、RunControl、sandbox
+   和 bounded log/result store；只把原 start/write/stop 的校验与副作用拆开，
+   没有新增进程状态权威或审批器。
+3. Replace vs add: 主路径用 typed admission 替换 ProcessManager 内部审批，
+   post-admission 直接使用现有状态操作；legacy execute 保留兼容安全入口。
+4. Net line delta: baseline runtime 16,932、all Rust 29,724；actual runtime
+   16,932 (+0)、all Rust 29,798 (+74)。剩余预算为 3,068 和 202 行。
+5. Visible surface: 不改变 process schema、模型输入、事件、Session 或公共
+   协议；进程启动、stdin 写入和进程树终止仍只发生在 approval 通过后。
+6. Boundary evidence: `cargo test -p mini-agent-capabilities`（66 passed）、
+   package Clippy、fmt、diff check 和 line budget 通过；既有 managed process
+   生命周期、sandbox 和 bounded output 测试保持有效。MCP 尚未迁移。
+```
+
+判定：**Process typed admission 接受**。下一批迁移 MCP tool call；MCP server
+startup approval 仍是 Host 装配阶段的独立门禁，不能误写成模型调用 admission。
+
 ### 3.4 评估自动化的顺序
 
 自动化和下一迭代按以下顺序推进：

@@ -25,6 +25,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Migrated `edit_file` and `write_file` to typed admission with approval before
   file mutation; their direct legacy `execute` entry points remain approval-safe
   for compatibility.
+- Migrated `process_start`, `process_write`, and `process_stop` to typed admission
+  with approval before process mutation; read/list operations remain read-only
+  legacy paths and direct execute compatibility remains approval-safe.
 
 ### Audited
 

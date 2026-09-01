@@ -6,7 +6,10 @@ use crate::workspace::io_error;
 use crate::workspace::shell_command;
 use crate::workspace::string_arg;
 use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolAdmission;
 use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolExecutionOutcome;
+use mini_agent_protocol::ToolExecutionRequest;
 use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
@@ -111,16 +114,24 @@ impl ProcessManager {
     }
 
     fn start(&self, command: &str) -> Result<String, ToolError> {
+        self.validate_start(command)?;
+        self.0
+            .approval
+            .approve(&format!("start managed process `{command}`"))?;
+        self.start_after_admission(command)
+    }
+
+    fn validate_start(&self, command: &str) -> Result<(), ToolError> {
         if command.is_empty() || command.len() > MAX_COMMAND_BYTES {
             return Err(ToolError(format!(
                 "command must contain 1..={MAX_COMMAND_BYTES} bytes"
             )));
         }
         self.0.approval.ensure_plan_mode_unlocked()?;
-        self.0
-            .approval
-            .approve(&format!("start managed process `{command}`"))?;
+        Ok(())
+    }
 
+    fn start_after_admission(&self, command: &str) -> Result<String, ToolError> {
         let mut state = self.0.state.lock().unwrap();
         refresh_jobs(&mut state.jobs)?;
         while state.jobs.len() >= MAX_PROCESSES {
@@ -217,15 +228,24 @@ impl ProcessManager {
     }
 
     fn write(&self, id: u64, input: &str) -> Result<String, ToolError> {
+        self.validate_write(input)?;
+        self.0
+            .approval
+            .approve(&format!("write to managed process `{id}`"))?;
+        self.write_after_admission(id, input)
+    }
+
+    fn validate_write(&self, input: &str) -> Result<(), ToolError> {
         if input.is_empty() || input.len() > MAX_INPUT_BYTES {
             return Err(ToolError(format!(
                 "input must contain 1..={MAX_INPUT_BYTES} bytes"
             )));
         }
         self.0.approval.ensure_plan_mode_unlocked()?;
-        self.0
-            .approval
-            .approve(&format!("write to managed process `{id}`"))?;
+        Ok(())
+    }
+
+    fn write_after_admission(&self, id: u64, input: &str) -> Result<String, ToolError> {
         let mut state = self.0.state.lock().unwrap();
         refresh_jobs(&mut state.jobs)?;
         let job = state
@@ -251,6 +271,10 @@ impl ProcessManager {
         self.0
             .approval
             .approve(&format!("stop managed process `{id}`"))?;
+        self.stop_after_admission(id)
+    }
+
+    fn stop_after_admission(&self, id: u64) -> Result<String, ToolError> {
         let mut state = self.0.state.lock().unwrap();
         refresh_jobs(&mut state.jobs)?;
         let job = state
@@ -330,6 +354,21 @@ impl Tool for ProcessStart {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         self.0.start(string_arg(arguments, "command")?)
     }
+
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        let command = string_arg(&request.arguments, "command")?;
+        self.0.validate_start(command)?;
+        Ok(ToolAdmission::ApprovalRequired {
+            action: format!("start managed process `{command}`"),
+        })
+    }
+
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        outcome(
+            string_arg(&request.arguments, "command")
+                .and_then(|command| self.0.start_after_admission(command)),
+        )
+    }
 }
 
 impl Tool for ProcessRead {
@@ -369,6 +408,22 @@ impl Tool for ProcessWrite {
         self.0
             .write(process_id(arguments)?, string_arg(arguments, "input")?)
     }
+
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        let id = process_id(&request.arguments)?;
+        let input = string_arg(&request.arguments, "input")?;
+        self.0.validate_write(input)?;
+        Ok(ToolAdmission::ApprovalRequired {
+            action: format!("write to managed process `{id}`"),
+        })
+    }
+
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        outcome(process_id(&request.arguments).and_then(|id| {
+            string_arg(&request.arguments, "input")
+                .and_then(|input| self.0.write_after_admission(id, input))
+        }))
+    }
 }
 
 impl Tool for ProcessStop {
@@ -382,6 +437,18 @@ impl Tool for ProcessStop {
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         self.0.stop(process_id(arguments)?)
+    }
+
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        let id = process_id(&request.arguments)?;
+        self.0.0.approval.ensure_plan_mode_unlocked()?;
+        Ok(ToolAdmission::ApprovalRequired {
+            action: format!("stop managed process `{id}`"),
+        })
+    }
+
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        outcome(process_id(&request.arguments).and_then(|id| self.0.stop_after_admission(id)))
     }
 }
 
@@ -457,6 +524,13 @@ fn process_id(arguments: &Value) -> Result<u64, ToolError> {
         .and_then(Value::as_u64)
         .filter(|id| *id > 0)
         .ok_or_else(|| ToolError("process_id must be a positive integer".to_string()))
+}
+
+fn outcome(result: Result<String, ToolError>) -> ToolExecutionOutcome {
+    result.map_or_else(
+        |error| ToolExecutionOutcome::failed(error.to_string()),
+        ToolExecutionOutcome::completed,
+    )
 }
 
 #[cfg(test)]
