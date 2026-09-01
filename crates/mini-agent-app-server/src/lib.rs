@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::thread;
 use tokio::sync::Notify;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -425,15 +426,29 @@ where
         let runtime_revision = Arc::new(AtomicU64::new(0));
         let (commands, command_receiver) = mpsc::channel(COMMAND_BUFFER);
         let (events, _) = broadcast::channel(EVENT_BUFFER);
-        tokio::spawn(worker_loop(
-            threads,
-            command_receiver,
-            events.clone(),
-            thread_ids.clone(),
-            runtime_revision.clone(),
-            factory.clone(),
-            control.clone(),
-        ));
+        let worker_events = events.clone();
+        let worker_thread_ids = thread_ids.clone();
+        let worker_revision = runtime_revision.clone();
+        let worker_factory = factory.clone();
+        let worker_control = control.clone();
+        thread::Builder::new()
+            .name("mini-agent-app-server".to_string())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("app-server worker runtime must be available");
+                runtime.block_on(worker_loop(
+                    threads,
+                    command_receiver,
+                    worker_events,
+                    worker_thread_ids,
+                    worker_revision,
+                    worker_factory,
+                    worker_control,
+                ));
+            })
+            .expect("app-server worker thread must start");
         Self {
             commands,
             events,

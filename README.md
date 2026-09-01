@@ -84,7 +84,8 @@ tool-owned approval path. App Server transports approval notifications and
 persists settled results. The public Shell path correlates `requestId`, `turnId`,
 and `callId` from `turn/start` through `approval/request`, `approval/respond`,
 `approval/resolved`, and `turn/event`. Approval remains synchronous internally;
-other sensitive tools are not migrated until non-blocking behavior is defined.
+the App Server worker isolates that wait from the connection runtime. Other sensitive
+tools are migrated only in bounded batches after their typed admission is defined.
 
 Runtime state has one authority: the App Server Runtime Actor orders Thread,
 World, Workflow, MCP, Session, and revision changes. Host implements the
@@ -303,8 +304,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `16,940 / 20,000` lines and all
-Rust source `29,676 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `16,932 / 20,000` lines and all
+Rust source `29,668 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 

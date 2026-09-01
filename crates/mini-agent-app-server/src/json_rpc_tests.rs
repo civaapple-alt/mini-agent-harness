@@ -440,7 +440,7 @@ async fn serves_initialize_over_jsonl_stdio() {
     task.await.unwrap().unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::test]
 async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
     let root = rpc_root("shell-approval-rpc");
     let broker = ApprovalBroker::new();
@@ -475,12 +475,12 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         ),
     );
 
-    let mut control_connection = AppServerConnection::with_approval_broker_and_capability_manifest(
-        server.clone(),
+    let mut connection = AppServerConnection::with_approval_broker_and_capability_manifest(
+        server,
         broker.clone(),
         default_capability_manifest(),
     );
-    let initialize = control_connection
+    let initialize = connection
         .handle_request(initialize_request(1, "shell-rpc"))
         .await
         .unwrap();
@@ -489,32 +489,11 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         true
     );
 
-    let mut events_connection = AppServerConnection::with_approval_broker_and_capability_manifest(
-        server.clone(),
-        broker.clone(),
-        default_capability_manifest(),
-    );
-    events_connection
-        .handle_request(initialize_request(4, "shell-events"))
-        .await;
-
-    let mut turn_connection = AppServerConnection::with_approval_broker_and_capability_manifest(
-        server,
-        broker.clone(),
-        default_capability_manifest(),
-    );
-    turn_connection
-        .handle_request(initialize_request(5, "shell-turn"))
-        .await;
-    let runtime_handle = tokio::runtime::Handle::current();
-    let turn_task = tokio::task::spawn_blocking(move || {
-        runtime_handle.block_on(async move {
-            turn_connection
-                .handle_request(turn_start_request(2, "run shell"))
-                .await
-                .unwrap()
-        })
-    });
+    let turn_response = connection
+        .handle_request(turn_start_request(2, "run shell"))
+        .await
+        .unwrap();
+    assert_eq!(turn_response.result.unwrap()["value"]["turn_id"], "turn-1");
 
     let pending = tokio::time::timeout(Duration::from_secs(3), broker.next_request())
         .await
@@ -531,7 +510,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         Some(mini_agent_protocol::TurnId::new("turn-1"))
     );
 
-    let approval_response = control_connection
+    let approval_response = connection
         .handle_request(JsonRpcRequest::request(
             3,
             METHOD_APPROVAL_RESPOND,
@@ -564,7 +543,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
 
     let mut tool_finished_seen = false;
     loop {
-        let notification = events_connection.next_notification().await.unwrap();
+        let notification = connection.next_notification().await.unwrap();
         assert_eq!(notification.method, METHOD_TURN_EVENT);
         let params = notification.params.unwrap();
         let notification: TurnEventNotification = serde_json::from_value(params).unwrap();
@@ -588,8 +567,6 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         }
     }
     assert!(tool_finished_seen);
-    let turn_response = turn_task.await.unwrap();
-    assert_eq!(turn_response.result.unwrap()["value"]["turn_id"], "turn-1");
     std::fs::remove_dir_all(root).unwrap();
 }
 

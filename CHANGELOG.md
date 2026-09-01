@@ -36,6 +36,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- Isolated the App Server worker on a dedicated Tokio runtime thread so the
+  synchronous approval callback cannot block the public connection transport.
+  The callback and single-Thread worker semantics remain explicit; this does not
+  claim a fully asynchronous Tool API.
 - Narrowed the interactive REPL to a core-capability reference client. It keeps
   turns, streaming events, approval, run control, and session commands, while
   Plan/Goal workflow orchestration is now consumed through the App Server by

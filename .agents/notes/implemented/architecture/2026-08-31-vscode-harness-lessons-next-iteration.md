@@ -1420,6 +1420,45 @@ public turn/start
 敏感工具，必须先定义同步 callback 如何在 App Server worker 中实现非阻塞等待，或
 明确一个等量/更大的 Rust 抵扣；在此之前保持其他工具的 `Legacy` 路径。
 
+#### 阶段 3 第四个改造批次：隔离同步 approval callback
+
+本批没有改造 ApprovalController 的同步 API，而是修复它对 App Server async
+边界的阻塞影响：App Server worker 不再使用调用方 runtime 的 `tokio::spawn`，
+而是在独立线程中运行自己的 current-thread Tokio runtime。同步 approval callback
+因此最多阻塞当前 App Server worker；连接所在 runtime 仍可发送
+`approval/request`、接收 `approval/respond` 并投影 resolved/event。Core、Host
+和 Tool trait 的同步执行契约保持不变，避免为了异步化一次性扩散到所有工具。
+
+六项准入验证：
+
+```text
+1. Layer:
+   App Server 调度边界；不改变 Core/Host/Capabilities 的工具职责。
+2. Duplicate responsibility:
+   复用既有 worker_loop、RunControl、ApprovalBroker 和单一命令队列；只替换
+   worker 的调度载体，没有第二个 worker、审批器或执行路径。
+3. Replace vs add:
+   用独立线程 runtime 替换调用方 runtime 上的 worker spawn；没有新增通用
+   async approval framework，也没有把同步 callback 隐瞒成异步 API。
+4. Net line delta:
+   baseline: runtime 16,940、all Rust 29,676；actual: runtime 16,932 (-8)、
+   all Rust 29,668 (-8)。当前余量为 3,068 和 332 行。
+5. Visible surface:
+   不增加模型输入、事件、持久化或公共协议字段；`approval/request` 和
+   `approval/respond` 的既有关联保持不变。明确的限制是同一 App Server worker
+   仍一次只运行一个 Thread，approval 等待期间该 worker 不处理其他命令。
+6. Boundary evidence:
+   `cargo test -p mini-agent-app-server`（33 passed）在单线程 Tokio 测试中
+   覆盖同一公共 AppServerConnection 的 turn/start、approval/respond 和事件；
+   App Server Protocol、Core、Capabilities、Host、Protocol 回归和跨包 Clippy
+   均通过，另有 fmt、diff check 和 line budget 证据。
+```
+
+判定：**App Server async boundary 接受**。这解决了公共连接 runtime 被同步
+approval callback 卡住的问题，但不是完整的异步 Tool API。其他敏感工具现在可以
+按批迁移到已有 typed admission；每批仍须控制在几百行以内，并在全 Rust 预算不足
+时先提供等量抵扣。
+
 ### 3.4 评估自动化的顺序
 
 自动化和下一迭代按以下顺序推进：

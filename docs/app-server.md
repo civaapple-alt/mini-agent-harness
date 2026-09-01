@@ -58,6 +58,9 @@ approved boolean, as well as the optional `turnId` and `callId` for the built-in
 Shell path. Clients can correlate `requestId`/`turnId`/`callId` from
 `approval/request` through `approval/respond`, `approval/resolved`, and the
 matching `turn/event`, without inferring approval from `tool/finished` content.
+The App Server worker runs on a dedicated runtime thread, so a synchronous host
+approval callback does not block the connection's async transport. The worker
+still serializes one Thread at a time while that approval is pending.
 
 The Rust `LocalAppServerClient` uses the same DTOs and dispatch without stdio,
 which lets an embedded frontend migrate to the service boundary before it
