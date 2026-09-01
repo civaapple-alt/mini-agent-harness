@@ -1,7 +1,7 @@
 //! Worker-side REPL orchestration.
 //!
 //! The parent module owns terminal input and rendering; this module owns the
-//! App Server worker lifecycle and workflow execution.
+//! App Server worker lifecycle and core turn execution.
 
 use super::*;
 
@@ -36,11 +36,6 @@ pub(super) enum WorkerCommand {
         approval: ApprovalMode,
         copilot: bool,
     },
-    SetPlanMode {
-        active: bool,
-        prompt: Option<String>,
-    },
-    StartGoal(String),
     Shutdown,
 }
 
@@ -101,8 +96,6 @@ pub(super) fn spawn_worker(
         };
         let auto_max_steps = launch.copilot_max_steps();
         let web_search_enabled = launch.web_search_enabled();
-        let runtime_config = launch.runtime_config();
-        let workflow_scope = launch.workflow_scope();
         let mut runtime = match model_runtime.block_on(
             launch.start_with_control(approval.clone(), std::sync::Arc::new(run_control.clone())),
         ) {
@@ -114,11 +107,6 @@ pub(super) fn spawn_worker(
             }
         };
         let mut copilot = copilot;
-        let mut goal_objective: Option<String> = None;
-        let mut plan_active = model_runtime
-            .block_on(runtime.client_mut().workflow_state())
-            .map(|state| state.plan_active)
-            .unwrap_or(false);
         let mut world = match model_runtime.block_on(runtime.client_mut().world_state()) {
             Ok(world) => world,
             Err(error) => {
@@ -150,16 +138,6 @@ pub(super) fn spawn_worker(
                         .client_mut()
                         .update_thread(ThreadUpdate::AppendContext(world.context.clone())),
                 );
-                if let Ok(state) = model_runtime.block_on(runtime.client_mut().workflow_state())
-                    && state
-                        .goal
-                        .is_some_and(|goal| goal.status == WorkflowGoalStatus::Running)
-                {
-                    let _ = model_runtime.block_on(runtime.client_mut().pause_goal());
-                    let _ = events.send(ReplEvent::Warning(
-                        "goal> paused on restart; reissue /goal to continue".to_string(),
-                    ));
-                }
             }
             let label = if opened.resumed { "resumed" } else { "new" };
             let _ = events.send(ReplEvent::Notice(format!(
@@ -183,36 +161,18 @@ pub(super) fn spawn_worker(
         if events.send(ReplEvent::Ready).is_err() {
             return;
         }
-        'work: while let Ok(mut command) = commands.recv() {
+        'work: while let Ok(command) = commands.recv() {
             let _ = events.send(ReplEvent::WorkStarted);
             loop {
                 match command {
                     WorkerCommand::Prompt(prompt) => {
-                        match prompt::run_prompt(prompt::PromptContext {
+                        prompt::run_prompt(prompt::PromptContext {
                             prompt,
-                            plan_active,
                             run_control: &run_control,
                             runtime: &mut runtime,
                             model_runtime: &model_runtime,
-                            approval: &approval,
-                            goal_objective: &mut goal_objective,
                             events: &events,
-                            verify_goal_checkpoint:
-                                |messages: &[mini_agent_app_server::frontend::Message],
-                                 criteria: &str| {
-                                    model_runtime.block_on(verifier::verify_goal_checkpoint(
-                                        &runtime_config,
-                                        messages,
-                                        criteria,
-                                    ))
-                                },
-                        }) {
-                            prompt::PromptOutcome::Finished => {}
-                            prompt::PromptOutcome::Continue(next) => {
-                                command = next;
-                                continue;
-                            }
-                        }
+                        });
                     }
                     WorkerCommand::ClearHistory => {
                         let has_session = model_runtime
@@ -424,11 +384,6 @@ pub(super) fn spawn_worker(
                         approval: mode,
                         copilot: new_copilot,
                     } => {
-                        if !new_copilot && goal_objective.is_some() {
-                            let _ = model_runtime.block_on(runtime.client_mut().pause_goal());
-                            approval.set_goal_dir(None);
-                            goal_objective = None;
-                        }
                         copilot = new_copilot;
                         approval.set_mode(mode);
                         let mut config = harness_config_auto(copilot, auto_max_steps);
@@ -467,180 +422,6 @@ pub(super) fn spawn_worker(
                             ));
                         }
                     }
-                    WorkerCommand::SetPlanMode { active, ref prompt } => {
-                        if active
-                            && !matches!(
-                                workflow_scope,
-                                WorkflowScope::Plan | WorkflowScope::PlanAndGoal
-                            )
-                        {
-                            let _ = events.send(ReplEvent::Warning(
-                                "plan> disabled by the active runtime profile".to_string(),
-                            ));
-                            continue;
-                        }
-                        if active {
-                            match model_runtime
-                                .block_on(runtime.client_mut().set_plan_mode(true, prompt.clone()))
-                            {
-                                Ok(_) => {
-                                    let plan_file = model_runtime
-                                        .block_on(runtime.client_mut().session_info())
-                                        .ok()
-                                        .flatten()
-                                        .and_then(|session| {
-                                            std::path::Path::new(&session.path)
-                                                .parent()
-                                                .map(std::path::Path::to_path_buf)
-                                        })
-                                        .unwrap_or_else(|| {
-                                            std::path::PathBuf::from(&world.workspace)
-                                        })
-                                        .join("plan.md");
-                                    plan_active = true;
-                                    approval.set_goal_dir(None);
-                                    goal_objective = None;
-                                    approval.set_living_plan(Some(plan_file.clone()));
-                                    let mut config = harness_config_auto(copilot, auto_max_steps);
-                                    config.system_prompt =
-                                        workflow_api::with_plan_mode_overlay(&stable_system_prompt);
-                                    let _ = model_runtime.block_on(
-                                        runtime
-                                            .client_mut()
-                                            .update_thread(ThreadUpdate::ReplaceConfig(config)),
-                                    );
-                                    let context = format!(
-                                        "[Plan Mode active: living plan at {}. Plan only — research and update plan.md. Do not produce the final deliverable. Relative path plan.md maps to that file. Workspace modifications are locked.]",
-                                        plan_file.display()
-                                    );
-                                    let _ = model_runtime.block_on(
-                                        runtime
-                                            .client_mut()
-                                            .update_thread(ThreadUpdate::AppendContext(context)),
-                                    );
-                                    let _ = events.send(ReplEvent::Notice(format!(
-                                    "plan mode on: workspace modifications locked. Living plan at {}",
-                                    plan_file.display()
-                                )));
-                                    if let Some(prompt) = prompt.clone() {
-                                        command = WorkerCommand::Prompt(prompt);
-                                        continue;
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ = events.send(ReplEvent::Warning(format!(
-                                        "error: cannot init plan mode: {}",
-                                        e.message
-                                    )));
-                                }
-                            }
-                        } else {
-                            approval.set_living_plan(None);
-                            plan_active = false;
-                            let _ = model_runtime
-                                .block_on(runtime.client_mut().set_plan_mode(false, None));
-                            let mut config = harness_config_auto(copilot, auto_max_steps);
-                            config.system_prompt.clone_from(&stable_system_prompt);
-                            let _ = model_runtime.block_on(
-                                runtime
-                                    .client_mut()
-                                    .update_thread(ThreadUpdate::ReplaceConfig(config)),
-                            );
-                            let _ = events.send(ReplEvent::Notice(
-                                "plan mode off: resumed standard execution mode".to_string(),
-                            ));
-                        }
-                    }
-                    WorkerCommand::StartGoal(ref objective) => {
-                        if !matches!(
-                            workflow_scope,
-                            WorkflowScope::Goal | WorkflowScope::PlanAndGoal
-                        ) {
-                            let _ = events.send(ReplEvent::Warning(
-                                "goal> disabled by the active runtime profile".to_string(),
-                            ));
-                            continue;
-                        }
-                        let session = model_runtime
-                            .block_on(runtime.client_mut().session_info())
-                            .ok()
-                            .flatten();
-                        if session.is_none() {
-                            let _ = events.send(ReplEvent::Warning(
-                                "goal> requires a durable session".to_string(),
-                            ));
-                            break;
-                        }
-                        if let Err(error) = runtime_config.verifier_provider_settings() {
-                            let _ = events.send(ReplEvent::Warning(format!(
-                                "goal> requires an independent verifier: {error}"
-                            )));
-                            break;
-                        }
-                        let session_dir = session
-                            .and_then(|opened| {
-                                std::path::Path::new(&opened.path)
-                                    .parent()
-                                    .map(std::path::Path::to_path_buf)
-                            })
-                            .unwrap_or_else(|| std::path::PathBuf::from(&world.workspace));
-                        match model_runtime
-                            .block_on(runtime.client_mut().start_goal(objective.clone()))
-                        {
-                            Ok(state) => {
-                                goal_objective = Some(objective.clone());
-                                approval.set_living_plan(None);
-                                let goal_dir = session_dir.join("goal");
-                                approval.set_goal_dir(Some(goal_dir.clone()));
-                                plan_active = false;
-                                let _ = model_runtime
-                                    .block_on(runtime.client_mut().set_plan_mode(false, None));
-                                copilot = true;
-                                approval.set_mode(ApprovalMode::Automatic);
-                                let mut config = harness_config_auto(true, auto_max_steps);
-                                config.max_steps = if config.max_steps == 0 {
-                                    state.milestone_step_budget
-                                } else {
-                                    config.max_steps.min(state.milestone_step_budget)
-                                };
-                                config.system_prompt.clone_from(&stable_system_prompt);
-                                let _ = model_runtime.block_on(
-                                    runtime
-                                        .client_mut()
-                                        .update_thread(ThreadUpdate::ReplaceConfig(config)),
-                                );
-                                let goal_plan = goal_dir.join("plan.md");
-                                let context = format!(
-                                    "[Autonomous Goal Mode active: goal_id={}. Execute now. Current milestone {}/{}. Goal plan at {}. Relative path goal/plan.md maps to that file. Workspace mutations are allowed.]",
-                                    state.goal_id,
-                                    state.current_milestone,
-                                    state.total_milestones,
-                                    goal_plan.display()
-                                );
-                                let _ = model_runtime.block_on(
-                                    runtime
-                                        .client_mut()
-                                        .update_thread(ThreadUpdate::AppendContext(context)),
-                                );
-                                let _ = events.send(ReplEvent::Notice(format!(
-                                "goal mode on [goal_id: {}]: executing milestone {}/{} (auto-approve, copilot on)",
-                                state.goal_id, state.current_milestone, state.total_milestones
-                            )));
-                                command = WorkerCommand::Prompt(workflow_api::goal_turn_prompt(
-                                    objective,
-                                    state.current_milestone,
-                                    state.total_milestones,
-                                ));
-                                continue;
-                            }
-                            Err(e) => {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "error: cannot start goal mode: {}",
-                                    e.message
-                                )));
-                            }
-                        }
-                    }
                     WorkerCommand::Shutdown => break 'work,
                 }
                 break;
@@ -649,34 +430,6 @@ pub(super) fn spawn_worker(
         }
         let _ = events.send(ReplEvent::Exited);
     })
-}
-
-fn fail_active_goal(
-    runtime: &mut AppServerRuntime,
-    model_runtime: &tokio::runtime::Runtime,
-    approval: &ApprovalController,
-    goal_objective: &mut Option<String>,
-) {
-    if goal_objective.is_some() {
-        let _ = model_runtime.block_on(runtime.client_mut().fail_goal());
-        approval.set_goal_dir(None);
-        *goal_objective = None;
-    }
-}
-
-fn protocol_verifier_verdict(verdict: &workflow_api::VerifierVerdict) -> WorkflowVerifierVerdict {
-    WorkflowVerifierVerdict {
-        outcome: match verdict.outcome {
-            workflow_api::VerdictOutcome::Approved => WorkflowVerdictOutcome::Approved,
-            workflow_api::VerdictOutcome::Rejected => WorkflowVerdictOutcome::Rejected,
-            workflow_api::VerdictOutcome::NeedsClarification => {
-                WorkflowVerdictOutcome::NeedsClarification
-            }
-            workflow_api::VerdictOutcome::Invalid => WorkflowVerdictOutcome::Invalid,
-        },
-        score: verdict.score,
-        summary: verdict.summary.clone(),
-    }
 }
 
 fn report_run_error(events: &mpsc::SyncSender<ReplEvent>, error: &str) {

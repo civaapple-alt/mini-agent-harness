@@ -43,8 +43,7 @@ USAGE:
 Starts the interactive REPL. Tools run without per-step approval; shell is protected by the sandbox.
 Interactive, one-shot ask, and auto sessions persist settled checkpoints under ~/.mini-agent/sessions.
 Use `/auto` to enter copilot mode; `/auto off` restores per-action prompts.
-Use `/plan` or `/plan <prompt>` to enter Plan Mode (locks codebase mutations, drafts the session living plan); `/plan off` exits.
-Use `/goal <objective>` to start Autonomous Goal Mode and immediately execute the first milestone.
+Plan and Goal workflows are exposed through App Server clients such as Studio and the SDK; this REPL stays focused on core turn execution.
 
 OPTIONS:
     --session-id SESSION_ID     Resume this durable session instead of opening a new one

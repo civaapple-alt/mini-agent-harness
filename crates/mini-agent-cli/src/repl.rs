@@ -17,19 +17,12 @@ use mini_agent_app_server::frontend::ToolError;
 use mini_agent_app_server::frontend::TurnInput;
 use mini_agent_app_server::frontend::TurnInputMode;
 use mini_agent_app_server::frontend::TurnStatus;
-use mini_agent_app_server::frontend::WorkflowGoalAdvanceParams;
-use mini_agent_app_server::frontend::WorkflowGoalStatus;
-use mini_agent_app_server::frontend::WorkflowScope;
-use mini_agent_app_server::frontend::WorkflowVerdictOutcome;
-use mini_agent_app_server::frontend::WorkflowVerifierVerdict;
 use mini_agent_app_server::frontend::harness_config_auto;
 use mini_agent_app_server::frontend::load_workspace_profile;
 use mini_agent_app_server::frontend::observer::RunObserver;
 use mini_agent_app_server::frontend::print_auto_warning;
 use mini_agent_app_server::frontend::skills;
-use mini_agent_app_server::frontend::workflow as workflow_api;
 use mini_agent_app_server::local::LocalRuntimeRequest;
-use mini_agent_app_server::verifier;
 use std::collections::VecDeque;
 use std::io;
 use std::io::IsTerminal;
@@ -37,7 +30,6 @@ use std::io::Write;
 use std::process::ExitCode;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
 
 const MAX_INPUT_BYTES: usize = 32 * 1024;
 const EVENT_BUFFER: usize = 64;
@@ -270,49 +262,6 @@ pub async fn run(
                         },
                         &mut pending_work,
                     ),
-                    command
-                        if command.strip_prefix("/plan").is_some_and(|rest| {
-                            rest.is_empty() || rest.starts_with(char::is_whitespace)
-                        }) =>
-                    {
-                        let action = match workflow_api::parse_plan_slash(command) {
-                            Some(action) => action,
-                            None => unreachable!("plan command matched its parser guard"),
-                        };
-                        match action {
-                            workflow_api::PlanSlash::Disable => queue_work(
-                                &worker_tx,
-                                WorkerCommand::SetPlanMode {
-                                    active: false,
-                                    prompt: None,
-                                },
-                                &mut pending_work,
-                            ),
-                            workflow_api::PlanSlash::Enable { prompt } => queue_work(
-                                &worker_tx,
-                                WorkerCommand::SetPlanMode {
-                                    active: true,
-                                    prompt,
-                                },
-                                &mut pending_work,
-                            ),
-                        }
-                    }
-                    command if command.starts_with("/goal ") => {
-                        let objective = command[6..].trim().to_string();
-                        if objective.is_empty() {
-                            eprintln!("usage: /goal <objective>");
-                            if ready && pending_work == 0 {
-                                print_prompt();
-                            }
-                        } else {
-                            queue_work(
-                                &worker_tx,
-                                WorkerCommand::StartGoal(objective),
-                                &mut pending_work,
-                            );
-                        }
-                    }
                     command if command.starts_with('/') => {
                         eprintln!("unknown local command: {command}");
                         if ready && pending_work == 0 {
@@ -497,13 +446,6 @@ fn print_help() {
     );
     println!(
         "/auto off      Switch to manual mode (require per-step approval for writes/shell/MCP)"
-    );
-    println!(
-        "/plan [prompt] Enable Plan Mode and optionally start drafting the session living plan"
-    );
-    println!("/plan off      Exit Plan Mode and resume standard execution");
-    println!(
-        "/goal <goal>   Start Goal Mode and immediately execute the objective (auto-approve, copilot on)"
     );
     println!(
         "/status        Display runtime status (security preset, sandbox, web search, session, approval)"
