@@ -231,10 +231,14 @@ impl Discovery {
         });
         self.mcp_servers.retain(|server| {
             let label = format!("{}/{}", server.plugin_name, server.server_name);
-            if requested.contains(label.as_str()) || requested.contains(server.server_name.as_str())
+            if requested.contains(label.as_str())
+                || requested.contains(server.server_name.as_str())
+                || requested.contains(server.plugin_name.as_str())
             {
                 matched.insert(if requested.contains(label.as_str()) {
                     label
+                } else if requested.contains(server.plugin_name.as_str()) {
+                    server.plugin_name.clone()
                 } else {
                     server.server_name.clone()
                 });

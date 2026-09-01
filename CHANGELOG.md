@@ -31,6 +31,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   `Discovery::activate_skill` metadata result. Activation does not read Skill
   bodies, start MCP, enable providers, grant approval, or add an App Server
   method; Turn input and Host allowlist resolution remain deferred.
+- **Plugin provider selection:** selecting a validated Plugin name now retains
+  all of its discovered MCP provider inputs through the existing extension
+  selection path. This fixes Plugin-to-server selection without starting MCP,
+  granting approval, or adding a Plugin-specific execution path.
 - **Planning:** add the proposed Goal Runtime next-phase plan covering the
   canonical `thread/goal/set/get/clear` contract, automatic continuation,
   settings/Goal notifications, and retirement of manual Goal controls. This

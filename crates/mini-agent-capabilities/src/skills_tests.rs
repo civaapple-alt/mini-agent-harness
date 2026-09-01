@@ -134,6 +134,40 @@ fn selected_extensions_keep_named_entries_and_report_missing_names() {
 }
 
 #[test]
+fn selecting_plugin_retains_its_provider_inputs() {
+    let root = test_root();
+    let plugin = root.join(".agents/plugins/deploy");
+    write_plugin_manifest(&plugin, "deploy.tools");
+    fs::write(
+        plugin.join("mcp.json"),
+        serde_json::to_vec(&json!({
+            "$schema": MCP_SCHEMA,
+            "mcpServers": {
+                "local": {"type": "stdio", "command": "example-server"},
+                "remote": {"type": "streamable-http", "url": "https://example.com/mcp"}
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut discovery = discover(&root);
+    discovery.retain_selected(&["deploy.tools".to_string()]);
+
+    assert_eq!(discovery.plugin_names(), ["deploy.tools"]);
+    assert_eq!(
+        discovery.mcp_server_labels(),
+        ["deploy.tools/local", "deploy.tools/remote"]
+    );
+    assert!(
+        discovery.diagnostics().is_empty(),
+        "{:?}",
+        discovery.diagnostics()
+    );
+    remove_test_root(&root);
+}
+
+#[test]
 fn discovers_and_selects_bounded_mcp_transports() {
     let root = test_root();
     let plugin = root.join(".agents/plugins/tools");

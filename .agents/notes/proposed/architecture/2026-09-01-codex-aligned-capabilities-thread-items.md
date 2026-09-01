@@ -560,8 +560,12 @@ and after; no estimate authorizes a budget breach.
 
 ### Stage 3: Plugin provider selection
 
-- Treat Plugin discovery as catalog metadata plus provider inputs.
-- Map Plugin MCP tools to the existing MCP provider.
+- **Landed (bounded first slice):** selecting a Plugin name retains all of its
+  discovered MCP provider inputs through the existing extension selection
+  path. Selecting an individual server label remains supported.
+- Treat Plugin discovery as catalog metadata plus provider inputs; the Plugin
+  itself is not an executable provider.
+- **Next slice:** map selected Plugin MCP tools to the existing MCP provider.
 - Map explicitly supplied callback tools to Dynamic Tool handling.
 - Reject arbitrary provider IDs from untrusted Thread data.
 - Keep Plugin installation, startup, approval, and retry out of Core.
@@ -701,10 +705,11 @@ This proposal is ready for implementation only when:
 first bounded Skill dependency/activation metadata slice are implemented.**
 
 The default Builtin catalog, its direct deletion, the first Host-owned Tool
-Catalog slice, Thread-level Builtin selection, and bounded Skill dependency
-metadata/activation are now landed. App Server Turn activation, Host dependency
-allowlist resolution, Plugin provider selection, ThreadItem protocol work,
-Artifact APIs, and Goal Runtime integration remain later stages.
+Catalog slice, Thread-level Builtin selection, bounded Skill dependency
+metadata/activation, and bounded Plugin-to-provider-input selection are now
+landed. App Server Turn activation, Host dependency allowlist resolution,
+Plugin MCP tool loading, ThreadItem protocol work, Artifact APIs, and Goal
+Runtime integration remain later stages.
 
 ## Implementation record — 2026-09-01 Skill dependency/activation slice
 
@@ -731,3 +736,26 @@ Six-question admission:
 
 Decision: **accept the bounded metadata slice and proceed to the next explicit
 Turn/Host resolution batch only with a measured offset or further cleanup.**
+
+## Implementation record — 2026-09-01 Plugin provider input selection slice
+
+Six-question admission:
+
+1. **Layer:** Capabilities discovery selection; it owns the relationship between
+   a validated Plugin manifest and its package-relative MCP inputs.
+2. **Duplicate responsibility:** reuse `Discovery::retain_selected` and the
+   existing `McpServerConfig`/MCP loader; no Plugin Router or executor was added.
+3. **Replace vs add:** fix the existing selection predicate so a selected
+   Plugin retains its own server inputs; individual server selection remains a
+   narrower existing path.
+4. **Net line delta:** all Rust `29,178 → 29,216` (`+38`); runtime
+   (`core + protocol + host + app-server`) remains `17,343`.
+5. **Visible surface:** no model prompt, App Server method, event, persistence,
+   approval, or public protocol change; only the selected provider input set is
+   corrected before the existing Host load gate.
+6. **Boundary evidence:** Capabilities coverage selects a Plugin name and
+   observes all of its MCP server labels without starting either server;
+   existing MCP approval/startup tests remain the execution boundary.
+
+Decision: **accept the provider-input selection slice; defer Plugin MCP tool
+loading and Dynamic Tool mapping to a separately budgeted provider batch.**
