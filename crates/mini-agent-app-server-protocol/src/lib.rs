@@ -16,6 +16,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 
+mod thread_item;
+
+pub use thread_item::ItemStatus;
+pub use thread_item::ThreadItem;
+
 pub const JSONRPC_VERSION: &str = "2.0";
 pub const PROTOCOL_VERSION: u32 = 1;
 
@@ -615,6 +620,7 @@ pub struct TurnReadResult {
     pub final_text: Option<String>,
     pub steps: usize,
     pub messages: Vec<Message>,
+    pub items: Vec<ThreadItem>,
     pub error: Option<String>,
 }
 
@@ -670,15 +676,18 @@ pub struct TurnEventNotification {
     pub thread_id: ThreadId,
     pub turn_id: Option<TurnId>,
     pub sequence: u64,
+    pub items: Vec<ThreadItem>,
     pub event: mini_agent_protocol::Event,
 }
 
 impl From<EventEnvelope> for TurnEventNotification {
     fn from(event: EventEnvelope) -> Self {
+        let items = ThreadItem::from_event(&event);
         Self {
             thread_id: event.thread_id,
             turn_id: event.turn_id,
             sequence: event.sequence,
+            items,
             event: event.event,
         }
     }
@@ -794,5 +803,6 @@ mod tests {
         assert_eq!(notification.thread_id, ThreadId::new("thread-1"));
         assert_eq!(notification.turn_id, Some(TurnId::new("turn-1")));
         assert_eq!(notification.sequence, 4);
+        assert!(notification.items.is_empty());
     }
 }

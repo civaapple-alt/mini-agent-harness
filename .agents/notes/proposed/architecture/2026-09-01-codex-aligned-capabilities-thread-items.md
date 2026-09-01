@@ -572,16 +572,23 @@ and after; no estimate authorizes a budget breach.
 
 ### Stage 4: Internal ThreadItem projection
 
-- Add the smallest internal Item representation needed to project existing
-  Core/Host events.
-- Use `callId` as the initial tool Item id.
-- Map Shell, Edit/Write, MCP, Dynamic, image, and message events.
-- Emit started/completed state from one App Server event projection path.
+- **Landed (bounded first slice):** add the smallest public Item representation
+  backed by current Core events: `UserMessage`, `AgentMessage`, `Reasoning`,
+  `ToolCall`, and `ContextCompaction`.
+- Use `callId` as the initial tool Item id and bound projected text to 16 KiB.
+- Current generic ToolCall projection covers all existing tools; specialized
+  Shell/Edit/MCP/Dynamic variants remain deferred until their source metadata
+  is available without guessing.
+- Emit Item values from the existing App Server event projection path and
+  derive settled Items from the existing messages, with no second log.
 - Do not yet replace Core Session messages or add a second persistence log.
 
 ### Stage 5: Public ThreadItem protocol
 
-- Add v2 `Turn.items`, Item lifecycle notifications, and bounded deltas.
+- **Landed (bounded first slice):** expose bounded `items` on `turn/event` and
+  `turn/read`, preserving the existing Core event alongside the projection.
+- Next add v2 `Turn.items` lifecycle notifications only after persisted Item
+  identity and resume semantics are stable.
 - Add cursor-based `thread/items/list` only when persisted projection and resume
   semantics are stable.
 - Update App Server README, generated schemas, Python SDK, TypeScript output,
@@ -706,10 +713,11 @@ first bounded Skill dependency/activation metadata slice are implemented.**
 
 The default Builtin catalog, its direct deletion, the first Host-owned Tool
 Catalog slice, Thread-level Builtin selection, bounded Skill dependency
-metadata/activation, and bounded Plugin-to-provider-input selection are now
-landed. App Server Turn activation, Host dependency allowlist resolution,
-Plugin MCP tool loading, ThreadItem protocol work, Artifact APIs, and Goal
-Runtime integration remain later stages.
+metadata/activation, bounded Plugin-to-provider-input selection, and the first
+ThreadItem projection are now landed. App Server Turn activation, Host
+dependency allowlist resolution, Plugin MCP tool loading, full Item lifecycle
+notifications/listing, Artifact APIs, and Goal Runtime integration remain
+later stages.
 
 ## Implementation record — 2026-09-01 Skill dependency/activation slice
 
@@ -759,3 +767,26 @@ Six-question admission:
 
 Decision: **accept the provider-input selection slice; defer Plugin MCP tool
 loading and Dynamic Tool mapping to a separately budgeted provider batch.**
+
+## Implementation record — 2026-09-01 bounded ThreadItem projection slice
+
+Six-question admission:
+
+1. **Layer:** App Server Protocol projection; it is the client-facing owner of
+   the ThreadItem wire shape while Core remains the event source.
+2. **Duplicate responsibility:** reuse Core Event/Message values and the
+   existing App Server turn projection; Session remains the only durable log.
+3. **Replace vs add:** add a derived Item view alongside existing fields and
+   events; no second turn loop, history, or persistence authority is added.
+4. **Net line delta:** runtime `17,343 → 17,626` (`+283`); all Rust
+   `29,216 → 29,499` (`+283`). The remaining all-Rust margin is `501` lines.
+5. **Visible surface:** add bounded `items` to `turn/event` and `turn/read`;
+   existing event payloads, approval correlation, and Session checkpoint shape
+   remain unchanged.
+6. **Boundary evidence:** App Server Protocol tests verify callId reuse and
+   bounded text; App Server tests pass the public event/read paths and preserve
+   the existing event trace.
+
+Decision: **accept the minimal projection; defer specialized Item variants,
+Item listing, Artifact references, and Goal Runtime integration until budget
+release and persisted identity evidence exist.**

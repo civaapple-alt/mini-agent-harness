@@ -297,6 +297,9 @@ activation expose only this metadata; provider resolution, startup, approval,
 and execution remain Host-owned and are not triggered by Skill discovery.
 Selecting a validated Plugin name retains that Plugin's MCP provider inputs,
 but does not start a server or create a Plugin-specific execution path.
+App Server `turn/event` and `turn/read` also expose bounded ThreadItems derived
+from existing Core events/messages; these items are a projection, not a second
+history store.
 
 ## Documentation
 
@@ -356,8 +359,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `17,343 / 20,000` lines and all
-Rust source `29,216 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `17,626 / 20,000` lines and all
+Rust source `29,499 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 

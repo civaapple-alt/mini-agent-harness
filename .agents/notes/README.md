@@ -9,8 +9,8 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `17,343 / 20,000` lines (86.7%; 2,657 remaining)
-- all Rust source: `29,216 / 30,000` lines (97.4%; 784 remaining)
+- runtime (`core + protocol + host + app-server`): `17,626 / 20,000` lines (88.1%; 2,374 remaining)
+- all Rust source: `29,499 / 30,000` lines (98.3%; 501 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -31,7 +31,8 @@ The line-budget release work has completed its low-risk Stage 1 audit and the ta
   Thread `builtinTools` selection batches add `404` runtime / `404` all-Rust
   lines, and the first typed Skill dependency/activation metadata slice adds
   `191` all-Rust lines, and Plugin-to-provider-input selection adds `38`
-  all-Rust lines, so the approximate `26,900`
+  all-Rust lines. The bounded ThreadItem projection adds `283` runtime /
+  `283` all-Rust lines, so the approximate `26,900`
   target remains optimization debt
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, duplicate Python test fixture probing, dead Plan slash-command parsing and prompt facades, dead local WorldState summary accessors, and the REPL `/status`/`/info` management projection. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
@@ -82,13 +83,20 @@ the metadata catalog exposes non-empty declarations, and
 `Discovery::activate_skill` returns a typed metadata-only activation. It does
 not read Skill bodies, start MCP, enable providers, or grant approval. App Server
 Turn activation and Host allowlist resolution remain the next Skill batch; the
-current all-Rust margin is only `784` lines.
+current all-Rust margin is only `501` lines.
 
 The first Plugin provider slice is implemented in Capabilities: selecting a
 validated Plugin name now retains all of that Plugin's discovered MCP provider
 inputs, while individual server labels remain selectable. This does not start a
 server, load tools, grant approval, or add a Plugin-specific execution path;
 those remain Host/MCP work for a later bounded batch.
+
+The first bounded ThreadItem projection is implemented in App Server Protocol.
+`turn/event` and `turn/read` expose `UserMessage`, `AgentMessage`, `Reasoning`,
+generic `ToolCall`, and `ContextCompaction` items derived from existing Core
+events/messages. Tool items reuse `callId` and text is bounded to 16 KiB. This
+is a projection only: no second Session log, Item listing method, Artifact API,
+or specialized source classification is introduced.
 
 The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative historical CLI scenarios pass, with current App Server boundary evidence and CLI interactive 12/12 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy and model/provider comparison remain explicitly open gaps. CLI `ask --trace-jsonl PATH` now has public-path evidence for redaction, per-record/total bounds, and overwrite refusal; implicit baseline export remains off. Docker CLI/server 29.6.1 and the `alpine` image are available on this host; Docker preflight now queries the daemon with `docker info`, and ordinary plus candidate-strict probes verify the `/workspace` mount and container-only temporary files, while the strict probe also observes network, capability, read-only-root, and bounded-cgroup behavior. These are current-host evidence only, not a complete cross-platform security claim. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists. The REPL now omits duplicate World/MCP/extension management; these remain available through App Server clients.
 
@@ -115,10 +123,14 @@ The unfinished Goal work is tracked in the [Goal Runtime and `thread/goal/*` pla
    Skill batch must add explicit Turn input and Host allowlist resolution only
    with a measured offset and public boundary evidence; do not introduce a
    second router or let Skills silently enable providers.
- 5. The Plugin provider-input selection slice is implemented by the existing
+5. The Plugin provider-input selection slice is implemented by the existing
     Discovery/MCP path. Plugin MCP tool loading and Dynamic Tool mapping require
-    a separate offset and public approval/startup evidence.
- 6. The bounded opt-in CLI Trace contract is implemented and covered by CLI public
+   a separate offset and public approval/startup evidence.
+ 6. The bounded ThreadItem projection is implemented alongside existing
+    `turn/event` and `turn/read` data. Full Item lifecycle/listing and persisted
+    identity require separate evidence and budget; do not add an Artifact store
+    or Goal Runtime coupling to this projection.
+ 7. The bounded opt-in CLI Trace contract is implemented and covered by CLI public
    scenarios: explicit `ask --trace-jsonl PATH`, create-new ownership, redaction,
    8 KiB per-record and 256 KiB total limits, and fail-on-write/finalization error.
    The baseline recipe remains explicit and does not create traces implicitly.

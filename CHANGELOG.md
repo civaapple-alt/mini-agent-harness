@@ -35,6 +35,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   all of its discovered MCP provider inputs through the existing extension
   selection path. This fixes Plugin-to-server selection without starting MCP,
   granting approval, or adding a Plugin-specific execution path.
+- **ThreadItem projection:** add bounded `items` to App Server `turn/event` and
+  `turn/read`, derived from existing Core events/messages. The first subset is
+  `UserMessage`, `AgentMessage`, `Reasoning`, generic `ToolCall`, and
+  `ContextCompaction`; tool items reuse `callId`, and no second history store or
+  Artifact API is introduced.
 - **Planning:** add the proposed Goal Runtime next-phase plan covering the
   canonical `thread/goal/set/get/clear` contract, automatic continuation,
   settings/Goal notifications, and retirement of manual Goal controls. This

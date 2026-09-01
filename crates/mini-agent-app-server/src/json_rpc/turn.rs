@@ -57,6 +57,11 @@ where
                             .outcome
                             .as_ref()
                             .map_or_else(Vec::new, |outcome| outcome.messages.clone()),
+                        items: result.outcome.as_ref().map_or_else(Vec::new, |outcome| {
+                            mini_agent_app_server_protocol::ThreadItem::from_messages(
+                                &outcome.messages,
+                            )
+                        }),
                         error: result.error,
                     },
                 ),

@@ -296,6 +296,7 @@ pub(super) async fn worker_loop<M>(
                                 final_text: None,
                                 steps: 0,
                                 messages: Vec::new(),
+                                items: Vec::new(),
                                 error: Some(error.clone()),
                             };
                             let persistence_error = thread
@@ -605,6 +606,7 @@ fn project_turn_result(result: &TurnResult) -> TurnReadResult {
         final_text: Some(result.outcome.final_text.clone()),
         steps: result.outcome.steps,
         messages: result.outcome.messages.clone(),
+        items: mini_agent_app_server_protocol::ThreadItem::from_messages(&result.outcome.messages),
         error: None,
     }
 }
