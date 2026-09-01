@@ -135,15 +135,23 @@ impl Workspace {
     }
 
     fn local_file_path(&self, value: &Value, outside_action: &str) -> Result<PathBuf, ToolError> {
+        let (resolved, requires_approval) = self.local_file_path_with_admission(value)?;
+        if requires_approval {
+            self.approve(&format!("{outside_action} {}", resolved.display()))?;
+        }
+        Ok(resolved)
+    }
+
+    fn local_file_path_with_admission(&self, value: &Value) -> Result<(PathBuf, bool), ToolError> {
         let candidate = self.candidate(value)?;
         let resolved = candidate
             .canonicalize()
             .map_err(|error| ToolError(format!("cannot resolve path: {error}")))?;
         if self.is_session_artifact(&resolved) {
-            return Ok(resolved);
+            return Ok((resolved, false));
         }
         if self.ensure_readable(resolved.clone()).is_ok() {
-            return Ok(resolved);
+            return Ok((resolved, false));
         }
         if has_git_component(&resolved) {
             return Err(ToolError("path escapes the workspace".to_string()));
@@ -154,8 +162,7 @@ impl Workspace {
                 resolved.display()
             )));
         }
-        self.approve(&format!("{outside_action} {}", resolved.display()))?;
-        Ok(resolved)
+        Ok((resolved, true))
     }
 
     fn mutate_path(&self, value: &Value) -> Result<PathBuf, ToolError> {

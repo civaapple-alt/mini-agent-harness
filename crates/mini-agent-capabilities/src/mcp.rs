@@ -4,7 +4,10 @@ use crate::workspace::ApprovalController;
 use http::HeaderName;
 use http::HeaderValue;
 use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolAdmission;
 use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolExecutionOutcome;
+use mini_agent_protocol::ToolExecutionRequest;
 use mini_agent_protocol::ToolSpec;
 use rmcp::ClientLifecycleMode;
 use rmcp::ClientServiceExt;
@@ -158,10 +161,38 @@ impl Tool for McpTool {
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         self.approval.ensure_plan_mode_unlocked()?;
-        self.approval.approve(&format!(
+        self.approval.approve(&self.action())?;
+        self.call(arguments)
+    }
+
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        self.approval.ensure_plan_mode_unlocked()?;
+        request
+            .arguments
+            .as_object()
+            .ok_or_else(|| ToolError("MCP tool arguments must be a JSON object".to_string()))?;
+        Ok(ToolAdmission::ApprovalRequired {
+            action: self.action(),
+        })
+    }
+
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        self.call(&request.arguments).map_or_else(
+            |error| ToolExecutionOutcome::failed(error.to_string()),
+            ToolExecutionOutcome::completed,
+        )
+    }
+}
+
+impl McpTool {
+    fn action(&self) -> String {
+        format!(
             "call MCP tool {:?} on {}",
             self.remote_name, self.server_label
-        ))?;
+        )
+    }
+
+    fn call(&self, arguments: &Value) -> Result<String, ToolError> {
         let arguments = arguments
             .as_object()
             .ok_or_else(|| ToolError("MCP tool arguments must be a JSON object".to_string()))?

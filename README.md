@@ -79,14 +79,16 @@ another runtime execution path.
 Approval is currently a distributed Core/Host boundary. `ToolRouter` resolves and
 dispatches through the protocol-level `ToolExecutionDelegate`; the Host
 `ToolOrchestrator` owns the typed admission and approval decision for the migrated
-Shell, EditFile, WriteFile, ProcessStart, ProcessWrite, and ProcessStop tools,
-while ProcessRead, ProcessList, and MCP remain on the legacy tool-owned approval
-path. App Server transports approval notifications and
+Shell, EditFile, WriteFile, ProcessStart, ProcessWrite, ProcessStop, MCP calls,
+and outside-workspace ReadImage paths, while read-only ProcessRead, ProcessList,
+ReadFile, and result retrieval remain on the legacy path. MCP server startup
+approval remains a separate Host assembly gate. App Server transports approval
+notifications and
 persists settled results. The public Shell path correlates `requestId`, `turnId`,
 and `callId` from `turn/start` through `approval/request`, `approval/respond`,
 `approval/resolved`, and `turn/event`. Approval remains synchronous internally;
-the App Server worker isolates that wait from the connection runtime. Other sensitive
-tools are migrated only in bounded batches after their typed admission is defined.
+the App Server worker isolates that wait from the connection runtime. Typed admission
+now covers the approval-gated model tool calls; read-only tools retain the legacy path.
 
 Runtime state has one authority: the App Server Runtime Actor orders Thread,
 World, Workflow, MCP, Session, and revision changes. Host implements the
@@ -306,7 +308,7 @@ admission confirmations is checked exactly once; reviewers remain responsible fo
 answer quality.
 
 The current hard-budget snapshot is runtime `16,932 / 20,000` lines and all
-Rust source `29,798 / 30,000` lines. The approximate `26,900` Stage 1 target
+Rust source `29,867 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 
@@ -344,9 +346,9 @@ The next iteration is evidence-triggered rather than another broad cleanup:
    creates a new redacted JSONL artifact with per-record and total limits; its
    public success, redaction, and overwrite-failure scenarios are covered. The
    baseline recipe remains explicit and does not create trace files implicitly.
-3. Preserve the completed Shell typed-admission and App Server public approval
-   correlation path. Before migrating another sensitive tool, define non-blocking
-   approval behavior and provide net-zero growth or an explicit line-budget offset.
+3. Preserve the completed typed-admission set and App Server public approval
+   correlation path. New sensitive tools require the same six-question record and
+   a net-zero plan or explicit line-budget offset; read-only tools stay legacy.
 4. Revisit CLI public MCP-timeout projection only when a bounded fault-injection
    seam exists; otherwise keep the capability/App Server evidence and mark the
    CLI transport gap deferred.

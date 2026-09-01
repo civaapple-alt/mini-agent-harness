@@ -5,22 +5,8 @@ pub(super) struct ReadImage {
     pub(super) store: crate::image::ImageStore,
 }
 
-impl Tool for ReadImage {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "read_image".to_string(),
-            description: "Read a local PNG/JPEG/GIF/WebP file and return it for vision models. Path may be workspace-relative or an absolute path on this machine (for example a file under Pictures). Do not copy outside images into the workspace. Absolute paths outside the workspace require approval. The host uploads once via the Files API and later turns reuse that file_id. This is not a screenshot tool.".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": { "path": {"type": "string"} },
-                "required": ["path"],
-                "additionalProperties": false
-            }),
-        }
-    }
-
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let path = self.workspace.local_file_path(arguments, "read_image")?;
+impl ReadImage {
+    fn read(&self, path: PathBuf) -> Result<String, ToolError> {
         let declared = crate::image::declared_media_type(&path).ok_or_else(|| {
             ToolError(format!(
                 "cannot read \"{}\": read_image only accepts PNG/JPEG/WebP/GIF paths",
@@ -64,6 +50,51 @@ impl Tool for ReadImage {
             .store
             .save(&display.display().to_string(), actual, bytes)?;
         Ok(crate::image::format_envelope(&stored))
+    }
+}
+
+impl Tool for ReadImage {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "read_image".to_string(),
+            description: "Read a local PNG/JPEG/GIF/WebP file and return it for vision models. Path may be workspace-relative or an absolute path on this machine (for example a file under Pictures). Do not copy outside images into the workspace. Absolute paths outside the workspace require approval. The host uploads once via the Files API and later turns reuse that file_id. This is not a screenshot tool.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "path": {"type": "string"} },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let path = self.workspace.local_file_path(arguments, "read_image")?;
+        self.read(path)
+    }
+
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        let (path, requires_approval) = self
+            .workspace
+            .local_file_path_with_admission(&request.arguments)?;
+        if !requires_approval {
+            return Ok(ToolAdmission::Legacy);
+        }
+        Ok(ToolAdmission::ApprovalRequired {
+            action: format!("read_image {}", path.display()),
+        })
+    }
+
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        match self
+            .workspace
+            .local_file_path_with_admission(&request.arguments)
+        {
+            Ok((path, _)) => self.read(path).map_or_else(
+                |error| ToolExecutionOutcome::failed(error.to_string()),
+                ToolExecutionOutcome::completed,
+            ),
+            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+        }
     }
 }
 

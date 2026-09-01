@@ -1521,6 +1521,46 @@ Legacy 路径，直接 `execute` 入口继续保留原审批行为。
 判定：**Process typed admission 接受**。下一批迁移 MCP tool call；MCP server
 startup approval 仍是 Host 装配阶段的独立门禁，不能误写成模型调用 admission。
 
+#### 阶段 3 第七个改造批次：MCP/ReadImage typed admission
+
+本批完成剩余 approval-gated 模型工具调用的迁移：MCP tool call 现在先验证
+JSON object 参数并返回 typed `ApprovalRequired`，批准后才通过 post-admission
+路径调用远端工具；`read_image` 对工作区/Session 可读路径保持 `Legacy`，对
+工作区外的绝对路径返回 typed approval，批准后才读取和上传图像。MCP server
+startup approval 仍是 Host 装配阶段的独立门禁，不与模型采样返回后的 tool-call
+admission 混为一谈。只读的 `ProcessRead`、`ProcessList`、`ReadFile` 和结果读取
+继续使用 Legacy 路径。
+
+六项准入验证：
+
+```text
+1. Layer: Capabilities MCP/ReadImage 描述参数和副作用 admission，Host
+   ToolOrchestrator 复用统一审批；Core、App Server 和 CLI 不增加执行路径。
+2. Duplicate responsibility: 复用现有 RMCP call、Workspace 路径策略、
+   ImageStore 和 ApprovalController；没有新增 MCP 状态权威、文件读取权威或
+   第二个审批器。
+3. Replace vs add: 主路径用 admission + execute_after_admission 替换模型工具
+   调用中的内部 approval；MCP startup gate 和 direct legacy execute 继续保留，
+   作为装配门禁及兼容安全入口。
+4. Net line delta: baseline runtime 16,932、all Rust 29,798；actual runtime
+   16,932 (+0)、all Rust 29,867 (+69)。剩余预算为 3,068 和 133 行；本批之后
+   不再增加 Rust 功能代码，后续优先做抵扣、测试证据和文档。
+5. Visible surface: 不改变 tool schema、模型输入、事件、Session 或公共协议；
+   远端 MCP 调用和工作区外图像读取都只在 approval 通过后产生副作用，拒绝仍
+   返回非空结构化失败结果。
+6. Boundary evidence: `cargo test -p mini-agent-capabilities`（66 passed）、
+   package Clippy、fmt、diff check 和 line budget 通过；既有 MCP server/call
+   refusal、RMCP stdio/HTTP、图像上传、路径越界和 approval denial 测试保持有效。
+   App Server 公共 Shell scenario 已覆盖相同 Host admission、approval broker
+   和 request/turn/call correlation 边界；MCP-specific public projection 未
+   新增协议面，仍以既有 App Server timeout/refusal evidence 为准。
+```
+
+判定：**MCP tool call 与 ReadImage typed admission 接受**。当前所有会产生模型
+工具调用副作用的内建路径均已迁移；剩余 Legacy 仅为只读工具、兼容 direct execute
+入口和 MCP startup assembly gate。由于全 Rust 预算只剩 133 行，下一轮不得继续
+扩展 Rust 生产面，除非先给出等量抵扣。
+
 ### 3.4 评估自动化的顺序
 
 自动化和下一迭代按以下顺序推进：
@@ -1594,10 +1634,13 @@ Docker contract and README/SECURITY wording intentionally make no stronger isola
    和下一轮模型输入中保持非空；cross-file refactor scenario 已验证两个文件的读取、编辑和最终落盘；且没有改变生产执行路径；
    CLI `ask --trace-jsonl PATH` 已验证 bounded redaction、总量上限和 create-new ownership；
 5. runtime 和 all Rust 两个 hard ceilings 均通过，且本批没有删除受保护的 Core/Actor/CAS/Session 测试或权威；
-6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致。
+6. README、CHANGELOG、Agent Notes、`AGENTS.md` 和 PR template 已与实际流程一致；
+   approval-gated 的 Shell、文件 mutation、工作区外 ReadImage、managed process
+   mutation 和 MCP tool call 均已有 typed admission 迁移记录。
 
 后续仍需补充 CLI public MCP transport timeout projection、
 HTTP 429 provider-specific retry/backoff 合同、Docker sandbox 的更强 network/capability/resource isolation 和独立 model/provider
 对比场景；CLI public-path 的未知工具恢复、cross-file refactor、MCP connection/call refusal、
 sandbox 前置拒绝以及 App Server 的 NeedsApproval/MCP timeout projection 已覆盖，但更完整的
-工具失败/超时/重试矩阵仍是证据缺口，不是当前实现的已覆盖能力。
+工具失败/超时/重试矩阵仍是证据缺口，不是当前实现的已覆盖能力。全 Rust 预算只剩
+133 行；除非先删除等量冗余或兼容代码，否则下一轮不增加 Rust 生产面。

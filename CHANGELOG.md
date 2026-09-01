@@ -28,17 +28,19 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Migrated `process_start`, `process_write`, and `process_stop` to typed admission
   with approval before process mutation; read/list operations remain read-only
   legacy paths and direct execute compatibility remains approval-safe.
+- Migrated MCP tool calls and outside-workspace `read_image` to typed admission.
+  MCP server startup approval remains a separate Host assembly gate, while
+  workspace/session image reads and other read-only tools retain their legacy path.
 
 ### Audited
 
 - Audited the Core/Host `ToolRouter → ToolOrchestrator` approval path. The first
   execution-delegate seam now exists, but there is still no full central approval
-  orchestrator: Core dispatches, built-in Capabilities own pre-side-effect approval,
-  Host owns the migration-time outcome classification, and App Server owns approval
-  transport plus settled-turn persistence. Shell now has typed admission and public
-  approval correlation; other sensitive tools remain explicitly deferred. Approval
-  callbacks are still synchronous, so non-blocking approval is a prerequisite for
-  broadening the migration.
+  orchestrator: Core dispatches, built-in Capabilities describe typed admission,
+  Host owns the migration-time approval decision, and App Server owns approval
+  transport plus settled-turn persistence. Approval-gated model tool calls are now
+  migrated in bounded slices; read-only tools and MCP server startup remain explicit
+  legacy/assembly boundaries.
 
 ### Changed
 
