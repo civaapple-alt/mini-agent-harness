@@ -6,7 +6,10 @@ use crate::tool_batch_executor::truncate_utf8;
 pub(super) const LOOP_WARNING_PREFIX: &str = "[Loop warning:";
 
 pub(super) const COMPACTION_PREFIX: &str = "[Compacted conversation context]";
-pub(super) const COMPACTION_PROMPT: &str = "Summarize the conversation state for another coding agent that must continue the work. Preserve the user's active goal, constraints, decisions, files changed, commands and tests already run, failures, unresolved work, and the exact next actions. Be concise but do not omit information needed to continue. Output only the summary and do not call tools.";
+
+pub(super) fn compaction_prompt() -> &'static str {
+    include_str!("../builtin/prompts/system/compaction.md").trim_end()
+}
 pub(super) const COMPACT_TAIL_GROUPS: usize = 2;
 pub(super) const COMPACT_TAIL_MAX_BYTES: usize = 128 * 1024;
 

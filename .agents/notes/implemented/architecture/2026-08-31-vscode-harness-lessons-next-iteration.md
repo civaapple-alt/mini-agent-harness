@@ -1597,6 +1597,54 @@ Host profile/Capabilities 装配选择，具体 attach/执行由对应 Runtime �
 协议 trait 角色，`Tool` 是组合 trait，而不是第二套执行路径。后续只做
 预算抵扣、边界证据和文档维护，不再继续扩展这一抽象层。
 
+#### 阶段 3 第九个改造批次：外置稳定 Builtin Prompt 模板
+
+本批将稳定、可版本化的内置提示词从 Rust `match` 和长字符串中移到 crate
+自有的 UTF-8 Markdown 模板，并用 `include_str!` 在编译期嵌入。Core 外置默认
+system prompt 与 compaction instruction；Capabilities 外置当前已启用的
+`explore`、`plan`、`general` agent 和 `reviewer`、`implementer`、`researcher`
+persona；App Server 外置 Goal verifier prompt。当前代码实际只有这 3 个 persona，
+没有借此批次凭空恢复历史上未启用的 `security-auditor`、`test-writer`、
+`design-doc-writer`、`design-doc-reviewer`。
+
+模板只承载稳定 builtin 文本，不承载 project `AGENTS.md`、extension/skill
+metadata、world state 或 workflow instructions。Host 仍负责这些 bounded
+动态片段的组合，Core 仍负责 turn、context limit、compaction 和 Session 写回。
+所有模板通过 `trim_end()` 保持既有提示词的模型可见字节；本批没有改变 prompt
+内容、事件、持久化或公共 JSON-RPC schema。
+
+App Server 配置替换审计结论：不新增公共任意 `systemPrompt` 替换接口。启动阶段
+已有 `initialize.profile`/workspace profile 的 allowlisted 选择，足以选择受限的
+agent/persona；本地 CLI 仍使用内部 `ThreadUpdate::ReplaceConfig(HarnessConfig)`
+完成模式切换。若未来 Studio/SDK 需要运行时切换，应新增 typed、allowlisted 的
+`agent`/`persona` 或 prompt preset selector，并通过同一个 Runtime Actor 应用，
+不能把未审查的长字符串直接写入模型上下文。
+
+六项准入验证：
+
+```text
+1. Layer: Core 持有默认/compaction builtin，Capabilities 持有 agent/persona
+   builtin，App Server 持有 verifier builtin；Host 只负责动态组合和 profile
+   选择，CLI 不新增 prompt 装配路径。
+2. Duplicate responsibility: 替换原有 Rust 长字符串；保留既有 enum、profile
+   overlay、HarnessConfig 和 verifier 生命周期，没有新增模板引擎或第二套 loader。
+3. Replace vs add: 用 crate-owned Markdown + include_str! 替换 inline literal；
+   不新增公共配置替换。`ThreadUpdate::ReplaceConfig` 继续作为已有本地内部 seam。
+4. Net line delta: baseline runtime 16,975、all Rust 29,949；actual runtime
+   16,980 (+5)、all Rust 29,859 (-90)。释放 90 行 all-Rust 预算；剩余预算为
+   3,020 和 141 行。
+5. Visible surface: 模板字节、模型输入、事件、Session、持久化和公共协议保持
+   不变；只新增 crate 内部 compile-time asset source。App Server 不接受任意 raw
+   system prompt，避免无界模型可见输入。
+6. Boundary evidence: 运行 Core、Capabilities、Host、App Server 受影响 crate
+   测试、workspace Clippy、fmt、diff check 和 line budget；重点确认 include_str!
+   在各 crate 下可编译、compaction/verifier/profile overlay 既有边界行为不变。
+```
+
+判定：**Builtin Prompt 外置接受；App Server 公共配置替换暂不增加**。后续若要
+支持 Studio/SDK 在已建立 Thread 后切换身份，必须先提出 bounded typed selector、
+同一 Actor 应用点、可见面/持久化影响和公共场景证据，再作为独立协议变更评审。
+
 ### 3.4 评估自动化的顺序
 
 自动化和下一迭代按以下顺序推进：

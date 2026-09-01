@@ -15,8 +15,8 @@ use crate::SessionState;
 use crate::context::context_bytes_for;
 use crate::context::model_input_digest;
 use crate::context::tool_manifest_digest;
-use crate::context_controller::COMPACTION_PROMPT;
 use crate::context_controller::assemble_compacted;
+use crate::context_controller::compaction_prompt;
 use crate::context_controller::mechanical_compact;
 use crate::context_controller::split_compaction_parts;
 use crate::context_controller::trim_prefix_to_fit;
@@ -50,9 +50,9 @@ pub struct HarnessConfig {
 impl Default for HarnessConfig {
     fn default() -> Self {
         Self {
-            system_prompt:
-                "You are a coding agent. Use tools when needed and report the result plainly."
-                    .to_string(),
+            system_prompt: include_str!("../builtin/prompts/system/default.md")
+                .trim_end()
+                .to_string(),
             max_steps: 8,
             max_context_item_bytes: 8 * 1024,
             max_user_input_bytes: 32 * 1024,
@@ -562,7 +562,7 @@ impl<M: Model> Harness<M> {
         observer.observe(&Event::ContextCompactionStarted { before_bytes });
         trim_prefix_to_fit(
             &mut prefix,
-            COMPACTION_PROMPT,
+            compaction_prompt(),
             &self.config.system_prompt,
             &[],
             self.config.max_context_bytes,
@@ -574,7 +574,7 @@ impl<M: Model> Harness<M> {
         }
         let mut compaction_messages = prefix.clone();
         compaction_messages.push(Message::User {
-            text: COMPACTION_PROMPT.to_string(),
+            text: compaction_prompt().to_string(),
         });
         let response = match self
             .model

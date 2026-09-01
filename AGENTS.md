@@ -16,6 +16,12 @@ every feature in Codex, Pi, fx, or Qi.
   admission, approval, and execution; `ToolRuntime` owns the concrete side
   effect and its configured sandbox. Core still owns the turn loop, events, and
   conversation-history writeback.
+- Stable built-in prompt bodies belong to crate-owned `builtin/prompts` Markdown
+  assets and are embedded at compile time. Host-owned project, extension, world,
+  and workflow instructions remain bounded runtime composition. App Server may
+  select an allowlisted startup profile, but must not expose arbitrary raw
+  system-prompt replacement over the public protocol; local `ReplaceConfig` is
+  an internal frontend control-plane seam.
 - Do not add a framework for policies, hooks, plugins, storage, scheduling, or
   dependency injection before a concrete experiment needs it.
 - Passive observers never alter execution.

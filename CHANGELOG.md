@@ -7,6 +7,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Added
 
+- Externalized stable Core, Capabilities, and App Server built-in prompt bodies
+  into crate-owned Markdown templates embedded at compile time. Prompt bytes,
+  bounded composition, and the existing allowlisted profile selection remain
+  unchanged; arbitrary public system-prompt replacement was intentionally not
+  added.
 - App Server approval routing now emits a server-owned `approval/resolved`
   notification after `approval/respond`, so clients can observe the complete
   `requested → resolved → tool result` lifecycle. Shell approval requests now

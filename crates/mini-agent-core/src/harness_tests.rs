@@ -1,7 +1,7 @@
 use super::*;
 use crate::context_controller::COMPACTION_PREFIX;
-use crate::context_controller::COMPACTION_PROMPT;
 use crate::context_controller::assemble_compacted;
+use crate::context_controller::compaction_prompt;
 use crate::context_controller::split_prefix_tail;
 use crate::context_controller::trim_prefix_to_fit;
 use crate::tool_batch_executor::truncate_utf8;
@@ -715,7 +715,7 @@ async fn compacts_context_and_continues_the_tool_loop() {
         [
             Message::User { text: compacted_prompt },
             Message::User { text: instruction },
-        ] if compacted_prompt == prompt.as_str() && instruction == COMPACTION_PROMPT
+        ] if compacted_prompt == prompt.as_str() && instruction == compaction_prompt()
     ));
     assert!(matches!(
         continuation.messages.as_slice(),
@@ -819,7 +819,7 @@ async fn trims_over_budget_compaction_prefix_and_continues() {
     let compaction = &requests[0];
     assert!(matches!(
         compaction.messages.last(),
-        Some(Message::User { text }) if text == COMPACTION_PROMPT
+        Some(Message::User { text }) if text == compaction_prompt()
     ));
     assert!(
         !compaction

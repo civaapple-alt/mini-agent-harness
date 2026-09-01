@@ -111,6 +111,28 @@ Host runtime and persistence seams
 Core / Protocol execution foundation
 ```
 
+## Built-in prompt templates
+
+Stable built-in prompt bodies are kept as crate-owned UTF-8 Markdown assets and
+embedded at compile time with `include_str!`. The current sources are:
+
+- `crates/mini-agent-core/builtin/prompts/system/`: the default system prompt
+  and bounded compaction instruction;
+- `crates/mini-agent-capabilities/builtin/prompts/agents/`: `explore`, `plan`,
+  and `general` foundational agent contracts;
+- `crates/mini-agent-capabilities/builtin/prompts/personas/`: the currently
+  enabled `reviewer`, `implementer`, and `researcher` persona contracts;
+- `crates/mini-agent-app-server/builtin/prompts/system/`: the independent Goal
+  verifier instruction.
+
+The Host still composes these bounded built-ins with project `AGENTS.md`,
+extension/skill metadata, world state, and workflow instructions. Those dynamic
+sources are not copied into the template files and remain subject to the
+existing context limits. App Server startup may select an allowlisted profile,
+which can select an agent/persona through the workspace profile. Its internal
+local `ThreadUpdate::ReplaceConfig` seam remains available to the CLI, but the
+public JSON-RPC API does not accept arbitrary system-prompt text.
+
 The crate dependency direction keeps the foundation independent:
 `mini-agent-core → mini-agent-protocol`; `mini-agent-host` builds on core and
 protocol; the app-server service depends on host, core, protocol, and the
@@ -311,8 +333,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `16,975 / 20,000` lines and all
-Rust source `29,949 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `16,980 / 20,000` lines and all
+Rust source `29,859 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 

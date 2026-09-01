@@ -9,8 +9,8 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `16,975 / 20,000` lines (84.9%; 3,025 remaining)
-- all Rust source: `29,949 / 30,000` lines (99.8%; 51 remaining)
+- runtime (`core + protocol + host + app-server`): `16,980 / 20,000` lines (84.9%; 3,020 remaining)
+- all Rust source: `29,859 / 30,000` lines (99.5%; 141 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -21,7 +21,8 @@ The line-budget release work has completed its low-risk Stage 1 audit and the ta
   and the Process typed-admission batch adds `74` all-Rust lines,
   and the MCP/ReadImage typed-admission batch adds `69` all-Rust lines,
   and the Handler/Runtime role split adds `43` runtime / `82` all-Rust lines,
-  so the approximate `26,900` target remains optimization debt
+  and the builtin prompt template extraction adds `5` runtime / removes `90`
+  all-Rust lines, so the approximate `26,900` target remains optimization debt
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, and duplicate Python test fixture probing. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
@@ -41,6 +42,15 @@ used by the existing registry/provider/delegate. Sandbox selection remains a Hos
 concern, with sandbox attach performed by the concrete runtime; this avoids a
 second generic sandbox wrapper while preserving the same approval-before-effect
 invariant.
+
+Stable built-in prompt bodies are now crate-owned Markdown assets under each
+crate's `builtin/prompts` directory and are embedded at compile time. The current
+Core default/compaction, Capabilities agent/persona, and App Server verifier
+templates preserve the previous prompt bytes; Host continues to compose bounded
+project, extension, world, and workflow inputs. App Server startup profile
+selection remains the public configuration seam. Its raw `systemPrompt` is not
+publicly replaceable; the existing `ThreadUpdate::ReplaceConfig` is local and
+internal to frontend control paths.
 
 Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 target is optimization debt, not permission to remove protected behavior. New changes must preserve both hard ceilings, report the runtime and whole-workspace line delta, and default to net-zero growth or identify an explicit offset. Code changes run the affected tests, Clippy, formatting, and `python scripts/line_budget.py`; new Core/Protocol/Actor/CAS/Session behavior also needs an architecture note and boundary-level evidence.
 

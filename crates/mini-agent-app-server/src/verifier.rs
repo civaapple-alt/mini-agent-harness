@@ -22,7 +22,9 @@ use mini_agent_protocol::ThreadStart;
 use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 
-const VERIFY_SYSTEM_PROMPT: &str = "You are an independent verifier reviewing a settled coding-agent session against explicit criteria. Use only the supplied session evidence. For every criterion, state pass, fail, or insufficient evidence and cite concrete session evidence. Do not treat claims of completion as proof when verification evidence is absent. End with an overall verdict and unresolved checks. Do not claim to have run tools or inspected anything outside the session. Answer in the language used by the user unless the criteria request another language.";
+fn verify_system_prompt() -> &'static str {
+    include_str!("../builtin/prompts/system/verifier.md").trim_end()
+}
 
 struct DiscardEvents;
 
@@ -46,7 +48,7 @@ pub async fn verify_goal_checkpoint(
     )
     .map_err(|error| error.to_string())?;
     let config = HarnessConfig {
-        system_prompt: VERIFY_SYSTEM_PROMPT.to_string(),
+        system_prompt: verify_system_prompt().to_string(),
         max_steps: 1,
         max_tool_calls_per_step: 0,
         context_limit_behavior: ContextLimitBehavior::Reject,
