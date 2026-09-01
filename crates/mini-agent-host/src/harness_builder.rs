@@ -239,7 +239,7 @@ where
             .load_mcp(
                 &profile.extension_provider,
                 &configured_mcp_servers,
-                approval,
+                approval.clone(),
             )
             .map_err(|error| error.to_string())?
     } else {
@@ -264,7 +264,7 @@ where
     let stable_system_prompt = config.system_prompt.clone();
     let world = WorldState::detect(&workspace, approval_mode, copilot, profile.sandbox);
     let world_context = world.model_context()?;
-    let tool_executor = Arc::new(ToolOrchestrator);
+    let tool_executor = Arc::new(ToolOrchestrator::new(approval.clone()));
     let tool_registry = ToolRegistry::with_executor(tools, tool_executor);
     let mut harness = Harness::new(model, tool_registry, config);
     harness

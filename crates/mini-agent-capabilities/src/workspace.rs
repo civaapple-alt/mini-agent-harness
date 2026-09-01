@@ -16,7 +16,10 @@ pub use approval::{ApprovalController, ApprovalMode};
 #[cfg(test)]
 use files::{EditFile, ReadFile, ReadImage, WriteFile};
 use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolAdmission;
 use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolExecutionOutcome;
+use mini_agent_protocol::ToolExecutionRequest;
 use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;

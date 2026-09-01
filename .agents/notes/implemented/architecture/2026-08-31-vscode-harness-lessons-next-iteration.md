@@ -1300,6 +1300,61 @@ Core Harness
 内建敏感工具，先定义 typed admission 和副作用前审批证据，再迁移其 approval 调用，
 同时删除对应 legacy 分类/路径，确保没有双重审批。
 
+#### 阶段 3 第二个改造批次：Shell typed admission
+
+本批选择 Shell 作为第一个真正迁移的内建敏感工具。Shell 的命令长度和格式校验、
+Plan Mode 检查以及 approval action 仍由 Shell 提供；审批决策从 Shell 的主模型执行
+路径移到 Host `ToolOrchestrator`，批准后才调用 `execute_after_admission`。直接调用
+旧 `execute` 仍保留原审批行为，作为兼容安全路径；模型经 Host 装配的主路径不再
+调用 Shell 内部的 `approve`，因此没有双重审批。
+
+```text
+model tool call
+  → ToolRouter resolve
+  → ToolOrchestrator: Shell::admission(request)
+  → ApprovalController::approve(action)
+  → Shell::execute_after_admission(request)
+  → Core ToolFinished / Message::Tool
+```
+
+六项准入验证：
+
+```text
+1. Layer:
+   Protocol 增加可移植的 ToolAdmission 与 Tool lifecycle hooks；Capabilities 的
+   Shell 提供 typed admission；Host Orchestrator 执行审批；Core/App Server 只
+   复用既有 delegate、事件和 Session 边界。
+2. Duplicate responsibility:
+   检查 Shell、Workspace::approve、ApprovalController、Host Orchestrator 和
+   ToolExecutionDelegate。Shell 的主路径审批调用被移除并由 Orchestrator 接管；
+   没有增加第二个 Router、ApprovalController 或 Session 写入路径。
+3. Replace vs add:
+   用 `ToolAdmission::ApprovalRequired` 替换 Shell 在主执行路径中的直接审批；
+   保留 `Tool::execute` 的兼容安全行为，并让其他工具继续返回 `Legacy`，避免在
+   尚未迁移的工具上猜测 policy 或引入第二套执行协议。
+4. Net line delta:
+   expected: runtime +150 以内、all Rust +220 以内；actual: runtime
+   16,411 → 16,556 (+145)，all Rust 29,051 → 29,258 (+207)。当前余量分别为
+   3,444 和 742 行；下一批必须净零或提供明确抵扣。
+5. Visible surface:
+   不改变 model input、tool schema、wire protocol、event 或 Session schema；
+   Shell 的拒绝文本保持非空且兼容。新增的是内部 typed admission hook；approval
+   request 仍是同步 callback，`requestId`/`turnId`/`callId` correlation 仍待公共
+   App Server 场景确认。
+6. Boundary evidence:
+   `cargo test -p mini-agent-protocol`（7 passed）、`cargo test -p mini-agent-core`
+   （32 passed）、`cargo test -p mini-agent-capabilities`（66 passed）、
+   `cargo test -p mini-agent-host`（42 passed）、`cargo test -p mini-agent-app-server`
+   （32 passed）、跨包 Clippy、`cargo fmt --all`、`git diff --check` 和
+   `python scripts/line_budget.py` 均通过。Host fake admitted-tool 测试证明批准
+   先于执行且拒绝无副作用；Capabilities 测试证明 Shell admission action 和旧
+   直接拒绝行为。真实模型 → App Server → Shell approval 公共场景仍是缺口。
+```
+
+判定：**Shell typed admission 接受**。下一步先补真实 App Server 公共 Shell approval
+scenario，并补齐 approval 与 `requestId`/`turnId`/`callId` 的关联；在该证据和预算
+抵扣明确前，不迁移 Edit/Write、Process 或 MCP，也不把 `Legacy` 默认改成隐式 allow。
+
 ### 3.4 评估自动化的顺序
 
 自动化和下一迭代按以下顺序推进：

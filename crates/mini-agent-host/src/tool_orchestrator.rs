@@ -1,4 +1,6 @@
+use mini_agent_capabilities::ApprovalController;
 use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolAdmission;
 use mini_agent_protocol::ToolExecutionDelegate;
 use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionRequest;
@@ -10,12 +12,29 @@ use mini_agent_protocol::ToolExecutionStatus;
 /// outcome classification in one place. Approval and sandbox admission move
 /// here in later slices; the tool remains the source of tool-specific parsing
 /// and side-effect behavior until then.
-#[derive(Default)]
-pub(crate) struct ToolOrchestrator;
+pub(crate) struct ToolOrchestrator {
+    approval: ApprovalController,
+}
+
+impl ToolOrchestrator {
+    pub(crate) fn new(approval: ApprovalController) -> Self {
+        Self { approval }
+    }
+}
 
 impl ToolExecutionDelegate for ToolOrchestrator {
     fn execute(&self, tool: &dyn Tool, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
-        classify_outcome(tool.execute_outcome(&request.arguments))
+        let outcome = match tool.admission(request) {
+            Ok(ToolAdmission::Legacy) => tool.execute_outcome(&request.arguments),
+            Ok(ToolAdmission::ApprovalRequired { action }) => {
+                match self.approval.approve(&action) {
+                    Ok(()) => tool.execute_after_admission(request),
+                    Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+                }
+            }
+            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+        };
+        classify_outcome(outcome)
     }
 }
 
@@ -43,3 +62,7 @@ fn classify_outcome(outcome: ToolExecutionOutcome) -> ToolExecutionOutcome {
     };
     ToolExecutionOutcome { status, ..outcome }
 }
+
+#[cfg(test)]
+#[path = "tool_orchestrator_tests.rs"]
+mod tests;

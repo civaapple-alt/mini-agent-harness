@@ -17,6 +17,7 @@ pub use model::ModelResponse;
 pub use model::ModelUsage;
 pub use model::ToolCall;
 pub use tool::Tool;
+pub use tool::ToolAdmission;
 pub use tool::ToolError;
 pub use tool::ToolExecutionDelegate;
 pub use tool::ToolExecutionOutcome;

@@ -17,14 +17,43 @@ impl Tool for Shell {
     }
 
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let command = self.validated_command(arguments)?;
+        self.0.approval.ensure_plan_mode_unlocked()?;
+        self.0.approve(&format!("shell command `{command}`"))?;
+        self.run_command(command)
+    }
+
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        let command = self.validated_command(&request.arguments)?;
+        self.0.approval.ensure_plan_mode_unlocked()?;
+        Ok(ToolAdmission::ApprovalRequired {
+            action: format!("shell command `{command}`"),
+        })
+    }
+
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        let result = self
+            .validated_command(&request.arguments)
+            .and_then(|command| self.run_command(command));
+        match result {
+            Ok(content) => ToolExecutionOutcome::completed(content),
+            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+        }
+    }
+}
+
+impl Shell {
+    fn validated_command<'a>(&self, arguments: &'a Value) -> Result<&'a str, ToolError> {
         let command = string_arg(arguments, "command")?;
         if command.is_empty() || command.len() > MAX_COMMAND_BYTES {
             return Err(ToolError(format!(
                 "command must contain 1..={MAX_COMMAND_BYTES} bytes"
             )));
         }
-        self.0.approval.ensure_plan_mode_unlocked()?;
-        self.0.approve(&format!("shell command `{command}`"))?;
+        Ok(command)
+    }
+
+    fn run_command(&self, command: &str) -> Result<String, ToolError> {
         let output = run_shell(command, &self.0.root, self.0.sandbox, COMMAND_TIMEOUT)?;
         if output.text.len() <= INLINE_COMMAND_OUTPUT_BYTES {
             return Ok(output.text);

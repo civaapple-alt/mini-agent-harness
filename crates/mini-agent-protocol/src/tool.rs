@@ -75,6 +75,17 @@ impl ToolExecutionOutcome {
     }
 }
 
+/// Describes the admission work required before a tool can cause side effects.
+///
+/// `Legacy` preserves the existing tool-owned lifecycle during incremental
+/// migration. `ApprovalRequired` moves the approval decision to the host
+/// execution delegate while leaving tool-specific validation with the tool.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ToolAdmission {
+    Legacy,
+    ApprovalRequired { action: String },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolError(pub String);
 
@@ -90,6 +101,21 @@ impl Error for ToolError {}
 pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
     fn execute(&self, arguments: &Value) -> Result<String, ToolError>;
+
+    /// Describes host admission for one model-requested call.
+    fn admission(&self, _request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        Ok(ToolAdmission::Legacy)
+    }
+
+    /// Executes a call after the host has completed its typed admission.
+    /// Implementations returning `ApprovalRequired` must override this method
+    /// so the legacy approval path is not invoked a second time.
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        match self.execute(&request.arguments) {
+            Ok(content) => ToolExecutionOutcome::completed(content),
+            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+        }
+    }
 
     /// Returns a structured result while preserving the legacy `execute` API.
     /// Host tools may override this to report approval, deferral, or retryable

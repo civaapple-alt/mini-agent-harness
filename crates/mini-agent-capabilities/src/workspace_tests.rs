@@ -188,6 +188,36 @@ fn shell_denial_is_explicit_before_sandbox_execution() {
 }
 
 #[test]
+fn shell_admission_describes_approval_before_execution() {
+    let root = test_root();
+    let shell = Shell(
+        Arc::new(
+            Workspace::with_read_roots(
+                root.clone(),
+                ApprovalController::new(ApprovalMode::Automatic),
+                Vec::new(),
+                SandboxKind::Native,
+            )
+            .unwrap(),
+        ),
+        ResultStore::default(),
+    );
+    let request = ToolExecutionRequest::new(
+        "call-shell",
+        "shell",
+        json!({"command": "printf admission"}),
+    );
+
+    assert_eq!(
+        shell.admission(&request).unwrap(),
+        ToolAdmission::ApprovalRequired {
+            action: "shell command `printf admission`".to_string(),
+        }
+    );
+    remove_test_root(&root);
+}
+
+#[test]
 fn rejects_escape_and_git_paths() {
     let root = test_root();
     let other = test_root();

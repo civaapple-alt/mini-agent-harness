@@ -15,6 +15,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   migration seam. Core resolves a tool and delegates execution lifecycle ownership
   to Host; legacy tool execution and approval behavior remain compatible while
   typed admission is prepared for a later bounded migration.
+- Added typed `ToolAdmission` for the built-in Shell tool. Host now approves the
+  bounded command before invoking Shell's post-admission execution hook; other
+  tools remain on the explicit legacy path until their own migration evidence is
+  accepted.
 
 ### Audited
 

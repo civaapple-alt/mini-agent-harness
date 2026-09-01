@@ -78,10 +78,10 @@ another runtime execution path.
 
 Approval is currently a distributed Core/Host boundary. `ToolRouter` resolves and
 dispatches through the protocol-level `ToolExecutionDelegate`; the Host
-`ToolOrchestrator` currently preserves legacy outcome classification, while
-built-in Capabilities still perform their own pre-side-effect approval and sandbox
-checks. App Server transports approval notifications and persists settled results.
-Typed admission and approval correlation remain a separate migration step.
+`ToolOrchestrator` owns the typed admission and approval decision for the migrated
+Shell tool, while the remaining built-in Capabilities still use the legacy
+tool-owned approval path. App Server transports approval notifications and
+persists settled results. Approval correlation remains a separate migration step.
 
 Runtime state has one authority: the App Server Runtime Actor orders Thread,
 World, Workflow, MCP, Session, and revision changes. Host implements the
@@ -300,8 +300,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `16,411 / 20,000` lines and all
-Rust source `29,051 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `16,556 / 20,000` lines and all
+Rust source `29,258 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 
