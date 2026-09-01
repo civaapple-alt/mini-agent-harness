@@ -8,14 +8,12 @@ use crate::AppServerRuntime;
 use crate::RuntimeStartOptions;
 use crate::SessionRequest;
 use crate::frontend::ApprovalController;
-use mini_agent_capabilities::ApprovalMode;
 use mini_agent_capabilities::SandboxKind;
 use mini_agent_capabilities::SecurityPreset;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::RunControl;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_host::RuntimeProfile;
-use mini_agent_host::WorldState;
 use mini_agent_host::harness_config;
 use mini_agent_host::harness_config_auto;
 use std::sync::Arc;
@@ -31,17 +29,6 @@ pub struct LocalRuntimeRequest {
     pub web_search_override: Option<bool>,
     pub session_request: SessionRequest,
     pub max_steps: Option<usize>,
-}
-
-/// Returns the bounded startup summary shown by local frontends before the
-/// runtime worker is ready.
-pub fn world_summary(
-    workspace: &std::path::Path,
-    approval: ApprovalMode,
-    copilot: bool,
-    sandbox: SandboxKind,
-) -> String {
-    WorldState::detect(workspace, approval, copilot, sandbox).summary()
 }
 
 /// Fully resolved local runtime inputs, before the frontend approval callback
@@ -60,14 +47,6 @@ impl LocalRuntimeLaunch {
 
     pub fn copilot_max_steps(&self) -> usize {
         self.runtime_config.copilot_max_steps()
-    }
-
-    pub fn web_search_enabled(&self) -> bool {
-        self.runtime_config.web_search()
-    }
-
-    pub fn workflow_scope(&self) -> crate::frontend::WorkflowScope {
-        self.profile.workflows
     }
 
     pub fn security_preset(&self) -> SecurityPreset {

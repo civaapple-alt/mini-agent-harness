@@ -200,11 +200,8 @@ pub mod skills {
 
 /// Workflow commands and prompt shaping exposed to local frontends.
 pub mod workflow {
-    pub use mini_agent_host::PlanSlash;
     pub use mini_agent_host::VerdictOutcome;
     pub use mini_agent_host::VerifierVerdict;
     pub use mini_agent_host::goal_turn_prompt;
-    pub use mini_agent_host::parse_plan_slash;
-    pub use mini_agent_host::planning_turn_prompt;
     pub use mini_agent_host::with_plan_mode_overlay;
 }

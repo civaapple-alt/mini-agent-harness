@@ -7,6 +7,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **REPL scope:** remove the `/status` and `/info` management display and its
+  duplicate local runtime projection. Runtime, capability, world, and MCP
+  inspection remains available through App Server clients; REPL session,
+  streaming, approval, steering, queue, and turn execution remain unchanged.
 - **Breaking App Server API:** replace `workflow/plan/set` with the typed
   `thread/settings/update` `collaborationMode` setting. Plan Mode now updates
   the bounded Host prompt and approval lock through the Runtime Actor, and

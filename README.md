@@ -67,8 +67,10 @@ limits, failures, and observation events.
   App Server runtime; the CLI does not own provider, tool, Thread, or Harness
   assembly. The REPL is intentionally a core-capability reference client for
   turns, streaming events, approval, run control, and sessions; full Plan/Goal
-  workflow presentation belongs to App Server clients such as Studio. The App
-  Server's `local` bootstrap adapter resolves runtime profiles and launch
+  workflow and management presentation belongs to App Server clients such as
+  Studio; the REPL intentionally does not provide a duplicate `/status` or
+  `/info` dashboard. The App Server's `local` bootstrap adapter resolves
+  runtime profiles and launch
   settings for embedded frontends, keeping that setup out of the REPL and
   headless command paths. The CLI imports launch, approval, observation, and
   event contracts from `mini-agent-app-server::frontend` and has no direct

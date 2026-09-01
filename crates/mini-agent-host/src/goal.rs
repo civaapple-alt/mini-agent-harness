@@ -147,46 +147,11 @@ fn current_time_ms() -> u64 {
         .as_millis() as u64
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlanSlash {
-    Enable { prompt: Option<String> },
-    Disable,
-}
-
-pub fn parse_plan_slash(input: &str) -> Option<PlanSlash> {
-    let rest = input.strip_prefix("/plan")?;
-    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
-        return None;
-    }
-    let rest = unquote(rest.trim());
-    if rest.is_empty() || rest == "on" {
-        Some(PlanSlash::Enable { prompt: None })
-    } else if rest == "off" {
-        Some(PlanSlash::Disable)
-    } else {
-        Some(PlanSlash::Enable {
-            prompt: Some(one_line(rest)),
-        })
-    }
-}
-
 pub fn living_plan_path(session_dir: &Path) -> PathBuf {
     session_dir.join("plan.md")
 }
 
 use mini_agent_capabilities::normalize_path;
-
-fn unquote(text: &str) -> &str {
-    let bytes = text.as_bytes();
-    let last = bytes.last().copied();
-    if bytes.len() >= 2
-        && ((bytes[0] == b'"' && last == Some(b'"')) || (bytes[0] == b'\'' && last == Some(b'\'')))
-    {
-        text[1..text.len() - 1].trim()
-    } else {
-        text
-    }
-}
 
 fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -207,12 +172,6 @@ pub fn with_plan_mode_overlay(base: &str) -> String {
     } else {
         format!("{base}\n\n{architect}\n\n{LIVING_PLAN_RIDER}")
     }
-}
-
-pub fn planning_turn_prompt(request: &str) -> String {
-    format!(
-        "Draft or update the living plan for this request. Do not produce the final deliverable.\n\nRequest:\n{request}"
-    )
 }
 
 pub fn goal_turn_prompt(objective: &str, milestone: usize, total: usize) -> String {

@@ -36,5 +36,5 @@ Copy one file from `mcp/` to `.agents/mcp/<server>.json`. The HTTP example uses
 an optional `CONTEXT7_API_KEY`; the stdio example launches the configured
 process. Connection and tool-call approval follow the active runtime profile.
 
-Use `/status` in an interactive session after changing extensions to inspect the
-non-secret runtime and MCP summary.
+Use the App Server capability and world status interfaces after changing
+extensions to inspect the non-secret runtime and MCP summary.

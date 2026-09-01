@@ -2,42 +2,12 @@ use super::*;
 use crate::test_support::test_root as test_dir;
 
 #[test]
-fn parse_plan_slash_accepts_prompt_and_ignores_lookalikes() {
-    assert_eq!(
-        parse_plan_slash("/plan"),
-        Some(PlanSlash::Enable { prompt: None })
-    );
-    assert_eq!(
-        parse_plan_slash("/plan on"),
-        Some(PlanSlash::Enable { prompt: None })
-    );
-    assert_eq!(parse_plan_slash("/plan off"), Some(PlanSlash::Disable));
-    assert_eq!(
-        parse_plan_slash("/plan implement auth"),
-        Some(PlanSlash::Enable {
-            prompt: Some("implement auth".to_string())
-        })
-    );
-    assert_eq!(
-        parse_plan_slash("/plan \"ship the login flow\""),
-        Some(PlanSlash::Enable {
-            prompt: Some("ship the login flow".to_string())
-        })
-    );
-    assert_eq!(parse_plan_slash("/planner"), None);
-    assert_eq!(parse_plan_slash("/status"), None);
-}
-
-#[test]
 fn plan_mode_overlay_keeps_architect_foundation() {
     let overlay = with_plan_mode_overlay("You are a coding agent.");
     assert!(overlay.contains("read-only software architect"));
     assert!(overlay.contains("=== LIVING PLAN MODE ==="));
     assert!(overlay.contains("Do not produce the final deliverable"));
     assert_eq!(with_plan_mode_overlay(&overlay), overlay);
-    let prompt = planning_turn_prompt("提供最新 Mac Studio 介绍的 html");
-    assert!(prompt.contains("Do not produce the final deliverable"));
-    assert!(prompt.contains("提供最新 Mac Studio 介绍的 html"));
     let goal = goal_turn_prompt("提供最新 Mac Studio 介绍的 html", 1, 3);
     assert!(goal.contains("Execute the objective now"));
     assert!(goal.contains("1/3"));

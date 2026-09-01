@@ -1,8 +1,9 @@
 # Troubleshooting
 
 Start with `mini-agent --version`, then configure the provider environment before
-running `ask`, `auto`, or the interactive session. Inside the interactive
-session, `/status` shows the effective runtime state.
+running `ask`, `auto`, or the interactive session. Inspect effective runtime
+state through the App Server `initialize`, `world/state`, and `mcp/status`
+interfaces; the REPL does not duplicate that management dashboard.
 
 ## Missing provider configuration
 

@@ -87,7 +87,7 @@ pub async fn run(
     );
 
     println!("{}", crate::version_line());
-    println!("mini-agent — /auto /status /session /queue /new /help /exit");
+    println!("mini-agent — /auto /session /queue /new /help /exit");
     print_auto_warning();
     if copilot {
         println!("auto mode on");
@@ -180,9 +180,6 @@ pub async fn run(
                     }
                     "/new" => {
                         queue_work(&worker_tx, WorkerCommand::ClearHistory, &mut pending_work)
-                    }
-                    "/status" | "/info" => {
-                        queue_work(&worker_tx, WorkerCommand::ShowStatus, &mut pending_work)
                     }
                     "/session" => {
                         queue_work(&worker_tx, WorkerCommand::ShowSession, &mut pending_work)
@@ -377,9 +374,6 @@ fn print_help() {
     );
     println!(
         "/auto off      Switch to manual mode (require per-step approval for writes/shell/MCP)"
-    );
-    println!(
-        "/status        Display runtime status (security preset, sandbox, web search, session, approval)"
     );
     println!("/session       Show durable session ID, thread ID, and JSONL persistence path");
     println!("/queue         Show number of pending operations in input queue");

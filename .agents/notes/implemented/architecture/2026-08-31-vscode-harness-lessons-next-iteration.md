@@ -1727,7 +1727,7 @@ HTTP 429 provider-specific retry/backoff 合同、Docker sandbox 的更强 netwo
 对比场景；CLI public-path 的未知工具恢复、cross-file refactor、MCP connection/call refusal、
 sandbox 前置拒绝以及 App Server 的 NeedsApproval/MCP timeout projection 已覆盖，但更完整的
 工具失败/超时/重试矩阵仍是证据缺口，不是当前实现的已覆盖能力。全 Rust 预算只剩
-133 行；除非先删除等量冗余或兼容代码，否则下一轮不增加 Rust 生产面。
+231 行；除非先删除等量冗余或兼容代码，否则下一轮不增加 Rust 生产面。
 
 #### 2026-09-01：Plan → `collaborationMode` 第一批落地
 
@@ -1773,3 +1773,40 @@ Decision: **accept and commit this batch**. Goal remains a separate durable runt
 concern; automatic Goal continuation, `thread/goal/*`-style public operations, and
 settings notifications are deferred to later bounded batches after the whole-Rust
 line budget is released. Do not reintroduce the removed Plan endpoint while doing so.
+
+#### 2026-09-01：P0 预算释放——移除死 facade 与 REPL 管理展示
+
+本批完成了当前阶段 1 的低风险 P0 释放。Host 删除了没有生产调用方的
+`PlanSlash`/`parse_plan_slash`、旧 planning prompt facade 及其配套 re-export；保留
+`goal_turn_prompt`，因为它仍是下一阶段 Goal Runtime 的 Host 组合入口。App Server
+local facade 和 Host `WorldState` 删除了没有消费者的 `world_summary`、workflow scope
+及 runtime image/accessor 镜像。CLI REPL 删除 `/status`/`/info` 管理展示和对应 worker
+投影，但保留 session、streaming、approval、steering、queue 和 turn execution；管理
+状态继续由 App Server 的 `initialize`、`world/state`、`mcp/status` 等公共边界提供。
+
+本批六项准入记录：
+
+```text
+1. Layer: Host/App Server local facade and CLI REPL presentation; Core, Actor/CAS/Session,
+   approval, and public App Server state authorities are out of scope.
+2. Duplicate responsibility: the removed Plan parser/prompt/world accessors had no
+   production consumers, and the REPL status dashboard duplicated App Server-owned state.
+   mini-agent-web uses its own HTTP status endpoints and was not changed.
+3. Replace vs add: delete the dead facade and local dashboard; reuse Host goal prompt
+   composition and the existing App Server status/management APIs. No replacement wrapper
+   or second runtime path was added.
+4. Net line delta: runtime `17,078 -> 16,966` (`-112`); all Rust
+   `29,957 -> 29,769` (`-188`). Remaining headroom is `3,034` runtime and `231` all Rust.
+5. Visible surface: the REPL loses only the duplicate `/status` and `/info` local display;
+   App Server protocol, model-visible prompt composition, events, persistence, and public
+   execution semantics are unchanged. This is a CLI surface reduction, not a protocol change.
+6. Boundary evidence: `cargo test -p mini-agent-host` (41 passed),
+   `cargo test -p mini-agent-app-server` (33 passed), and CLI interactive tests (12 passed),
+   plus `cargo fmt --all`, strict Clippy for Host/App Server/CLI, `git diff --check`, and
+   `python scripts/line_budget.py` all pass.
+```
+
+Decision: **accept and commit this P0 batch**. The next candidate is P1 duplicate-test
+consolidation only if it can remain a few-hundred-line, public-boundary-preserving batch;
+do not begin automatic Goal continuation or migrate another sensitive tool from this
+margin without a new six-question admission record and an explicit offset.

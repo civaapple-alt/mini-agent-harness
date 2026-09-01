@@ -179,20 +179,6 @@ impl WorldState {
         ]
     }
 
-    pub fn summary(&self) -> String {
-        format!(
-            "{} {} | {} | {} | approval {} | {} project kind(s) | {}/{} commands available",
-            self.os,
-            self.arch,
-            self.shell,
-            self.mode_name(),
-            self.approval_name(),
-            self.project_kinds.len(),
-            self.available_commands.len(),
-            COMMANDS.len()
-        )
-    }
-
     fn mode_name(&self) -> &'static str {
         if self.copilot { "auto" } else { "default" }
     }

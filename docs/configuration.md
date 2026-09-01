@@ -159,10 +159,11 @@ All provider requests use `{OPENAI_BASE_URL}/responses`. DeepSeek image turns
 use `function_call_output` `input_image.file_id`; mini-agent does not select a
 second provider protocol or rewrite the endpoint based on the model name.
 
-Use `/status` in the interactive session to inspect the effective runtime
-status, and use the App Server `initialize` response to inspect the bounded
-non-secret capability manifest. Neither output contains credentials. Provider
-configuration is validated when a provider-backed turn starts.
+Use the App Server `initialize` response to inspect the bounded non-secret
+capability manifest. The REPL keeps this as a core turn surface and does not
+duplicate the App Server runtime status dashboard. Neither output contains
+credentials. Provider configuration is validated when a provider-backed turn
+starts.
 
 If the startup workspace contains `AGENTS.md`, mini-agent appends its UTF-8
 contents once to the stable system prompt. The file has a 16 KiB hard limit.

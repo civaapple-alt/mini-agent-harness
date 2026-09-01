@@ -27,7 +27,6 @@ pub(super) enum ReplEvent {
 pub(super) enum WorkerCommand {
     Prompt(String),
     ClearHistory,
-    ShowStatus,
     ShowSession,
     SetExecution {
         approval: ApprovalMode,
@@ -92,7 +91,6 @@ pub(super) fn spawn_worker(
             }
         };
         let auto_max_steps = launch.copilot_max_steps();
-        let web_search_enabled = launch.web_search_enabled();
         let mut runtime = match model_runtime.block_on(
             launch.start_with_control(approval.clone(), std::sync::Arc::new(run_control.clone())),
         ) {
@@ -103,7 +101,6 @@ pub(super) fn spawn_worker(
                 return;
             }
         };
-        let mut copilot = copilot;
         let mut world = match model_runtime.block_on(runtime.client_mut().world_state()) {
             Ok(world) => world,
             Err(error) => {
@@ -191,72 +188,6 @@ pub(super) fn spawn_worker(
                             }
                         }
                     }
-                    WorkerCommand::ShowStatus => {
-                        let mode_str = match approval.mode() {
-                            ApprovalMode::Automatic => "automatic (auto-approve)",
-                            ApprovalMode::Interactive => "interactive (prompt on shell/sensitive)",
-                        };
-                        let copilot_str = if copilot {
-                            if auto_max_steps == 0 {
-                                "on (unlimited steps)".to_string()
-                            } else {
-                                format!("on (max {auto_max_steps} steps)")
-                            }
-                        } else {
-                            "off".to_string()
-                        };
-                        let session_str = if let Ok(Some(opened)) =
-                            model_runtime.block_on(runtime.client_mut().session_info())
-                        {
-                            format!(
-                                "{} (thread {}) [durable: {}]",
-                                opened.session_id, opened.thread_id, opened.path
-                            )
-                        } else {
-                            "unavailable".to_string()
-                        };
-                        let workspace_str = world.workspace.clone();
-
-                        let _ = events.send(ReplEvent::Notice(format!(
-                            "status> workspace:        {workspace_str}"
-                        )));
-                        let _ = events.send(ReplEvent::Notice(format!(
-                            "status> security-preset:  {preset}"
-                        )));
-                        let _ = events.send(ReplEvent::Notice(format!(
-                            "status> sandbox:          {sandbox_kind}"
-                        )));
-                        let _ = events.send(ReplEvent::Notice(format!(
-                            "status> approval:         {mode_str}"
-                        )));
-                        let web_search_str = if web_search_enabled {
-                            "enabled (built-in responses web_search)"
-                        } else {
-                            "disabled"
-                        };
-                        let _ = events.send(ReplEvent::Notice(format!(
-                            "status> web search:       {web_search_str}"
-                        )));
-                        let _ = events.send(ReplEvent::Notice(format!(
-                            "status> copilot mode:     {copilot_str}"
-                        )));
-                        let manifest = runtime.capability_manifest();
-                        let disabled = manifest
-                            .disabled
-                            .iter()
-                            .map(|(name, _)| name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(",");
-                        let _ = events.send(ReplEvent::Notice(format!(
-                            "status> capabilities:      profile={} enabled={} disabled={}",
-                            manifest.profile,
-                            manifest.enabled.join(","),
-                            disabled
-                        )));
-                        let _ = events.send(ReplEvent::Notice(format!(
-                            "status> session:          {session_str}"
-                        )));
-                    }
                     WorkerCommand::ShowSession => {
                         match model_runtime.block_on(runtime.client_mut().session_info()) {
                             Ok(Some(session)) => {
@@ -280,9 +211,8 @@ pub(super) fn spawn_worker(
                     }
                     WorkerCommand::SetExecution {
                         approval: mode,
-                        copilot: new_copilot,
+                        copilot,
                     } => {
-                        copilot = new_copilot;
                         approval.set_mode(mode);
                         let mut config = harness_config_auto(copilot, auto_max_steps);
                         config.system_prompt.clone_from(&stable_system_prompt);
