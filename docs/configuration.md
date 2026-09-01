@@ -191,17 +191,19 @@ runtime telemetry `signals.json`, frozen environment snapshot `prompt_context.js
 and the append-only `session.jsonl` log. Large tool results are recorded as
 `result_stored` entries in that same log so handles survive resume.
 
-## Plan Mode and Autonomous Goal Workspaces
+## App Server Plan Mode and Autonomous Goal Workspaces
 
-Mini-Agent decouples task execution workflows from approval policies:
+Mini-Agent decouples task execution workflows from approval policies. These
+workflows are owned by the App Server and are intended for Studio/SDK clients;
+the core REPL remains focused on turn execution and run control:
 
-- **Plan Mode (`/plan` or `/plan <prompt>`)**: Locks codebase mutations to read-only while permitting edits exclusively to the session living plan (`~/.mini-agent/sessions/<workspace>/<id>/plan.md`). Relative path `plan.md` maps to that file. Tracks planning state in `plan_mode.json`.
-- **Autonomous Goal Mode (`/goal <objective>`)**: Materializes a dedicated `goal/` workspace containing `state.json` (milestone progress, loop counts, verifier scores) and `plan.md` (acceptance criteria). Integrates with an independent Goal verifier (`goal/verifier_verdict.md`) to provide blind validation gates before advancing milestones.
+- **Plan Mode (`workflow/plan/set`)**: Locks codebase mutations to read-only while permitting edits exclusively to the session living plan (`~/.mini-agent/sessions/<workspace>/<id>/plan.md`). Relative path `plan.md` maps to that file. Tracks planning state in `plan_mode.json`.
+- **Autonomous Goal Mode (`workflow/goal/*`)**: Materializes a dedicated `goal/` workspace containing `state.json` (milestone progress, loop counts, verifier scores) and `plan.md` (acceptance criteria). Integrates with an independent Goal verifier (`goal/verifier_verdict.md`) to provide blind validation gates before advancing milestones.
 
 Goal limits can be shortened in a workspace `.env` for deterministic local
 fixtures. A timeout stops the current milestone cooperatively, persists a
-failed Goal state, and leaves the REPL available for another command; it does
-not forcibly interrupt synchronous tool effects.
+failed Goal state, and returns control to the App Server client; it does not
+forcibly interrupt synchronous tool effects.
 - **Built-in Foundations & Personas**: Supports 3 core agent roles (`explore`, `plan`, `general`) and 3 bounded personas (`reviewer`, `implementer`, `researcher`).
 
 ## Goal verification

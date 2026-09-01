@@ -16,7 +16,7 @@ the [MIT License](LICENSE).
 - Interactive agent sessions and one-shot `ask` commands.
 - An autonomous `auto` mode with bounded context compaction.
 - Bounded workspace file tools, shell commands, web fetches, images, and MCP.
-- Explicit Plan Mode and autonomous Goal Mode.
+- App Server workflow APIs for Plan Mode and autonomous Goal Mode.
 - Durable sessions with resume, fork, live events, and result continuation.
 - Tool-free Goal verification against settled checkpoints.
 - Native process handling on macOS, Linux, and Windows, with optional Docker
@@ -63,11 +63,14 @@ limits, failures, and observation events.
 - `mini-agent-cli` is the frontend: REPL input, headless commands, output
   rendering, and local session interaction. Agent turns go through the local
   App Server runtime; the CLI does not own provider, tool, Thread, or Harness
-  assembly. The App Server's `local` bootstrap adapter resolves runtime
-  profiles and launch settings for embedded frontends, keeping that setup out
-  of the REPL and headless command paths. The CLI imports launch, approval,
-  observation, and event contracts from `mini-agent-app-server::frontend` and
-  has no direct Host or Capabilities dependency.
+  assembly. The REPL is intentionally a core-capability reference client for
+  turns, streaming events, approval, run control, and sessions; full Plan/Goal
+  workflow presentation belongs to App Server clients such as Studio. The App
+  Server's `local` bootstrap adapter resolves runtime profiles and launch
+  settings for embedded frontends, keeping that setup out of the REPL and
+  headless command paths. The CLI imports launch, approval, observation, and
+  event contracts from `mini-agent-app-server::frontend` and has no direct
+  Host or Capabilities dependency.
 
 The mainline is the CLI over the App Server boundary. Other frontends should
 exercise the same App Server management and event contracts rather than add
@@ -186,8 +189,8 @@ Turn commands accept the following options:
 `ask` reads at most 32 KiB from stdin when no prompt is supplied. `auto PROMPT`
 runs one autonomous turn; bare `auto` opens an interactive copilot.
 `resume SESSION_ID` resumes a session directly, while `fork SESSION_ID` creates
-an independent session. Goal verification is initiated by Goal Mode and is not
-a standalone CLI command.
+an independent session. Goal verification is initiated through the App Server
+workflow contract and is not a standalone REPL command.
 
 `--trace-jsonl PATH` is an explicit one-shot diagnostic artifact. The parent directory
 must already exist, the file is created without overwrite, each record is capped at
@@ -217,9 +220,11 @@ other live effects are not resumed.
   evidence before adding them.
 - There is no telemetry, update check, or crash-report service.
 
-Plan Mode (`/plan`) locks workspace mutations while keeping a living session
-plan. Goal Mode (`/goal <objective>`) tracks milestones and can require an
-independent verifier before advancing.
+Plan and Goal are App Server workflow contracts: Plan Mode locks workspace
+mutations while keeping a living session plan, and Goal Mode tracks milestones
+with an optional independent verifier. The REPL deliberately does not expose
+`/plan` or `/goal`; use an App Server client such as Studio or the SDK for the
+full workflow surface.
 
 ## Extensions
 
@@ -288,14 +293,14 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `16,243 / 20,000` lines and all
-Rust source `29,815 / 30,000` lines. The approximate `26,900` Stage 1 target
+The current hard-budget snapshot is runtime `16,336 / 20,000` lines and all
+Rust source `29,152 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
-scenarios pass, with App Server `31/31` and CLI interactive `15/15` regression
-coverage. Changes that affect prompt, tool schema, loop-control, context,
+scenarios pass, with current App Server boundary evidence and CLI interactive
+`12/12` regression coverage. Changes that affect prompt, tool schema, loop-control, context,
 events, or persistence must add scenario/eval evidence beyond unit tests.
 
 The Stage 2 boundary evidence also includes a test-only fault-injection model

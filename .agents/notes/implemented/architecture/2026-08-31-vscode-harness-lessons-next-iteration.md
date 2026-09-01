@@ -1099,6 +1099,47 @@ Decision: accept
 Decision: accept
 ```
 
+#### 阶段 1 本轮实践的六项验证：REPL 核心能力边界
+
+```text
+1. Layer: CLI（通过现有 App Server/Host/Core 主路径执行）
+   rationale: 本批只收缩 `mini-agent-cli` 的交互适配层；Turn、工具、审批、
+   run control 和 Session 仍通过 App Server 公共路径运行，Plan/Goal 的状态机仍由
+   App Server workflow API 所有。
+2. Duplicate responsibility:
+   searched `repl.rs`, `repl_worker.rs`, `repl_worker/prompt.rs`, the App Server
+   workflow client methods, and Studio/SDK-facing workflow contracts. REPL 原先重复
+   编排 Plan prompt、Goal verifier、timeout/advance 和 restart pause；这些不应再由
+   终端参考客户端复制。
+3. Replace vs add:
+   删除 REPL 的 `/plan`、`/goal` 解析、WorkerCommand 分支和 Goal verifier loop；
+   不新增替代 CLI 命令，不删除 App Server workflow API、持久化状态或 Core 边界。
+4. Net line delta:
+   expected: runtime +0; all Rust -500 to -800
+   actual: runtime 16,336 -> 16,336 (+0); all Rust 29,908 -> 29,152 (-756)
+   （以 `python scripts/line_budget.py` 为准；CLI production/unit/integration
+   合计从 4,039 降至 3,283）。
+5. Visible surface:
+   REPL slash-command surface intentionally shrinks: `/plan` and `/goal` no longer
+   start local workflows and are reported as unknown local commands. No model input、
+   event、Session schema 或 public App Server protocol changed；App Server clients
+   retain the complete Plan/Goal workflow surface.
+6. Boundary evidence:
+   `cargo test -p mini-agent-cli` (14 unit + 12 interactive integration passed),
+   `cargo fmt --all`, `cargo clippy -p mini-agent-cli --all-targets -- -D warnings`,
+   `git diff --check`, and `python scripts/line_budget.py`. The three removed tests
+   were CLI-only Goal orchestration tests; App Server/Core workflow and boundary tests
+   remain protected.
+
+Decision: accept
+```
+
+This batch establishes the product split for the next iteration: Studio is the
+full user interaction surface, while the REPL demonstrates the harness core
+and its stable public path. Future REPL reduction may remove duplicate World/MCP
+inspection and extension presentation in a separate bounded batch; it must keep
+the world snapshot and capability state authoritative in Host/App Server.
+
 ### 3.4 评估自动化的顺序
 
 自动化和下一迭代按以下顺序推进：

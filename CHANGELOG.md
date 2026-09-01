@@ -12,6 +12,13 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   `requested → resolved → tool result` lifecycle. This is additive to the
   protocol and does not change approval policy or Session commit semantics.
 
+### Changed
+
+- Narrowed the interactive REPL to a core-capability reference client. It keeps
+  turns, streaming events, approval, run control, and session commands, while
+  Plan/Goal workflow orchestration is now consumed through the App Server by
+  Studio/SDK clients instead of duplicated `/plan` and `/goal` commands.
+
 ## [0.6.0] - 2026-09-01
 
 ### Added

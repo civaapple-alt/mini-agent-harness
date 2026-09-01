@@ -5,50 +5,54 @@ This directory records architectural decision records (ADRs), technology selecti
 
 ---
 
-## Current Maintenance Gate (2026-08-31)
+## Current Maintenance Gate (2026-09-01)
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `16,243 / 20,000` lines (81.2%; 3,757 remaining)
-- all Rust source: `29,815 / 30,000` lines (99.4%; 185 remaining)
+- runtime (`core + protocol + host + app-server`): `16,336 / 20,000` lines (81.7%; 3,664 remaining)
+- all Rust source: `29,152 / 30,000` lines (97.2%; 848 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
-  the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, and the Docker runtime probe adds `23` test lines, so
+  the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, and the REPL core-surface batch removes `756` lines, so
   the approximate `26,900` target remains optimization debt
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, and duplicate Python test fixture probing. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
-The low-risk Stage 1 candidates are now exhausted. The remaining reduction candidates are intentional frontend facades, input-compatibility aliases, provider/protocol coverage, or larger state-boundary changes; they require an explicit design decision. Stage 2 boundary protections remain in force while Stage 3 is the active admission mode and the budget gates stay active. The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
+The first explicit Stage 1 release batch is now complete: the REPL keeps core turn execution, streaming events, approval, run control, and session basics, while Plan/Goal workflow orchestration is left to App Server clients such as Studio. Further REPL reduction of duplicate World/MCP/extension presentation requires its own bounded batch. Stage 2 boundary protections remain in force while Stage 3 is the active admission mode and the budget gates stay active. The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
 
-Stage 2 targeted boundary checks pass for Core, Protocol, App Server Protocol, App Server, Capabilities, Host, and the complete CLI interactive integration target. The goal-timeout lifecycle now settles `turn/interrupt` and durable checkpoint state before marking the goal failed. App Server and the one-shot CLI now export bounded, redacted JSONL Trace records through explicit caller-selected paths. Core/Capabilities now have test-only fault evidence for malformed or missing tool arguments, partial model streams, and retryable tool results; CLI public-path recovery now verifies an unknown-tool result reaches the next model round; App Server public events and checkpoints now preserve non-empty `NeedsApproval` rejection and MCP timeout results. The full workspace test suite remains unrun pending explicit approval.
+Stage 2 targeted boundary checks pass for Core, Protocol, App Server Protocol, App Server, Capabilities, Host, and the CLI interactive integration target. The goal-timeout lifecycle now settles `turn/interrupt` and durable checkpoint state before marking the goal failed. App Server and the one-shot CLI now export bounded, redacted JSONL Trace records through explicit caller-selected paths. Core/Capabilities now have test-only fault evidence for malformed or missing tool arguments, partial model streams, and retryable tool results; CLI public-path recovery now verifies an unknown-tool result reaches the next model round; App Server public events and checkpoints now preserve non-empty `NeedsApproval` rejection and MCP timeout results. The REPL scope batch removed only CLI-local Plan/Goal orchestration and its duplicate CLI tests; App Server/Core workflow evidence remains protected. The full workspace test suite remains unrun pending explicit approval.
 
 Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 target is optimization debt, not permission to remove protected behavior. New changes must preserve both hard ceilings, report the runtime and whole-workspace line delta, and default to net-zero growth or identify an explicit offset. Code changes run the affected tests, Clippy, formatting, and `python scripts/line_budget.py`; new Core/Protocol/Actor/CAS/Session behavior also needs an architecture note and boundary-level evidence.
 
 The six qualitative questions are collected in the repository [PR template](../../.github/pull_request_template.md). Pull-request CI checks that all six questions are answered, placeholders are replaced, and the confirmations are checked; reviewers enforce layer ownership, duplicate-path analysis, replacement-vs-addition reasoning, visible-surface impact, and boundary evidence.
 
-The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative CLI scenarios pass, with the original App Server baseline 28/28 and current App Server 31/31 plus CLI interactive 15/15 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy and model/provider comparison remain explicitly open gaps. CLI `ask --trace-jsonl PATH` now has public-path evidence for redaction, per-record/total bounds, and overwrite refusal; implicit baseline export remains off. Docker CLI/server 29.6.1 and the `alpine` image are available on this host; Docker preflight now queries the daemon with `docker info`, and ordinary plus candidate-strict probes verify the `/workspace` mount and container-only temporary files, while the strict probe also observes network, capability, read-only-root, and bounded-cgroup behavior. These are current-host evidence only, not a complete cross-platform security claim. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists.
+The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative historical CLI scenarios pass, with current App Server boundary evidence and CLI interactive 12/12 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy and model/provider comparison remain explicitly open gaps. CLI `ask --trace-jsonl PATH` now has public-path evidence for redaction, per-record/total bounds, and overwrite refusal; implicit baseline export remains off. Docker CLI/server 29.6.1 and the `alpine` image are available on this host; Docker preflight now queries the daemon with `docker info`, and ordinary plus candidate-strict probes verify the `/workspace` mount and container-only temporary files, while the strict probe also observes network, capability, read-only-root, and bounded-cgroup behavior. These are current-host evidence only, not a complete cross-platform security claim. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists.
 
 ### Next iteration order (evidence-triggered)
 
 1. Keep both hard ceilings and the six-question admission gate active; no Rust
    feature starts without net-zero growth or an explicit offset.
-2. The bounded opt-in CLI Trace contract is implemented and covered by CLI public
+2. Keep the REPL as a core-capability reference surface. The Plan/Goal workflow
+   UI and orchestration stay in App Server clients such as Studio/SDK; any further
+   World/MCP/extension presentation removal must be a separate few-hundred-line
+   batch with public-path evidence.
+3. The bounded opt-in CLI Trace contract is implemented and covered by CLI public
    scenarios: explicit `ask --trace-jsonl PATH`, create-new ownership, redaction,
    8 KiB per-record and 256 KiB total limits, and fail-on-write/finalization error.
    The baseline recipe remains explicit and does not create traces implicitly.
-3. Revisit CLI public MCP-timeout projection only if a bounded fault-injection
+4. Revisit CLI public MCP-timeout projection only if a bounded fault-injection
    seam can be justified; otherwise keep the current capability/App Server
    coverage and record the CLI transport gap as deferred.
-4. The measurable Core compaction-trigger scenario is now recorded: it checks a
+5. The measurable Core compaction-trigger scenario is now recorded: it checks a
    trigger at least 70% of the bounded fixture budget and recent-tail retention;
    production remains at the documented 50% trigger unless later evidence proves
    that threshold unsuitable.
-5. Docker availability and workspace-mount evidence are now recorded. The next
+6. Docker availability and workspace-mount evidence are now recorded. The next
    action is to review the [Docker isolation policy proposal](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md),
    covering threat model, supported platforms, defaults/opt-outs, compatibility,
    and fail-closed behavior. A current-host feasibility probe accepted the
    candidate flags and strict workspace mounting, but cross-platform evidence is
    still required before stronger isolation may be implemented.
-6. Defer provider comparison and retry/backoff until a second provider or an
+7. Defer provider comparison and retry/backoff until a second provider or an
    explicit bounded policy exists; paid-provider CI is not a default gate.
 
 Every item must remain a few-hundred-line batch, pass affected tests and Clippy,
@@ -169,7 +173,7 @@ If a proposed approach is rejected during review:
 | 2026-08-30 | [Capabilities API Boundaries](implemented/architecture/2026-08-30-capabilities-api-boundaries.md) | Capabilities root facade split into stable contracts, composition seams, and crate-internal implementation |
 | 2026-08-30 | [Goal Verifier Naming Boundary](implemented/architecture/2026-08-30-goal-verifier-naming.md) | Replaced current Mentor implementation names with Goal verifier terminology without retaining legacy environment aliases |
 | 2026-08-31 | [Python SDK Architecture & App Server Integration](implemented/architecture/2026-08-31-python-sdk-architecture-and-app-server-integration.md) | Official Python SDK packaging, async context manager, strongly typed event stream models, and Codex-aligned layered architecture |
-| 2026-08-31 | [Harness Framework Comparison and Next-Iteration Admission Note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) | 合并 mini-agent-harness/Codex 原生分层与 Turn 流程对照、VS Code harness 经验、bounded scenario 证据和六项准入记录 |
+| 2026-08-31 | [Harness Framework Comparison and Next-Iteration Admission Note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) | 合并 mini-agent-harness/Codex 原生分层与 Turn 流程对照、VS Code harness 经验、bounded scenario 证据、六项准入记录和 REPL 核心能力边界 |
 | 2026-08-30 | [Runtime Authority and Action Ordering](implemented/architecture/2026-08-30-runtime-authority-and-action-ordering.md) | Core/App Server/Host authority boundaries, internal action envelopes, and separate action/event ordering |
 | 2026-08-30 | [Runtime State Actor Queue](implemented/architecture/2026-08-30-runtime-state-actor-queue.md) | Session, World, MCP, and Workflow state ownership through one App Server actor queue |
 | 2026-08-30 | [Runtime Revision, CAS, and Transaction Boundary](implemented/architecture/2026-08-30-runtime-revision-cas-and-transaction.md) | Unified runtime revisions, stale-write rejection, and the Thread/Session persistence boundary |
