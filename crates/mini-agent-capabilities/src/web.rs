@@ -587,7 +587,6 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::result_store::ReadToolResult;
 
     fn stub_ok(_url: &str) -> Result<FetchedPage, ToolError> {
         Ok(FetchedPage {
@@ -775,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn web_fetch_caches_long_output_for_bounded_continuation() {
+    fn web_fetch_caches_long_output_as_bounded_artifact() {
         let fetch = WebFetch {
             get: stub_long,
             results: ResultStore::default(),
@@ -789,15 +788,6 @@ mod tests {
             "{preview}"
         );
         assert!(!preview.contains("MIDDLE-MARKER"), "{preview}");
-
-        let continuation = ReadToolResult(fetch.results.clone())
-            .execute(&json!({"handle": "result-1", "query": "MIDDLE-MARKER"}))
-            .unwrap();
-        assert!(continuation.contains("MIDDLE-MARKER"), "{continuation}");
-        assert!(
-            continuation.contains("source_truncated=false"),
-            "{continuation}"
-        );
     }
 
     #[test]

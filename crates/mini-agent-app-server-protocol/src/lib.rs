@@ -478,7 +478,6 @@ pub struct ContextLimits {
 pub struct RulePolicy {
     pub workspace_write: bool,
     pub shell_execution: bool,
-    pub process_execution: bool,
     pub workflow_scope: String,
 }
 

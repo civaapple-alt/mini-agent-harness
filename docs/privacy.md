@@ -29,9 +29,8 @@ workspace. The verdict is not sent to later primary turns unless a user
 explicitly copies it into the conversation.
 
 Result handles are appended to the same `session.jsonl` log and are restored when
-the session is resumed. The input queue, in-flight turns, and managed-process
-records remain process-local. Managed child process trees are stopped when the
-CLI exits. Persistence does not make an interrupted external effect replay-safe.
+the session is resumed. The input queue and in-flight turns remain process-local.
+Persistence does not make an interrupted external effect replay-safe.
 
 Project skills and compatible plugin instructions contribute only bounded
 metadata until the model chooses to read an instruction file or resource.

@@ -1,8 +1,4 @@
-use crate::workspace::string_arg;
 use mini_agent_protocol::ToolError;
-use mini_agent_protocol::ToolHandler;
-use mini_agent_protocol::ToolRuntime;
-use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -19,8 +15,6 @@ const MAX_RESULT_BYTES: usize = 8 * 1024 * 1024;
 // JSON escaping can expand newline-heavy output; keep persisted payloads well
 // below the 512 KiB session record ceiling.
 const MAX_PERSISTED_RESULT_BYTES: usize = 64 * 1024;
-const MAX_READ_BYTES: usize = 16 * 1024;
-const DEFAULT_READ_BYTES: usize = 8 * 1024;
 const PREVIEW_BYTES: usize = 4 * 1024;
 
 #[derive(Clone)]
@@ -52,10 +46,7 @@ struct StoreState {
 }
 
 struct StoredEntry {
-    handle: String,
     content: String,
-    source_bytes: usize,
-    source_truncated: bool,
 }
 
 pub struct StoredResult {
@@ -107,12 +98,7 @@ impl ResultStore {
         }
         state.total_bytes = state.total_bytes.saturating_add(content.len());
         let stored_bytes = content.len();
-        state.entries.push_back(StoredEntry {
-            handle: handle.clone(),
-            content,
-            source_bytes,
-            source_truncated,
-        });
+        state.entries.push_back(StoredEntry { content });
         Ok(StoredResult {
             handle,
             preview,
@@ -130,88 +116,6 @@ impl ResultStore {
             };
             state.total_bytes = state.total_bytes.saturating_sub(removed.content.len());
         }
-    }
-
-    fn read(
-        &self,
-        handle: &str,
-        start_byte: usize,
-        byte_count: usize,
-        query: Option<&str>,
-    ) -> Result<String, ToolError> {
-        let state = self.inner.lock().unwrap();
-        let entry = state
-            .entries
-            .iter()
-            .find(|entry| entry.handle == handle)
-            .ok_or_else(|| ToolError(format!("unknown or expired result handle: {handle}")))?;
-        if let Some(query) = query {
-            if query.is_empty() {
-                return Err(ToolError("query must not be empty".to_string()));
-            }
-            let Some(index) = entry.content.find(query) else {
-                return Ok(format!("query not found in {handle}: {query}"));
-            };
-            let radius = byte_count / 2;
-            let start = floor_boundary(&entry.content, index.saturating_sub(radius));
-            let end = ceil_boundary(
-                &entry.content,
-                index
-                    .saturating_add(query.len())
-                    .saturating_add(radius)
-                    .min(entry.content.len()),
-            );
-            return Ok(format_read(entry, start, end));
-        }
-
-        let start = start_byte.saturating_sub(1).min(entry.content.len());
-        let start = ceil_boundary(&entry.content, start);
-        let end = ceil_boundary(
-            &entry.content,
-            start.saturating_add(byte_count).min(entry.content.len()),
-        );
-        Ok(format_read(entry, start, end))
-    }
-}
-
-pub struct ReadToolResult(pub ResultStore);
-
-impl ToolHandler for ReadToolResult {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "read_tool_result".to_string(),
-            description:
-                "Read a bounded byte range or literal match from a large tool result handle"
-                    .to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "handle": {"type": "string"},
-                    "start_byte": {"type": "integer", "minimum": 1},
-                    "byte_count": {"type": "integer", "minimum": 1, "maximum": MAX_READ_BYTES},
-                    "query": {"type": "string"}
-                },
-                "required": ["handle"],
-                "additionalProperties": false
-            }),
-        }
-    }
-}
-
-impl ToolRuntime for ReadToolResult {
-    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let handle = string_arg(arguments, "handle")?;
-        let start_byte = usize_arg(arguments, "start_byte")?.unwrap_or(1);
-        let byte_count = usize_arg(arguments, "byte_count")?
-            .unwrap_or(DEFAULT_READ_BYTES)
-            .min(MAX_READ_BYTES);
-        let query = arguments.get("query").map(|value| {
-            value
-                .as_str()
-                .ok_or_else(|| ToolError("query must be a string".to_string()))
-        });
-        self.0
-            .read(handle, start_byte, byte_count, query.transpose()?)
     }
 }
 
@@ -236,14 +140,6 @@ fn load_session_results(path: &PathBuf) -> StoreState {
         let Some(content) = record.get("content").and_then(Value::as_str) else {
             continue;
         };
-        let source_bytes = record
-            .get("source_bytes")
-            .and_then(Value::as_u64)
-            .unwrap_or(content.len() as u64) as usize;
-        let source_truncated = record
-            .get("source_truncated")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
         let numeric_id = handle
             .strip_prefix("result-")
             .and_then(|value| value.parse::<u64>().ok())
@@ -251,10 +147,7 @@ fn load_session_results(path: &PathBuf) -> StoreState {
         state.next_id = state.next_id.max(numeric_id);
         state.total_bytes = state.total_bytes.saturating_add(content.len());
         state.entries.push_back(StoredEntry {
-            handle: handle.to_string(),
             content: content.to_string(),
-            source_bytes,
-            source_truncated,
         });
     }
     state
@@ -311,19 +204,6 @@ fn append_session_result(
         .map_err(|error| ToolError(format!("cannot persist tool result: {error}")))
 }
 
-fn format_read(entry: &StoredEntry, start: usize, end: usize) -> String {
-    format!(
-        "handle={} bytes={}-{} stored_bytes={} source_bytes={} source_truncated={}\n{}",
-        entry.handle,
-        start.saturating_add(1),
-        end,
-        entry.content.len(),
-        entry.source_bytes,
-        entry.source_truncated,
-        &entry.content[start..end]
-    )
-}
-
 fn retain_head_and_tail(content: String, max_bytes: usize) -> String {
     if content.len() <= max_bytes {
         return content;
@@ -354,18 +234,6 @@ fn ceil_boundary(text: &str, mut index: usize) -> usize {
     index
 }
 
-fn usize_arg(arguments: &Value, name: &str) -> Result<Option<usize>, ToolError> {
-    let Some(value) = arguments.get(name) else {
-        return Ok(None);
-    };
-    let value = value
-        .as_u64()
-        .and_then(|value| usize::try_from(value).ok())
-        .filter(|value| *value > 0)
-        .ok_or_else(|| ToolError(format!("{name} must be a positive integer")))?;
-    Ok(Some(value))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,32 +241,6 @@ mod tests {
     use crate::session::SessionStore;
     use crate::test_support::{HOME_LOCK, remove_test_root, test_root};
     use mini_agent_protocol::Message;
-
-    #[test]
-    fn stored_results_support_ranges_queries_and_eviction() {
-        let store = ResultStore::default();
-        let first = store
-            .store("alpha needle omega".to_string(), 18, false)
-            .unwrap();
-
-        assert!(
-            store
-                .read(&first.handle, 1, 5, None)
-                .unwrap()
-                .ends_with("alpha")
-        );
-        assert!(
-            store
-                .read(&first.handle, 1, 8, Some("needle"))
-                .unwrap()
-                .contains("needle")
-        );
-
-        for index in 0..MAX_RESULTS {
-            store.store(format!("entry {index}"), 7, false).unwrap();
-        }
-        assert!(store.read(&first.handle, 1, 5, None).is_err());
-    }
 
     #[test]
     fn oversized_results_report_cache_truncation() {
@@ -430,7 +272,7 @@ mod tests {
             .record_context(&context, std::slice::from_ref(&context))
             .unwrap();
         let store = opened.store.result_store();
-        let stored = store
+        store
             .store("persisted result".to_string(), 16, false)
             .unwrap();
         drop(store);
@@ -438,8 +280,10 @@ mod tests {
 
         let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
         let restored = resumed.store.result_store();
-        let content = restored.read(&stored.handle, 1, 64, None).unwrap();
-        assert!(content.contains("persisted result"));
+        let next = restored
+            .store("next result".to_string(), 11, false)
+            .unwrap();
+        assert_eq!(next.handle, "result-2");
         drop(resumed);
         remove_test_root(&root);
     }

@@ -23,7 +23,6 @@ const PROMPT_RULE_PRECEDENCE: [&str; 7] = [
 pub struct RulePolicy {
     pub workspace_write: bool,
     pub shell_execution: bool,
-    pub process_execution: bool,
     pub workflow_scope: WorkflowScope,
 }
 
@@ -68,7 +67,6 @@ impl RuntimeProfile {
         RulePolicy {
             workspace_write: self.tools == ToolScope::All && !read_only,
             shell_execution: self.tools == ToolScope::All && !read_only,
-            process_execution: false,
             workflow_scope: self.workflows,
         }
     }
@@ -82,7 +80,6 @@ impl RuntimeProfile {
             enabled.push("image".to_string());
             if self.agent.is_read_only() {
                 disabled.push(("shell".to_string(), "agent scope: read-only".to_string()));
-                disabled.push(("process".to_string(), "agent scope: read-only".to_string()));
                 disabled.push((
                     "workspace-write".to_string(),
                     "agent scope: read-only".to_string(),

@@ -10,10 +10,6 @@ mod model;
 mod openai;
 mod path_policy;
 mod persona;
-// Managed-process tools are retained for a future explicit Host/Plugin
-// provider, but are intentionally not part of the default Builtin catalog.
-#[allow(dead_code)]
-mod processes;
 mod registry;
 mod result_store;
 mod sandbox;
@@ -38,7 +34,6 @@ pub use registry::CapabilityKind;
 pub use registry::CapabilityRegistry;
 pub use registry::ToolBuildRequest;
 pub use registry::ToolProvider;
-pub use result_store::ReadToolResult;
 pub use result_store::ResultStore;
 pub use result_store::StoredResult;
 pub use sandbox::SandboxKind;

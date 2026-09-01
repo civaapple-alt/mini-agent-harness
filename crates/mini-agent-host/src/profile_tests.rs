@@ -105,7 +105,6 @@ fn explicit_agent_and_persona_profiles_render_one_bounded_overlay() {
     );
     assert!(!manifest.rule_policy.workspace_write);
     assert!(!manifest.rule_policy.shell_execution);
-    assert!(!manifest.rule_policy.process_execution);
 }
 
 #[test]

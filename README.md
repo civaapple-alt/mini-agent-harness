@@ -20,8 +20,8 @@ the [MIT License](LICENSE).
 - App Server workflow APIs for Plan Mode and autonomous Goal Mode.
 - Durable sessions with resume, fork, live events, and bounded result artifacts.
 - Tool-free Goal verification against settled checkpoints.
-- Managed-process code is retained for a future explicit Host/Plugin provider;
-  it is not in the default model-visible tool catalog.
+- Managed-process tools and result-continuation tools are not part of the
+  Builtin catalog; large outputs remain bounded internal artifacts.
 
 The design boundary is simple:
 
@@ -39,7 +39,7 @@ limits, failures, and observation events.
 - `mini-agent-core` implements the execution kernel: context preparation,
   model/tool steps, compaction, hard limits, and cooperative run control.
 - `mini-agent-capabilities` owns concrete provider implementations: model and
-  image adapters, workspace/process/web tools, permissions, MCP and skills,
+  image adapters, workspace/web tools, permissions, MCP and skills,
   sessions, and Result Store. `mini-agent-host` is the reusable application
   host for profile resolution, context/workflow composition, and runtime
   assembly; `HostRuntimeFactory` composes selected capabilities into a
@@ -86,9 +86,9 @@ by name and dispatches through the protocol-level `ToolExecutionDelegate`;
 `ToolHandler` owns tool-specific schema, argument parsing, and admission
 description; Host `ToolOrchestrator` owns approval and lifecycle order; and
 `ToolRuntime` owns the concrete side effect. The `Tool` trait composes Handler and
-Runtime for the existing registry/provider/delegate boundary. Typed admission covers Shell, EditFile, WriteFile,
-ProcessStart, ProcessWrite, ProcessStop, MCP calls, and outside-workspace
-ReadImage paths, while read-only tools remain on the Legacy path. Sandbox policy
+Runtime for the existing registry/provider/delegate boundary. Typed admission
+covers Shell, EditFile, WriteFile, MCP calls, and outside-workspace ReadImage
+paths, while read-only tools remain on the Legacy path. Sandbox policy
 is selected by the Host profile/Capabilities assembly and applied by the concrete
 runtime; it is not duplicated in the orchestrator. MCP server startup approval
 remains a separate Host assembly gate. App Server transports approval notifications
@@ -251,15 +251,14 @@ other live effects are not resumed.
 
 - File reads and writes are confined to the active workspace; `.git` is
   protected.
-- Model input, output, tool calls, tool results, and process activity have
+- Model input, output, tool calls, tool results, and shell activity have
   direct hard limits. See [limits](docs/limits.md).
 - Non-interactive `ask` fails closed for sensitive tools unless
   `--auto-approve` (or `-y`) is explicitly supplied.
 - `--sandbox docker` provides bounded container execution with the workspace
   mounted at `/workspace` when Docker is available. The current contract does
-  not claim complete network, capability, or resource isolation. Native process
-  handling prevents orphaned process trees, but shell execution is not itself a
-  security boundary. Stronger Docker restrictions are policy-gated; see
+  not claim complete network, capability, or resource isolation. Shell execution
+  is not itself a security boundary. Stronger Docker restrictions are policy-gated; see
   [SECURITY.md](SECURITY.md) and the [Docker isolation policy proposal](.agents/notes/proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
   for the required threat model, compatibility, failure, and cross-platform
   evidence before adding them.

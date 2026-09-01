@@ -454,7 +454,6 @@ fn default_capability_manifest() -> CapabilityManifest {
         rule_policy: mini_agent_app_server_protocol::RulePolicy {
             workspace_write: false,
             shell_execution: false,
-            process_execution: false,
             workflow_scope: "unknown".to_string(),
         },
         context_limits: Default::default(),

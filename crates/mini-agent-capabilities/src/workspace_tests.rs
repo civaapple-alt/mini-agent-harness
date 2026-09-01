@@ -1,5 +1,4 @@
 use super::*;
-use crate::ReadToolResult;
 use crate::test_support::{remove_test_root, test_root};
 use mini_agent_protocol::ToolExecutionStatus;
 use std::io::Cursor;
@@ -585,7 +584,7 @@ fn shell_preserves_utf8_from_workspace_files() {
 }
 
 #[test]
-fn large_shell_output_is_available_through_a_result_handle() {
+fn large_shell_output_is_retained_as_bounded_artifact() {
     let root = test_root();
     let workspace = Arc::new(
         Workspace::with_read_roots(
@@ -606,11 +605,6 @@ fn large_shell_output_is_available_through_a_result_handle() {
 
     let output = shell.execute(&json!({"command": command})).unwrap();
     assert!(output.contains("handle=\"result-1\""), "{output}");
-    let read = ReadToolResult(results)
-        .execute(&json!({"handle": "result-1", "start_byte": 1, "byte_count": 128}))
-        .unwrap();
-    assert!(read.contains("stored_bytes="));
-    assert!(read.len() >= 128);
 
     remove_test_root(&root);
 }

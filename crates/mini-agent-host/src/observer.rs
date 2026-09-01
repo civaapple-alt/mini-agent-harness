@@ -318,7 +318,7 @@ fn format_tool_finished(name: &str, content: &str, is_error: bool, color: bool) 
 }
 
 fn shows_full_tool_output(name: &str) -> bool {
-    matches!(name, "shell" | "process_read" | "read_tool_result")
+    name == "shell"
 }
 
 fn arg_str<'a>(arguments: &'a Value, name: &str) -> Option<&'a str> {
@@ -327,7 +327,7 @@ fn arg_str<'a>(arguments: &'a Value, name: &str) -> Option<&'a str> {
 
 fn tool_detail(call: &ToolCall) -> Option<String> {
     match call.name.as_str() {
-        "shell" | "process_start" => Some(bounded_single_line(
+        "shell" => Some(bounded_single_line(
             arg_str(&call.arguments, "command")?,
             MAX_TOOL_DETAIL_BYTES,
         )),
@@ -337,14 +337,6 @@ fn tool_detail(call: &ToolCall) -> Option<String> {
         )),
         "web_fetch" => Some(bounded_single_line(
             arg_str(&call.arguments, "url")?,
-            MAX_TOOL_DETAIL_BYTES,
-        )),
-        "process_read" | "process_write" | "process_stop" => Some(bounded_single_line(
-            arg_str(&call.arguments, "process_id")?,
-            MAX_TOOL_DETAIL_BYTES,
-        )),
-        "read_tool_result" => Some(bounded_single_line(
-            arg_str(&call.arguments, "handle")?,
             MAX_TOOL_DETAIL_BYTES,
         )),
         _ => None,

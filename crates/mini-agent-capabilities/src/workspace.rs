@@ -22,7 +22,6 @@ use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
-pub(crate) use shell::shell_command;
 #[cfg(test)]
 use shell::{Shell, capture_bounded, run_shell};
 #[cfg(test)]

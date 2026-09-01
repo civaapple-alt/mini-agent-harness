@@ -36,9 +36,8 @@ The interactive REPL does not prompt by default; `/auto off` turns prompts on.
 
 Foreground output is captured with a hard limit. Large completed results return
 a bounded preview and are retained as a session-side artifact; result
-continuation is not exposed by the default Builtin catalog. Keep shell output
-narrow when the omitted middle is important. Managed-process tools are reserved
-for a future explicit Host/Plugin provider.
+continuation is not exposed by the Builtin catalog. Keep shell output narrow
+when the omitted middle is important.
 
 ## A durable session is locked
 

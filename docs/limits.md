@@ -82,8 +82,6 @@ Host tools add their own effect-side bounds before results reach core:
 | captured foreground stdout and stderr | 8 MiB combined |
 | inline foreground result threshold | 16 KiB |
 | retained result artifact | 8 MiB in memory; session-backed records retain at most 64 KiB each, 8 entries, 16 MiB total |
-| managed processes | 8 when an explicit Host/Plugin provider is selected |
-| managed-process log | 256 KiB per stream when an explicit Host/Plugin provider is selected |
 | queued REPL operations | 16 |
 | root `AGENTS.md` | 16 KiB; UTF-8-safe head and tail if larger; reject if invalid UTF-8 |
 | rendered world-state snapshot | 8 KiB; fixed command catalog and capped path |
@@ -104,11 +102,9 @@ Host tools add their own effect-side bounds before results reach core:
 Shell streams are drained concurrently with a hard capture limit, so a noisy
 process cannot accumulate unbounded captured output or deadlock on a full pipe.
 Large completed results are retained in the process-local result store and
-projected to the model as a bounded preview. Managed process logs
-retain bounded head and tail while their pipes continue to drain; at most eight
-process records exist, and dropping the host stops any remaining process trees.
-On foreground timeout the host terminates the shell process tree. Process
-execution is still not an isolation boundary. Non-interactive `ask` requires
+projected to the model as a bounded preview. On foreground timeout the host
+terminates the shell process tree. Shell execution is still not an isolation
+boundary. Non-interactive `ask` requires
 explicit approval for sensitive tools; the explicitly selected `auto` mode does
 not.
 

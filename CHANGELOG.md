@@ -14,9 +14,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   implements its six-tool default exposure policy and records the admission gate.
 - **Builtin tool scope:** the default model-visible catalog is now limited to
   `read_file`, `write_file`, `edit_file`, `shell`, `web_fetch`, and `read_image`.
-  Managed-process tools are reserved for a future explicit Host/Plugin provider;
-  `read_tool_result` remains an internal result-sidecar implementation and is
-  no longer exposed as a default model tool.
+  Managed-process tools and `read_tool_result` are removed; `ResultStore` remains
+  an internal bounded result sidecar.
 - **Planning:** add the proposed Goal Runtime next-phase plan covering the
   canonical `thread/goal/set/get/clear` contract, automatic continuation,
   settings/Goal notifications, and retirement of manual Goal controls. This
@@ -59,9 +58,6 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Migrated `edit_file` and `write_file` to typed admission with approval before
   file mutation; their direct legacy `execute` entry points remain approval-safe
   for compatibility.
-- Migrated `process_start`, `process_write`, and `process_stop` to typed admission
-  with approval before process mutation; read/list operations remain read-only
-  legacy paths and direct execute compatibility remains approval-safe.
 - Migrated MCP tool calls and outside-workspace `read_image` to typed admission.
   MCP server startup approval remains a separate Host assembly gate, while
   workspace/session image reads and other read-only tools retain their legacy path.
@@ -69,6 +65,13 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   admission) and `ToolRuntime` (legacy and post-admission side effects). `Tool`
   remains their composition boundary, so Router resolution and Core history
   handling stay unchanged.
+
+### Removed
+
+- Removed the managed-process Builtin tools and the model-visible
+  `read_tool_result` tool to keep the Builtin catalog limited to six tools. The
+  App Server `capabilityManifest.rulePolicy.processExecution` field is also
+  removed because no supported Builtin capability consumes it.
 
 ### Audited
 

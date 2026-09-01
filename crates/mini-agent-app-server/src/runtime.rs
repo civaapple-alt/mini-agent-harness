@@ -318,7 +318,6 @@ pub fn capability_manifest_to_protocol(
         rule_policy: ProtocolRulePolicy {
             workspace_write: manifest.rule_policy.workspace_write,
             shell_execution: manifest.rule_policy.shell_execution,
-            process_execution: manifest.rule_policy.process_execution,
             workflow_scope: serialized_name(manifest.rule_policy.workflow_scope),
         },
         context_limits: ProtocolContextLimits {

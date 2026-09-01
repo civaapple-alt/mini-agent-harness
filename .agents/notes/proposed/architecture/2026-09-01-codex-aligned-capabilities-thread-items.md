@@ -36,7 +36,7 @@ concepts are not yet aligned:
 |---|---|---|
 | Skill | Bounded discovery and metadata prompt; model reads `SKILL.md` with `read_file` | Explicit Skill metadata, dependency declaration, and turn-level activation |
 | Plugin | Discovered package name and MCP configuration | Package metadata plus selected Provider inputs; no direct arbitrary code execution |
-| Builtin tools | One `BuiltinToolProvider` assembles all workspace/process/web/image tools | One catalog of first-party ToolSpecs with per-tool exposure and origin; only six are visible by default |
+| Builtin tools | One `BuiltinToolProvider` assembles the workspace/web/image tools | One catalog of first-party ToolSpecs with per-tool exposure and origin; only six are visible by default |
 | Tool execution | `ToolRouter` delegates to Host `ToolOrchestrator`; typed admission is in place for sensitive tools | Preserve this ownership and make every provider use it |
 | History | Core `Event` and `messages`; App Server `turn/event` projection | Add a Codex-shaped `Turn.items` projection without moving Session authority |
 | Large results | `ResultStore` handles and ImageStore attachments | Keep existing stores, then expose bounded `ArtifactRef` from ThreadItems |
@@ -279,10 +279,8 @@ Builtin default:
 The following are deliberately not in the default model-visible catalog:
 
 ```text
-Deferred explicit Host/Plugin provider:
+Removed Builtin tools:
   process_start/read/write/stop/list
-
-Host-internal result sidecar (not a model tool):
   read_tool_result
 
 Explicit extension capabilities:
@@ -291,12 +289,12 @@ Explicit extension capabilities:
   Plugin-provided command integrations
 ```
 
-This selection policy is now the default provider behavior. It is intentionally
-not a deletion of the deferred process implementation or ResultStore: process
-execution needs a separate explicit Host/Plugin provider, while large result
-continuation belongs to the future Artifact sidecar path. Sensitive Builtin
-tools remain approval-gated even when auto-approved; auto-approval is a decision
-record, not absence of the admission lifecycle.
+This selection policy is now the default provider behavior and the removed tools
+have no remaining Builtin implementation. `ResultStore` remains only as an
+internal bounded sidecar for Shell/Web results; large result continuation is a
+future Artifact-sidecar concern. Sensitive Builtin tools remain approval-gated
+even when auto-approved; auto-approval is a decision record, not absence of the
+admission lifecycle.
 
 ### Unified call lifecycle
 
@@ -357,16 +355,18 @@ This batch applies the six-question gate to the first exposure-policy change:
    workspace tool factory, `ToolRouter`, `ToolOrchestrator`, `ResultStore`, and
    `ImageStore`. No second router, executor, approval authority, or result store
    is introduced.
-3. **Replace vs. add:** Remove process and result-continuation entries from the
-   default model-visible vector. Retain their implementations for a future
-   explicit Host/Plugin provider and retain ResultStore as an internal sidecar.
+3. **Replace vs. add:** Delete the managed-process implementation and the
+   `ReadToolResult` wrapper instead of retaining dead tools. Reuse `ResultStore`
+   as an internal Shell/Web sidecar; no alternate provider is added.
 4. **Net line delta:** The measured post-change baseline is runtime
-   `16,954/20,000` and all Rust `29,776/30,000`. The batch is kept small and
-   leaves 224 all-Rust lines; future work needs a measured offset before code.
+   `16,939/20,000` and all Rust `28,907/30,000`. Direct removal releases 869
+   all-Rust lines and leaves 1,093 lines; future work still needs a measured
+   offset before code.
 5. **Visible surface:** The default manifest now exposes exactly
    `read_file`, `edit_file`, `write_file`, `shell`, `web_fetch`, and `read_image`.
-   Process tools and `read_tool_result` are not model-visible by default. There
-   is no new Item, persistence field, approval correlation, or public protocol.
+   Process tools and `read_tool_result` are removed. The App Server manifest no
+   longer advertises `rulePolicy.processExecution`; there is no new Item or
+   approval correlation.
 6. **Boundary evidence:** `mini-agent-capabilities` (66 tests),
    `mini-agent-host` (41 tests), and `mini-agent-app-server` (32 tests) pass.
    The capabilities suite asserts the exact six-tool catalog; Host and App Server
@@ -504,7 +504,7 @@ and after; no estimate authorizes a budget breach.
 - Add the smallest internal Item representation needed to project existing
   Core/Host events.
 - Use `callId` as the initial tool Item id.
-- Map Shell/Process, Edit/Write, MCP, Dynamic, image, and message events.
+- Map Shell, Edit/Write, MCP, Dynamic, image, and message events.
 - Emit started/completed state from one App Server event projection path.
 - Do not yet replace Core Session messages or add a second persistence log.
 
@@ -603,7 +603,7 @@ The proposal does not authorize:
 
 | Risk/open decision | Required resolution |
 |---|---|
-| Current Builtin Provider exposes all tools together | Stage 1 must prove per-tool exposure without duplicating constructors |
+| Default Builtin Provider has a fixed catalog | Stage 1 must add Host-owned selection without reintroducing removed tools or duplicating constructors |
 | Skill dependencies can expand capabilities unexpectedly | Resolve only against an allowlisted Thread policy and record missing/denied dependencies |
 | Dynamic Tool callback may block a connection | Reuse the App Server request lifecycle and isolate blocking work before public enablement |
 | Item projection can duplicate Event and Session logic | Keep one projection adapter and one durable authority; add no parallel loop |
