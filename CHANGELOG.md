@@ -7,6 +7,16 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Architecture proposal:** add a complete Codex-aligned design for Skill,
+  Plugin, Builtin/Host/MCP/Dynamic Tool selection, `Thread` → `Turn` →
+  `ThreadItem` projection, approval correlation, and sidecar Artifact references.
+  The full design remains gated on whole-Rust budget release; this batch only
+  implements its six-tool default exposure policy and records the admission gate.
+- **Builtin tool scope:** the default model-visible catalog is now limited to
+  `read_file`, `write_file`, `edit_file`, `shell`, `web_fetch`, and `read_image`.
+  Managed-process tools are reserved for a future explicit Host/Plugin provider;
+  `read_tool_result` remains an internal result-sidecar implementation and is
+  no longer exposed as a default model tool.
 - **Planning:** add the proposed Goal Runtime next-phase plan covering the
   canonical `thread/goal/set/get/clear` contract, automatic continuation,
   settings/Goal notifications, and retirement of manual Goal controls. This

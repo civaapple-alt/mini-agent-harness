@@ -68,7 +68,7 @@ impl RuntimeProfile {
         RulePolicy {
             workspace_write: self.tools == ToolScope::All && !read_only,
             shell_execution: self.tools == ToolScope::All && !read_only,
-            process_execution: self.tools == ToolScope::All && !read_only,
+            process_execution: false,
             workflow_scope: self.workflows,
         }
     }
@@ -89,7 +89,6 @@ impl RuntimeProfile {
                 ));
             } else {
                 enabled.push("shell".to_string());
-                enabled.push("process".to_string());
                 enabled.push("workspace-write".to_string());
             }
         } else {

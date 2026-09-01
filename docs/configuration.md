@@ -54,7 +54,8 @@ same. Startup output and the App Server initialize response expose the bounded c
 manifest, including enabled/disabled groups and prompt/rule source names.
 The host keeps prompt admission and rule admission as separate profile
 settings. Their source names are visible independently in the manifest, along
-with the effective typed policy for workspace writes, shell/process execution,
+with the effective typed policy for workspace writes and shell execution;
+managed-process execution is reserved for an explicit Host/Plugin provider.
 and workflow scope. The manifest also lists each rule source in precedence
 order as active, shadowed, or disabled with a bounded reason. Explore and Plan
 profiles enforce read-only workspace rules at the host boundary. The built-in

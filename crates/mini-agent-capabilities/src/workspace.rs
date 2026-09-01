@@ -1,10 +1,7 @@
-use crate::processes::ProcessManager;
 mod approval;
 mod files;
 mod shell;
 
-use crate::processes::process_tools;
-use crate::result_store::ReadToolResult;
 use crate::result_store::ResultStore;
 use crate::sandbox::ProcessSandbox;
 use crate::sandbox::SandboxKind;
@@ -73,25 +70,17 @@ pub fn workspace_tools_with_read_roots_and_results(
         extra_read_roots,
         sandbox,
     )?);
-    let processes = ProcessManager::new(
-        workspace.root.clone(),
-        workspace.approval.clone(),
-        results.clone(),
-        sandbox,
-    );
     let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(files::ReadFile(Arc::clone(&workspace))),
         Box::new(files::EditFile(Arc::clone(&workspace))),
         Box::new(files::WriteFile(Arc::clone(&workspace))),
         Box::new(shell::Shell(Arc::clone(&workspace), results.clone())),
-        Box::new(ReadToolResult(results.clone())),
     ];
     tools.extend(crate::web::web_tools(results.clone()));
     tools.push(Box::new(files::ReadImage {
         workspace: Arc::clone(&workspace),
         store: images,
     }));
-    tools.extend(process_tools(processes));
     Ok(tools)
 }
 

@@ -10,6 +10,9 @@ mod model;
 mod openai;
 mod path_policy;
 mod persona;
+// Managed-process tools are retained for a future explicit Host/Plugin
+// provider, but are intentionally not part of the default Builtin catalog.
+#[allow(dead_code)]
 mod processes;
 mod registry;
 mod result_store;

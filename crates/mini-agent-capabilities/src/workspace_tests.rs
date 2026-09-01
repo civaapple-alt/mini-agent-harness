@@ -1,4 +1,5 @@
 use super::*;
+use crate::ReadToolResult;
 use crate::test_support::{remove_test_root, test_root};
 use mini_agent_protocol::ToolExecutionStatus;
 use std::io::Cursor;
@@ -12,6 +13,37 @@ fn policy_can_be_replaced_after_frontend_callback_creation() {
 
     assert_eq!(approval.preset(), SecurityPreset::Turbomode);
     approval.approve("shell:echo profile").unwrap();
+}
+
+#[test]
+fn default_builtin_tools_are_bounded_to_core_catalog() {
+    let root = test_root();
+    let tools = workspace_tools_with_read_roots_and_results(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
+        crate::image::ImageStore::memory_only(),
+        ResultStore::default(),
+    )
+    .unwrap();
+    let names = tools
+        .into_iter()
+        .map(|tool| tool.spec().name)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        names,
+        vec![
+            "read_file",
+            "edit_file",
+            "write_file",
+            "shell",
+            "web_fetch",
+            "read_image",
+        ]
+    );
+    remove_test_root(&root);
 }
 
 #[test]

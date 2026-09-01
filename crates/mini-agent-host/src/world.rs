@@ -125,7 +125,7 @@ impl WorldState {
         context.push_str("<execution_guidance>");
         context.push_str(match self.approval {
             ApprovalMode::Interactive => {
-                "Sensitive writes, shell commands, managed process starts, MCP connections, and MCP calls require per-action user approval."
+                "Sensitive writes, shell commands, MCP connections, and MCP calls require per-action user approval."
             }
             ApprovalMode::Automatic => {
                 "Work continuously toward the user's goal. Inspect the workspace before editing, use tools as needed, keep changes scoped, and run relevant checks. Do not stop at intermediate progress or ask for confirmation unless blocked by missing information or an unsafe action outside the workspace. Sensitive effects may run without per-action approval, and shell commands are not sandboxed."

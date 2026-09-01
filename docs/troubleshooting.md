@@ -35,9 +35,10 @@ The interactive REPL does not prompt by default; `/auto off` turns prompts on.
 ## A command produces too much output
 
 Foreground output is captured with a hard limit. Large completed results return
-a preview and a process-local handle; the model can call `read_tool_result` to
-inspect a byte range or literal match. Use managed-process tools for servers and
-watchers instead of a foreground shell command.
+a bounded preview and are retained as a session-side artifact; result
+continuation is not exposed by the default Builtin catalog. Keep shell output
+narrow when the omitted middle is important. Managed-process tools are reserved
+for a future explicit Host/Plugin provider.
 
 ## A durable session is locked
 

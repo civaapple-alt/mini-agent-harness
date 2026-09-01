@@ -62,7 +62,7 @@ pub trait ToolProvider: Send + Sync {
 const BUILTIN_TOOL_DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
     id: crate::BUILTIN_TOOL_PROVIDER,
     kind: CapabilityKind::Tool,
-    description: "Built-in workspace, process, web, and image tools",
+    description: "Built-in workspace, shell, web, and image tools",
 };
 
 const BUILTIN_DESCRIPTORS: [CapabilityDescriptor; 4] = [

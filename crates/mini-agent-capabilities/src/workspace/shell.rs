@@ -64,7 +64,7 @@ impl Shell {
             .1
             .store(output.text, output.source_bytes, output.source_truncated)?;
         Ok(format!(
-            "<tool_result_preview handle=\"{}\" stored_bytes=\"{}\" source_bytes=\"{}\" source_truncated=\"{}\">\n{}\n</tool_result_preview>\nUse read_tool_result with this handle to inspect a byte range or literal query.",
+            "<tool_result_preview handle=\"{}\" stored_bytes=\"{}\" source_bytes=\"{}\" source_truncated=\"{}\">\n{}\n</tool_result_preview>\nOutput was truncated to the default bounded preview; result continuation is not enabled in the default builtin catalog.",
             stored.handle,
             stored.stored_bytes,
             stored.source_bytes,
@@ -81,12 +81,10 @@ pub(super) fn shell_description(approval: ApprovalMode) -> String {
     };
     if cfg!(windows) {
         format!(
-            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Use PowerShell syntax and cmdlets; do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`. For long-running or interactive programs, use process_start and process_write instead."
+            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Use PowerShell syntax and cmdlets; do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`."
         )
     } else {
-        format!(
-            "Run one POSIX sh command in the workspace {approval}, with a 120-second deadline. For long-running or interactive programs, use process_start and process_write instead"
-        )
+        format!("Run one POSIX sh command in the workspace {approval}, with a 120-second deadline.")
     }
 }
 

@@ -15,12 +15,13 @@ the [MIT License](LICENSE).
 
 - Interactive agent sessions and one-shot `ask` commands.
 - An autonomous `auto` mode with bounded context compaction.
-- Bounded workspace file tools, shell commands, web fetches, images, and MCP.
+- Six bounded default Builtin tools: `read_file`, `write_file`, `edit_file`,
+  `shell`, `web_fetch`, and `read_image`; MCP remains an explicit extension.
 - App Server workflow APIs for Plan Mode and autonomous Goal Mode.
-- Durable sessions with resume, fork, live events, and result continuation.
+- Durable sessions with resume, fork, live events, and bounded result artifacts.
 - Tool-free Goal verification against settled checkpoints.
-- Native process handling on macOS, Linux, and Windows, with optional Docker
-  isolation.
+- Managed-process code is retained for a future explicit Host/Plugin provider;
+  it is not in the default model-visible tool catalog.
 
 The design boundary is simple:
 
@@ -222,7 +223,7 @@ Turn commands accept the following options:
 | `--session-id ID` (also `--session ID`) | interactive, `ask`, `auto` | Resume a durable session instead of opening a new one. |
 | `--auto-approve`, `-y` (also `--yes`, `--auto`) | `ask` | Allow sensitive tools without an interactive approval prompt. |
 | `--max-steps N` | `ask` | Limit model steps; default is 8 for `ask`, and `0` means unlimited. |
-| `--no-tools` | interactive, `ask`, `auto` | Disable workspace, shell, web, image, process, and MCP tools. |
+| `--no-tools` | interactive, `ask`, `auto` | Disable all Builtin and extension tools. |
 | `--security-preset PRESET` | interactive, `ask`, `auto` | Choose `default`, `turbomode`, or `full-machine`; default is `default`. |
 | `--sandbox KIND` | interactive, `ask`, `auto` | Choose `native` or `docker`; default is `native`. |
 | `--web-search` / `--search` | interactive, `ask`, `auto` | Enable built-in Responses `web_search`. |
@@ -243,7 +244,7 @@ metadata, counts, and hashes only; prompt, tool arguments/results, and Session h
 are not copied. A trace write or finalization error fails the command.
 
 Interactive, one-shot, and auto sessions always append their settled history and
-stored result handles to `~/.mini-agent/sessions/`. Running processes, queued input, and
+bounded result artifacts to `~/.mini-agent/sessions/`. Running processes, queued input, and
 other live effects are not resumed.
 
 ## Safety and boundaries
@@ -308,6 +309,9 @@ nested-agent behavior are not emulated. See the
 - [Goal Runtime next-phase plan](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) — unfinished
   `thread/goal/*`, serialized GoalRuntime, automatic continuation, notifications,
   and retirement order for manual Goal controls.
+- [Codex-aligned capabilities and ThreadItems proposal](.agents/notes/proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md) — proposed
+  Skill/Plugin/Builtin/Host/MCP/Dynamic Tool boundaries, `Thread` → `Turn` →
+  `ThreadItem` projection, approval correlation, and sidecar Artifact references.
 
 ## Development
 
