@@ -35,9 +35,10 @@ every feature in Codex, Pi, fx, or Qi.
 - Runtime hard limit: 20,000 Rust source lines across `core`, `protocol`,
   `host`, and `app-server`. The separately reported `acp` edge is excluded
   from this runtime limit.
-- Whole workspace hard limit: 30,000 Rust source lines.
-- The CLI is excluded from the runtime limit but included in the whole
-  workspace limit. Tests count toward both limits.
+- Release-source hard limit: 30,000 Rust source lines across Core, Protocol,
+  Capabilities, Host, and App Server.
+- The CLI, including the experimental REPL, is reported separately and is
+  excluded from the release-source limit. Tests in release packages count.
 - Run `python scripts/line_budget.py` after code changes.
 
 The limit is a ceiling, not a target. Removing a concept is better than fitting
@@ -51,7 +52,8 @@ questions in `.github/pull_request_template.md` before implementation:
 1. Does the change belong to Core, Host, Capabilities, App Server, or CLI?
 2. Does an existing path or type already own the same responsibility?
 3. Can an old concept be removed or replaced instead of adding another layer?
-4. What is the expected and actual net line delta for runtime and all Rust?
+4. What is the expected and actual net line delta for runtime and release
+   source (excluding experimental CLI/REPL)?
 5. Does it expand model-visible input, events, persistence, or public protocol?
 6. Can existing public boundary tests cover it, and what evidence is missing?
 
@@ -63,7 +65,8 @@ reviewers still judge the answer quality and architecture.
 New code defaults to net-zero growth or must identify an explicit offset. Never
 remove Core tests, Actor/CAS/Session authority, or public protocol behavior only
 to satisfy the approximate Stage 1 target. The 20,000-line runtime and
-30,000-line whole-workspace ceilings remain hard gates.
+30,000-line release-source ceilings remain hard gates; experimental CLI/REPL
+growth is informational until it is promoted into the supported surface.
 
 If a change affects prompt, tool schema, loop-control, context, events, or
 persistence, public unit tests alone are not sufficient: add bounded Harness

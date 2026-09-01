@@ -94,7 +94,9 @@ git status --short
 ```
 
 For the 0.6.0 release, both the 20,000-line runtime budget and the 30,000-line
-workspace total, including tests, are hard gates.
+release-source total, including tests in supported packages, are hard gates.
+The experimental CLI/REPL is reported by the budget script but is excluded from
+the release-source gate.
 
 The release archives contain only the binary, `README.md`, `LICENSE`, and
 `CHANGELOG.md`. `scripts/package_release.py` creates deterministic archives and

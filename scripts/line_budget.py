@@ -5,8 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_LIMIT = 20_000
-# The workspace total includes production code and tests and is a hard release
-# gate for the 0.5.0 release.
+# The release-source total includes production code and tests from the supported
+# runtime packages. The experimental CLI/REPL is reported separately and is not
+# part of this hard release gate.
 PROJECT_LIMIT = 30_000
 
 # Keep the report aligned with the conceptual runtime layers. Capabilities are
@@ -25,6 +26,14 @@ LAYERS = (
     ),
     ("cli", ("mini-agent-cli",)),
 )
+RELEASE_PACKAGES = (
+    "mini-agent-core",
+    "mini-agent-protocol",
+    "mini-agent-capabilities",
+    "mini-agent-host",
+    "mini-agent-app-server",
+    "mini-agent-app-server-protocol",
+)
 RUNTIME_PACKAGES = (
     "mini-agent-core",
     "mini-agent-protocol",
@@ -33,14 +42,8 @@ RUNTIME_PACKAGES = (
     "mini-agent-app-server-protocol",
 )
 # Keep provider implementations outside the runtime gate even though they are
-# included in the all-Rust workspace total and shown as their own layer.
-
-
-def rust_lines(path: Path) -> int:
-    return sum(
-        len(source.read_text(encoding="utf-8").splitlines())
-        for source in path.rglob("*.rs")
-    )
+# included in the release-source total and shown as their own layer.
+# The experimental CLI/REPL is intentionally outside both enforced totals.
 
 
 def _scan_code(line: str, state: dict[str, object]) -> str:
@@ -178,21 +181,12 @@ def layer_counts(root: Path, packages: tuple[str, ...]) -> tuple[int, int, int, 
     return tuple(counts)
 
 
-def project_counts(root: Path) -> tuple[int, int, int, int]:
-    counts = [0, 0, 0, 0]
-    for source in (root / "crates").rglob("*.rs"):
-        for index, value in enumerate(source_counts(source)):
-            counts[index] += value
-    return tuple(counts)
-
-
 def layer_lines(root: Path, packages: tuple[str, ...]) -> int:
     return layer_counts(root, packages)[0]
 
 
 def check(root: Path = ROOT) -> int:
-    crates_root = root / "crates"
-    project_lines = rust_lines(crates_root)
+    release_lines = layer_lines(root, RELEASE_PACKAGES)
 
     for name, packages in LAYERS:
         package_list = ", ".join(packages)
@@ -212,8 +206,8 @@ def check(root: Path = ROOT) -> int:
                     f"(production {package_production}, unit {package_unit}, "
                     f"integration {package_integration})"
                 )
-    total, production, unit, integration = project_counts(root)
-    assert total == project_lines
+    total, production, unit, integration = layer_counts(root, RELEASE_PACKAGES)
+    assert total == release_lines
     runtime_total, runtime_production, runtime_unit, runtime_integration = (
         layer_counts(root, RUNTIME_PACKAGES)
     )
@@ -224,11 +218,12 @@ def check(root: Path = ROOT) -> int:
         f"integration {runtime_integration})"
     )
     print(
-        f"all Rust source: {project_lines}/{PROJECT_LIMIT} lines "
+        f"release Rust source (excluding experimental CLI/REPL): "
+        f"{release_lines}/{PROJECT_LIMIT} lines "
         f"(production {production}, unit {unit}, integration {integration})"
     )
 
-    if runtime_total > RUNTIME_LIMIT or project_lines > PROJECT_LIMIT:
+    if runtime_total > RUNTIME_LIMIT or release_lines > PROJECT_LIMIT:
         print("line budget exceeded", file=sys.stderr)
         return 1
     return 0

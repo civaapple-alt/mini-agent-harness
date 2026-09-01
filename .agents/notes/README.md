@@ -10,7 +10,7 @@ This directory records architectural decision records (ADRs), technology selecti
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
 - runtime (`core + protocol + host + app-server`): `17,626 / 20,000` lines (88.1%; 2,374 remaining)
-- all Rust source: `29,499 / 30,000` lines (98.3%; 501 remaining)
+- release Rust source (excluding experimental CLI/REPL): `26,792 / 30,000` lines (89.3%; 3,208 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -32,8 +32,8 @@ The line-budget release work has completed its low-risk Stage 1 audit and the ta
   lines, and the first typed Skill dependency/activation metadata slice adds
   `191` all-Rust lines, and Plugin-to-provider-input selection adds `38`
   all-Rust lines. The bounded ThreadItem projection adds `283` runtime /
-  `283` all-Rust lines, so the approximate `26,900`
-  target remains optimization debt
+  `283` release-source lines. The current release-source total excludes the
+  experimental CLI/REPL and is now below the approximate `26,900` reference.
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, duplicate Python test fixture probing, dead Plan slash-command parsing and prompt facades, dead local WorldState summary accessors, and the REPL `/status`/`/info` management projection. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
@@ -63,7 +63,7 @@ selection remains the public configuration seam. Its raw `systemPrompt` is not
 publicly replaceable; the existing `ThreadUpdate::ReplaceConfig` is local and
 internal to frontend control paths.
 
-Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 target is optimization debt, not permission to remove protected behavior. New changes must preserve both hard ceilings, report the runtime and whole-workspace line delta, and default to net-zero growth or identify an explicit offset. Code changes run the affected tests, Clippy, formatting, and `python scripts/line_budget.py`; new Core/Protocol/Actor/CAS/Session behavior also needs an architecture note and boundary-level evidence.
+Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 target is optimization debt, not permission to remove protected behavior. New changes must preserve both hard ceilings, report the runtime and release-source line delta, and default to net-zero growth or identify an explicit offset. Code changes run the affected tests, Clippy, formatting, and `python scripts/line_budget.py`; new Core/Protocol/Actor/CAS/Session behavior also needs an architecture note and boundary-level evidence.
 
 The six qualitative questions are collected in the repository [PR template](../../.github/pull_request_template.md). Pull-request CI checks that all six questions are answered, placeholders are replaced, and the confirmations are checked; reviewers enforce layer ownership, duplicate-path analysis, replacement-vs-addition reasoning, visible-surface impact, and boundary evidence.
 
@@ -74,7 +74,7 @@ bounded Builtin subset and Core Router applies a reversible visibility filter.
 The Runtime Actor applies both settings at one serialized mutation boundary;
 MCP/external tools are preserved. The active Thread and same-object resume path
 retain the filter, while new/forked factory Threads and durable capability
-checkpointing remain deferred. The batch leaves `1,013` whole-Rust lines;
+checkpointing remain deferred. The current release-source margin is `3,208` lines;
 automatic Goal continuation and settings notifications remain deferred.
 
 The first Skill dependency/activation slice is implemented in Capabilities.
@@ -83,7 +83,8 @@ the metadata catalog exposes non-empty declarations, and
 `Discovery::activate_skill` returns a typed metadata-only activation. It does
 not read Skill bodies, start MCP, enable providers, or grant approval. App Server
 Turn activation and Host allowlist resolution remain the next Skill batch; the
-current all-Rust margin is only `501` lines.
+current release-source margin is `3,208` lines. The experimental CLI/REPL is
+still reported separately at `2,707` lines and does not consume this gate.
 
 The first Plugin provider slice is implemented in Capabilities: selecting a
 validated Plugin name now retains all of that Plugin's discovered MCP provider

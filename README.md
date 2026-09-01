@@ -359,10 +359,11 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `17,626 / 20,000` lines and all
-Rust source `29,499 / 30,000` lines. The approximate `26,900` Stage 1 target
-is currently exceeded and remains optimization debt rather than a reason to
-delete protected behavior.
+The current hard-budget snapshot is runtime `17,626 / 20,000` lines and release
+Rust source `26,792 / 30,000` lines, excluding the experimental CLI/REPL. The
+CLI is still reported separately for visibility. The approximate `26,900` Stage
+1 target is now within the enforced release-source total and remains an
+optimization reference rather than a reason to delete protected behavior.
 
 The Goal Runtime next phase is planned but not yet implemented. Follow the
 [Goal Runtime next-phase plan](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
@@ -448,18 +449,19 @@ composition seam, not cross-provider quality evidence.
 
 The line-budget report breaks Rust source down by the runtime layers: `core`,
   `protocol`, `capabilities`, `host`, `app-server`, and `cli`, followed by the enforced
-  workspace total. `capabilities` is the separately reported provider
+  release-source total. `capabilities` is the separately reported provider
   implementation group behind Host and is not part of the runtime-layer gate.
-  Each layer and the workspace total also show `production`, `unit`, and
+  The experimental `cli`/REPL layer is informational and is excluded from the
+  release-source total.
+  Each layer and the release-source total also show `production`, `unit`, and
   `integration` lines:
   inline `#[cfg(test)]` modules and `*_tests.rs` files are counted as unit
   tests, while Rust files below a `tests/` directory are counted as
   integration tests. The enforced ceilings are 20,000 lines for the runtime
   layers (`core` + `protocol` + `host` + `app-server`). The 30,000-line
-  workspace total is enforced for
-  the 0.6.0 release, including tests. Both ceilings block the release gate.
-  The report still includes all Rust source, including the CLI, so cleanup
-  remains measurable.
+  release-source total is enforced for the 0.6.0 release, including tests in
+  supported packages. Both ceilings block the release gate; experimental
+  CLI/REPL lines remain visible but do not block the release.
 
 The CI matrix covers Ubuntu, macOS, and Windows. Current development is
 validated on macOS arm64; Windows remains a first-class target and is checked

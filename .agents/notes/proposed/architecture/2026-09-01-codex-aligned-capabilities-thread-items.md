@@ -630,7 +630,8 @@ Every implementation batch must answer all six questions in the PR template:
    accepted without an explicit decision.
 
 4. Net line delta
-   Report runtime and all-Rust before/after values. Default to net-zero growth or
+   Report runtime and release-source before/after values, excluding experimental
+   CLI/REPL. Default to net-zero growth or
    identify an explicit offset. Keep every batch within the change-size guidance.
 
 5. Visible surface
@@ -731,8 +732,9 @@ Six-question admission:
 3. **Replace vs add:** extend the existing Skill metadata record and add one
    typed activation projection; provider startup, approval, and execution are
    still owned by Host/Capabilities.
-4. **Net line delta:** all Rust `28,987 → 29,178` (`+191`); the reported runtime
-   (`core + protocol + host + app-server`) remains `17,343`. The batch stays
+4. **Net line delta:** release source `26,280 → 26,471` (`+191`), excluding
+   experimental CLI/REPL; the reported runtime (`core + protocol + host +
+   app-server`) remains `17,343`. The batch stays
    below the few-hundred-line limit and consumes the remaining budget margin.
 5. **Visible surface:** Skills with dependencies add bounded dependency metadata
    to the model-visible catalog. No App Server method, event, persistence,
@@ -756,8 +758,9 @@ Six-question admission:
 3. **Replace vs add:** fix the existing selection predicate so a selected
    Plugin retains its own server inputs; individual server selection remains a
    narrower existing path.
-4. **Net line delta:** all Rust `29,178 → 29,216` (`+38`); runtime
-   (`core + protocol + host + app-server`) remains `17,343`.
+4. **Net line delta:** release source `26,471 → 26,509` (`+38`), excluding
+   experimental CLI/REPL; runtime (`core + protocol + host + app-server`)
+   remains `17,343`.
 5. **Visible surface:** no model prompt, App Server method, event, persistence,
    approval, or public protocol change; only the selected provider input set is
    corrected before the existing Host load gate.
@@ -778,8 +781,9 @@ Six-question admission:
    existing App Server turn projection; Session remains the only durable log.
 3. **Replace vs add:** add a derived Item view alongside existing fields and
    events; no second turn loop, history, or persistence authority is added.
-4. **Net line delta:** runtime `17,343 → 17,626` (`+283`); all Rust
-   `29,216 → 29,499` (`+283`). The remaining all-Rust margin is `501` lines.
+4. **Net line delta:** runtime `17,343 → 17,626` (`+283`); release source
+   `26,509 → 26,792` (`+283`), excluding experimental CLI/REPL. The remaining
+   release-source margin is `3,208` lines.
 5. **Visible surface:** add bounded `items` to `turn/event` and `turn/read`;
    existing event payloads, approval correlation, and Session checkpoint shape
    remain unchanged.

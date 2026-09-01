@@ -10,8 +10,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **Architecture proposal:** add a complete Codex-aligned design for Skill,
   Plugin, Builtin/Host/MCP/Dynamic Tool selection, `Thread` → `Turn` →
   `ThreadItem` projection, approval correlation, and sidecar Artifact references.
-  The full design remains gated on whole-Rust budget release; this batch only
+  The full design remains gated on release-source budget; this batch only
   implements its six-tool default exposure policy and records the admission gate.
+- **Line budget:** change the enforced 30,000-line total to cover supported
+  release packages only; `mini-agent-cli`, including the experimental REPL, is
+  still reported separately but no longer blocks the release-source gate.
 - **Builtin tool scope:** the default model-visible catalog is now limited to
   `read_file`, `write_file`, `edit_file`, `shell`, `web_fetch`, and `read_image`.
   Managed-process tools and `read_tool_result` are removed; `ResultStore` remains
@@ -214,8 +217,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 ### Changed
 
 - Activated Stage 3 normal budget admission. The runtime `20,000`-line and
-  whole-workspace `30,000`-line ceilings remain hard gates; new changes default
-  to net-zero growth or must identify an explicit offset.
+  release-source `30,000`-line ceilings remain hard gates; the experimental
+  CLI/REPL remains separately reported and excluded from the release-source
+  gate. New changes default to net-zero growth or must identify an explicit
+  offset.
 - Aligned `AGENTS.md` with the Stage 3 workflow: affected-package validation is
   the default, while local full-workspace tests require explicit approval;
   CI remains responsible for the full matrix.

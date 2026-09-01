@@ -86,7 +86,10 @@ class LineBudgetTests(unittest.TestCase):
                 "runtime (core + protocol + host + app-server): 1/20000 lines",
                 output.getvalue(),
             )
-            self.assertIn("all Rust source: 1/30000 lines", output.getvalue())
+            self.assertIn(
+                "release Rust source (excluding experimental CLI/REPL): 1/30000 lines",
+                output.getvalue(),
+            )
 
     def test_capabilities_are_reported_but_excluded_from_runtime_gate(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -112,7 +115,27 @@ class LineBudgetTests(unittest.TestCase):
                 output.getvalue(),
             )
 
-    def test_workspace_total_is_release_gate(self):
+    def test_experimental_cli_is_reported_but_excluded_from_release_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            core_root = root / "crates" / "mini-agent-core" / "src"
+            core_root.mkdir(parents=True)
+            (core_root / "lib.rs").write_text("fn core() {}\n", encoding="utf-8")
+            cli_root = root / "crates" / "mini-agent-cli" / "src"
+            cli_root.mkdir(parents=True)
+            (cli_root / "lib.rs").write_text("fn cli() {}\n" * 20, encoding="utf-8")
+
+            output = io.StringIO()
+            with mock.patch.object(line_budget, "PROJECT_LIMIT", 1):
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(line_budget.check(root), 0)
+            self.assertIn("cli: 20 lines", output.getvalue())
+            self.assertIn(
+                "release Rust source (excluding experimental CLI/REPL): 1/1 lines",
+                output.getvalue(),
+            )
+
+    def test_release_source_total_is_release_gate(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             package_root = root / "crates" / "mini-agent-core" / "src"
@@ -124,7 +147,10 @@ class LineBudgetTests(unittest.TestCase):
                 with contextlib.redirect_stdout(output):
                     with contextlib.redirect_stderr(io.StringIO()):
                         self.assertEqual(line_budget.check(root), 1)
-            self.assertIn("all Rust source: 1/0 lines", output.getvalue())
+            self.assertIn(
+                "release Rust source (excluding experimental CLI/REPL): 1/0 lines",
+                output.getvalue(),
+            )
 
 
 if __name__ == "__main__":
