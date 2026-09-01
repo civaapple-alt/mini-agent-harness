@@ -368,9 +368,30 @@ This batch applies the six-question gate to the first exposure-policy change:
    longer advertises `rulePolicy.processExecution`; there is no new Item or
    approval correlation.
 6. **Boundary evidence:** `mini-agent-capabilities` (61 tests),
-   `mini-agent-host` (41 tests), and `mini-agent-app-server` (32 tests) pass.
+   `mini-agent-host` (43 tests), and `mini-agent-app-server` (32 tests) pass.
    The capabilities suite asserts the exact six-tool catalog; Host and App Server
    suites cover profile exposure, approval, JSON-RPC, and lifecycle behavior.
+
+### Stage 1 admission record: Host-owned Tool Catalog slice
+
+1. **Layer:** Host owns the catalog metadata and applies it only to the selected
+   Builtin provider; Capabilities still constructs concrete tools. No Core or
+   public App Server protocol change is needed.
+2. **Duplicate responsibility:** Reuse the existing provider construction,
+   `ToolRouter`, `ToolOrchestrator`, and Handler admission. `ToolCatalog` does
+   not resolve names for execution or introduce another lifecycle.
+3. **Replace vs. add:** Replace implicit Builtin visibility with an explicit
+   six-entry Host catalog. Explicitly registered non-Builtin providers pass
+   through unchanged until Thread-level selection is implemented.
+4. **Net line delta:** Before this slice: runtime `16,939/20,000`, all Rust
+   `28,907/30,000`; after: runtime `17,149/20,000`, all Rust `29,117/30,000`.
+   The slice adds 210 Rust lines and leaves 883 lines of whole-workspace margin.
+5. **Visible surface:** The six default Builtin names remain unchanged; their
+   origin, provider, exposure, and coarse admission metadata are now explicit.
+   No Item, persistence, approval-correlation, or JSON-RPC field is added.
+6. **Boundary evidence:** Host tests cover the typed six-entry catalog and
+   removal of unlisted names; Capabilities, Host, App Server, and CLI suites
+   remain green. Thread-level hidden/disabled selection is still deferred.
 
 ## Artifact and result contract
 
@@ -476,9 +497,11 @@ and after; no estimate authorizes a budget breach.
 
 ### Stage 1: Tool Catalog and exposure
 
-- Introduce a Host-owned bounded catalog over existing ToolSpecs.
-- Record origin, exposure, admission class, provider, and stable name.
-- Filter the model-visible manifest per Thread profile.
+- Landed the first Host-owned bounded catalog over existing ToolSpecs.
+- Record origin, exposure, admission class, provider, and stable name for the
+  six default Builtin entries.
+- Filter the default Builtin provider through that catalog; Thread-level
+  selection remains a follow-up batch.
 - Keep the concrete `ToolProvider` construction path and existing Orchestrator.
 - Prove that hidden tools remain callable only through explicitly authorized
   internal paths and that disabled tools cannot be resolved.
@@ -633,7 +656,8 @@ This proposal is ready for implementation only when:
 **Proposed: accept the direction; implement only the six-tool exposure
 preparation.**
 
-The default Builtin catalog and its admission record are now landed. The next
-actionable work is whole-Rust budget release followed by a separate Host-owned
-Tool Catalog batch. ThreadItem protocol work must follow that catalog decision;
-Artifact APIs and Goal Runtime integration remain later stages.
+The default Builtin catalog, its direct deletion, and the first Host-owned
+Tool Catalog slice are now landed. Thread-level selection is still deferred;
+the next actionable work is whole-Rust budget release followed by bounded Skill
+dependency/activation work. ThreadItem protocol work must follow that catalog
+decision; Artifact APIs and Goal Runtime integration remain later stages.

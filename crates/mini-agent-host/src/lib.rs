@@ -13,6 +13,7 @@ pub mod observer;
 pub mod profile;
 pub mod project_context;
 pub mod runtime_factory;
+mod tool_catalog;
 mod tool_orchestrator;
 pub mod world;
 

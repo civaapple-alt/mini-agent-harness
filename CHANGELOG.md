@@ -16,6 +16,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   `read_file`, `write_file`, `edit_file`, `shell`, `web_fetch`, and `read_image`.
   Managed-process tools and `read_tool_result` are removed; `ResultStore` remains
   an internal bounded result sidecar.
+- **Host Tool Catalog:** add the first Host-owned catalog with explicit tool
+  origin, exposure, admission class, provider, and stable name. The catalog
+  filters only the built-in provider; externally registered providers keep their
+  own tool surface until a later Thread-level selection batch.
 - **Planning:** add the proposed Goal Runtime next-phase plan covering the
   canonical `thread/goal/set/get/clear` contract, automatic continuation,
   settings/Goal notifications, and retirement of manual Goal controls. This

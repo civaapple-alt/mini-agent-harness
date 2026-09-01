@@ -192,7 +192,7 @@ If a proposed approach is rejected during review:
 
 | Date | Title | Focus |
 |---|---|---|
-| 2026-09-01 | [Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems](proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md) | 完整对齐 Skill、Plugin、Builtin/Host/MCP/Dynamic Tool、Thread/Turn/ThreadItem、审批和 Artifact 侧车结果的提案；实现等待预算释放 |
+| 2026-09-01 | [Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems](proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md) | 完整对齐 Skill、Plugin、Builtin/Host/MCP/Dynamic Tool、Thread/Turn/ThreadItem、审批和 Artifact 侧车结果的提案；六工具删除与 Host Tool Catalog 首批已落地 |
 | 2026-09-01 | [Goal Runtime and `thread/goal/*` Next-Phase Plan](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) | Canonical Goal lifecycle API, serialized GoalRuntime, automatic continuation, notifications, migration and retirement gates |
 | 2026-08-31 | [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md) | Threat model, candidate strict profile, compatibility, cross-platform evidence, and fail-closed behavior before Docker flags |
 | 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Implementation complete locally; cross-platform CI/native-platform and authorized real-provider evidence remain open |

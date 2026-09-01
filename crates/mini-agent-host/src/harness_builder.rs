@@ -14,6 +14,7 @@ use crate::profile::{
     ToolScope,
 };
 use crate::project_context;
+use crate::tool_catalog::retain_default_builtin_tools;
 use crate::tool_orchestrator::ToolOrchestrator;
 use crate::world::WorldState;
 use mini_agent_capabilities::ApprovalController;
@@ -215,6 +216,11 @@ where
             images: images.clone(),
             results,
         }) {
+            Ok(tools)
+                if profile.tool_provider == mini_agent_capabilities::BUILTIN_TOOL_PROVIDER =>
+            {
+                retain_default_builtin_tools(tools)
+            }
             Ok(tools) => tools,
             Err(error) => return Err(error.to_string()),
         }
