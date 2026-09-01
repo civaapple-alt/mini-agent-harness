@@ -47,13 +47,21 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   contract the canonical new Goal control plane. Host Goal state now carries
   bounded objective, token budget, and timestamps with old-state defaults, and
   the App Server Runtime Actor owns a serialized `GoalRuntime` state component.
-  The existing Thread/Turn loop remains the only execution loop; automatic
-  continuation, Goal notifications, and retirement of manual workflow controls
-  remain separately gated.
+  The existing Thread/Turn loop remains the only execution loop; settled
+  continuation, settings notifications, and retirement of manual workflow
+  controls remain separately gated.
+- **Goal Runtime first-turn seam:** make `thread/goal/set` schedule one bounded
+  `StartIfIdle` ordinary Thread Turn through the existing App Server worker
+  after durable state creation. Add one Goal notification source for
+  `thread/goal/updated` and `thread/goal/cleared`; local clients can consume
+  generic notifications while `next_event()` continues to expose only turn
+  events. Settled-checkpoint verifier/continuation and settings notifications
+  remain deferred.
 - **Planning:** merge the Goal Runtime plan into the Codex-aligned capabilities
   record as its execution appendix. The remaining automatic continuation,
-  settings/Goal notifications, and retirement of manual Goal controls stay
-  gated by public boundary evidence.
+  settings notifications, and retirement of manual Goal controls stay gated by
+  public boundary evidence; the initial Goal update/clear notifications are
+  implemented in the first-turn seam.
 - **Test maintenance:** remove duplicate App Server approval-broker coverage
   already exercised by the public Shell approval scenario, and remove the
   private image-magic unit check covered by the workspace `read_image` path.

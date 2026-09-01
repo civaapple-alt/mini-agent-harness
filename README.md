@@ -323,7 +323,8 @@ history store.
   and six-question validation records.
 - [Goal Runtime implementation appendix](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) —
   Codex-shaped `thread/goal/*` and serialized GoalRuntime owner are landed;
-  automatic continuation, notifications, and manual-API retirement remain gated.
+  settled-checkpoint continuation, settings notifications, and manual-API
+  retirement remain gated; initial scheduling and Goal notifications are landed.
 - [Codex-aligned capabilities and ThreadItems proposal](.agents/notes/proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md) — canonical
   Skill/Plugin/Builtin/Host/MCP/Dynamic Tool boundaries, `Thread` → `Turn` →
   `ThreadItem` projection, Goal Runtime integration, approval correlation, and
@@ -360,8 +361,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `17,626 / 20,000` lines and release
-Rust source `26,792 / 30,000` lines, excluding the experimental CLI/REPL. The
+The current hard-budget snapshot is runtime `18,419 / 20,000` lines and release
+Rust source `27,585 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.
@@ -369,8 +370,8 @@ optimization reference rather than a reason to delete protected behavior.
 The Goal Runtime is now aligned to the Codex Thread model: the canonical
 `thread/goal/set|get|clear` control plane and serialized App Server owner are
 implemented. Follow the [Goal Runtime implementation appendix](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
-for automatic continuation, notifications, and final manual-API retirement;
-those phases still require public boundary evidence.
+for settled-checkpoint continuation, settings notifications, and final manual-API
+retirement; those phases still require public boundary evidence.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
 scenarios pass, with current App Server boundary evidence and CLI interactive

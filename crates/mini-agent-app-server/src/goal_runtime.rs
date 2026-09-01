@@ -1,7 +1,23 @@
 use crate::workflows::{GoalState, VerifierVerdict};
+use mini_agent_app_server_protocol::ThreadGoal;
 use mini_agent_app_server_protocol::ThreadGoalStatus;
 use mini_agent_host::HostWorkflowStore;
+use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::TurnId;
 use std::io;
+use tokio::sync::broadcast;
+
+#[derive(Clone, Debug)]
+pub(crate) enum GoalRuntimeEvent {
+    Updated {
+        thread_id: ThreadId,
+        turn_id: Option<TurnId>,
+        state: GoalState,
+    },
+    Cleared {
+        thread_id: ThreadId,
+    },
+}
 
 /// Serialized owner of one Thread Goal's durable state and lifecycle actions.
 ///
@@ -11,11 +27,15 @@ use std::io;
 #[derive(Clone, Debug)]
 pub(crate) struct GoalRuntime {
     store: HostWorkflowStore,
+    events: broadcast::Sender<GoalRuntimeEvent>,
 }
 
 impl GoalRuntime {
-    pub(crate) fn new(store: HostWorkflowStore) -> Self {
-        Self { store }
+    pub(crate) fn new(
+        store: HostWorkflowStore,
+        events: broadcast::Sender<GoalRuntimeEvent>,
+    ) -> Self {
+        Self { store, events }
     }
 
     pub(crate) fn plan_active(&self) -> bool {
@@ -84,6 +104,23 @@ impl GoalRuntime {
         self.store.clear_goal()
     }
 
+    pub(crate) fn notify_updated(
+        &self,
+        thread_id: ThreadId,
+        turn_id: Option<TurnId>,
+        state: GoalState,
+    ) {
+        let _ = self.events.send(GoalRuntimeEvent::Updated {
+            thread_id,
+            turn_id,
+            state,
+        });
+    }
+
+    pub(crate) fn notify_cleared(&self, thread_id: ThreadId) {
+        let _ = self.events.send(GoalRuntimeEvent::Cleared { thread_id });
+    }
+
     pub(crate) fn verification_criteria(&self) -> io::Result<String> {
         self.store.verification_criteria()
     }
@@ -106,5 +143,27 @@ impl GoalRuntime {
 
     pub(crate) fn fail_goal(&self) -> io::Result<GoalState> {
         self.store.fail_goal()
+    }
+}
+
+pub(crate) fn project_goal(thread_id: ThreadId, state: GoalState) -> ThreadGoal {
+    ThreadGoal {
+        thread_id,
+        objective: state.objective,
+        status: match state.status {
+            mini_agent_host::GoalStatus::Running => ThreadGoalStatus::Active,
+            mini_agent_host::GoalStatus::Converged => ThreadGoalStatus::Complete,
+            mini_agent_host::GoalStatus::Failed => ThreadGoalStatus::Blocked,
+            mini_agent_host::GoalStatus::UserPaused => ThreadGoalStatus::Paused,
+        },
+        token_budget: state.token_budget,
+        tokens_used: 0,
+        time_used_seconds: if state.created_at_ms == 0 {
+            0
+        } else {
+            (state.updated_at_ms.saturating_sub(state.created_at_ms) / 1000) as i64
+        },
+        created_at: (state.created_at_ms / 1000) as i64,
+        updated_at: (state.updated_at_ms / 1000) as i64,
     }
 }

@@ -9,6 +9,7 @@ use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::goal_runtime::GoalRuntime;
+use crate::goal_runtime::GoalRuntimeEvent;
 use crate::runtime_actor::RuntimeCommand;
 use crate::runtime_actor::RuntimeRequest;
 use crate::worker::Command;
@@ -25,11 +26,14 @@ use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::TurnStatus;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 pub(crate) struct RuntimeActorState {
     pub(crate) management: RuntimeManagementState,
     pub(crate) goal_runtime: GoalRuntime,
+    pub(crate) commands: mpsc::Sender<Command>,
     pub(crate) approval: ApprovalController,
     pub(crate) builtin_tools: mini_agent_host::BuiltinToolSelection,
     pub(crate) stable_system_prompt: Option<String>,
@@ -65,6 +69,7 @@ pub struct RuntimeManagementService<M> {
     pub(crate) server: AppServer<M>,
     state: Option<RuntimeManagementState>,
     approval: ApprovalController,
+    goal_notifications: broadcast::Sender<GoalRuntimeEvent>,
 }
 
 impl<M> Clone for RuntimeManagementService<M> {
@@ -74,6 +79,7 @@ impl<M> Clone for RuntimeManagementService<M> {
             server: self.server.clone(),
             state: None,
             approval: self.approval.clone(),
+            goal_notifications: self.goal_notifications.clone(),
         }
     }
 }
@@ -90,6 +96,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         approval: ApprovalController,
     ) -> Self {
         let active_thread_id = server.thread_id().clone();
+        let (goal_notifications, _) = broadcast::channel(64);
         Self {
             server,
             state: Some(RuntimeManagementState {
@@ -103,6 +110,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 },
             }),
             approval,
+            goal_notifications,
         }
     }
 
@@ -114,15 +122,20 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             server,
             state,
             approval,
+            goal_notifications,
         } = self;
         let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
         let stable_system_prompt = workflows.stable_system_prompt().map(str::to_string);
-        let goal_runtime =
-            GoalRuntime::new(workflows.into_store().map_err(|error| error.to_string())?);
+        let goal_runtime = GoalRuntime::new(
+            workflows.into_store().map_err(|error| error.to_string())?,
+            goal_notifications.clone(),
+        );
+        let commands = server.command_sender();
         server
             .install_runtime_state(RuntimeActorState {
                 management,
                 goal_runtime,
+                commands,
                 approval: approval.clone(),
                 builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
                 stable_system_prompt: stable_system_prompt.clone(),
@@ -139,6 +152,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 server,
                 state: None,
                 approval,
+                goal_notifications,
             },
             workflows,
         ))
@@ -149,6 +163,10 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     ) -> Result<ActionResponse<Option<RuntimeSessionInfo>>, ActionFailure> {
         self.request_action(|reply| RuntimeCommand::SessionInfo { reply })
             .await
+    }
+
+    pub(crate) fn goal_notifications(&self) -> broadcast::Sender<GoalRuntimeEvent> {
+        self.goal_notifications.clone()
     }
 
     pub async fn checkpoint_seq(&self) -> Result<Option<u64>, String> {

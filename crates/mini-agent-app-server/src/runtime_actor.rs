@@ -14,6 +14,9 @@ use mini_agent_core::ThreadCheckpoint;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::TurnInput;
+use mini_agent_protocol::TurnInputMode;
+use mini_agent_protocol::TurnStart;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -195,11 +198,25 @@ pub(super) fn handle<M>(
             reply,
         } => {
             let result = mutate(runtime, runtime_revision, |state| {
-                state
+                let previous = state
+                    .goal_runtime
+                    .load_goal_state()
+                    .map_err(workflow_error)?;
+                let goal = state
                     .goal_runtime
                     .set_goal(objective.as_deref(), status, token_budget)
-                    .map(|goal| (goal, true))
-                    .map_err(workflow_error)
+                    .map_err(workflow_error)?;
+                let changed = previous.as_ref().is_none_or(|previous| {
+                    previous.goal_id != goal.goal_id || previous.token_budget != goal.token_budget
+                });
+                if changed {
+                    let thread_id = state.management.thread_id();
+                    schedule_goal_turn(state, &goal)?;
+                    state
+                        .goal_runtime
+                        .notify_updated(thread_id, None, goal.clone());
+                }
+                Ok((goal, changed))
             });
             respond(reply, receipt, result);
         }
@@ -213,11 +230,13 @@ pub(super) fn handle<M>(
         ),
         RuntimeCommand::GoalClear { reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
-                state
-                    .goal_runtime
-                    .clear_goal()
-                    .map(|cleared| (cleared, cleared))
-                    .map_err(workflow_error)
+                let cleared = state.goal_runtime.clear_goal().map_err(workflow_error)?;
+                if cleared {
+                    state
+                        .goal_runtime
+                        .notify_cleared(state.management.thread_id());
+                }
+                Ok((cleared, cleared))
             });
             respond(reply, receipt, result);
         }
@@ -446,6 +465,29 @@ where
     append_context_and_persist(threads, state, context)?;
     state.management.set_world(updated);
     Ok(true)
+}
+
+fn schedule_goal_turn(
+    state: &RuntimeActorState,
+    goal: &crate::workflows::GoalState,
+) -> Result<(), AppServerError> {
+    let (reply, _response) = oneshot::channel();
+    state
+        .commands
+        .try_send(crate::worker::Command::Start {
+            thread_id: state.management.thread_id(),
+            request: TurnStart::new(TurnInput::new(
+                TurnInputMode::StartIfIdle,
+                mini_agent_host::goal_turn_prompt(
+                    &goal.objective,
+                    goal.current_milestone,
+                    goal.total_milestones,
+                ),
+            )),
+            expected_turn_id: None,
+            reply,
+        })
+        .map_err(|_| AppServerError::Disconnected)
 }
 
 fn append_context_and_persist<M>(

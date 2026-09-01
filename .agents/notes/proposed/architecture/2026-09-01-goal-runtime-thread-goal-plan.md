@@ -26,8 +26,8 @@ Scope: mini-agent App Server / Host workflow control plane
 | 2. `workflow/plan/set` | 已明确不保留 | 旧方法已删除，不注册、不暴露，也不提供兼容适配器。这是有意的 breaking change；后续不得重新引入。 |
 | 3. typed `WorkflowPolicy` | 部分完成 | 当前由 `CollaborationMode`、Host `PlanModeState`、`ApprovalController` 和 Runtime Actor 共同形成 typed policy seam；不为形式上的 `WorkflowPolicy` 再增加一层。只有出现第二种 workflow policy 时才考虑提取独立类型。 |
 | 4. `thread/goal/set/get/clear` | 第一批已完成 | 已补齐 Codex-shaped protocol、public JSON-RPC、local client、bounded Host state 和 set/get/clear 公共场景。 |
-| 5. `GoalRuntime` | owner 已抽出 | `GoalRuntime` 已成为 Runtime Actor 内的串行状态 owner；verifier、criteria、record、advance 仍是迁移中的旧操作，自动续跑尚未接入。 |
-| 6. Goal/settings notifications | 未完成 | 当前只有 action response 和既有 turn/approval 事件；需要在 durable state/revision 提交后发布有界通知。 |
+| 5. `GoalRuntime` | owner/首轮接缝已完成 | `GoalRuntime` 已成为 Runtime Actor 内的串行状态 owner；`thread/goal/set` 在 durable write 后通过现有 Thread worker 提交一个 `StartIfIdle` 普通 Turn。verifier、settled checkpoint 后续 continuation 仍未收回。 |
+| 6. Goal/settings notifications | Goal 通知首批完成 | `thread/goal/updated|cleared` 已由唯一 Goal notification source 发布；settings 通知、verifier/advance reason 和完整顺序证据仍待完成。 |
 | 7. 旧手工 Goal API 退役 | 未完成 | `workflow/goal/criteria`、`workflow/goal/record_verdict`、`workflow/goal/advance` 必须等自动续跑和通知证据稳定后再废弃。 |
 
 ## 2. 目标边界
@@ -49,7 +49,7 @@ App Server client
 
 - Core 继续拥有 Thread、turn loop、模型输入、工具结果、事件和 Session conversation writeback；Core 不认识 GoalRuntime。
 - Host `HostWorkflowStore` 继续拥有 `goal/state.json`、`goal/plan.md` 和 verifier artifact 的受限持久化，不负责调度下一轮 turn。
-- App Server 内部 `GoalRuntime` 拥有 Goal 生命周期、verifier 调用、milestone advance/retry、continuation scheduling 和通知时序。它是 Runtime Actor 内的一个串行状态组件，不是另一个独立执行线程或第二个 Runtime。当前第一批已先收回 durable state 和 public set/get/clear；后续再收回 verifier 与 continuation。
+- App Server 内部 `GoalRuntime` 拥有 Goal 生命周期、verifier 调用、milestone advance/retry、continuation scheduling 和通知时序。它是 Runtime Actor 内的一个串行状态组件，不是另一个独立执行线程或第二个 Runtime。当前已收回 durable state、public set/get/clear、Goal notifications 和 set 后首轮 Turn scheduling；后续再收回 verifier 与 settled checkpoint continuation。
 - JSON-RPC / local client 只负责 decode、调用 canonical GoalRuntime action 和投影 DTO；不在 transport 层做 advance、retry 或重复通知。
 - Host/Capabilities 继续决定审批、sandbox 和工具实际副作用；GoalRuntime 不复制 ToolRouter、ToolOrchestrator 或 approval authority。
 
@@ -71,7 +71,7 @@ App Server client
 thread/goal/set
   request:  { threadId, objective }
   response: ActionResult<WorkflowGoalState>
-  effect:   create/replace a durable Goal and schedule its first turn
+  effect:   create/replace a durable Goal and schedule its first ordinary Thread Turn
 
 thread/goal/get
   request:  { threadId }
@@ -205,25 +205,32 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 
 预期只允许小幅净增；如果 protocol + handler 超过当前预算，应先拆出 offset commit，不得压缩 DTO 或绕过 schema。
 
-### Batch 2：抽出 serialized GoalRuntime
+### Batch 2：抽出 serialized GoalRuntime — 首轮/通知接缝已完成
 
-- 新增 app-server 内部 `goal_runtime.rs` 或等价 private module，不新建独立 crate/线程；
-- 将 verifier invocation、verdict recording、advance/retry 和 continuation decision 从 `WorkflowService`/Runtime Actor 分散分支收回一个 state machine；
-- Host 只保留文件/状态原语；App Server 只保留 public action adapter；
-- 保留旧 `criteria`、`record_verdict`、`advance` 作为暂时的 deprecated/manual path，但不允许和自动运行同时写状态；
-- public test 覆盖 one-turn-per-milestone、approved advance、rejected retry、loop budget exhaustion 和 verifier failure。
+- 新增 app-server 内部 `goal_runtime.rs`，不新建独立 crate/线程；
+- 将 durable Goal state、public set/get/clear action 和通知出口收回一个
+  serialized GoalRuntime owner；Host 只保留文件/状态原语；
+- `thread/goal/set` 已通过既有 worker 的 `StartIfIdle` 提交首轮普通 Turn；
+  不新建第二个 turn loop；
+- Goal update/clear 通过单一 App Server notification source 发布，local client
+  的通用 notification 入口与 `next_event()` 的 turn-event 过滤已接通；
+- 保留旧 `criteria`、`record_verdict`、`advance` 作为暂时的 manual path，
+  在自动运行同时写状态前不得继续扩展；verifier invocation、advance/retry、
+  settled continuation、loop budget 和 verifier failure 仍待后续批次。
 
 ### Batch 3：自动续跑与恢复
 
 - 在现有 turn settled/checkpoint path 上接 GoalRuntime，不新增 Core loop；
-- 实现 set 后首轮、verifier 后下一轮、resume 不重放、clear/interrupt safe checkpoint；
+- 实现 verifier 后下一轮、resume 不重放、clear/interrupt safe checkpoint；
 - 明确 turn/interrupt 与 Goal clear、steer、follow-up 的确定性冲突结果；
 - 加入 bounded scenario：多 milestone、verifier reject/retry、timeout、cancel、restart/resume；
 - 测试必须断言 durable state、下一轮 model input 中的 bounded Goal result 和 turn/event 顺序。
 
 ### Batch 4：settings/Goal notifications
 
-- 在 Runtime Actor 的唯一 mutation commit 点发布 `thread/settings/updated` 和 `thread/goal/updated`；
+- 在 Runtime Actor 的唯一 mutation commit 点发布
+  `thread/settings/updated`，并补齐 Goal notification 的 reason、revision 和
+  settled-turn 关联；首轮 `thread/goal/updated|cleared` 已完成；
 - 验证 notification 只发一次、先于后续 continuation、且 stateRevision 与 action response 一致；
 - clear 的 nullable goal、restore 的 `restored` reason、verifier/advance 的 `turnId` 关联都要有 public JSON-RPC evidence；
 - local client、stdio JSON-RPC 和 SDK projection 使用同一 notification model，不增加 transport-specific state machine。
@@ -296,4 +303,10 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 
 ## 8. 下一步
 
-Batch 1 已完成并通过 Host、App Server Protocol、App Server 定向测试。下一批只实现 GoalRuntime 的自动首轮/settled checkpoint 接缝：先验证 `set` 后只启动一个普通 Thread Turn，再接 verifier 与 continuation；不得在 Core 增加第二个 loop。settings/Goal notifications 与旧 manual Goal API 退役继续保持未完成状态。
+Batch 1 与 Batch 2 的 Goal contract、serialized owner、首轮普通 Turn 和
+通知接缝已完成，并通过 Host、App Server Protocol、App Server 定向测试；
+第二批实际为 runtime/release source `+225` 行。下一批只实现 settled
+checkpoint 后的 verifier/continuation：先确保每个 milestone 至多一个主
+Thread Turn，再接 retry/terminal state；不得在 Core 增加第二个 loop。
+settings notification、完整 resume/clear race 和旧 manual Goal API 退役
+继续保持未完成状态。

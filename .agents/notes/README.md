@@ -9,8 +9,8 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `17,626 / 20,000` lines (88.1%; 2,374 remaining)
-- release Rust source (excluding experimental CLI/REPL): `26,792 / 30,000` lines (89.3%; 3,208 remaining)
+- runtime (`core + protocol + host + app-server`): `18,419 / 20,000` lines (92.1%; 1,581 remaining)
+- release Rust source (excluding experimental CLI/REPL): `27,585 / 30,000` lines (92.0%; 2,415 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -74,8 +74,10 @@ bounded Builtin subset and Core Router applies a reversible visibility filter.
 The Runtime Actor applies both settings at one serialized mutation boundary;
 MCP/external tools are preserved. The active Thread and same-object resume path
 retain the filter, while new/forked factory Threads and durable capability
-checkpointing remain deferred. The current release-source margin is `3,208` lines;
-automatic Goal continuation and settings notifications remain deferred.
+checkpointing remain deferred. The current release-source margin is `2,415`
+lines; settled-checkpoint Goal continuation and settings notifications remain
+deferred. Initial Goal scheduling and Goal update/clear notifications are
+implemented through the serialized GoalRuntime owner.
 
 The first Skill dependency/activation slice is implemented in Capabilities.
 Skill frontmatter may declare up to 16 bounded `builtin` or `mcp` references;
@@ -83,7 +85,7 @@ the metadata catalog exposes non-empty declarations, and
 `Discovery::activate_skill` returns a typed metadata-only activation. It does
 not read Skill bodies, start MCP, enable providers, or grant approval. App Server
 Turn activation and Host allowlist resolution remain the next Skill batch; the
-current release-source margin is `3,208` lines. The experimental CLI/REPL is
+current release-source margin is `2,415` lines. The experimental CLI/REPL is
 still reported separately at `2,707` lines and does not consume this gate.
 
 The first Plugin provider slice is implemented in Capabilities: selecting a
@@ -105,8 +107,9 @@ Goal Runtime is being converged on the Codex Thread/Turn/ThreadItem model. The
 first bounded slice now provides the canonical `thread/goal/set|get|clear`
 contract and an App Server `GoalRuntime` owner over Host durable state. Follow
 the [Goal Runtime implementation appendix](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
-for the remaining automatic continuation, notifications, and final manual-API
-retirement gates; these are not yet claimed as complete.
+for the remaining settled-checkpoint continuation, settings notifications, and
+final manual-API retirement gates; Goal update/clear notifications and initial
+set scheduling are already implemented.
 
 ### Next iteration order (evidence-triggered)
 

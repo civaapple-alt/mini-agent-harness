@@ -344,7 +344,20 @@ pub struct ThreadGoalSetParams {
     pub thread_id: ThreadId,
     pub objective: Option<String>,
     pub status: Option<ThreadGoalStatus>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub token_budget: Option<Option<i64>>,
+}
+
+fn deserialize_double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -848,7 +861,16 @@ mod tests {
         .unwrap();
         assert_eq!(params["threadId"], "thread-1");
         assert_eq!(params["tokenBudget"], 1000);
-        assert_eq!(serde_json::to_value(ThreadGoalStatus::UsageLimited).unwrap(), "usageLimited");
+        assert_eq!(
+            serde_json::to_value(ThreadGoalStatus::UsageLimited).unwrap(),
+            "usageLimited"
+        );
+        let cleared: ThreadGoalSetParams = serde_json::from_value(serde_json::json!({
+            "threadId": "thread-1",
+            "tokenBudget": null
+        }))
+        .unwrap();
+        assert_eq!(cleared.token_budget, Some(None));
     }
 
     #[test]

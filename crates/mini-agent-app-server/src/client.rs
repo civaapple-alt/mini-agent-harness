@@ -25,6 +25,7 @@ use mini_agent_app_server_protocol::METHOD_THREAD_READ;
 use mini_agent_app_server_protocol::METHOD_THREAD_RESUME;
 use mini_agent_app_server_protocol::METHOD_THREAD_SETTINGS_UPDATE;
 use mini_agent_app_server_protocol::METHOD_THREAD_START;
+use mini_agent_app_server_protocol::METHOD_TURN_EVENT;
 use mini_agent_app_server_protocol::METHOD_TURN_INTERRUPT;
 use mini_agent_app_server_protocol::METHOD_TURN_READ;
 use mini_agent_app_server_protocol::METHOD_TURN_START;
@@ -553,11 +554,12 @@ where
     }
 
     pub async fn next_event(&mut self) -> Result<EventEnvelope, JsonRpcError> {
-        let notification = self
-            .connection
-            .next_notification()
-            .await
-            .map_err(|error| JsonRpcError::server_error(error.to_string()))?;
+        let notification = loop {
+            let notification = self.next_notification().await?;
+            if notification.method == METHOD_TURN_EVENT {
+                break notification;
+            }
+        };
         let params = notification
             .params
             .ok_or_else(|| JsonRpcError::invalid_params("turn/event params are missing"))?;
@@ -569,6 +571,13 @@ where
             event.sequence,
             event.event,
         ))
+    }
+
+    pub async fn next_notification(&mut self) -> Result<JsonRpcRequest, JsonRpcError> {
+        self.connection
+            .next_notification()
+            .await
+            .map_err(|error| JsonRpcError::server_error(error.to_string()))
     }
 
     async fn read_settled_turn(&mut self, turn_id: TurnId) -> Result<RuntimeTurnResult, String> {

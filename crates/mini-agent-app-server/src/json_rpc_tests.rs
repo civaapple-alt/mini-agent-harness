@@ -430,6 +430,16 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     assert_eq!(result["value"]["goal"]["status"], "active");
     assert_eq!(result["value"]["goal"]["tokenBudget"], 1200);
     assert!(result["value"]["goal"].get("path").is_none());
+    let notification = loop {
+        let notification = connection.next_notification().await.unwrap();
+        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
+            break notification;
+        }
+    };
+    assert_eq!(
+        notification.params.unwrap()["goal"]["objective"],
+        "ship the next iteration"
+    );
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -453,6 +463,12 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
         .await
         .unwrap();
     assert_eq!(response.result.unwrap()["value"]["cleared"], true);
+    loop {
+        let notification = connection.next_notification().await.unwrap();
+        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_CLEARED {
+            break;
+        }
+    }
 
     let response = connection
         .handle_request(JsonRpcRequest::request(

@@ -30,8 +30,11 @@ Stage 2 Skill slice now parses typed `builtin`/`mcp` dependencies and returns
   allowlist resolution remain deferred until their own evidence is accepted.
   Goal Runtime now follows the execution appendix in
   `2026-09-01-goal-runtime-thread-goal-plan.md`: the first Codex-shaped
-  `thread/goal/set|get|clear` and serialized owner slice is landed, while
-  automatic continuation and notifications remain gated by the next batch.
+  `thread/goal/set|get|clear`, initial set scheduling, Goal notifications, and
+  serialized owner slice are landed; settled-checkpoint continuation and
+  settings notifications remain gated by the next batch. The two records are
+  implemented together; the appendix tracks execution batches and this note
+  remains the canonical architecture decision.
 
 ## Why this direction
 
@@ -611,14 +614,16 @@ and after; no estimate authorizes a budget breach.
 - **Landed (bounded first slice):** add the Codex-shaped `ThreadGoal` public
   contract (`thread/goal/set|get|clear`) and make an App Server `GoalRuntime`
   the serialized owner of Goal state actions while Host remains the persistence
-  primitive. See the execution appendix for the six-question record and exact
-  migration order.
-- Goal Runtime schedules ordinary Thread Turns.
+  primitive. `set` schedules the first ordinary Thread Turn through the existing
+  worker, and Goal update/clear notifications use one App Server source. See
+  the execution appendix for the six-question record and exact migration order.
+- Goal Runtime schedules ordinary Thread Turns after settled checkpoint evidence.
 - Milestone evidence references settled Turn/Item IDs and bounded result handles.
 - Verifier output remains an isolated derived artifact and cannot rewrite the
   main Thread history.
-- Automatic continuation, settings notifications, and Goal notifications stay
-  under the existing Goal Runtime proposal and are not duplicated here.
+- Settled-checkpoint continuation and settings notifications stay under the
+  linked Goal Runtime appendix and are not duplicated here. The initial Goal
+  update/clear notifications are already part of the landed first-turn seam.
 
 ## Six-question admission record for every stage
 
@@ -720,16 +725,18 @@ This proposal is ready for implementation only when:
 
 **Proposed: accept the direction; implementation is in progress.** The six-tool
 exposure preparation, Skill/Plugin bounded slices, ThreadItem projection, and
-the first Codex-shaped Goal control-plane/owner slice are implemented.
+  the first Codex-shaped Goal control-plane/owner and first-turn notification
+  slice are implemented.
 
 The default Builtin catalog, its direct deletion, the first Host-owned Tool
 Catalog slice, Thread-level Builtin selection, bounded Skill dependency
 metadata/activation, bounded Plugin-to-provider-input selection, and the first
 ThreadItem projection are now landed. App Server Turn activation, Host
 dependency allowlist resolution, Plugin MCP tool loading, full Item lifecycle
-notifications/listing, Artifact APIs, and Goal Runtime integration remain
-later stages. Goal automatic continuation, settings/Goal notifications, and
-retirement of manual Goal controls remain deferred.
+notifications/listing, Artifact APIs, settled-checkpoint Goal continuation,
+settings notifications, and retirement of manual Goal controls remain
+deferred; initial Goal scheduling and Goal update/clear notifications are
+implemented.
 
 ## Implementation record — 2026-09-01 Goal Runtime canonical contract
 
@@ -746,18 +753,20 @@ Six-question admission:
    `workflow/goal/start` with Codex-shaped set/get/clear semantics; retain old
    manual criteria/verdict/advance calls only until automatic continuation has
    public evidence.
-4. **Net line delta:** record the measured runtime and release-source values in
-   the commit entry and budget report. The batch is kept below the repository
-   few-hundred-line guidance and does not consume the experimental CLI/REPL
-   budget.
+4. **Net line delta:** runtime `17,626 → 18,194` (`+568`) and release source
+   `26,792 → 27,360` (`+568`) for the canonical contract batch; the batch is
+   below the repository few-hundred-line guidance and does not consume the
+   experimental CLI/REPL budget.
 5. **Visible surface:** add bounded `ThreadGoal` fields and public JSON-RPC
    methods; no raw plan, verifier prompt, tool arguments, or Session path is
    exposed. `get` is read-only; set rejects an active replacement; clear
    removes only the active Goal association.
 6. **Boundary evidence:** App Server public coverage verifies
    set/get/conflict/clear/get, camelCase wire names, token budget projection,
-   and absence of Host paths. Automatic turn scheduling, notifications, and
-   resume/clear races are explicitly not claimed by this record.
+   and absence of Host paths. The same public scenario verifies Goal update
+   notifications and set-triggered ordinary Turn scheduling; verifier,
+   settled-checkpoint continuation, settings notifications, and resume/clear
+   races are explicitly not claimed by this record.
 
 ## Implementation record — 2026-09-01 Skill dependency/activation slice
 
@@ -831,5 +840,30 @@ Six-question admission:
    the existing event trace.
 
 Decision: **accept the minimal projection; defer specialized Item variants,
-Item listing, Artifact references, and Goal Runtime integration until budget
-release and persisted identity evidence exist.**
+Item listing, and Artifact references until persisted identity evidence exists.
+Goal Runtime integration proceeds through the linked execution appendix.**
+
+## Implementation record — 2026-09-01 Goal Runtime first-turn and notification seam
+
+Six-question admission:
+
+1. **Layer:** App Server GoalRuntime and notification transport; the existing
+   Core worker remains the sole Thread/Turn executor.
+2. **Duplicate responsibility:** reuse the existing Core event broadcast,
+   Runtime Actor mutation boundary, and local/stdio transport. GoalRuntime is
+   the only new Goal notification source; no transport-specific Goal state
+   machine was added.
+3. **Replace vs add:** replace the previously silent `set` result with a
+   durable-write-then-notify action and submit the first ordinary
+   `StartIfIdle` turn. Settled verifier/continuation is intentionally not
+   duplicated here.
+4. **Net line delta:** runtime `18,194 → 18,419` (`+225`) and release source
+   `27,360 → 27,585` (`+225`), excluding experimental CLI/REPL. The batch stays
+   below the few-hundred-line guidance.
+5. **Visible surface:** add bounded Goal update/clear notifications and a
+   generic local-client notification path. Goal prompts remain bounded; no raw
+   plan, verifier output, tool arguments, or Host path enters the notification.
+6. **Boundary evidence:** public App Server coverage verifies Goal notification
+   delivery, filtering from `next_event`, set-triggered ordinary Turn activity,
+   and clear notification delivery. Full verifier/continuation ordering remains
+   the next acceptance gate.
