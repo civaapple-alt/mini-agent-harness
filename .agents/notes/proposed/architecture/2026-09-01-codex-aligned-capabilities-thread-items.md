@@ -367,7 +367,7 @@ This batch applies the six-question gate to the first exposure-policy change:
    Process tools and `read_tool_result` are removed. The App Server manifest no
    longer advertises `rulePolicy.processExecution`; there is no new Item or
    approval correlation.
-6. **Boundary evidence:** `mini-agent-capabilities` (66 tests),
+6. **Boundary evidence:** `mini-agent-capabilities` (61 tests),
    `mini-agent-host` (41 tests), and `mini-agent-app-server` (32 tests) pass.
    The capabilities suite asserts the exact six-tool catalog; Host and App Server
    suites cover profile exposure, approval, JSON-RPC, and lifecycle behavior.
