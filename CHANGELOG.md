@@ -7,6 +7,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Planning:** add the proposed Goal Runtime next-phase plan covering the
+  canonical `thread/goal/set/get/clear` contract, automatic continuation,
+  settings/Goal notifications, and retirement of manual Goal controls. This
+  documents deferred work and does not change runtime or protocol behavior.
 - **Test maintenance:** remove duplicate App Server approval-broker coverage
   already exercised by the public Shell approval scenario, and remove the
   private image-magic unit check covered by the workspace `read_image` path.

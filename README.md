@@ -305,6 +305,9 @@ nested-agent behavior are not emulated. See the
 - [Harness framework and next-iteration note](.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) — mini/Codex
   framework and Turn-flow comparison, VS Code harness lessons, bounded scenarios,
   and six-question validation records.
+- [Goal Runtime next-phase plan](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) — unfinished
+  `thread/goal/*`, serialized GoalRuntime, automatic continuation, notifications,
+  and retirement order for manual Goal controls.
 
 ## Development
 
@@ -341,6 +344,11 @@ The current hard-budget snapshot is runtime `16,955 / 20,000` lines and all
 Rust source `29,752 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
+
+The Goal Runtime next phase is planned but not yet implemented. Follow the
+[Goal Runtime next-phase plan](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
+for the required budget release, canonical `thread/goal/set/get/clear` contract,
+automatic continuation, notifications, and final manual-API retirement gates.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
 scenarios pass, with current App Server boundary evidence and CLI interactive
