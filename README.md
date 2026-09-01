@@ -76,6 +76,13 @@ The mainline is the CLI over the App Server boundary. Other frontends should
 exercise the same App Server management and event contracts rather than add
 another runtime execution path.
 
+Approval is currently a distributed Core/Host boundary: `ToolRouter` dispatches,
+built-in Capabilities perform their own pre-side-effect approval and sandbox
+checks, Host classifies legacy outcomes, and App Server transports approval
+notifications and persists settled results. A centralized `ToolOrchestrator` is
+not yet part of the contract; adding one requires a separate admission and
+correlation decision.
+
 Runtime state has one authority: the App Server Runtime Actor orders Thread,
 World, Workflow, MCP, Session, and revision changes. Host implements the
 capability and persistence seams, while CLI and JSON-RPC clients submit actions

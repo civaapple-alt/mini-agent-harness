@@ -1173,6 +1173,81 @@ authoritative in Host/App Server.
 Decision: accept
 ```
 
+#### 阶段 3 审计：Core/Host 的 ToolRouter → ToolOrchestrator 审批准入链路
+
+本次只做代码路径和既有边界证据审计，不新增运行时代码。审计结论是：当前
+mini-agent 已有审批能力，但还没有 Codex 式独立的 `ToolOrchestrator`。实际
+路径如下：
+
+```text
+model response
+  → Core Harness 校验有界 tool calls
+  → Core ToolRouter 查找并调用 execute_outcome
+  → Capabilities 具体工具自行完成 policy / approval / sandbox 前置检查
+  → Host ClassifiedTool 对 legacy error 文本做 outcome 分类
+  → Core 截断结果，写入 ToolFinished 和 Session Message::Tool
+  → provider 将 Message::Tool 投影为 function_call_output
+  → App Server 在 turn settle 后 checkpoint、持久化并发布 TurnFinished
+```
+
+关键发现：
+
+- `mini-agent-core::ToolRouter` 目前只是工具目录、名称查找和 dispatch，不能
+  统一承载审批、permission/sandbox 选择、`call_id` 关联或执行前 admission。
+- Shell、Process、MCP、Edit/Write 等内建工具在各自 `execute` 内部调用
+  `ApprovalController`；这些敏感路径当前都在副作用前检查，拒绝也能回写为
+  非空的 Tool result。Read-only 工具按职责不请求审批。
+- `mini-agent-host::ClassifiedTool` 是兼容性桥接：从 `user denied:`、Plan Mode、
+  timeout 等错误文本推断 `NeedsApproval`、`Deferred`、`Retryable`。它发生在
+  工具返回之后，不是一个强制的执行前准入器；没有实现该约定的外部工具可能绕过
+  统一审批语义。
+- Protocol 已有 `ToolExecutionOutcome` 和 `NeedsApproval` 等结构化状态，但
+  Responses 的 `function_call_output` 当前只把 content 发给模型，状态仍主要
+  保存在内部 event/session 结构中；Host 的 approval broker 也只是通知/应答
+  transport，不负责工具路由和执行。
+- App Server 的 Actor、checkpoint 和 Session 持久化边界没有发现绕过：工具结果
+  在 Core turn 中进入 `Message::Tool`，settled turn 后才进入 runtime/session
+  持久化。当前缺口是 approval callback 同步阻塞 turn worker，以及 JSON-RPC
+  审批通知虽有 `turnId` 字段但 transport 目前填 `None`，Broker 没有 `callId`。
+
+本次按六项准入问题记录：
+
+```text
+1. Layer:
+   Core + Host + Capabilities + App Server 边界审计；不把 CLI 或 Studio 的交互
+   适配层当作新的执行层。
+2. Duplicate responsibility:
+   已检查 ToolRouter、ToolExecutionOutcome、ClassifiedTool、ApprovalController、
+   ApprovalBroker、Host harness builder、Core batch executor、App Server worker
+   和 Responses function_call_output 投影。当前没有第二个 ToolOrchestrator；重复
+   责任主要表现为各 Capability 工具分别编排 approval，以及 Host 的事后字符串分类。
+3. Replace vs add:
+   本批不添加中央 orchestrator，也不把审批搬出各工具。先以现有 Protocol outcome、
+   Host/App Server broker 和 Core Session 回写作为证据；未来若引入统一 admission，
+   必须先定义替换边界、审批 correlation 和外部工具兼容策略，不能再叠加一层包装。
+4. Net line delta:
+   expected +0 runtime / +0 all Rust；actual +0 / +0（本批仅审计与文档）。当前
+   runtime 为 16,336 / 20,000，全 Rust 为 28,976 / 30,000，暂不为安全语义增加
+   未抵扣的 Rust plumbing。
+5. Visible surface:
+   本批不改变模型输入、工具 schema、事件、Session 或公共协议。审计确认现有
+   function_call_output 仍保持兼容；待补的可见面是 approval request/resolution
+   与 turn/call 的可关联性，以及是否要让模型看到结构化 status，而非只看到 content。
+6. Boundary evidence:
+   已复核 Core ToolRouter/ToolBatch、Capabilities workspace/shell/process/MCP
+   审批测试、Host outcome 分类、App Server broker/JSON-RPC 通知、Actor settle/
+   checkpoint/session 路径和现有 public `NeedsApproval` fixture。当前缺少真正的
+   built-in sensitive tool 从 model sampling 经 App Server 发起审批、收到拒绝、
+   确认无副作用并完成下一轮 model input 的 public-path scenario。
+```
+
+判定：**审计接受，统一 ToolOrchestrator 实现 deferred**。下一步只准在不突破
+line ceiling 且有明确抵扣时补一条真实内建工具的 App Server 审批 scenario：请求、
+应答、无副作用、`ToolFinished`/`Message::Tool` 非空拒绝结果、checkpoint 和下一轮
+`function_call_output` 必须完整可观测。随后再单独评审 typed admission、异步审批
+等待和 `turnId/callId` correlation；在这些契约未确定前，不新增通用路由或 sandbox
+包装层。
+
 ### 3.4 评估自动化的顺序
 
 自动化和下一迭代按以下顺序推进：

@@ -12,6 +12,15 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   `requested → resolved → tool result` lifecycle. This is additive to the
   protocol and does not change approval policy or Session commit semantics.
 
+### Audited
+
+- Audited the Core/Host `ToolRouter → ToolOrchestrator` approval path. The current
+  design has no central orchestrator: Core dispatches, built-in Capabilities own
+  pre-side-effect approval, Host performs compatibility outcome classification,
+  and App Server owns approval transport plus settled-turn persistence. Typed
+  admission, approval correlation, and a real built-in public approval scenario
+  remain explicitly deferred.
+
 ### Changed
 
 - Narrowed the interactive REPL to a core-capability reference client. It keeps

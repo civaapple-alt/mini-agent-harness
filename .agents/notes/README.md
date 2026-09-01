@@ -21,6 +21,8 @@ The first Stage 1 release batches are now complete: the REPL keeps core turn exe
 
 Stage 2 targeted boundary checks pass for Core, Protocol, App Server Protocol, App Server, Capabilities, Host, and the CLI interactive integration target. The goal-timeout lifecycle now settles `turn/interrupt` and durable checkpoint state before marking the goal failed. App Server and the one-shot CLI now export bounded, redacted JSONL Trace records through explicit caller-selected paths. Core/Capabilities now have test-only fault evidence for malformed or missing tool arguments, partial model streams, and retryable tool results; CLI public-path recovery now verifies an unknown-tool result reaches the next model round; App Server public events and checkpoints now preserve non-empty `NeedsApproval` rejection and MCP timeout results. The REPL scope batches removed only CLI-local Plan/Goal orchestration, World/MCP/extension presentation, and their duplicate CLI code; App Server/Core workflow and management evidence remains protected. The full workspace test suite remains unrun pending explicit approval.
 
+The Core/Host `ToolRouter → ToolOrchestrator` approval-admission audit is complete. There is no central `ToolOrchestrator` yet: Core `ToolRouter` only looks up and dispatches, built-in Capabilities perform approval and sandbox checks locally, Host `ClassifiedTool` performs post-execution compatibility classification, and App Server owns approval notifications plus settled-turn persistence. Actor/CAS/Session authority remains intact. The audit is accepted, but a centralized orchestrator is deferred until typed admission semantics, approval correlation, and a real built-in public approval scenario can be defined within the line budget.
+
 Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 target is optimization debt, not permission to remove protected behavior. New changes must preserve both hard ceilings, report the runtime and whole-workspace line delta, and default to net-zero growth or identify an explicit offset. Code changes run the affected tests, Clippy, formatting, and `python scripts/line_budget.py`; new Core/Protocol/Actor/CAS/Session behavior also needs an architecture note and boundary-level evidence.
 
 The six qualitative questions are collected in the repository [PR template](../../.github/pull_request_template.md). Pull-request CI checks that all six questions are answered, placeholders are replaced, and the confirmations are checked; reviewers enforce layer ownership, duplicate-path analysis, replacement-vs-addition reasoning, visible-surface impact, and boundary evidence.
@@ -35,18 +37,23 @@ The first bounded scenario baseline is now implemented and recorded in the [harn
    UI and orchestration stay in App Server clients such as Studio/SDK; any further
    World/MCP/extension presentation removal is now complete; future changes must
    preserve Host/App Server ownership and add public-path evidence.
-3. The bounded opt-in CLI Trace contract is implemented and covered by CLI public
+3. Before adding a ToolOrchestrator, preserve the current distributed approval
+   ordering and define the smallest replacement seam: typed admission outcome,
+   `requestId`/`turnId`/`callId` correlation, non-blocking approval behavior, and
+   one real built-in sensitive-tool App Server scenario. Do not add a generic
+   router/sandbox wrapper without an explicit offset and protocol decision.
+4. The bounded opt-in CLI Trace contract is implemented and covered by CLI public
    scenarios: explicit `ask --trace-jsonl PATH`, create-new ownership, redaction,
    8 KiB per-record and 256 KiB total limits, and fail-on-write/finalization error.
    The baseline recipe remains explicit and does not create traces implicitly.
-4. Revisit CLI public MCP-timeout projection only if a bounded fault-injection
+5. Revisit CLI public MCP-timeout projection only if a bounded fault-injection
    seam can be justified; otherwise keep the current capability/App Server
    coverage and record the CLI transport gap as deferred.
-5. The measurable Core compaction-trigger scenario is now recorded: it checks a
+6. The measurable Core compaction-trigger scenario is now recorded: it checks a
    trigger at least 70% of the bounded fixture budget and recent-tail retention;
    production remains at the documented 50% trigger unless later evidence proves
    that threshold unsuitable.
-6. Docker availability and workspace-mount evidence are now recorded. The next
+7. Docker availability and workspace-mount evidence are now recorded. The next
    action is to review the [Docker isolation policy proposal](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md),
    covering threat model, supported platforms, defaults/opt-outs, compatibility,
    and fail-closed behavior. A current-host feasibility probe accepted the
