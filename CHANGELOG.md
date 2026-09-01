@@ -11,15 +11,19 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   notification after `approval/respond`, so clients can observe the complete
   `requested → resolved → tool result` lifecycle. This is additive to the
   protocol and does not change approval policy or Session commit semantics.
+- Added the first `ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator`
+  migration seam. Core resolves a tool and delegates execution lifecycle ownership
+  to Host; legacy tool execution and approval behavior remain compatible while
+  typed admission is prepared for a later bounded migration.
 
 ### Audited
 
-- Audited the Core/Host `ToolRouter → ToolOrchestrator` approval path. The current
-  design has no central orchestrator: Core dispatches, built-in Capabilities own
-  pre-side-effect approval, Host performs compatibility outcome classification,
-  and App Server owns approval transport plus settled-turn persistence. Typed
-  admission, approval correlation, and a real built-in public approval scenario
-  remain explicitly deferred.
+- Audited the Core/Host `ToolRouter → ToolOrchestrator` approval path. The first
+  execution-delegate seam now exists, but there is still no full central approval
+  orchestrator: Core dispatches, built-in Capabilities own pre-side-effect approval,
+  Host owns the migration-time outcome classification, and App Server owns approval
+  transport plus settled-turn persistence. Typed admission, approval correlation,
+  and a real built-in public approval scenario remain explicitly deferred.
 
 ### Changed
 

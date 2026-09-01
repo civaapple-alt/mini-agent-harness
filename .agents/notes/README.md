@@ -9,11 +9,12 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `16,336 / 20,000` lines (81.7%; 3,664 remaining)
-- all Rust source: `28,976 / 30,000` lines (96.6%; 1,024 remaining)
+- runtime (`core + protocol + host + app-server`): `16,411 / 20,000` lines (82.1%; 3,589 remaining)
+- all Rust source: `29,051 / 30,000` lines (96.8%; 949 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
-  the approximate `26,900` target remains optimization debt
+  the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
+  so the approximate `26,900` target remains optimization debt
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, and duplicate Python test fixture probing. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
@@ -21,7 +22,7 @@ The first Stage 1 release batches are now complete: the REPL keeps core turn exe
 
 Stage 2 targeted boundary checks pass for Core, Protocol, App Server Protocol, App Server, Capabilities, Host, and the CLI interactive integration target. The goal-timeout lifecycle now settles `turn/interrupt` and durable checkpoint state before marking the goal failed. App Server and the one-shot CLI now export bounded, redacted JSONL Trace records through explicit caller-selected paths. Core/Capabilities now have test-only fault evidence for malformed or missing tool arguments, partial model streams, and retryable tool results; CLI public-path recovery now verifies an unknown-tool result reaches the next model round; App Server public events and checkpoints now preserve non-empty `NeedsApproval` rejection and MCP timeout results. The REPL scope batches removed only CLI-local Plan/Goal orchestration, World/MCP/extension presentation, and their duplicate CLI code; App Server/Core workflow and management evidence remains protected. The full workspace test suite remains unrun pending explicit approval.
 
-The Core/Host `ToolRouter → ToolOrchestrator` approval-admission audit is complete. There is no central `ToolOrchestrator` yet: Core `ToolRouter` only looks up and dispatches, built-in Capabilities perform approval and sandbox checks locally, Host `ClassifiedTool` performs post-execution compatibility classification, and App Server owns approval notifications plus settled-turn persistence. Actor/CAS/Session authority remains intact. The audit is accepted, but a centralized orchestrator is deferred until typed admission semantics, approval correlation, and a real built-in public approval scenario can be defined within the line budget.
+The Core/Host `ToolRouter → ToolOrchestrator` approval-admission audit is complete. The first migration slice now injects a Host `ToolOrchestrator` through the protocol-level `ToolExecutionDelegate`: Core `ToolRouter` resolves and delegates, Host retains legacy outcome classification, and built-in Capabilities still perform approval and sandbox checks locally. App Server owns approval notifications plus settled-turn persistence, and Actor/CAS/Session authority remains intact. Full centralized admission is deferred until typed admission semantics, approval correlation, and a real built-in public approval scenario can be defined within the line budget.
 
 Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 target is optimization debt, not permission to remove protected behavior. New changes must preserve both hard ceilings, report the runtime and whole-workspace line delta, and default to net-zero growth or identify an explicit offset. Code changes run the affected tests, Clippy, formatting, and `python scripts/line_budget.py`; new Core/Protocol/Actor/CAS/Session behavior also needs an architecture note and boundary-level evidence.
 
@@ -37,11 +38,11 @@ The first bounded scenario baseline is now implemented and recorded in the [harn
    UI and orchestration stay in App Server clients such as Studio/SDK; any further
    World/MCP/extension presentation removal is now complete; future changes must
    preserve Host/App Server ownership and add public-path evidence.
-3. Before adding a ToolOrchestrator, preserve the current distributed approval
-   ordering and define the smallest replacement seam: typed admission outcome,
-   `requestId`/`turnId`/`callId` correlation, non-blocking approval behavior, and
-   one real built-in sensitive-tool App Server scenario. Do not add a generic
-   router/sandbox wrapper without an explicit offset and protocol decision.
+3. Preserve the first `ToolExecutionDelegate`/Host `ToolOrchestrator` slice as a
+   migration seam. The next slice may move approval for one built-in sensitive tool
+   only after defining typed admission, `requestId`/`turnId`/`callId` correlation,
+   non-blocking approval behavior, and a real App Server public scenario. Do not add
+   a generic router/sandbox wrapper or leave two approval authorities active.
 4. The bounded opt-in CLI Trace contract is implemented and covered by CLI public
    scenarios: explicit `ask --trace-jsonl PATH`, create-new ownership, redaction,
    8 KiB per-record and 256 KiB total limits, and fail-on-write/finalization error.

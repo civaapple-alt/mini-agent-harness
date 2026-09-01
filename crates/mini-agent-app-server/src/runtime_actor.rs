@@ -11,7 +11,6 @@ use mini_agent_capabilities::McpLoadResult;
 use mini_agent_capabilities::load_mcp;
 use mini_agent_core::Thread;
 use mini_agent_core::ThreadCheckpoint;
-use mini_agent_host::tool_outcome::classify_tools;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ThreadId;
@@ -457,10 +456,7 @@ where
     let thread = threads
         .get_mut(thread_id.as_str())
         .ok_or(AppServerError::ThreadNotFound(thread_id))?;
-    crate::worker::apply_thread_update(
-        thread,
-        crate::ThreadUpdate::ExtendTools(classify_tools(tools)),
-    )?;
+    crate::worker::apply_thread_update(thread, crate::ThreadUpdate::ExtendTools(tools))?;
     state
         .management
         .record_mcp_retry(&loaded_server_names, &enabled_servers, tool_count);

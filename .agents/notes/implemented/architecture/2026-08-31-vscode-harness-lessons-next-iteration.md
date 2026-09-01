@@ -1173,9 +1173,10 @@ authoritative in Host/App Server.
 Decision: accept
 ```
 
-#### 阶段 3 审计：Core/Host 的 ToolRouter → ToolOrchestrator 审批准入链路
+#### 阶段 3 审计基线：Core/Host 的 ToolRouter → ToolOrchestrator 审批准入链路
 
-本次只做代码路径和既有边界证据审计，不新增运行时代码。审计结论是：当前
+以下是 `505c24f` 文档审计批次时的代码路径基线；本批随后只增加执行委托切片，
+不改变审批策略。审计结论是：当时
 mini-agent 已有审批能力，但还没有 Codex 式独立的 `ToolOrchestrator`。实际
 路径如下：
 
@@ -1247,6 +1248,57 @@ line ceiling 且有明确抵扣时补一条真实内建工具的 App Server 审�
 `function_call_output` 必须完整可观测。随后再单独评审 typed admission、异步审批
 等待和 `turnId/callId` correlation；在这些契约未确定前，不新增通用路由或 sandbox
 包装层。
+
+#### 阶段 3 首个改造批次：ToolRouter → ToolExecutionDelegate → ToolOrchestrator
+
+本批把 Codex 原生关系映射为一个最小的 Host 注入边界：Router 负责 resolve，
+Host 的 Orchestrator 负责执行委托和 legacy outcome 分类；尚未迁移具体 Capability
+的 approval/sandbox 逻辑。因此这不是完整的统一审批实现，而是可逐步替换旧
+`Tool::execute_outcome` 的执行生命周期 seam。
+
+```text
+Core Harness
+  → ToolRouter：查找 tool，并保留 call_id/name/arguments
+  → ToolExecutionDelegate：跨 Core/Host 的执行委托契约
+  → Host ToolOrchestrator：当前兼容调用 legacy Tool::execute_outcome
+  → Capability Tool：当前仍负责自身参数校验和 approval/sandbox
+  → Core：写入 ToolFinished / Message::Tool
+```
+
+六项准入验证：
+
+```text
+1. Layer:
+   Protocol 定义可移植的 ToolExecutionDelegate；Core 只保存并调用委托；Host
+   装配 ToolOrchestrator。Capabilities、App Server 和 CLI 公共行为不变。
+2. Duplicate responsibility:
+   搜索 ToolRouter、ToolRegistry、Tool::execute_outcome、Host classify_tools、
+   ApprovalController 和 App Server broker。删除旧的 ClassifiedTool wrapper，
+   将 outcome 分类收拢到 Host ToolOrchestrator；没有增加第二个 Router 或 Session
+   写入路径。
+3. Replace vs add:
+   用 Router 的 injected delegate 替换 Host `classify_tools` 包装路径；保留
+   `Tool::execute_outcome` 作为迁移期 legacy runtime。审批和 sandbox 暂不搬迁，
+   避免当前批次同时产生两套 admission。
+4. Net line delta:
+   expected: runtime 小幅净增且低于剩余预算；actual: runtime
+   16,336 → 16,411 (+75)，all Rust 28,976 → 29,051 (+75)。当前余量分别为
+   3,589 和 949 行；后续 approval migration 必须净零或提供抵扣。
+5. Visible surface:
+   不改变模型输入、tool schema、event、Session 或 wire protocol。新增的是
+   Rust in-process `ToolExecutionDelegate`/`ToolRouter::with_executor` 注入边界；
+   `call_id` 已能穿过 Router 到 delegate，但 approval 的 turn/call correlation
+   仍未完成。
+6. Boundary evidence:
+   `cargo test -p mini-agent-protocol`（7 passed）、`cargo test -p mini-agent-core`
+   （32 passed）、`cargo test -p mini-agent-host`（40 passed）、受影响三 crate
+   的 Clippy、`cargo fmt --all`、`git diff --check` 和 `python scripts/line_budget.py`
+   均通过。缺口仍是实际内建敏感工具的 App Server 审批公共场景。
+```
+
+判定：**首个执行委托切片接受**。下一批不直接扩展通用 Orchestrator；只选择一个
+内建敏感工具，先定义 typed admission 和副作用前审批证据，再迁移其 approval 调用，
+同时删除对应 legacy 分类/路径，确保没有双重审批。
 
 ### 3.4 评估自动化的顺序
 

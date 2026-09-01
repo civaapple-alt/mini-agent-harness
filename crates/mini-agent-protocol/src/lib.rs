@@ -18,6 +18,7 @@ pub use model::ModelUsage;
 pub use model::ToolCall;
 pub use tool::Tool;
 pub use tool::ToolError;
+pub use tool::ToolExecutionDelegate;
 pub use tool::ToolExecutionOutcome;
 pub use tool::ToolExecutionRequest;
 pub use tool::ToolExecutionStatus;

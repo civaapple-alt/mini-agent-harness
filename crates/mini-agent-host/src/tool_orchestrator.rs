@@ -1,30 +1,21 @@
 use mini_agent_protocol::Tool;
+use mini_agent_protocol::ToolExecutionDelegate;
 use mini_agent_protocol::ToolExecutionOutcome;
+use mini_agent_protocol::ToolExecutionRequest;
 use mini_agent_protocol::ToolExecutionStatus;
-use mini_agent_protocol::ToolSpec;
-use serde_json::Value;
 
-/// Wraps host tools with the policy-aware outcome projection used by core.
-pub fn classify_tools(tools: Vec<Box<dyn Tool>>) -> Vec<Box<dyn Tool>> {
-    tools
-        .into_iter()
-        .map(|tool| Box::new(ClassifiedTool(tool)) as Box<dyn Tool>)
-        .collect()
-}
+/// Owns the host-side execution boundary while legacy tools are migrated.
+///
+/// This first slice delegates the actual call to the existing tool and keeps
+/// outcome classification in one place. Approval and sandbox admission move
+/// here in later slices; the tool remains the source of tool-specific parsing
+/// and side-effect behavior until then.
+#[derive(Default)]
+pub(crate) struct ToolOrchestrator;
 
-struct ClassifiedTool(Box<dyn Tool>);
-
-impl Tool for ClassifiedTool {
-    fn spec(&self) -> ToolSpec {
-        self.0.spec()
-    }
-
-    fn execute(&self, arguments: &Value) -> Result<String, mini_agent_protocol::ToolError> {
-        self.0.execute(arguments)
-    }
-
-    fn execute_outcome(&self, arguments: &Value) -> ToolExecutionOutcome {
-        classify_outcome(self.0.execute_outcome(arguments))
+impl ToolExecutionDelegate for ToolOrchestrator {
+    fn execute(&self, tool: &dyn Tool, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        classify_outcome(tool.execute_outcome(&request.arguments))
     }
 }
 

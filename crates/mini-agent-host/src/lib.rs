@@ -13,7 +13,7 @@ pub mod observer;
 pub mod profile;
 pub mod project_context;
 pub mod runtime_factory;
-pub mod tool_outcome;
+mod tool_orchestrator;
 pub mod world;
 
 #[cfg(test)]

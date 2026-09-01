@@ -102,6 +102,17 @@ pub trait Tool: Send + Sync {
     }
 }
 
+/// Delegates one resolved tool call to the owner of its execution lifecycle.
+///
+/// Core uses this boundary after `ToolRouter` resolves a tool. A host can use
+/// it to add admission, approval, sandbox, retry, and outcome classification
+/// without moving those concerns into the portable tool contract. The
+/// delegate must return a bounded outcome and must not mutate Core session
+/// history; Core remains responsible for recording the result.
+pub trait ToolExecutionDelegate: Send + Sync {
+    fn execute(&self, tool: &dyn Tool, request: &ToolExecutionRequest) -> ToolExecutionOutcome;
+}
+
 #[cfg(test)]
 #[path = "tool_tests.rs"]
 mod tests;

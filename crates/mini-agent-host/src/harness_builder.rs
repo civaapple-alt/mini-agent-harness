@@ -6,6 +6,7 @@ use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::ToolRegistry;
 use mini_agent_protocol::Model;
+use std::sync::Arc;
 
 use crate::config::RuntimeConfig;
 use crate::profile::{
@@ -13,7 +14,7 @@ use crate::profile::{
     ToolScope,
 };
 use crate::project_context;
-use crate::tool_outcome::classify_tools;
+use crate::tool_orchestrator::ToolOrchestrator;
 use crate::world::WorldState;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ImageStore;
@@ -254,7 +255,6 @@ where
     let enabled_mcp_servers = loaded_servers.iter().cloned().collect();
     let mcp_tool_count = mcp_tools.len();
     tools.extend(mcp_tools);
-    let tools = classify_tools(tools);
     let retry_mcp_servers = configured_mcp_servers
         .into_iter()
         .filter(|server| {
@@ -264,7 +264,9 @@ where
     let stable_system_prompt = config.system_prompt.clone();
     let world = WorldState::detect(&workspace, approval_mode, copilot, profile.sandbox);
     let world_context = world.model_context()?;
-    let mut harness = Harness::new(model, ToolRegistry::new(tools), config);
+    let tool_executor = Arc::new(ToolOrchestrator);
+    let tool_registry = ToolRegistry::with_executor(tools, tool_executor);
+    let mut harness = Harness::new(model, tool_registry, config);
     harness
         .append_context(world_context)
         .map_err(|error| error.to_string())?;
