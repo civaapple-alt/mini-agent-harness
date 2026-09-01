@@ -118,6 +118,14 @@ pub(super) async fn worker_loop<M>(
     while let Some(command) = commands.recv().await {
         if let Command::InstallRuntime { state } = command {
             runtime = Some(*state);
+            if runtime
+                .as_ref()
+                .is_some_and(|state| state.workflow.plan_active())
+                && let Some(state) = runtime.as_mut()
+                && let Err(error) = runtime_actor::set_collaboration_mode(&mut threads, state, true)
+            {
+                eprintln!("warning: failed to restore collaboration mode: {error}");
+            }
             continue;
         }
         let base_revision = runtime

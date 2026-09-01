@@ -1728,3 +1728,48 @@ HTTP 429 provider-specific retry/backoff 合同、Docker sandbox 的更强 netwo
 sandbox 前置拒绝以及 App Server 的 NeedsApproval/MCP timeout projection 已覆盖，但更完整的
 工具失败/超时/重试矩阵仍是证据缺口，不是当前实现的已覆盖能力。全 Rust 预算只剩
 133 行；除非先删除等量冗余或兼容代码，否则下一轮不增加 Rust 生产面。
+
+#### 2026-09-01：Plan → `collaborationMode` 第一批落地
+
+App Server 的 Plan 公共入口已切换为 `thread/settings/update`，请求使用有界的
+`collaborationMode.mode`（`default` 或 `plan`）。旧 `workflow/plan/set` 不再注册、
+不再在客户端 facade 暴露，也不提供兼容 wrapper；这是有意的公共协议变更，避免
+同时维护两套 Plan 控制路径。`workflow/state` 仍保留为状态读取接口，但返回的
+Plan 字段也已统一为 `collaborationMode`。
+
+模式切换由 App Server Runtime Actor 在一个 mutation action 内完成：Plan 模式会
+创建/恢复 session living `plan.md`，设置共享 `ApprovalController` 的 living-plan
+锁，并把 Host 已组合的 bounded system prompt 加上 Plan overlay；切回 default 会
+撤销 living-plan 锁并恢复原 prompt。runtime bind 时若发现持久化的 Plan 状态仍 active，
+worker 会重新应用同一锁和 prompt overlay，避免 resume 后出现“状态显示 Plan、工具
+却可写”的分裂状态。App Server 不接受任意 raw system-prompt 文本。
+
+本批六项准入记录：
+
+```text
+1. Layer: App Server protocol/JSON-RPC + Runtime Actor, with Core Harness's existing
+   settled prompt mutation seam and Host workflow/approval persistence.
+2. Duplicate responsibility: `workflow/plan/set`, the old client `set_plan_mode`, and
+   the previous runtime Plan command represented the same public control; they were
+   removed rather than retained beside `thread/settings/update`.
+3. Replace vs add: replace the public Plan selector and internal command name; reuse
+   Host `HostWorkflowStore`, `ApprovalController`, Runtime Actor/CAS, and bounded prompt
+   overlay. No second workflow store, orchestrator, or arbitrary prompt setter was added.
+4. Net line delta: record the exact `line_budget.py` before/after values at commit time;
+   this batch is bounded to the existing protocol/runtime seam and consumes no new
+   Goal loop or provider path.
+5. Visible surface: breaking App Server method/DTO change; `thread/settings/update`
+   changes Thread prompt and approval policy at a settled control-plane boundary.
+   Model-visible text remains Host-composed and bounded; Session and public events do
+   not gain a raw prompt field.
+6. Boundary evidence: App Server JSON-RPC workflow coverage verifies the new method and
+   state projection; affected App Server, Core, and Host tests plus Clippy, fmt, and
+   line-budget checks are required before commit. A persisted-Plan restore scenario is
+   the next targeted regression if the current test fixture can cover it without a new
+   runtime path.
+```
+
+Decision: **accept and commit this batch**. Goal remains a separate durable runtime
+concern; automatic Goal continuation, `thread/goal/*`-style public operations, and
+settings notifications are deferred to later bounded batches after the whole-Rust
+line budget is released. Do not reintroduce the removed Plan endpoint while doing so.

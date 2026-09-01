@@ -13,6 +13,8 @@ use mini_agent_app_server_protocol::ApprovalRequestNotification;
 use mini_agent_app_server_protocol::ApprovalResolvedNotification;
 use mini_agent_app_server_protocol::ApprovalRespondParams;
 use mini_agent_app_server_protocol::CapabilityManifest;
+use mini_agent_app_server_protocol::CollaborationMode;
+use mini_agent_app_server_protocol::CollaborationModeKind;
 use mini_agent_app_server_protocol::DisabledCapability;
 use mini_agent_app_server_protocol::InitializeParams;
 use mini_agent_app_server_protocol::InitializeResult;
@@ -30,6 +32,7 @@ use mini_agent_app_server_protocol::METHOD_THREAD_FORK;
 use mini_agent_app_server_protocol::METHOD_THREAD_LIST;
 use mini_agent_app_server_protocol::METHOD_THREAD_READ;
 use mini_agent_app_server_protocol::METHOD_THREAD_RESUME;
+use mini_agent_app_server_protocol::METHOD_THREAD_SETTINGS_UPDATE;
 use mini_agent_app_server_protocol::METHOD_THREAD_START;
 use mini_agent_app_server_protocol::METHOD_TURN_EVENT;
 use mini_agent_app_server_protocol::METHOD_TURN_INTERRUPT;
@@ -42,7 +45,6 @@ use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_FAIL;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_PAUSE;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_RECORD_VERDICT;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_START;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_PLAN_SET;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
 use mini_agent_app_server_protocol::METHOD_WORLD_REFRESH;
 use mini_agent_app_server_protocol::METHOD_WORLD_SET_EXECUTION;
@@ -61,6 +63,8 @@ use mini_agent_app_server_protocol::ThreadReadParams;
 use mini_agent_app_server_protocol::ThreadReadResult;
 use mini_agent_app_server_protocol::ThreadResumeParams;
 use mini_agent_app_server_protocol::ThreadResumeResult;
+use mini_agent_app_server_protocol::ThreadSettingsUpdateParams;
+use mini_agent_app_server_protocol::ThreadSettingsUpdateResult;
 use mini_agent_app_server_protocol::ThreadStartParams;
 use mini_agent_app_server_protocol::ThreadStartResult;
 use mini_agent_app_server_protocol::TurnEventNotification;
@@ -73,7 +77,6 @@ use mini_agent_app_server_protocol::WorkflowGoalRecordVerdictParams;
 use mini_agent_app_server_protocol::WorkflowGoalStartParams;
 use mini_agent_app_server_protocol::WorkflowGoalState;
 use mini_agent_app_server_protocol::WorkflowGoalStatus;
-use mini_agent_app_server_protocol::WorkflowPlanSetParams;
 use mini_agent_app_server_protocol::WorkflowState;
 use mini_agent_app_server_protocol::WorkflowVerdictOutcome;
 use mini_agent_app_server_protocol::WorkflowVerifierVerdict;
@@ -255,12 +258,12 @@ where
             METHOD_THREAD_RESUME => self.handle_thread_resume(request).await,
             METHOD_THREAD_READ => self.handle_thread_read(request).await,
             METHOD_THREAD_CLOSE => self.handle_thread_close(request).await,
+            METHOD_THREAD_SETTINGS_UPDATE => self.handle_thread_settings_update(request).await,
             METHOD_TURN_START => self.handle_turn_start(request).await,
             METHOD_TURN_READ => self.handle_turn_read(request).await,
             METHOD_TURN_STEER => self.handle_turn_steer(request).await,
             METHOD_TURN_INTERRUPT => self.handle_turn_interrupt(request).await,
             METHOD_WORKFLOW_STATE => self.handle_workflow_state(request).await,
-            METHOD_WORKFLOW_PLAN_SET => self.handle_workflow_plan_set(request).await,
             METHOD_WORKFLOW_GOAL_START => self.handle_workflow_goal_start(request).await,
             METHOD_WORKFLOW_GOAL_PAUSE => self.handle_workflow_goal_pause(request).await,
             METHOD_WORKFLOW_GOAL_FAIL => self.handle_workflow_goal_fail(request).await,
@@ -366,6 +369,7 @@ where
                 thread_fork: self.server.supports_thread_factory(),
                 thread_read: true,
                 thread_close: true,
+                thread_settings_update: self.runtime.is_some(),
                 turn_read: true,
                 thread_list: true,
                 approval_requests: self.approval_enabled,

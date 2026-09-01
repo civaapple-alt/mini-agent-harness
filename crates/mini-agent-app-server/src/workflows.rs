@@ -33,6 +33,7 @@ pub struct WorkflowService {
     store: Option<HostWorkflowStore>,
     commands: Option<mpsc::Sender<Command>>,
     revision: Option<Arc<AtomicU64>>,
+    stable_system_prompt: Option<String>,
 }
 
 impl WorkflowService {
@@ -41,7 +42,20 @@ impl WorkflowService {
             store: Some(HostWorkflowStore::new(session_dir, goal_limits)),
             commands: None,
             revision: None,
+            stable_system_prompt: None,
         }
+    }
+
+    /// Associates the prompt assembled by Host with this runtime so Plan Mode
+    /// can switch the settled Thread without exposing raw prompt replacement
+    /// through the App Server protocol.
+    pub fn with_stable_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.stable_system_prompt = Some(prompt.into());
+        self
+    }
+
+    pub(crate) fn stable_system_prompt(&self) -> Option<&str> {
+        self.stable_system_prompt.as_deref()
     }
 
     pub(crate) fn into_store(mut self) -> io::Result<HostWorkflowStore> {
@@ -50,17 +64,17 @@ impl WorkflowService {
             .ok_or_else(|| io::Error::other("workflow store is already bound"))
     }
 
-    pub(crate) fn bound(commands: mpsc::Sender<Command>, revision: Arc<AtomicU64>) -> Self {
+    pub(crate) fn bound(
+        commands: mpsc::Sender<Command>,
+        revision: Arc<AtomicU64>,
+        stable_system_prompt: Option<String>,
+    ) -> Self {
         Self {
             store: None,
             commands: Some(commands),
             revision: Some(revision),
+            stable_system_prompt,
         }
-    }
-
-    pub(crate) async fn state(&self) -> io::Result<(bool, Option<GoalState>)> {
-        self.request(|reply| RuntimeCommand::WorkflowState { reply })
-            .await
     }
 
     pub(crate) async fn state_action(
@@ -70,28 +84,12 @@ impl WorkflowService {
             .await
     }
 
-    pub(crate) async fn enable_plan_mode_action(
+    pub(crate) async fn set_collaboration_mode_action(
         &self,
-        prompt: Option<&str>,
+        active: bool,
     ) -> Result<ActionResponse<()>, ActionFailure> {
-        let prompt = prompt.map(str::to_string);
-        self.request_action(|reply| RuntimeCommand::WorkflowSetPlan {
-            active: true,
-            prompt,
-            reply,
-        })
-        .await
-    }
-
-    pub(crate) async fn disable_plan_mode_action(
-        &self,
-    ) -> Result<ActionResponse<()>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::WorkflowSetPlan {
-            active: false,
-            prompt: None,
-            reply,
-        })
-        .await
+        self.request_action(|reply| RuntimeCommand::SetCollaborationMode { active, reply })
+            .await
     }
 
     pub(crate) async fn init_goal_action(

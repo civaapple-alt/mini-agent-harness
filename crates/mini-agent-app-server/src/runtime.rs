@@ -206,7 +206,8 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
                 .and_then(|opened| opened.store.path().parent().map(PathBuf::from))
                 .unwrap_or_else(|| world.workspace().to_path_buf()),
             goal_limits,
-        );
+        )
+        .with_stable_system_prompt(stable_system_prompt.clone());
         let management = RuntimeManagementService::new(
             server.clone(),
             session,

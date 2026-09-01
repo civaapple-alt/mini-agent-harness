@@ -54,8 +54,10 @@ limits, failures, and observation events.
   Session/World/MCP/Goal/Plan management through the runtime service. The App
   Server owns workflow commands; Host only supplies the wrapped
   `HostWorkflowStore` persistence seam. The
-  JSON-RPC surface also exposes `workflow/state`, `workflow/plan/set`, and
-   typed Goal lifecycle methods.
+  JSON-RPC surface exposes `thread/settings/update` with the typed
+  `collaborationMode` setting, `workflow/state`, and typed Goal lifecycle
+  methods. The former `workflow/plan/set` method is intentionally removed;
+  clients must use the settings method.
   `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess
   clients. Runtime actions are serialized by the App Server Actor and return
   `actionId`, `actionSequence`, and `stateRevision`; Core event sequence numbers

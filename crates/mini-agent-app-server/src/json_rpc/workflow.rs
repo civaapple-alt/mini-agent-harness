@@ -19,46 +19,13 @@ where
                     request.id,
                     response,
                     WorkflowState {
-                        plan_active,
+                        collaboration_mode: collaboration_mode(plan_active),
                         goal: goal.map(workflow_goal_state),
                     },
                 )
             }
             Err(error) => response_error(request.id, map_action_error(error)),
         }
-    }
-
-    pub(super) async fn handle_workflow_plan_set(
-        &self,
-        request: JsonRpcRequest,
-    ) -> Option<JsonRpcResponse> {
-        let params = match request.decode_params::<WorkflowPlanSetParams>() {
-            Ok(params) => params,
-            Err(error) => return response_error(request.id, error),
-        };
-        let workflows = match self.workflow_service() {
-            Ok(workflows) => workflows,
-            Err(error) => return response_error(request.id, error),
-        };
-        let result = if params.active {
-            workflows
-                .enable_plan_mode_action(params.prompt.as_deref())
-                .await
-        } else {
-            workflows.disable_plan_mode_action().await
-        };
-        let response = match result {
-            Ok(response) => response,
-            Err(error) => return response_error(request.id, map_action_error(error)),
-        };
-        let state = match workflows.state().await {
-            Ok((plan_active, goal)) => WorkflowState {
-                plan_active,
-                goal: goal.map(workflow_goal_state),
-            },
-            Err(error) => return response_error(request.id, workflow_error(error.to_string())),
-        };
-        response_action_with(request.id, response, state)
     }
 
     pub(super) async fn handle_workflow_goal_start(
@@ -177,7 +144,7 @@ where
         }
     }
 
-    fn workflow_service(&self) -> Result<&WorkflowService, JsonRpcError> {
+    pub(super) fn workflow_service(&self) -> Result<&WorkflowService, JsonRpcError> {
         self.runtime
             .as_ref()
             .map(RuntimeServices::workflows)
@@ -204,6 +171,16 @@ fn workflow_goal_state(state: crate::workflows::GoalState) -> WorkflowGoalState 
         verifier_model: state.verifier_model,
         last_verifier_score: state.last_verifier_score,
         updated_at_ms: state.updated_at_ms,
+    }
+}
+
+fn collaboration_mode(active: bool) -> CollaborationMode {
+    CollaborationMode {
+        mode: if active {
+            CollaborationModeKind::Plan
+        } else {
+            CollaborationModeKind::Default
+        },
     }
 }
 

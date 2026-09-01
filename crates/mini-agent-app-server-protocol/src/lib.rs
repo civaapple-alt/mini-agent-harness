@@ -27,6 +27,7 @@ pub const METHOD_THREAD_FORK: &str = "thread/fork";
 pub const METHOD_THREAD_RESUME: &str = "thread/resume";
 pub const METHOD_THREAD_READ: &str = "thread/read";
 pub const METHOD_THREAD_CLOSE: &str = "thread/close";
+pub const METHOD_THREAD_SETTINGS_UPDATE: &str = "thread/settings/update";
 pub const METHOD_TURN_START: &str = "turn/start";
 pub const METHOD_TURN_READ: &str = "turn/read";
 pub const METHOD_TURN_STEER: &str = "turn/steer";
@@ -36,7 +37,6 @@ pub const METHOD_APPROVAL_REQUEST: &str = "approval/request";
 pub const METHOD_APPROVAL_RESOLVED: &str = "approval/resolved";
 pub const METHOD_APPROVAL_RESPOND: &str = "approval/respond";
 pub const METHOD_WORKFLOW_STATE: &str = "workflow/state";
-pub const METHOD_WORKFLOW_PLAN_SET: &str = "workflow/plan/set";
 pub const METHOD_WORKFLOW_GOAL_START: &str = "workflow/goal/start";
 pub const METHOD_WORKFLOW_GOAL_PAUSE: &str = "workflow/goal/pause";
 pub const METHOD_WORKFLOW_GOAL_FAIL: &str = "workflow/goal/fail";
@@ -238,6 +238,8 @@ pub struct ServerCapabilities {
     #[serde(default)]
     pub thread_close: bool,
     #[serde(default)]
+    pub thread_settings_update: bool,
+    #[serde(default)]
     pub turn_read: bool,
     #[serde(default)]
     pub thread_list: bool,
@@ -260,6 +262,40 @@ pub struct InitializeResult {
     pub capability_manifest: CapabilityManifest,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollaborationMode {
+    pub mode: CollaborationModeKind,
+}
+
+impl Default for CollaborationMode {
+    fn default() -> Self {
+        Self {
+            mode: CollaborationModeKind::Default,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CollaborationModeKind {
+    Default,
+    Plan,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSettingsUpdateParams {
+    pub thread_id: ThreadId,
+    pub collaboration_mode: CollaborationMode,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSettingsUpdateResult {
+    pub collaboration_mode: CollaborationMode,
+}
+
 /// Secret-free workflow state projected by the App Server.
 ///
 /// Filesystem paths and Host implementation types stay private to the
@@ -268,16 +304,8 @@ pub struct InitializeResult {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowState {
-    pub plan_active: bool,
+    pub collaboration_mode: CollaborationMode,
     pub goal: Option<WorkflowGoalState>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowPlanSetParams {
-    pub active: bool,
-    #[serde(default)]
-    pub prompt: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

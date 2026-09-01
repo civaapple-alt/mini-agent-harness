@@ -30,6 +30,8 @@ use tokio::sync::oneshot;
 pub(crate) struct RuntimeActorState {
     pub(crate) management: RuntimeManagementState,
     pub(crate) workflow: HostWorkflowStore,
+    pub(crate) approval: ApprovalController,
+    pub(crate) stable_system_prompt: Option<String>,
     revision: crate::action::RuntimeRevision,
 }
 
@@ -113,16 +115,22 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             approval,
         } = self;
         let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
+        let stable_system_prompt = workflows.stable_system_prompt().map(str::to_string);
         let workflow = workflows.into_store().map_err(|error| error.to_string())?;
         server
             .install_runtime_state(RuntimeActorState {
                 management,
                 workflow,
+                approval: approval.clone(),
+                stable_system_prompt: stable_system_prompt.clone(),
                 revision: crate::action::RuntimeRevision::default(),
             })
             .map_err(|error| error.to_string())?;
-        let workflows =
-            WorkflowService::bound(server.command_sender(), server.runtime_revision_handle());
+        let workflows = WorkflowService::bound(
+            server.command_sender(),
+            server.runtime_revision_handle(),
+            stable_system_prompt,
+        );
         Ok((
             Self {
                 server,

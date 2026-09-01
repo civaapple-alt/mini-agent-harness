@@ -5,6 +5,8 @@ use crate::ThreadUpdate;
 use crate::runtime::{RuntimeTurnBatch, RuntimeTurnResult};
 use mini_agent_app_server_protocol::CapabilityProviderSelection;
 use mini_agent_app_server_protocol::ClientCapabilities;
+use mini_agent_app_server_protocol::CollaborationMode;
+use mini_agent_app_server_protocol::CollaborationModeKind;
 use mini_agent_app_server_protocol::InitializeParams;
 use mini_agent_app_server_protocol::InitializeResult;
 use mini_agent_app_server_protocol::JsonRpcError;
@@ -18,6 +20,7 @@ use mini_agent_app_server_protocol::METHOD_THREAD_FORK;
 use mini_agent_app_server_protocol::METHOD_THREAD_LIST;
 use mini_agent_app_server_protocol::METHOD_THREAD_READ;
 use mini_agent_app_server_protocol::METHOD_THREAD_RESUME;
+use mini_agent_app_server_protocol::METHOD_THREAD_SETTINGS_UPDATE;
 use mini_agent_app_server_protocol::METHOD_THREAD_START;
 use mini_agent_app_server_protocol::METHOD_TURN_INTERRUPT;
 use mini_agent_app_server_protocol::METHOD_TURN_READ;
@@ -29,7 +32,6 @@ use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_FAIL;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_PAUSE;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_RECORD_VERDICT;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_START;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_PLAN_SET;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
 use mini_agent_app_server_protocol::METHOD_WORLD_REFRESH;
 use mini_agent_app_server_protocol::METHOD_WORLD_SET_EXECUTION;
@@ -46,6 +48,8 @@ use mini_agent_app_server_protocol::ThreadReadParams;
 use mini_agent_app_server_protocol::ThreadReadResult;
 use mini_agent_app_server_protocol::ThreadResumeParams;
 use mini_agent_app_server_protocol::ThreadResumeResult;
+use mini_agent_app_server_protocol::ThreadSettingsUpdateParams;
+use mini_agent_app_server_protocol::ThreadSettingsUpdateResult;
 use mini_agent_app_server_protocol::ThreadStartParams;
 use mini_agent_app_server_protocol::ThreadStartResult;
 use mini_agent_app_server_protocol::TurnEventNotification;
@@ -59,7 +63,6 @@ use mini_agent_app_server_protocol::WorkflowGoalCriteriaResult;
 use mini_agent_app_server_protocol::WorkflowGoalRecordVerdictParams;
 use mini_agent_app_server_protocol::WorkflowGoalStartParams;
 use mini_agent_app_server_protocol::WorkflowGoalState;
-use mini_agent_app_server_protocol::WorkflowPlanSetParams;
 use mini_agent_app_server_protocol::WorkflowState;
 use mini_agent_app_server_protocol::WorldRefreshResult;
 use mini_agent_app_server_protocol::WorldSetExecutionParams;
@@ -393,14 +396,17 @@ where
             .await
     }
 
-    pub async fn set_plan_mode(
+    pub async fn set_collaboration_mode(
         &mut self,
-        active: bool,
-        prompt: Option<String>,
-    ) -> Result<WorkflowState, JsonRpcError> {
+        mode: CollaborationModeKind,
+    ) -> Result<ThreadSettingsUpdateResult, JsonRpcError> {
+        let thread_id = self.connection.thread_id().await;
         self.call(
-            METHOD_WORKFLOW_PLAN_SET,
-            WorkflowPlanSetParams { active, prompt },
+            METHOD_THREAD_SETTINGS_UPDATE,
+            ThreadSettingsUpdateParams {
+                thread_id,
+                collaboration_mode: CollaborationMode { mode },
+            },
         )
         .await
     }

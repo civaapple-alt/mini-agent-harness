@@ -56,6 +56,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             enabled_mcp_servers,
             mcp_tool_count,
             retry_mcp_servers,
+            stable_system_prompt,
             capability_manifest,
             ..
         } = runtime;
@@ -88,7 +89,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let workflows = mini_agent_app_server::WorkflowService::new(
             startup_config.workspace(),
             startup_config.goal_limits(),
-        );
+        )
+        .with_stable_system_prompt(stable_system_prompt);
         Ok((
             server,
             capability_manifest,

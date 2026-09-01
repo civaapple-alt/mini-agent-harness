@@ -5,6 +5,14 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking App Server API:** replace `workflow/plan/set` with the typed
+  `thread/settings/update` `collaborationMode` setting. Plan Mode now updates
+  the bounded Host prompt and approval lock through the Runtime Actor, and
+  persisted Plan Mode is restored when a runtime is rebound. No compatibility
+  wrapper for the removed method is provided.
+
 ### Added
 
 - Externalized stable Core, Capabilities, and App Server built-in prompt bodies

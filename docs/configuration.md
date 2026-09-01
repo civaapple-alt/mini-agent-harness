@@ -199,7 +199,15 @@ Mini-Agent decouples task execution workflows from approval policies. These
 workflows are owned by the App Server and are intended for Studio/SDK clients;
 the core REPL remains focused on turn execution and run control:
 
-- **Plan Mode (`workflow/plan/set`)**: Locks codebase mutations to read-only while permitting edits exclusively to the session living plan (`~/.mini-agent/sessions/<workspace>/<id>/plan.md`). Relative path `plan.md` maps to that file. Tracks planning state in `plan_mode.json`.
+- **Plan Mode (`thread/settings/update`)**: Set `collaborationMode.mode` to
+  `"plan"` to lock codebase mutations to read-only while permitting edits
+  exclusively to the session living plan
+  (`~/.mini-agent/sessions/<workspace>/<id>/plan.md`). Relative path `plan.md`
+  maps to that file. The setting is applied by the App Server Runtime Actor to
+  the settled Thread, approval controller, and bounded Host-composed prompt;
+  arbitrary raw system-prompt replacement is not accepted. Planning state is
+  persisted in `plan_mode.json`. The former `workflow/plan/set` method is not
+  supported for compatibility.
 - **Autonomous Goal Mode (`workflow/goal/*`)**: Materializes a dedicated `goal/` workspace containing `state.json` (milestone progress, loop counts, verifier scores) and `plan.md` (acceptance criteria). Integrates with an independent Goal verifier (`goal/verifier_verdict.md`) to provide blind validation gates before advancing milestones.
 
 Goal limits can be shortened in a workspace `.env` for deterministic local

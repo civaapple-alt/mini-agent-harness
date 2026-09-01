@@ -6,6 +6,9 @@
 //! the frontend's direct dependency graph.
 
 pub use mini_agent_app_server_protocol::CapabilityManifest;
+pub use mini_agent_app_server_protocol::CollaborationMode;
+pub use mini_agent_app_server_protocol::CollaborationModeKind;
+pub use mini_agent_app_server_protocol::ThreadSettingsUpdateResult;
 pub use mini_agent_app_server_protocol::WorkflowGoalAdvanceParams;
 pub use mini_agent_app_server_protocol::WorkflowGoalStatus;
 pub use mini_agent_app_server_protocol::WorkflowState;

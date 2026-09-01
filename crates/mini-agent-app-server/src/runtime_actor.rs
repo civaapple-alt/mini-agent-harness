@@ -174,22 +174,9 @@ pub(super) fn handle<M>(
                     ))
                 }),
         ),
-        RuntimeCommand::WorkflowSetPlan {
-            active,
-            prompt,
-            reply,
-        } => {
+        RuntimeCommand::SetCollaborationMode { active, reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
-                if active {
-                    state
-                        .workflow
-                        .init_plan_mode(prompt.as_deref())
-                        .map(|_| ())
-                        .map_err(workflow_error)
-                } else {
-                    state.workflow.disable_plan_mode().map_err(workflow_error)
-                }
-                .map(|()| ((), true))
+                set_collaboration_mode(threads, state, active).map(|()| ((), true))
             });
             respond(reply, receipt, result);
         }
@@ -285,7 +272,7 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::ReadCheckpoint { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::StartNewThread { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowState { reply } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::WorkflowSetPlan { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::SetCollaborationMode { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowInitGoal { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowLoadGoal { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WorkflowCriteria { reply } => respond(reply, receipt, Err(error)),
@@ -347,6 +334,45 @@ fn check_revision(
             actual: base_revision.value(),
         })
     }
+}
+
+pub(super) fn set_collaboration_mode<M>(
+    threads: &mut HashMap<String, Thread<M>>,
+    state: &mut RuntimeActorState,
+    active: bool,
+) -> Result<(), AppServerError>
+where
+    M: Model,
+{
+    let thread_id = state.management.thread_id();
+    let thread = threads
+        .get_mut(thread_id.as_str())
+        .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
+    if active {
+        let plan_path = state
+            .workflow
+            .init_plan_mode(None)
+            .map_err(workflow_error)?;
+        state.approval.set_living_plan(Some(plan_path));
+        let base_prompt = match state.stable_system_prompt.as_ref() {
+            Some(prompt) => prompt.clone(),
+            None => {
+                let prompt = thread.harness().system_prompt().to_string();
+                state.stable_system_prompt = Some(prompt.clone());
+                prompt
+            }
+        };
+        thread
+            .harness_mut()
+            .set_system_prompt(mini_agent_host::with_plan_mode_overlay(&base_prompt));
+    } else {
+        state.workflow.disable_plan_mode().map_err(workflow_error)?;
+        state.approval.set_living_plan(None);
+        if let Some(prompt) = state.stable_system_prompt.as_deref() {
+            thread.harness_mut().set_system_prompt(prompt);
+        }
+    }
+    Ok(())
 }
 
 fn update_world<M>(

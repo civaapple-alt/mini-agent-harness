@@ -312,13 +312,16 @@ async fn exposes_workflow_management_without_host_paths() {
     let response = connection
         .handle_request(JsonRpcRequest::request(
             2,
-            METHOD_WORKFLOW_PLAN_SET,
-            serde_json::json!({"active": true, "prompt": "rpc plan"}),
+            METHOD_THREAD_SETTINGS_UPDATE,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "collaborationMode": {"mode": "plan"}
+            }),
         ))
         .await
         .unwrap();
     let result = response.result.unwrap();
-    assert_eq!(result["value"]["planActive"], true);
+    assert_eq!(result["value"]["collaborationMode"]["mode"], "plan");
     assert_eq!(result["actionId"], 1);
     assert_eq!(result["actionSequence"], 1);
     assert_eq!(result["stateRevision"], 1);
@@ -333,8 +336,8 @@ async fn exposes_workflow_management_without_host_paths() {
         .unwrap();
     let result = response.result.unwrap();
     assert_eq!(result["value"]["status"], "running");
-    assert_eq!(result["actionId"], 3);
-    assert_eq!(result["actionSequence"], 3);
+    assert_eq!(result["actionId"], 2);
+    assert_eq!(result["actionSequence"], 2);
     assert_eq!(result["stateRevision"], 2);
 
     let response = connection
@@ -347,11 +350,11 @@ async fn exposes_workflow_management_without_host_paths() {
         .unwrap();
     let result = response.result.unwrap();
     let state = result["value"].clone();
-    assert_eq!(state["planActive"], true);
+    assert_eq!(state["collaborationMode"]["mode"], "plan");
     assert_eq!(state["goal"]["status"], "running");
     assert!(state["goal"].get("planFile").is_none());
-    assert_eq!(result["actionId"], 4);
-    assert_eq!(result["actionSequence"], 4);
+    assert_eq!(result["actionId"], 3);
+    assert_eq!(result["actionSequence"], 3);
     assert_eq!(result["stateRevision"], 2);
 
     let response = connection
@@ -364,8 +367,8 @@ async fn exposes_workflow_management_without_host_paths() {
         .unwrap();
     let result = response.result.unwrap();
     assert_eq!(result["value"]["status"], "user_paused");
-    assert_eq!(result["actionId"], 5);
-    assert_eq!(result["actionSequence"], 5);
+    assert_eq!(result["actionId"], 4);
+    assert_eq!(result["actionSequence"], 4);
     assert_eq!(result["stateRevision"], 3);
     std::fs::remove_dir_all(root).unwrap();
 }

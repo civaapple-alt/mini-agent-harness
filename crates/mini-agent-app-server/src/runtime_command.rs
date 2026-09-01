@@ -52,9 +52,8 @@ pub(super) enum RuntimeCommand {
     WorkflowState {
         reply: oneshot::Sender<ActionResult<(bool, Option<crate::workflows::GoalState>)>>,
     },
-    WorkflowSetPlan {
+    SetCollaborationMode {
         active: bool,
-        prompt: Option<String>,
         reply: oneshot::Sender<ActionResult<()>>,
     },
     WorkflowInitGoal {
@@ -93,7 +92,7 @@ impl RuntimeCommand {
                 | Self::UpdateThread { .. }
                 | Self::RetryMcp { .. }
                 | Self::StartNewThread { .. }
-                | Self::WorkflowSetPlan { .. }
+                | Self::SetCollaborationMode { .. }
                 | Self::WorkflowInitGoal { .. }
                 | Self::WorkflowRecordVerdict { .. }
                 | Self::WorkflowAdvance { .. }

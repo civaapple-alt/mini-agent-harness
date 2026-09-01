@@ -115,6 +115,13 @@ impl<M: Model> Harness<M> {
         &self.config.system_prompt
     }
 
+    /// Replaces the model-visible system prompt at a settled control-plane
+    /// boundary. The caller must provide a bounded, fully composed prompt;
+    /// prompt source selection remains owned by the Host.
+    pub fn set_system_prompt(&mut self, prompt: impl Into<String>) {
+        self.config.system_prompt = prompt.into();
+    }
+
     pub fn messages(&self) -> &[Message] {
         self.session.messages()
     }

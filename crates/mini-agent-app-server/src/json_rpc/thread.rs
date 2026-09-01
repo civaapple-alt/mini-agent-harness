@@ -4,6 +4,34 @@ impl<M> AppServerConnection<M>
 where
     M: Model + Send + 'static,
 {
+    pub(super) async fn handle_thread_settings_update(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<ThreadSettingsUpdateParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        let active = matches!(params.collaboration_mode.mode, CollaborationModeKind::Plan);
+        match workflows.set_collaboration_mode_action(active).await {
+            Ok(response) => response_action_with(
+                request.id,
+                response,
+                ThreadSettingsUpdateResult {
+                    collaboration_mode: params.collaboration_mode,
+                },
+            ),
+            Err(error) => response_error(request.id, map_action_error(error)),
+        }
+    }
+
     pub(super) async fn handle_thread_start(
         &mut self,
         request: JsonRpcRequest,
