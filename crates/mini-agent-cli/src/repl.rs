@@ -16,7 +16,6 @@ use mini_agent_app_server::frontend::ToolError;
 use mini_agent_app_server::frontend::TurnInput;
 use mini_agent_app_server::frontend::TurnInputMode;
 use mini_agent_app_server::frontend::TurnStatus;
-use mini_agent_app_server::frontend::harness_config_auto;
 use mini_agent_app_server::frontend::observer::RunObserver;
 use mini_agent_app_server::frontend::print_auto_warning;
 use mini_agent_app_server::local::LocalRuntimeRequest;
@@ -84,7 +83,7 @@ pub async fn run(
     );
 
     println!("{}", crate::version_line());
-    println!("mini-agent — /auto /queue /new /help /exit");
+    println!("mini-agent — /steer /exit");
     print_auto_warning();
     if copilot {
         println!("auto mode on");
@@ -94,7 +93,6 @@ pub async fn run(
     let mut ready = false;
     let mut active_turn = false;
     let mut exiting = false;
-    let mut initialization_failed = false;
     while let Ok(event) = event_rx.recv() {
         match event {
             ReplEvent::Input(Ok(Some(line))) => {
@@ -114,21 +112,6 @@ pub async fn run(
                         if pending_work > 0 {
                             println!("exit queued after {pending_work} pending operation(s)");
                         }
-                    }
-                    "/help" => {
-                        print_help();
-                        if ready && pending_work == 0 {
-                            print_prompt();
-                        }
-                    }
-                    "/queue" => {
-                        println!("{pending_work} pending operation(s)");
-                        if ready && pending_work == 0 {
-                            print_prompt();
-                        }
-                    }
-                    "/new" => {
-                        queue_work(&worker_tx, WorkerCommand::ClearHistory, &mut pending_work)
                     }
                     command
                         if command.strip_prefix("/steer").is_some_and(|rest| {
@@ -162,33 +145,13 @@ pub async fn run(
                             );
                         }
                     }
-                    "/auto" | "/auto on" => queue_work(
-                        &worker_tx,
-                        WorkerCommand::SetExecution {
-                            approval: ApprovalMode::Automatic,
-                            copilot: true,
-                        },
-                        &mut pending_work,
-                    ),
-                    "/auto off" => queue_work(
-                        &worker_tx,
-                        WorkerCommand::SetExecution {
-                            approval: ApprovalMode::Interactive,
-                            copilot: false,
-                        },
-                        &mut pending_work,
-                    ),
                     command if command.starts_with('/') => {
                         eprintln!("unknown local command: {command}");
-                        if ready && pending_work == 0 {
-                            print_prompt();
-                        }
+                        print_prompt_if_idle(ready, pending_work, exiting);
                     }
                     _ if input.len() > MAX_INPUT_BYTES => {
                         eprintln!("input exceeds {MAX_INPUT_BYTES} byte limit");
-                        if ready && pending_work == 0 {
-                            print_prompt();
-                        }
+                        print_prompt_if_idle(ready, pending_work, exiting);
                     }
                     _ if active_turn => {
                         match run_control
@@ -214,22 +177,16 @@ pub async fn run(
                 }
             }
             ReplEvent::Input(Ok(None)) => {
-                if !exiting {
-                    exiting = true;
-                    let _ = worker_tx.send(WorkerCommand::Shutdown);
-                }
+                request_shutdown(&worker_tx, &mut exiting);
             }
             ReplEvent::Input(Err(error)) => {
                 eprintln!("error: cannot read input: {error}");
-                exiting = true;
-                let _ = worker_tx.send(WorkerCommand::Shutdown);
+                request_shutdown(&worker_tx, &mut exiting);
             }
             ReplEvent::Observed(event) => observer.emit(event),
             ReplEvent::Ready => {
                 ready = true;
-                if pending_work == 0 && !exiting {
-                    print_prompt();
-                }
+                print_prompt_if_idle(ready, pending_work, exiting);
             }
             ReplEvent::WorkStarted => {
                 active_turn = true;
@@ -243,18 +200,12 @@ pub async fn run(
                 } else if let Some(input) = run_control.take_follow_up_input() {
                     let _ = worker_tx.send(WorkerCommand::Prompt(input.text));
                 }
-                if ready && pending_work == 0 && !exiting {
-                    print_prompt();
-                }
+                print_prompt_if_idle(ready, pending_work, exiting);
             }
             ReplEvent::Approval { action, response } => {
                 eprint!("approve {action}? [y/N] ");
                 let _ = io::stderr().flush();
                 pending_approval.push_back(response);
-            }
-            ReplEvent::InitializationFailed(error) => {
-                eprintln!("error: {error}");
-                initialization_failed = true;
             }
             ReplEvent::Notice(message) => println!("{message}"),
             ReplEvent::Warning(message) => eprintln!("{message}"),
@@ -264,7 +215,7 @@ pub async fn run(
 
     observer.finish();
     let _ = worker.join();
-    if initialization_failed {
+    if !ready {
         ExitCode::from(2)
     } else if exiting {
         ExitCode::SUCCESS
@@ -273,28 +224,30 @@ pub async fn run(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn spawn_input_reader(events: mpsc::SyncSender<ReplEvent>) {
     thread::spawn(move || {
-        loop {
-            let mut line = String::new();
-            match io::stdin().read_line(&mut line) {
-                Ok(0) => {
-                    let _ = events.send(ReplEvent::Input(Ok(None)));
-                    break;
-                }
-                Ok(_) => {
-                    if events.send(ReplEvent::Input(Ok(Some(line)))).is_err() {
-                        break;
-                    }
-                }
-                Err(error) => {
-                    let _ = events.send(ReplEvent::Input(Err(error.to_string())));
-                    break;
-                }
+        for result in io::stdin().lines() {
+            let failed = result.is_err();
+            let event = ReplEvent::Input(result.map(Some).map_err(|error| error.to_string()));
+            if events.send(event).is_err() || failed {
+                return;
             }
         }
+        let _ = events.send(ReplEvent::Input(Ok(None)));
     });
+}
+
+fn request_shutdown(worker: &mpsc::Sender<WorkerCommand>, exiting: &mut bool) {
+    if !*exiting {
+        *exiting = true;
+        let _ = worker.send(WorkerCommand::Shutdown);
+    }
+}
+
+fn print_prompt_if_idle(ready: bool, pending_work: usize, exiting: bool) {
+    if ready && pending_work == 0 && !exiting {
+        print_prompt();
+    }
 }
 
 fn queue_work(
@@ -312,23 +265,6 @@ fn queue_work(
             println!("queued ({pending_work} pending)");
         }
     }
-}
-
-fn print_help() {
-    println!(
-        "/auto          Enable autonomous copilot loop (unlimited steps, automatic context compaction)"
-    );
-    println!(
-        "/auto off      Switch to manual mode (require per-step approval for writes/shell/MCP)"
-    );
-    println!("/queue         Show number of pending operations in input queue");
-    println!("/steer <msg>   Stop the running turn at a safe checkpoint, then run <msg>");
-    println!("/new           Clear conversation history and start a fresh context");
-    println!("/help          Display this list of interactive slash commands");
-    println!("/exit          Finish queued work and quit");
-    println!(
-        "project> https://github.com/civaapple-alt/mini-agent-harness | creator: civaapple-alt | MIT"
-    );
 }
 
 fn print_prompt() {

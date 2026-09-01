@@ -42,8 +42,9 @@ USAGE:
 
 Starts the interactive REPL. Tools run without per-step approval; shell is protected by the sandbox.
 Interactive, one-shot ask, and auto sessions persist settled checkpoints under ~/.mini-agent/sessions.
-Use `/auto` to enter copilot mode; `/auto off` restores per-action prompts.
-Plan and Goal workflows are exposed through App Server clients such as Studio and the SDK; this REPL stays focused on core turn execution.
+Use `mini-agent auto` to enter copilot mode; execution mode is selected at startup.
+Use `/steer <message>` to redirect a running turn at a safe checkpoint.
+Plan and Goal workflows, session inspection, and interactive management are exposed through App Server clients such as Studio and the SDK; this REPL stays focused on core turn execution.
 
 OPTIONS:
     --session-id SESSION_ID     Resume this durable session instead of opening a new one

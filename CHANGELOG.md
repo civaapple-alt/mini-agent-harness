@@ -37,7 +37,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   displays plus the duplicate parent-side capability projection. Runtime,
   capability, world, MCP, and session metadata inspection remains available
   through App Server clients; REPL session persistence/resume entry points,
-  streaming, approval, steering, queue, and turn execution remain unchanged.
+  streaming, approval, `/steer`, and turn execution remain unchanged.
 - **Breaking App Server API:** replace `workflow/plan/set` with the typed
   `thread/settings/update` `collaborationMode` setting. Plan Mode now updates
   the bounded Host prompt and approval lock through the Runtime Actor, and
@@ -101,17 +101,22 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   The callback and single-Thread worker semantics remain explicit; this does not
   claim a fully asynchronous Tool API.
 - Narrowed the interactive REPL to a core-capability reference client. It keeps
-  turns, streaming events, approval, run control, `/queue`, `/steer`, `/auto`,
-  `/new`, and session persistence/resume entry points, while Plan/Goal workflow
-  orchestration and session metadata inspection are consumed through the App
-  Server by Studio/SDK clients instead of duplicated REPL management commands.
+  turns, streaming events, approval, `/steer`, startup-selected manual/auto
+  execution, and session persistence/resume entry points, while Plan/Goal
+  workflow orchestration and session metadata inspection are consumed through
+  the App Server by Studio/SDK clients instead of duplicated REPL management
+  commands.
 - Removed duplicate World/MCP/extension management presentation from the REPL.
   Host still injects the bounded world context and loads configured capabilities;
   Studio/SDK clients use the App Server `world/*` and `mcp/*` methods for
   inspection and retry.
 - Removed the interactive `/session` metadata display. The worker still uses
-  the existing session authority for resume detection, persistence, and `/new`;
+  the existing session authority for resume detection and persistence;
   Studio/TUI owns user-facing session identity and storage inspection.
+- Reduced the REPL implementation by 31.6% from its 649-line baseline. Removed
+  `/help`, `/queue`, `/new`, and runtime `/auto` mode switching; manual versus
+  automatic execution is selected at startup (`mini-agent` or `mini-agent auto`),
+  while `/steer`, approval, streaming, turn execution, and session resume remain.
 
 ## [0.6.0] - 2026-09-01
 

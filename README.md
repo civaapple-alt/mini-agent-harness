@@ -70,12 +70,13 @@ limits, failures, and observation events.
   rendering, and local session interaction. Agent turns go through the local
   App Server runtime; the CLI does not own provider, tool, Thread, or Harness
   assembly. The REPL is intentionally a core-capability reference client for
-  turns, streaming events, approval, run control, `/queue`, `/steer`, `/auto`,
-  `/new`, and session persistence/resume entry points; full Plan/Goal workflow
-  and management presentation, including session metadata inspection, belongs
-  to App Server clients such as Studio. The REPL intentionally does not provide
-  duplicate `/status`, `/info`, or `/session` management displays. The App
-  Server's `local` bootstrap adapter resolves
+  turns, streaming events, approval, `/steer`, startup-selected manual/auto
+  execution, and session persistence/resume entry points; full Plan/Goal
+  workflow and management presentation, including session metadata inspection,
+  belongs to App Server clients such as Studio. The REPL intentionally does not
+  provide `/help`, `/queue`, `/new`, runtime mode toggling, or duplicate
+  `/status`, `/info`, and `/session` management displays. The App Server's
+  `local` bootstrap adapter resolves
   runtime profiles and launch
   settings for embedded frontends, keeping that setup out of the REPL and
   headless command paths. The CLI imports launch, approval, observation, and
@@ -349,7 +350,7 @@ admission confirmations is checked exactly once; reviewers remain responsible fo
 answer quality.
 
 The current hard-budget snapshot is runtime `17,343 / 20,000` lines and all
-Rust source `29,233 / 30,000` lines. The approximate `26,900` Stage 1 target
+Rust source `28,987 / 30,000` lines. The approximate `26,900` Stage 1 target
 is currently exceeded and remains optimization debt rather than a reason to
 delete protected behavior.
 

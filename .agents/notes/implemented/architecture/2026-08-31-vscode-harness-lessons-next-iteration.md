@@ -1886,3 +1886,47 @@ Decision: **accept and commit this REPL simplification batch**. Future REPL chan
 must justify a direct Core turn/execution need; new workflow, session-inspection,
 Thread/Artifact, or other management features belong in the mini-agent-web Studio/TUI
 clients over the App Server protocol.
+
+#### 2026-09-01：REPL 30% 压缩——固定启动模式并移除交互管理胶水
+
+本批按“REPL 只展示核心 harness turn 能力”的目标继续收缩。删除 `/help`、`/queue`、
+`/new` 和运行期 `/auto` 切换；手动/自动模式改为启动参数选择：`mini-agent` 或
+`mini-agent auto`。保留 `/steer`、审批等待、流式事件、turn 执行和 durable session
+恢复。新 session 通过重新启动 CLI 创建，session inspection、Thread/Artifact、workflow
+和其他管理功能由 mini-agent-web Studio/TUI 通过 App Server 承担。
+
+REPL 三个实现文件从 649 行压缩到 444 行，净减少 205 行（31.6%）；测试同时删除
+运行期 auto 切换场景，只保留启动 auto 的公共路径证据。该变化释放 CLI 和全 Rust 预算，
+没有改变 Core、Host、App Server、Session 或公共协议的执行权威。
+
+本批六项准入记录：
+
+```text
+1. Layer: CLI REPL presentation, input commands, and worker dispatch only; Core turn,
+   Host admission, App Server Actor, approval lifecycle, and Session persistence remain
+   outside the change.
+2. Duplicate responsibility: `/help`, `/queue`, and `/new` were local convenience and
+   management projections; runtime `/auto` duplicated startup mode selection and App
+   Server configuration mutation. Studio/TUI is the intended interactive management
+   surface. The `auto` CLI entry point and durable resume path remain distinct.
+3. Replace vs add: delete the local management branches and the duplicated execution
+   reconfiguration path. Do not add a compatibility command or a second runtime path;
+   select execution mode at process startup and resume through the existing Session
+   authority.
+4. Net line delta: runtime `17,343 -> 17,343` (`0`); all Rust
+   `29,233 -> 28,987` (`-246`). REPL implementation `649 -> 444` (`-205`, `-31.6%`);
+   remaining headroom is `2,657` runtime and `1,013` all-Rust lines.
+5. Visible surface: removed the four interactive management/configuration commands and
+   their status text. `/steer`, approval prompts, streaming events, turn semantics,
+   model-visible context, Session JSONL, public App Server protocol, and startup `auto`
+   behavior remain unchanged. Studio/TUI owns the removed management interactions.
+6. Boundary evidence: CLI unit tests (14) and interactive public-path tests (12),
+   including startup auto execution and steer/resume paths, strict
+   `cargo clippy -p mini-agent-cli --all-targets -- -D warnings`, `cargo fmt --all`,
+   `git diff --check`, and `python scripts/line_budget.py` pass.
+```
+
+Decision: **accept and commit the 30% REPL compression batch**. Future REPL additions
+must justify a direct Core turn/execution need; no new workflow, session-management,
+Thread/Artifact, or runtime configuration command should be added to the REPL while
+Studio/TUI remains the product interaction layer.

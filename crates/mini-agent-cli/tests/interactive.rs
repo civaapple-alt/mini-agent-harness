@@ -778,33 +778,17 @@ fn ask_completes_bounded_cross_file_refactor_on_public_path() {
 }
 
 #[test]
-fn bare_auto_session_can_disable_and_reenable_auto_mode() {
+fn auto_session_starts_with_automatic_execution() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (requests_tx, requests_rx) = mpsc::channel();
-    let (first_command, blocked_command, third_command) = if cfg!(windows) {
-        (
-            "Write-Output auto-started",
-            "Set-Content -LiteralPath blocked.txt -Value blocked",
-            "Write-Output auto-resumed",
-        )
+    let command = if cfg!(windows) {
+        "Write-Output auto-started"
     } else {
-        (
-            "printf auto-started",
-            "printf blocked > blocked.txt",
-            "printf auto-resumed",
-        )
+        "printf auto-started"
     };
     let server = thread::spawn(move || {
-        let responses = [
-            (Some(first_command), ""),
-            (None, "first complete"),
-            (Some(blocked_command), ""),
-            (None, "second complete"),
-            (Some(third_command), ""),
-            (None, "third complete"),
-        ];
-        for (command, reply) in responses {
+        for (command, reply) in [(Some(command), ""), (None, "auto complete")] {
             let (mut stream, _) = listener.accept().unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
@@ -825,16 +809,8 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
         ),
     )
     .unwrap();
-    fs::write(
-        root.join("AGENTS.md"),
-        "Keep the stable project contract.\n",
-    )
-    .unwrap();
     let mut child = mini_agent(&root)
         .arg("auto")
-        .env_remove("OPENAI_API_KEY")
-        .env_remove("OPENAI_MODEL")
-        .env_remove("OPENAI_BASE_URL")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -844,76 +820,37 @@ fn bare_auto_session_can_disable_and_reenable_auto_mode() {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"first\n/auto off\nsecond\n/auto\nthird\n/exit\n")
+        .write_all(b"first\n/exit\n")
         .unwrap();
 
     let status = wait_for_child(&mut child);
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    child
-        .stdout
-        .take()
-        .unwrap()
-        .read_to_string(&mut stdout)
-        .unwrap();
-    child
-        .stderr
-        .take()
-        .unwrap()
-        .read_to_string(&mut stderr)
-        .unwrap();
+    let output = child.wait_with_output().unwrap();
     server.join().unwrap();
 
-    assert!(status.success(), "stderr: {stderr}");
-    assert!(stdout.contains("mini-agent — /auto /queue /new /help /exit"));
+    assert!(status.success());
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("mini-agent — /steer /exit"));
     assert!(stdout.contains("auto mode on"));
     assert!(stdout.contains("auto-started"));
-    assert!(stdout.contains("auto mode off; writes and shell commands require approval"));
-    assert!(stdout.contains("denied non-interactive action"));
-    assert!(stdout.contains("auto-resumed"));
-    assert!(!root.join("blocked.txt").exists());
     assert_eq!(
         stderr
             .matches("unsandboxed shell commands without approval")
             .count(),
-        2
+        1
     );
 
-    let requests = (0..6)
+    let requests = (0..2)
         .map(|_| serde_json::from_slice::<Value>(&requests_rx.recv().unwrap()).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(requests[0]["instructions"], requests[1]["instructions"]);
-    assert_eq!(requests[0]["instructions"], requests[2]["instructions"]);
-    assert_eq!(requests[0]["instructions"], requests[4]["instructions"]);
-    assert!(
-        requests[4]["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("Keep the stable project contract.")
-    );
-    assert!(
-        requests[0]["input"]
-            .to_string()
-            .contains("mode=\\\"auto\\\"")
-    );
-    assert!(
-        requests[2]["input"]
-            .to_string()
-            .contains("mode=\\\"default\\\"")
-    );
     assert!(
         requests[0]["tools"][3]["description"]
             .as_str()
             .unwrap()
             .contains("without per-command approval")
     );
-    assert!(
-        requests[2]["tools"][3]["description"]
-            .as_str()
-            .unwrap()
-            .contains("after user approval")
-    );
-
     fs::remove_dir_all(root).unwrap();
 }
 

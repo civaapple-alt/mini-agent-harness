@@ -1,7 +1,4 @@
-//! Worker-side REPL orchestration.
-//!
-//! The parent module owns terminal input and rendering; this module owns the
-//! App Server worker lifecycle and core turn execution.
+//! REPL worker lifecycle and turn execution.
 
 use super::*;
 
@@ -18,7 +15,6 @@ pub(super) enum ReplEvent {
         action: String,
         response: mpsc::SyncSender<bool>,
     },
-    InitializationFailed(String),
     Notice(String),
     Warning(String),
     Exited,
@@ -26,11 +22,6 @@ pub(super) enum ReplEvent {
 
 pub(super) enum WorkerCommand {
     Prompt(String),
-    ClearHistory,
-    SetExecution {
-        approval: ApprovalMode,
-        copilot: bool,
-    },
     Shutdown,
 }
 
@@ -38,7 +29,7 @@ struct ChannelObserver(mpsc::SyncSender<ReplEvent>);
 
 impl EventSink for ChannelObserver {
     fn emit(&mut self, event: EventEnvelope) {
-        let _ = self.0.send(ReplEvent::Observed(event));
+        send_event(&self.0, ReplEvent::Observed(event));
     }
 }
 
@@ -58,57 +49,42 @@ pub(super) fn spawn_worker(
     run_control: RunControl,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let model_runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
+        let initialized: Result<_, String> = (|| {
+            let model_runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| format!("error: cannot start REPL worker: {error}"))?;
+            let launch = mini_agent_app_server::local::prepare(LocalRuntimeRequest {
+                automatic: copilot,
+                no_tools,
+                security_preset: preset,
+                security_preset_explicit,
+                sandbox_kind,
+                sandbox_kind_explicit,
+                web_search_override,
+                session_request,
+                max_steps: None,
+            })?;
+            let mut runtime =
+                model_runtime
+                    .block_on(launch.start_with_control(
+                        approval.clone(),
+                        std::sync::Arc::new(run_control.clone()),
+                    ))
+                    .map_err(|error| error.to_string())?;
+            let world = model_runtime
+                .block_on(runtime.client_mut().world_state())
+                .map_err(|error| error.message)?;
+            Ok((model_runtime, runtime, world))
+        })();
+        let (model_runtime, mut runtime, world) = match initialized {
+            Ok(initialized) => initialized,
             Err(error) => {
-                let _ = events.send(ReplEvent::Warning(format!(
-                    "error: cannot start REPL worker: {error}"
-                )));
-                let _ = events.send(ReplEvent::Exited);
+                send_event(&events, ReplEvent::Warning(format!("error: {error}")));
+                send_event(&events, ReplEvent::Exited);
                 return;
             }
         };
-        let launch = match mini_agent_app_server::local::prepare(LocalRuntimeRequest {
-            automatic: copilot,
-            no_tools,
-            security_preset: preset,
-            security_preset_explicit,
-            sandbox_kind,
-            sandbox_kind_explicit,
-            web_search_override,
-            session_request,
-            max_steps: None,
-        }) {
-            Ok(launch) => launch,
-            Err(error) => {
-                let _ = events.send(ReplEvent::InitializationFailed(error));
-                let _ = events.send(ReplEvent::Exited);
-                return;
-            }
-        };
-        let auto_max_steps = launch.copilot_max_steps();
-        let mut runtime = match model_runtime.block_on(
-            launch.start_with_control(approval.clone(), std::sync::Arc::new(run_control.clone())),
-        ) {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                let _ = events.send(ReplEvent::InitializationFailed(error));
-                let _ = events.send(ReplEvent::Exited);
-                return;
-            }
-        };
-        let mut world = match model_runtime.block_on(runtime.client_mut().world_state()) {
-            Ok(world) => world,
-            Err(error) => {
-                let _ = events.send(ReplEvent::InitializationFailed(error.message));
-                let _ = events.send(ReplEvent::Exited);
-                return;
-            }
-        };
-        let stable_system_prompt = runtime.stable_system_prompt().to_string();
         if let Ok(Some(opened)) = model_runtime.block_on(runtime.client_mut().session_info())
             && opened.resumed
         {
@@ -127,119 +103,25 @@ pub(super) fn spawn_worker(
             return;
         }
         'work: while let Ok(command) = commands.recv() {
-            let _ = events.send(ReplEvent::WorkStarted);
-            loop {
-                match command {
-                    WorkerCommand::Prompt(prompt) => {
-                        prompt::run_prompt(prompt::PromptContext {
-                            prompt,
-                            run_control: &run_control,
-                            runtime: &mut runtime,
-                            model_runtime: &model_runtime,
-                            events: &events,
-                        });
-                    }
-                    WorkerCommand::ClearHistory => {
-                        let has_session = model_runtime
-                            .block_on(runtime.client_mut().session_info())
-                            .ok()
-                            .flatten()
-                            .is_some();
-                        if has_session
-                            && let Err(error) =
-                                model_runtime.block_on(runtime.client_mut().start_new_thread())
-                        {
-                            let _ = events.send(ReplEvent::Warning(format!(
-                                "warning: session persistence stopped: {error}"
-                            )));
-                        }
-                        if let Some(error) = model_runtime
-                            .block_on(
-                                runtime
-                                    .client_mut()
-                                    .update_thread(ThreadUpdate::ClearHistory),
-                            )
-                            .err()
-                        {
-                            let _ = events.send(ReplEvent::Warning(format!(
-                                "error: cannot clear conversation: {error}"
-                            )));
-                            continue;
-                        }
-                        match model_runtime.block_on(
-                            runtime
-                                .client_mut()
-                                .update_thread(ThreadUpdate::AppendContext(world.context.clone())),
-                        ) {
-                            Ok(()) => {
-                                let _ =
-                                    events.send(ReplEvent::Notice("new conversation".to_string()));
-                            }
-                            Err(error) => {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "error: cannot restore world state: {error}"
-                                )));
-                            }
-                        }
-                    }
-                    WorkerCommand::SetExecution {
-                        approval: mode,
-                        copilot,
-                    } => {
-                        approval.set_mode(mode);
-                        let mut config = harness_config_auto(copilot, auto_max_steps);
-                        config.system_prompt.clone_from(&stable_system_prompt);
-                        if let Err(error) = model_runtime.block_on(
-                            runtime
-                                .client_mut()
-                                .update_thread(ThreadUpdate::ReplaceConfig(config)),
-                        ) {
-                            let _ = events.send(ReplEvent::Warning(format!(
-                                "error: cannot change execution mode: {error}"
-                            )));
-                        }
-                        match model_runtime.block_on(runtime.client_mut().set_world_execution(
-                            match mode {
-                                ApprovalMode::Automatic => "automatic",
-                                ApprovalMode::Interactive => "interactive",
-                            },
-                            copilot,
-                        )) {
-                            Ok(result) => world = result.state,
-                            Err(error) => {
-                                let _ = events.send(ReplEvent::Warning(format!(
-                                    "error: cannot append execution mode state: {}",
-                                    error.message
-                                )));
-                            }
-                        }
-                        if copilot {
-                            let _ = events.send(ReplEvent::Warning("warning: auto mode runs workspace writes and unsandboxed shell commands without approval".to_string()));
-                            let _ = events.send(ReplEvent::Notice("auto mode on".to_string()));
-                        } else if mode == ApprovalMode::Interactive {
-                            let _ = events.send(ReplEvent::Notice(
-                                "auto mode off; writes and shell commands require approval"
-                                    .to_string(),
-                            ));
-                        }
-                    }
-                    WorkerCommand::Shutdown => break 'work,
+            send_event(&events, ReplEvent::WorkStarted);
+            match command {
+                WorkerCommand::Prompt(prompt) => {
+                    prompt::run_prompt(prompt, &run_control, &mut runtime, &model_runtime, &events);
                 }
-                break;
+                WorkerCommand::Shutdown => break 'work,
             }
-            let _ = events.send(ReplEvent::WorkFinished);
+            send_event(&events, ReplEvent::WorkFinished);
         }
-        let _ = events.send(ReplEvent::Exited);
+        send_event(&events, ReplEvent::Exited);
     })
 }
 
 fn report_run_error(events: &mpsc::SyncSender<ReplEvent>, error: &str) {
-    let _ = events.send(ReplEvent::Warning(format!("error: {error}")));
-    if error.contains("context") {
-        let _ = events.send(ReplEvent::Warning(
-            "hint: use /new to clear this conversation".to_string(),
-        ));
-    }
+    send_event(events, ReplEvent::Warning(format!("error: {error}")));
+}
+
+fn send_event(events: &mpsc::SyncSender<ReplEvent>, event: ReplEvent) {
+    let _ = events.send(event);
 }
 
 pub(super) fn request_approval(
