@@ -8,8 +8,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 ### Fixed
 
 - **Plan Mode Shell admission:** allow conservative read-only Shell inspection
-  commands, including PowerShell listing pipelines, while keeping mutations,
-  redirections, script blocks, and command substitution locked before approval.
+  commands, including PowerShell listing pipelines and read-only command
+  sequences, while keeping mutations, redirections, script blocks, and command
+  substitution locked before approval.
   Read-only Shell calls still retain the normal approval correlation path.
 
 ## [0.7.0] - 2026-09-02

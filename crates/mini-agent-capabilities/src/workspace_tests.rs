@@ -433,6 +433,13 @@ fn plan_mode_allows_read_only_shell_inspection() {
     let output = shell.execute(&request.arguments).unwrap();
     assert!(output.contains("note.txt") || output.contains(root.to_string_lossy().as_ref()));
 
+    let chained = if cfg!(windows) {
+        "Write-Output '---workspace---'; Get-ChildItem -Force | Select-Object Name"
+    } else {
+        "pwd; ls"
+    };
+    assert!(shell.execute(&json!({"command": chained})).is_ok());
+
     remove_test_root(&session);
     remove_test_root(&root);
 }

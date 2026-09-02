@@ -89,13 +89,17 @@ pub(super) fn is_read_only_shell_command(command: &str) -> bool {
     if command.chars().any(|character| {
         matches!(
             character,
-            '\n' | '\r' | ';' | '&' | '>' | '<' | '`' | '(' | ')' | '{' | '}'
+            '\n' | '\r' | '&' | '>' | '<' | '`' | '(' | ')' | '{' | '}'
         )
     }) || command.contains("$(")
     {
         return false;
     }
-    command.split('|').all(is_read_only_shell_segment)
+    command.split(';').all(is_read_only_shell_sequence)
+}
+
+fn is_read_only_shell_sequence(sequence: &str) -> bool {
+    sequence.split('|').all(is_read_only_shell_segment)
 }
 
 fn is_read_only_shell_segment(segment: &str) -> bool {
