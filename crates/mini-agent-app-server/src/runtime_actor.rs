@@ -488,10 +488,26 @@ pub(super) fn goal_turn_failed(
     turn_id: &mini_agent_protocol::TurnId,
     reason: &str,
 ) -> Result<bool, AppServerError> {
+    goal_turn_limited(
+        runtime,
+        goal_id,
+        turn_id,
+        mini_agent_host::GoalStatus::Failed,
+        reason,
+    )
+}
+
+pub(super) fn goal_turn_limited(
+    runtime: &mut Option<RuntimeActorState>,
+    goal_id: &str,
+    turn_id: &mini_agent_protocol::TurnId,
+    status: mini_agent_host::GoalStatus,
+    reason: &str,
+) -> Result<bool, AppServerError> {
     let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
     let updated = state
         .goal_runtime
-        .fail_turn(goal_id, turn_id, reason)
+        .limit_turn(goal_id, turn_id, status, reason)
         .map_err(workflow_error)?;
     if let Some(goal) = updated {
         state.goal_runtime.notify_updated(
@@ -503,6 +519,27 @@ pub(super) fn goal_turn_failed(
     } else {
         Ok(false)
     }
+}
+
+pub(super) fn goal_turn_usage(
+    runtime: &mut Option<RuntimeActorState>,
+    goal_id: &str,
+    turn_id: &mini_agent_protocol::TurnId,
+    tokens: u64,
+) -> Result<Option<crate::workflows::GoalState>, AppServerError> {
+    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    let updated = state
+        .goal_runtime
+        .record_turn_usage(goal_id, turn_id, tokens)
+        .map_err(workflow_error)?;
+    if let Some(goal) = updated.as_ref() {
+        state.goal_runtime.notify_updated(
+            state.management.thread_id(),
+            Some(turn_id.clone()),
+            goal.clone(),
+        );
+    }
+    Ok(updated)
 }
 
 pub(super) fn prepare_goal_verification<M>(

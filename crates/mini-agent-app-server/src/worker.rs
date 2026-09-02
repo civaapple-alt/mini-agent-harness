@@ -13,7 +13,10 @@ use mini_agent_core::TurnResult;
 use mini_agent_protocol::Event;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::EventSink;
+use mini_agent_protocol::ModelUsage;
 use std::collections::VecDeque;
+use std::time::Duration;
+use tokio::time::Instant;
 
 #[derive(Clone)]
 pub(super) enum TurnOrigin {
@@ -87,11 +90,21 @@ pub(super) enum Command {
 struct BroadcastSink {
     events: broadcast::Sender<EventEnvelope>,
     pending_finish: Option<EventEnvelope>,
+    tokens_used: u64,
 }
 
 impl BroadcastSink {
     fn take_pending_finish(&mut self) -> Option<EventEnvelope> {
         self.pending_finish.take()
+    }
+
+    fn record_usage(&mut self, usage: Option<ModelUsage>) {
+        if let Some(usage) = usage {
+            self.tokens_used = self
+                .tokens_used
+                .saturating_add(usage.input_tokens)
+                .saturating_add(usage.output_tokens);
+        }
     }
 }
 
@@ -104,6 +117,11 @@ struct RunningCommandContext<'a, M> {
 
 impl EventSink for BroadcastSink {
     fn emit(&mut self, event: EventEnvelope) {
+        match &event.event {
+            Event::ModelResponded { usage, .. }
+            | Event::ContextCompactionFinished { usage, .. } => self.record_usage(*usage),
+            _ => {}
+        }
         if matches!(event.event, Event::TurnFinished { .. }) {
             self.pending_finish = Some(event);
         } else {
@@ -237,6 +255,36 @@ pub(super) async fn worker_loop<M>(
                             break;
                         }
                     }
+                    let goal_state = match (goal_id.as_deref(), runtime.as_ref()) {
+                        (Some(goal_id), Some(runtime_state)) => {
+                            match runtime_state.goal_runtime.load_goal_state() {
+                                Ok(Some(goal)) if goal.goal_id == goal_id => Some(goal),
+                                Ok(_) => None,
+                                Err(error) => {
+                                    let reason =
+                                        format!("cannot load Goal execution limits: {error}");
+                                    let _ = runtime_actor::goal_turn_failed(
+                                        &mut runtime,
+                                        goal_id,
+                                        &turn_id,
+                                        &reason,
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                        _ => None,
+                    };
+                    let original_config = thread.harness().config().clone();
+                    if let Some(goal) = goal_state.as_ref() {
+                        let mut config = original_config.clone();
+                        config.max_steps = if goal.milestone_step_budget == 0 {
+                            usize::MAX
+                        } else {
+                            goal.milestone_step_budget
+                        };
+                        thread.harness_mut().replace_config(config);
+                    }
                     let started_at_ms = timestamp_ms();
                     let prompt = input.text.clone();
                     let previous_message_count = thread.harness().messages().len();
@@ -254,6 +302,7 @@ pub(super) async fn worker_loop<M>(
                     let mut sink = BroadcastSink {
                         events: events.clone(),
                         pending_finish: None,
+                        tokens_used: 0,
                     };
                     let mut turn = Box::pin(thread.run_turn_with_events(
                         input,
@@ -261,9 +310,25 @@ pub(super) async fn worker_loop<M>(
                         &control,
                         SteeringMode::StopAtCheckpoint,
                     ));
+                    let timeout_deadline = goal_state
+                        .as_ref()
+                        .filter(|goal| goal.milestone_timeout_secs > 0)
+                        .map(|goal| {
+                            Instant::now() + Duration::from_secs(goal.milestone_timeout_secs)
+                        });
+                    let timeout_configured = timeout_deadline.is_some();
+                    let timeout_deadline = timeout_deadline.unwrap_or_else(|| {
+                        Instant::now() + Duration::from_secs(365 * 24 * 60 * 60)
+                    });
+                    let mut timeout_requested = false;
                     let turn_result = loop {
+                        let timeout_active = timeout_configured && !timeout_requested;
                         tokio::select! {
                             result = &mut turn => break result,
+                            _ = tokio::time::sleep_until(timeout_deadline), if timeout_active => {
+                                timeout_requested = true;
+                                control.request_cancel();
+                            },
                             Some(command) = commands.recv() => {
                                 let base_revision = runtime
                                     .as_ref()
@@ -290,15 +355,21 @@ pub(super) async fn worker_loop<M>(
                             },
                             else => {
                                 drop(turn);
+                                thread.harness_mut().replace_config(original_config);
                                 threads.insert(key.clone(), thread);
                                 return;
                             },
                         }
                     };
                     drop(turn);
+                    thread.harness_mut().replace_config(original_config);
                     let mut goal_turn_completed = false;
+                    let mut goal_budget_exhausted = false;
+                    let mut goal_step_limited = false;
                     match turn_result {
                         Ok(result) => {
+                            goal_step_limited =
+                                result.status == mini_agent_protocol::TurnStatus::StepLimit;
                             let projected = project_turn_result(&result);
                             let turn_messages = projected
                                 .messages
@@ -374,11 +445,23 @@ pub(super) async fn worker_loop<M>(
                             );
                         }
                     }
+                    if let Some(goal_id) = goal_id.as_deref()
+                        && sink.tokens_used > 0
+                        && let Ok(Some(goal)) = runtime_actor::goal_turn_usage(
+                            &mut runtime,
+                            goal_id,
+                            &turn_id,
+                            sink.tokens_used,
+                        )
+                    {
+                        goal_budget_exhausted =
+                            goal.status == mini_agent_host::GoalStatus::BudgetLimited;
+                    }
                     if let Some(event) = sink.take_pending_finish() {
                         let _ = events.send(event);
                     }
                     if let Some(goal_id) = goal_id {
-                        if goal_turn_completed {
+                        if goal_turn_completed && !goal_budget_exhausted && !timeout_requested {
                             let settled =
                                 runtime_actor::goal_turn_settled(&mut runtime, &goal_id, &turn_id)
                                     .unwrap_or(false);
@@ -395,13 +478,27 @@ pub(super) async fn worker_loop<M>(
                             {
                                 spawn_goal_verifier(command_sender, request);
                             }
-                        } else {
-                            let _ = runtime_actor::goal_turn_failed(
-                                &mut runtime,
-                                &goal_id,
-                                &turn_id,
-                                "goal turn did not complete successfully",
-                            );
+                        } else if !goal_budget_exhausted {
+                            if timeout_requested || goal_step_limited {
+                                let _ = runtime_actor::goal_turn_limited(
+                                    &mut runtime,
+                                    &goal_id,
+                                    &turn_id,
+                                    mini_agent_host::GoalStatus::UsageLimited,
+                                    if timeout_requested {
+                                        "goal milestone timed out"
+                                    } else {
+                                        "goal milestone step budget exhausted"
+                                    },
+                                );
+                            } else {
+                                let _ = runtime_actor::goal_turn_failed(
+                                    &mut runtime,
+                                    &goal_id,
+                                    &turn_id,
+                                    "goal turn did not complete successfully",
+                                );
+                            }
                         }
                     }
                     runtime_actor::advance_revision(&mut runtime, &runtime_revision);

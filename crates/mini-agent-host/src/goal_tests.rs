@@ -57,7 +57,7 @@ fn goal_workspace_lifecycle_and_milestones() {
         },
     )
     .unwrap();
-    assert_eq!(state.schema_version, 2);
+    assert_eq!(state.schema_version, 3);
     assert_eq!(state.objective, "Refactor auth");
     assert_eq!(state.status, GoalStatus::Running);
     assert_eq!(state.current_milestone, 1);

@@ -367,8 +367,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `18,927 / 20,000` lines and release
-Rust source `28,093 / 30,000` lines, excluding the experimental CLI/REPL. The
+The current hard-budget snapshot is runtime `19,355 / 20,000` lines and release
+Rust source `28,521 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.
@@ -381,6 +381,12 @@ race guards, and retirement of manual Goal controls are implemented. Follow the
 for the state machine and boundary evidence. Pending verifier results are
 checked against their original settled checkpoint, and preparation failures
 become durable failed Goal states instead of leaving a Goal stuck.
+
+Goal execution now applies the persisted milestone step and timeout limits at
+the existing Core/App Server turn boundary. Timeout is cooperative and waits
+for safe turn settlement; provider-reported input/output usage is accumulated
+and stops a Goal at its token budget with `budgetLimited`. Step and timeout
+exhaustion use `usageLimited` and retain a bounded reason.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
 scenarios pass, with current App Server boundary evidence and CLI interactive

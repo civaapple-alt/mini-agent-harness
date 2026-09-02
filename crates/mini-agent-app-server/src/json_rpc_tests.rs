@@ -19,6 +19,7 @@ use mini_agent_protocol::Model;
 use mini_agent_protocol::ModelEventSink;
 use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::ModelUsage;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
 use mini_agent_protocol::ToolCall;
@@ -76,6 +77,14 @@ fn rpc_root(name: &str) -> std::path::PathBuf {
 
 struct ShellApprovalModel;
 
+struct StepLimitModel;
+
+struct BudgetModel;
+
+struct TimeoutModel {
+    release: Arc<tokio::sync::Notify>,
+}
+
 impl Model for ShellApprovalModel {
     type Error = Infallible;
 
@@ -114,6 +123,66 @@ impl Model for ShellApprovalModel {
     }
 }
 
+impl Model for StepLimitModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        _request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "step-limit-call".to_string(),
+                name: "missing_tool".to_string(),
+                arguments: serde_json::json!({}),
+            }],
+            usage: None,
+        })
+    }
+}
+
+impl Model for BudgetModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        _request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: "budget reached".to_string(),
+            tool_calls: Vec::new(),
+            usage: Some(ModelUsage {
+                input_tokens: 3,
+                cached_input_tokens: 0,
+                output_tokens: 2,
+            }),
+        })
+    }
+}
+
+impl Model for TimeoutModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        _request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        self.release.notified().await;
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: "released".to_string(),
+            tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
+
 fn shell_approval_command() -> &'static str {
     #[cfg(windows)]
     {
@@ -126,9 +195,17 @@ fn shell_approval_command() -> &'static str {
 }
 
 fn managed_connection(name: &str) -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
+    managed_connection_with(DoneModel, name, crate::workflows::GoalLimits::default())
+}
+
+fn managed_connection_with<M: Model + Send + 'static>(
+    model: M,
+    name: &str,
+    goal_limits: crate::workflows::GoalLimits,
+) -> (AppServerConnection<M>, std::path::PathBuf) {
     let root = rpc_root(name);
-    let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
-    let server = crate::tests::server(DoneModel);
+    let workflows = WorkflowService::new(root.clone(), goal_limits);
+    let server = crate::tests::server(model);
     let management = RuntimeManagementService::new(
         server.clone(),
         None,
@@ -148,6 +225,25 @@ fn managed_connection(name: &str) -> (AppServerConnection<DoneModel>, std::path:
             .with_runtime_services(RuntimeServices::new(management, workflows).unwrap()),
         root,
     )
+}
+
+async fn wait_for_goal_status<M: Model + Send + 'static>(
+    connection: &mut AppServerConnection<M>,
+    status: &str,
+) -> Value {
+    loop {
+        let notification =
+            tokio::time::timeout(Duration::from_secs(4), connection.next_notification())
+                .await
+                .expect("Goal execution should settle within the test deadline")
+                .unwrap();
+        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
+            let params = notification.params.unwrap();
+            if params["goal"]["status"] == status {
+                return params;
+            }
+        }
+    }
 }
 
 async fn wait_for_blocked_goal(connection: &mut AppServerConnection<DoneModel>) -> Value {
@@ -498,10 +594,124 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
 }
 
 #[tokio::test]
+async fn enforces_goal_step_budget_at_the_core_boundary() {
+    let (mut connection, root) = managed_connection_with(
+        StepLimitModel,
+        "goal-step-budget",
+        crate::workflows::GoalLimits {
+            milestone_step_budget: 1,
+            ..crate::workflows::GoalLimits::default()
+        },
+    );
+    connection
+        .handle_request(initialize_request(1, "goal-step-budget-test"))
+        .await
+        .unwrap();
+    connection
+        .handle_request(JsonRpcRequest::request(
+            2,
+            METHOD_THREAD_GOAL_SET,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "objective": "stop after one model step"
+            }),
+        ))
+        .await
+        .unwrap();
+
+    let notification = wait_for_goal_status(&mut connection, "usageLimited").await;
+    assert_eq!(notification["goal"]["tokensUsed"], 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn records_goal_usage_and_enforces_token_budget() {
+    let (mut connection, root) = managed_connection_with(
+        BudgetModel,
+        "goal-token-budget",
+        crate::workflows::GoalLimits::default(),
+    );
+    connection
+        .handle_request(initialize_request(1, "goal-token-budget-test"))
+        .await
+        .unwrap();
+    connection
+        .handle_request(JsonRpcRequest::request(
+            2,
+            METHOD_THREAD_GOAL_SET,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "objective": "stop at the token budget",
+                "tokenBudget": 5
+            }),
+        ))
+        .await
+        .unwrap();
+
+    let notification = wait_for_goal_status(&mut connection, "budgetLimited").await;
+    assert_eq!(notification["goal"]["tokensUsed"], 5);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn enforces_goal_timeout_with_cooperative_cancellation() {
+    let release = Arc::new(tokio::sync::Notify::new());
+    let (mut connection, root) = managed_connection_with(
+        TimeoutModel {
+            release: release.clone(),
+        },
+        "goal-timeout",
+        crate::workflows::GoalLimits {
+            milestone_timeout_secs: 1,
+            ..crate::workflows::GoalLimits::default()
+        },
+    );
+    connection
+        .handle_request(initialize_request(1, "goal-timeout-test"))
+        .await
+        .unwrap();
+    connection
+        .handle_request(JsonRpcRequest::request(
+            2,
+            METHOD_THREAD_GOAL_SET,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "objective": "stop when the milestone times out"
+            }),
+        ))
+        .await
+        .unwrap();
+
+    loop {
+        let notification =
+            tokio::time::timeout(Duration::from_secs(2), connection.next_notification())
+                .await
+                .unwrap()
+                .unwrap();
+        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED
+            && notification.params.as_ref().is_some_and(|params| {
+                params["turnId"] == "turn-1" && params["goal"]["status"] == "active"
+            })
+        {
+            break;
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    release.notify_one();
+
+    let notification = wait_for_goal_status(&mut connection, "usageLimited").await;
+    assert_eq!(notification["goal"]["tokensUsed"], 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn binds_active_goal_workspace_to_approval_controller() {
     let root = rpc_root("goal-approval-path");
     mini_agent_host::HostWorkflowStore::new(root.clone(), crate::workflows::GoalLimits::default())
         .set_goal("bind the goal workspace", None)
+        .unwrap();
+    mini_agent_host::HostWorkflowStore::new(root.clone(), crate::workflows::GoalLimits::default())
+        .pause_goal()
         .unwrap();
     let approval = ApprovalController::with_preset(ApprovalMode::Automatic, Default::default());
     let observed_approval = approval.clone();

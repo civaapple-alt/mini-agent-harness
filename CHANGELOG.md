@@ -87,6 +87,12 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **Goal admission boundary:** bind an active Goal's relative `goal/...` tool
   paths to the session-owned Goal workspace and reject objectives over 8 KiB at
   the Host creation boundary.
+- **Goal execution budgets:** apply the persisted milestone step budget to the
+  existing Core `max_steps` boundary, request cooperative cancellation at the
+  persisted milestone timeout, and accumulate provider-reported input/output
+  usage in durable Goal state. Step and timeout exhaustion project as
+  `usageLimited`; reaching `tokenBudget` projects as `budgetLimited` without
+  interrupting synchronous tool effects.
 
 ### Added
 

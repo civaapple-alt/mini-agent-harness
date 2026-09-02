@@ -283,22 +283,25 @@ impl GoalRuntime {
         self.store.fail_goal_with_reason(reason)
     }
 
-    pub(crate) fn fail_turn(
+    pub(crate) fn limit_turn(
         &self,
         goal_id: &str,
         turn_id: &TurnId,
+        status: mini_agent_host::GoalStatus,
         reason: &str,
     ) -> io::Result<Option<GoalState>> {
-        let Some(state) = self.store.load_goal_state()? else {
-            return Ok(None);
-        };
-        if state.goal_id != goal_id
-            || state.status != mini_agent_host::GoalStatus::Running
-            || state.active_turn_id.as_deref() != Some(turn_id.as_str())
-        {
-            return Ok(None);
-        }
-        self.store.fail_goal_with_reason(reason).map(Some)
+        self.store
+            .limit_goal_turn(goal_id, turn_id.as_str(), status, reason)
+    }
+
+    pub(crate) fn record_turn_usage(
+        &self,
+        goal_id: &str,
+        turn_id: &TurnId,
+        tokens: u64,
+    ) -> io::Result<Option<GoalState>> {
+        self.store
+            .record_goal_usage(goal_id, turn_id.as_str(), tokens)
     }
 }
 
@@ -311,9 +314,11 @@ pub(crate) fn project_goal(thread_id: ThreadId, state: GoalState) -> ThreadGoal 
             mini_agent_host::GoalStatus::Converged => ThreadGoalStatus::Complete,
             mini_agent_host::GoalStatus::Failed => ThreadGoalStatus::Blocked,
             mini_agent_host::GoalStatus::UserPaused => ThreadGoalStatus::Paused,
+            mini_agent_host::GoalStatus::UsageLimited => ThreadGoalStatus::UsageLimited,
+            mini_agent_host::GoalStatus::BudgetLimited => ThreadGoalStatus::BudgetLimited,
         },
         token_budget: state.token_budget,
-        tokens_used: 0,
+        tokens_used: state.tokens_used,
         time_used_seconds: if state.created_at_ms == 0 {
             0
         } else {

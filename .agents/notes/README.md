@@ -9,8 +9,8 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `18,927 / 20,000` lines (94.6%; 1,073 remaining)
-- release Rust source (excluding experimental CLI/REPL): `28,093 / 30,000` lines (93.6%; 1,907 remaining)
+- runtime (`core + protocol + host + app-server`): `19,355 / 20,000` lines (96.8%; 645 remaining)
+- release Rust source (excluding experimental CLI/REPL): `28,521 / 30,000` lines (95.1%; 1,479 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -34,7 +34,8 @@ The line-budget release work has completed its low-risk Stage 1 audit and the ta
   lines, and the first typed Skill dependency/activation metadata slice adds
   `191` all-Rust lines, and Plugin-to-provider-input selection adds `38`
   all-Rust lines. The bounded ThreadItem projection adds `283` runtime /
-  `283` release-source lines. The current release-source total excludes the
+  `283` release-source lines, and the Goal step/timeout/token-budget execution
+  batch adds `428` runtime / `428` all-Rust lines. The current release-source total excludes the
   experimental CLI/REPL and is now below the approximate `26,900` reference.
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, duplicate Python test fixture probing, dead Plan slash-command parsing and prompt facades, dead local WorldState summary accessors, and the REPL `/status`/`/info` management projection. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
@@ -80,8 +81,9 @@ checkpointing remain deferred. `thread/settings/updated` is emitted from the
 same Runtime Actor revision as the mutation response. Settled-checkpoint Goal
 continuation, verifier retry/terminal transitions, resume/clear stale-result
 guards, and the removal of manual workflow Goal controls are implemented through
-the serialized GoalRuntime owner. The current release-source margin is `1,907`
-lines.
+the serialized GoalRuntime owner. Goal step/timeout/token-budget execution is
+now wired through the same turn boundary; the current release-source margin is
+`1,479` lines.
 
 The first Skill dependency/activation slice is implemented in Capabilities.
 Skill frontmatter may declare up to 16 bounded `builtin` or `mcp` references;
@@ -89,7 +91,7 @@ the metadata catalog exposes non-empty declarations, and
 `Discovery::activate_skill` returns a typed metadata-only activation. It does
 not read Skill bodies, start MCP, enable providers, or grant approval. App Server
 Turn activation and Host allowlist resolution remain the next Skill batch; the
-  current release-source margin is `1,907` lines. The experimental CLI/REPL is
+  current release-source margin is `1,479` lines. The experimental CLI/REPL is
 still reported separately at `2,707` lines and does not consume this gate.
 
 The first Plugin provider slice is implemented in Capabilities: selecting a
@@ -116,8 +118,11 @@ for the state machine and evidence record. The active Goal now binds relative
 `goal/...` tool paths to the session-owned Goal workspace, and Host rejects
 objectives larger than 8 KiB before creating Goal state. Verifier checkpoint
 freshness and preparation failure handling are now explicit and tested. Budget
-enforcement and cross-stream notification ordering remain the next lifecycle
-hardening items.
+enforcement is now wired to Core/App Server turn execution: Goal step and
+timeout exhaustion project as `usageLimited`, provider-reported usage is
+durable, and token-budget exhaustion projects as `budgetLimited`. Timeout is
+cooperative and does not kill a synchronous tool effect. Cross-stream
+notification ordering and provider-backed verifier evidence remain open.
 
 ### Next iteration order (evidence-triggered)
 

@@ -4,7 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const GOAL_SCHEMA_VERSION: u32 = 2;
+pub const GOAL_SCHEMA_VERSION: u32 = 3;
 pub const MAX_GOAL_OBJECTIVE_BYTES: usize = 8 * 1024;
 pub const MAX_GOAL_PLAN_BYTES: usize = 32 * 1024;
 pub const DEFAULT_GOAL_MAX_LOOPS: usize = 20;
@@ -36,6 +36,8 @@ pub enum GoalStatus {
     Converged,
     Failed,
     UserPaused,
+    UsageLimited,
+    BudgetLimited,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -55,6 +57,8 @@ pub struct GoalState {
     pub last_verifier_score: Option<u32>,
     #[serde(default)]
     pub token_budget: Option<i64>,
+    #[serde(default)]
+    pub tokens_used: i64,
     #[serde(default)]
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
@@ -130,6 +134,12 @@ impl HostWorkflowStore {
     }
 
     pub fn set_goal(&self, objective: &str, token_budget: Option<i64>) -> io::Result<GoalState> {
+        if token_budget.is_some_and(|budget| budget <= 0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "goal token budget must be positive",
+            ));
+        }
         let mut state =
             init_goal_workspace_with_limits(&self.session_dir, objective, self.goal_limits)?;
         state.token_budget = token_budget;
@@ -197,6 +207,55 @@ impl HostWorkflowStore {
 
     pub fn fail_goal_with_reason(&self, reason: &str) -> io::Result<GoalState> {
         fail_goal_with_reason(&self.session_dir, Some(reason))
+    }
+
+    pub fn record_goal_usage(
+        &self,
+        goal_id: &str,
+        turn_id: &str,
+        tokens: u64,
+    ) -> io::Result<Option<GoalState>> {
+        update_goal_state(&self.session_dir, |state| {
+            if state.goal_id != goal_id
+                || state.status != GoalStatus::Running
+                || state.active_turn_id.as_deref() != Some(turn_id)
+            {
+                return Ok(None);
+            }
+            state.tokens_used = state
+                .tokens_used
+                .saturating_add(i64::try_from(tokens).unwrap_or(i64::MAX));
+            if state
+                .token_budget
+                .is_some_and(|budget| state.tokens_used >= budget)
+            {
+                state.status = GoalStatus::BudgetLimited;
+                state.last_error = Some("goal token budget exhausted".to_string());
+            }
+            state.updated_at_ms = current_time_ms();
+            Ok(Some(state.clone()))
+        })
+    }
+
+    pub fn limit_goal_turn(
+        &self,
+        goal_id: &str,
+        turn_id: &str,
+        status: GoalStatus,
+        reason: &str,
+    ) -> io::Result<Option<GoalState>> {
+        update_goal_state(&self.session_dir, |state| {
+            if state.goal_id != goal_id
+                || state.status != GoalStatus::Running
+                || state.active_turn_id.as_deref() != Some(turn_id)
+            {
+                return Ok(None);
+            }
+            state.status = status;
+            state.last_error = Some(reason.to_string());
+            state.updated_at_ms = current_time_ms();
+            Ok(Some(state.clone()))
+        })
     }
 }
 
@@ -343,6 +402,7 @@ pub fn init_goal_workspace_with_limits(
             .filter(|value| !value.trim().is_empty()),
         last_verifier_score: None,
         token_budget: None,
+        tokens_used: 0,
         created_at_ms,
         updated_at_ms: created_at_ms,
         active_turn_id: None,
@@ -443,17 +503,25 @@ pub fn record_verifier_verdict(
     fs::write(session_dir.join("goal").join("verifier_verdict.md"), record)
 }
 
-pub fn fail_goal_with_reason(session_dir: &Path, reason: Option<&str>) -> io::Result<GoalState> {
+pub fn limit_goal_with_reason(
+    session_dir: &Path,
+    status: GoalStatus,
+    reason: Option<&str>,
+) -> io::Result<GoalState> {
     let state_file = session_dir.join("goal").join("state.json");
     let mut state = load_goal_state(session_dir)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "goal state not found"))?;
-    state.status = GoalStatus::Failed;
+    state.status = status;
     state.last_error = reason.map(|reason| reason.chars().take(MAX_GOAL_ERROR_CHARS).collect());
     state.updated_at_ms = current_time_ms();
     let state_json = serde_json::to_vec_pretty(&state)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     fs::write(state_file, state_json)?;
     Ok(state)
+}
+
+pub fn fail_goal_with_reason(session_dir: &Path, reason: Option<&str>) -> io::Result<GoalState> {
+    limit_goal_with_reason(session_dir, GoalStatus::Failed, reason)
 }
 
 pub fn parse_verifier_verdict(content: &str) -> VerifierVerdict {

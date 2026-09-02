@@ -221,9 +221,15 @@ the core REPL remains focused on turn execution and run control:
   path is bound to this session-owned workspace rather than the project root.
 
 Goal limits can be shortened in a workspace `.env` for deterministic local
-fixtures. The step and timeout values are persisted with Goal state and are
-reserved for the automatic Goal-turn budget enforcement batch; they do not yet
-forcibly interrupt synchronous tool effects.
+fixtures. `MINI_AGENT_GOAL_STEP_BUDGET` is applied as the Core `max_steps` cap
+for each automatic Goal milestone turn. `MINI_AGENT_GOAL_TIMEOUT_SECS` starts
+at that turn's execution boundary and requests cooperative cancellation when it
+expires; Core then settles the turn at a safe boundary, so a synchronous tool
+effect is never killed halfway through. A step or timeout limit projects as
+`usageLimited`. Provider-reported input plus output tokens are accumulated in
+`tokensUsed`; reaching `tokenBudget` stops the Goal and projects as
+`budgetLimited`. Missing provider usage metadata is not estimated or silently
+converted into tokens.
 - **Built-in Foundations & Personas**: Supports 3 core agent roles (`explore`, `plan`, `general`) and 3 bounded personas (`reviewer`, `implementer`, `researcher`).
 
 ## Goal verification

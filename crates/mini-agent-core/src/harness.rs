@@ -115,6 +115,10 @@ impl<M: Model> Harness<M> {
         &self.config.system_prompt
     }
 
+    pub fn config(&self) -> &HarnessConfig {
+        &self.config
+    }
+
     /// Replaces the model-visible system prompt at a settled control-plane
     /// boundary. The caller must provide a bounded, fully composed prompt;
     /// prompt source selection remains owned by the Host.

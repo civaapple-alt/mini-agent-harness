@@ -244,6 +244,42 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 
 `workflow/state` 可暂时保留为聚合只读视图；是否最终退役另行记录，不与本计划混合。
 
+### Batch 6：接入 Goal step、timeout、token budget 执行 — 已完成
+
+本批仍复用唯一的 Core/App Server turn 生命周期：
+
+- `milestone_step_budget` 在 Goal turn 开始时临时映射为 Core
+  `HarnessConfig.max_steps`，普通客户端 turn 的配置不变；Core 的
+  `StepLimit` 以 `usageLimited` 结束 Goal。
+- `milestone_timeout_secs` 由 App Server worker 在同一 turn future 外部计时；
+  到期只调用现有 `RunControl::request_cancel()`，等待 Core 在模型步/完整工具
+  batch 的安全边界结算。同步工具副作用不会被异步强杀，最终以
+  `usageLimited` 和 bounded reason 持久化。
+- `ModelResponded` 与 `ContextCompactionFinished` 的 provider usage 在
+  `BroadcastSink` 汇总为 input + output tokens，写入 `GoalState.tokens_used`。
+  达到正的 `token_budget` 后持久化 `BudgetLimited`，公开映射为
+  `budgetLimited`，不再启动下一次 milestone/verifier。
+- Goal state schema 升为 3；`tokens_used` 对旧 state 使用 serde 默认值 0。
+  非正 token budget 在 Host 创建边界拒绝；没有 provider usage metadata 时不
+  进行猜测性估算。
+
+六项准入记录：
+
+1. Layer：Core 仅提供既有 `max_steps`、`RunControl` 与 usage events；执行
+   决策和持久化在 App Server worker/GoalRuntime/Host store。
+2. Duplicate responsibility：没有新增 Goal loop、timer thread 或 verifier
+   loop；普通 `turn/start` 仍沿用原 worker path。
+3. Replace vs add：替换此前“step/timeout 只持久化、不执行”的空档；新增
+   Goal limit 状态和 durable usage counter，不复制 Session authority。
+4. Net line delta：本批保持在几百行内，运行受影响 crate 测试、Clippy 和
+   line-budget 后记录实际数值。
+5. Visible surface：新增 `tokensUsed` 的真实投影、`usageLimited`/
+   `budgetLimited` 状态及 bounded `last_error`；Goal turn 的既有事件顺序和
+   checkpoint 写回保留，未引入无界输入。
+6. Boundary evidence：App Server public JSON-RPC tests 覆盖 Core step limit、
+   cooperative timeout 和 provider usage/token budget；普通 turn 与已有
+   verifier/checkpoint tests 继续通过。
+
 ## 6. 每个实现批次的六项准入模板
 
 ```text
@@ -300,8 +336,9 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 
 ## 8. 下一步
 
-Batch 1–5 的 Goal contract、serialized owner、settled-checkpoint verifier、
-自动 continuation、settings notification、resume/clear stale-result guard 和
-旧手工 API 退役均已完成，并通过 Host、App Server Protocol、App Server 定向
-测试。后续只维护真实 provider 场景、跨平台证据和 Codex ThreadItem/Artifact
-扩展，不再恢复第二个 Goal loop 或手工 advance API。
+Batch 1–6 的 Goal contract、serialized owner、settled-checkpoint verifier、
+自动 continuation、settings notification、resume/clear stale-result guard、
+旧手工 API 退役和 step/timeout/token budget 执行均已完成，并通过 Host、App
+Server Protocol、App Server 定向测试。后续只维护真实 provider 场景、跨平台
+证据和 Codex ThreadItem/Artifact 扩展，不再恢复第二个 Goal loop 或手工
+advance API。

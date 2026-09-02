@@ -207,12 +207,19 @@ impl Model for BlockingModel {
     }
 }
 
-pub(crate) fn server<M: Model + Send + 'static>(model: M) -> AppServer<M> {
-    let harness = Harness::new(model, ToolRegistry::default(), HarnessConfig::default());
+pub(crate) fn server_with_config<M: Model + Send + 'static>(
+    model: M,
+    config: HarnessConfig,
+) -> AppServer<M> {
+    let harness = Harness::new(model, ToolRegistry::default(), config);
     AppServer::new(
         ThreadStart::new(ThreadId::new("thread-1")),
         Thread::new(ThreadId::new("initial"), harness),
     )
+}
+
+pub(crate) fn server<M: Model + Send + 'static>(model: M) -> AppServer<M> {
+    server_with_config(model, HarnessConfig::default())
 }
 
 #[tokio::test]

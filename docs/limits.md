@@ -12,6 +12,9 @@ defaults are part of the harness rather than terminal flags.
 | one tool result | 16 KiB | retain UTF-8-safe head and tail |
 | model request context | 1 MiB | reject before the provider request |
 | model steps in one run | 8, or `0` for no cap | return `step_limit` when a positive cap is reached |
+| Goal milestone model steps | 50 by default | Goal becomes `usageLimited` |
+| Goal milestone wall-clock time | 600 seconds by default | request cooperative cancellation, then `usageLimited` |
+| Goal token budget | unset by default | accumulated provider input/output usage becomes `budgetLimited` |
 
 Context size is the byte length of the system prompt plus JSON-serialized
 messages and tool specifications. It is a provider-neutral safety ceiling, not
