@@ -14,9 +14,8 @@ use crate::worker::Command;
 use mini_agent_app_server_protocol::ThreadGoalStatus;
 pub(crate) use mini_agent_host::GoalLimits;
 pub(crate) use mini_agent_host::GoalState;
-pub(crate) use mini_agent_host::GoalStatus;
 use mini_agent_host::HostWorkflowStore;
-pub(crate) use mini_agent_host::VerdictOutcome;
+use mini_agent_host::RuntimeConfig;
 pub(crate) use mini_agent_host::VerifierVerdict;
 use std::io;
 use std::path::PathBuf;
@@ -35,6 +34,7 @@ pub struct WorkflowService {
     commands: Option<mpsc::Sender<Command>>,
     revision: Option<Arc<AtomicU64>>,
     stable_system_prompt: Option<String>,
+    verifier_config: Option<RuntimeConfig>,
 }
 
 impl WorkflowService {
@@ -44,6 +44,7 @@ impl WorkflowService {
             commands: None,
             revision: None,
             stable_system_prompt: None,
+            verifier_config: None,
         }
     }
 
@@ -55,8 +56,19 @@ impl WorkflowService {
         self
     }
 
+    /// Enables the separate tool-free provider used for automatic Goal
+    /// verification and continuation.
+    pub fn with_verifier_config(mut self, config: RuntimeConfig) -> Self {
+        self.verifier_config = Some(config);
+        self
+    }
+
     pub(crate) fn stable_system_prompt(&self) -> Option<&str> {
         self.stable_system_prompt.as_deref()
+    }
+
+    pub(crate) fn verifier_config(&self) -> Option<RuntimeConfig> {
+        self.verifier_config.clone()
     }
 
     pub(crate) fn into_store(mut self) -> io::Result<HostWorkflowStore> {
@@ -69,12 +81,14 @@ impl WorkflowService {
         commands: mpsc::Sender<Command>,
         revision: Arc<AtomicU64>,
         stable_system_prompt: Option<String>,
+        verifier_config: Option<RuntimeConfig>,
     ) -> Self {
         Self {
             store: None,
             commands: Some(commands),
             revision: Some(revision),
             stable_system_prompt,
+            verifier_config,
         }
     }
 
@@ -96,15 +110,6 @@ impl WorkflowService {
             reply,
         })
         .await
-    }
-
-    pub(crate) async fn init_goal_action(
-        &self,
-        objective: &str,
-    ) -> Result<ActionResponse<GoalState>, ActionFailure> {
-        let objective = objective.to_string();
-        self.request_action(|reply| RuntimeCommand::WorkflowInitGoal { objective, reply })
-            .await
     }
 
     pub(crate) async fn set_goal_action(
@@ -132,63 +137,6 @@ impl WorkflowService {
     pub(crate) async fn clear_goal_action(&self) -> Result<ActionResponse<bool>, ActionFailure> {
         self.request_action(|reply| RuntimeCommand::GoalClear { reply })
             .await
-    }
-
-    pub(crate) async fn load_goal_state(&self) -> io::Result<Option<GoalState>> {
-        self.request(|reply| RuntimeCommand::WorkflowLoadGoal { reply })
-            .await
-    }
-
-    pub(crate) async fn verification_criteria_action(
-        &self,
-    ) -> Result<ActionResponse<String>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::WorkflowCriteria { reply })
-            .await
-    }
-
-    pub(crate) async fn record_verifier_verdict_action(
-        &self,
-        checkpoint_seq: u64,
-        output: &str,
-    ) -> Result<ActionResponse<()>, ActionFailure> {
-        let output = output.to_string();
-        self.request_action(|reply| RuntimeCommand::WorkflowRecordVerdict {
-            checkpoint_seq,
-            output,
-            reply,
-        })
-        .await
-    }
-
-    pub(crate) async fn advance_goal_action(
-        &self,
-        verdict: Option<VerifierVerdict>,
-    ) -> Result<ActionResponse<GoalState>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::WorkflowAdvance { verdict, reply })
-            .await
-    }
-
-    pub(crate) async fn pause_goal_action(&self) -> Result<ActionResponse<()>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::WorkflowPause { reply })
-            .await
-    }
-
-    pub(crate) async fn fail_goal_action(
-        &self,
-    ) -> Result<ActionResponse<GoalState>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::WorkflowFail { reply })
-            .await
-    }
-
-    async fn request<T, F>(&self, build: F) -> io::Result<T>
-    where
-        F: FnOnce(oneshot::Sender<ActionResult<T>>) -> RuntimeCommand,
-    {
-        self.request_action(build)
-            .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
-            .map_err(|error| io::Error::other(error.to_string()))
     }
 
     async fn request_action<T, F>(&self, build: F) -> Result<ActionResponse<T>, ActionFailure>

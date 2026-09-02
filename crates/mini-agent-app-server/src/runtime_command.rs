@@ -69,31 +69,6 @@ pub(super) enum RuntimeCommand {
     GoalClear {
         reply: oneshot::Sender<ActionResult<bool>>,
     },
-    WorkflowInitGoal {
-        objective: String,
-        reply: oneshot::Sender<ActionResult<crate::workflows::GoalState>>,
-    },
-    WorkflowLoadGoal {
-        reply: oneshot::Sender<ActionResult<Option<crate::workflows::GoalState>>>,
-    },
-    WorkflowCriteria {
-        reply: oneshot::Sender<ActionResult<String>>,
-    },
-    WorkflowRecordVerdict {
-        checkpoint_seq: u64,
-        output: String,
-        reply: oneshot::Sender<ActionResult<()>>,
-    },
-    WorkflowAdvance {
-        verdict: Option<crate::workflows::VerifierVerdict>,
-        reply: oneshot::Sender<ActionResult<crate::workflows::GoalState>>,
-    },
-    WorkflowPause {
-        reply: oneshot::Sender<ActionResult<()>>,
-    },
-    WorkflowFail {
-        reply: oneshot::Sender<ActionResult<crate::workflows::GoalState>>,
-    },
 }
 
 impl RuntimeCommand {
@@ -108,11 +83,6 @@ impl RuntimeCommand {
                 | Self::SetCollaborationMode { .. }
                 | Self::GoalSet { .. }
                 | Self::GoalClear { .. }
-                | Self::WorkflowInitGoal { .. }
-                | Self::WorkflowRecordVerdict { .. }
-                | Self::WorkflowAdvance { .. }
-                | Self::WorkflowPause { .. }
-                | Self::WorkflowFail { .. }
         )
     }
 }

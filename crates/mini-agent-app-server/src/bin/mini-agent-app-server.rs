@@ -90,7 +90,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             startup_config.workspace(),
             startup_config.goal_limits(),
         )
-        .with_stable_system_prompt(stable_system_prompt);
+        .with_stable_system_prompt(stable_system_prompt)
+        .with_verifier_config(startup_config.clone());
         Ok((
             server,
             capability_manifest,

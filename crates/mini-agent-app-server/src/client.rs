@@ -30,12 +30,6 @@ use mini_agent_app_server_protocol::METHOD_TURN_INTERRUPT;
 use mini_agent_app_server_protocol::METHOD_TURN_READ;
 use mini_agent_app_server_protocol::METHOD_TURN_START;
 use mini_agent_app_server_protocol::METHOD_TURN_STEER;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_ADVANCE;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_CRITERIA;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_FAIL;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_PAUSE;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_RECORD_VERDICT;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_START;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
 use mini_agent_app_server_protocol::METHOD_WORLD_REFRESH;
 use mini_agent_app_server_protocol::METHOD_WORLD_SET_EXECUTION;
@@ -67,11 +61,6 @@ use mini_agent_app_server_protocol::TurnReadParams;
 use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_app_server_protocol::TurnStartParams;
 use mini_agent_app_server_protocol::TurnSteerParams;
-use mini_agent_app_server_protocol::WorkflowGoalAdvanceParams;
-use mini_agent_app_server_protocol::WorkflowGoalCriteriaResult;
-use mini_agent_app_server_protocol::WorkflowGoalRecordVerdictParams;
-use mini_agent_app_server_protocol::WorkflowGoalStartParams;
-use mini_agent_app_server_protocol::WorkflowGoalState;
 use mini_agent_app_server_protocol::WorkflowState;
 use mini_agent_app_server_protocol::WorldRefreshResult;
 use mini_agent_app_server_protocol::WorldSetExecutionParams;
@@ -464,58 +453,6 @@ where
             mini_agent_app_server_protocol::ThreadGoalClearParams { thread_id },
         )
         .await
-    }
-
-    pub async fn start_goal(
-        &mut self,
-        objective: impl Into<String>,
-    ) -> Result<WorkflowGoalState, JsonRpcError> {
-        self.call(
-            METHOD_WORKFLOW_GOAL_START,
-            WorkflowGoalStartParams {
-                objective: objective.into(),
-            },
-        )
-        .await
-    }
-
-    pub async fn pause_goal(&mut self) -> Result<WorkflowGoalState, JsonRpcError> {
-        self.call(METHOD_WORKFLOW_GOAL_PAUSE, serde_json::json!({}))
-            .await
-    }
-
-    pub async fn fail_goal(&mut self) -> Result<WorkflowGoalState, JsonRpcError> {
-        self.call(METHOD_WORKFLOW_GOAL_FAIL, serde_json::json!({}))
-            .await
-    }
-
-    pub async fn goal_criteria(&mut self) -> Result<WorkflowGoalCriteriaResult, JsonRpcError> {
-        self.call(METHOD_WORKFLOW_GOAL_CRITERIA, serde_json::json!({}))
-            .await
-    }
-
-    pub async fn advance_goal(
-        &mut self,
-        params: WorkflowGoalAdvanceParams,
-    ) -> Result<WorkflowGoalState, JsonRpcError> {
-        self.call(METHOD_WORKFLOW_GOAL_ADVANCE, params).await
-    }
-
-    pub async fn record_verifier_verdict(
-        &mut self,
-        checkpoint_seq: u64,
-        output: impl Into<String>,
-    ) -> Result<(), JsonRpcError> {
-        let _: serde_json::Value = self
-            .call(
-                METHOD_WORKFLOW_GOAL_RECORD_VERDICT,
-                WorkflowGoalRecordVerdictParams {
-                    checkpoint_seq,
-                    output: output.into(),
-                },
-            )
-            .await?;
-        Ok(())
     }
 
     pub async fn session_info(&mut self) -> Result<Option<SessionInfoResult>, JsonRpcError> {

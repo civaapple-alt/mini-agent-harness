@@ -33,6 +33,7 @@ pub const METHOD_THREAD_RESUME: &str = "thread/resume";
 pub const METHOD_THREAD_READ: &str = "thread/read";
 pub const METHOD_THREAD_CLOSE: &str = "thread/close";
 pub const METHOD_THREAD_SETTINGS_UPDATE: &str = "thread/settings/update";
+pub const METHOD_THREAD_SETTINGS_UPDATED: &str = "thread/settings/updated";
 pub const METHOD_TURN_START: &str = "turn/start";
 pub const METHOD_TURN_READ: &str = "turn/read";
 pub const METHOD_TURN_STEER: &str = "turn/steer";
@@ -47,12 +48,6 @@ pub const METHOD_THREAD_GOAL_CLEAR: &str = "thread/goal/clear";
 pub const METHOD_THREAD_GOAL_UPDATED: &str = "thread/goal/updated";
 pub const METHOD_THREAD_GOAL_CLEARED: &str = "thread/goal/cleared";
 pub const METHOD_WORKFLOW_STATE: &str = "workflow/state";
-pub const METHOD_WORKFLOW_GOAL_START: &str = "workflow/goal/start";
-pub const METHOD_WORKFLOW_GOAL_PAUSE: &str = "workflow/goal/pause";
-pub const METHOD_WORKFLOW_GOAL_FAIL: &str = "workflow/goal/fail";
-pub const METHOD_WORKFLOW_GOAL_CRITERIA: &str = "workflow/goal/criteria";
-pub const METHOD_WORKFLOW_GOAL_ADVANCE: &str = "workflow/goal/advance";
-pub const METHOD_WORKFLOW_GOAL_RECORD_VERDICT: &str = "workflow/goal/record_verdict";
 pub const METHOD_SESSION_INFO: &str = "session/info";
 pub const METHOD_WORLD_STATE: &str = "world/state";
 pub const METHOD_WORLD_REFRESH: &str = "world/refresh";
@@ -310,6 +305,15 @@ pub struct ThreadSettingsUpdateResult {
     pub builtin_tools: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSettingsUpdatedNotification {
+    pub thread_id: ThreadId,
+    pub collaboration_mode: CollaborationMode,
+    pub builtin_tools: Vec<String>,
+    pub state_revision: u64,
+}
+
 /// The public lifecycle state of one Thread-owned Goal.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -413,77 +417,7 @@ pub struct ThreadGoalClearedNotification {
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowState {
     pub collaboration_mode: CollaborationMode,
-    pub goal: Option<WorkflowGoalState>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowGoalStartParams {
-    pub objective: String,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowGoalAdvanceParams {
-    #[serde(default)]
-    pub verdict: Option<WorkflowVerifierVerdict>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowGoalRecordVerdictParams {
-    pub checkpoint_seq: u64,
-    pub output: String,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowGoalCriteriaResult {
-    pub criteria: String,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowVerifierVerdict {
-    pub outcome: WorkflowVerdictOutcome,
-    #[serde(default)]
-    pub score: Option<u32>,
-    pub summary: String,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowVerdictOutcome {
-    Approved,
-    Rejected,
-    NeedsClarification,
-    Invalid,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowGoalState {
-    pub schema_version: u32,
-    pub goal_id: String,
-    pub status: WorkflowGoalStatus,
-    pub current_milestone: usize,
-    pub total_milestones: usize,
-    pub loop_count: usize,
-    pub max_loops: usize,
-    pub milestone_step_budget: usize,
-    pub milestone_timeout_secs: u64,
-    pub verifier_model: Option<String>,
-    pub last_verifier_score: Option<u32>,
-    pub updated_at_ms: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowGoalStatus {
-    Running,
-    Converged,
-    Failed,
-    UserPaused,
+    pub goal: Option<ThreadGoal>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

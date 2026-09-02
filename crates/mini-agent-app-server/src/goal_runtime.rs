@@ -1,7 +1,10 @@
-use crate::workflows::{GoalState, VerifierVerdict};
+use crate::workflows::GoalState;
+use crate::workflows::VerifierVerdict;
 use mini_agent_app_server_protocol::ThreadGoal;
 use mini_agent_app_server_protocol::ThreadGoalStatus;
 use mini_agent_host::HostWorkflowStore;
+use mini_agent_host::RuntimeConfig;
+use mini_agent_protocol::Message;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::TurnId;
 use std::io;
@@ -12,30 +15,50 @@ pub(crate) enum GoalRuntimeEvent {
     Updated {
         thread_id: ThreadId,
         turn_id: Option<TurnId>,
-        state: GoalState,
+        state: Box<GoalState>,
     },
     Cleared {
         thread_id: ThreadId,
     },
 }
 
+pub(crate) struct GoalVerificationRequest {
+    pub(crate) thread_id: ThreadId,
+    pub(crate) goal_id: String,
+    pub(crate) turn_id: TurnId,
+    pub(crate) checkpoint_seq: u64,
+    pub(crate) messages: Vec<Message>,
+    pub(crate) criteria: String,
+    pub(crate) runtime_config: RuntimeConfig,
+}
+
 /// Serialized owner of one Thread Goal's durable state and lifecycle actions.
 ///
-/// This is an App Server state component, not a second turn loop. It will own
-/// verifier and continuation decisions as those phases move out of the legacy
-/// workflow facade; Host remains the persistence primitive.
-#[derive(Clone, Debug)]
+/// This is an App Server state component, not a second turn loop. It owns
+/// verifier and continuation decisions; Host remains the persistence
+/// primitive.
+#[derive(Clone)]
 pub(crate) struct GoalRuntime {
     store: HostWorkflowStore,
     events: broadcast::Sender<GoalRuntimeEvent>,
+    verifier_config: Option<RuntimeConfig>,
+    pending_verification: Option<(String, TurnId)>,
+    scheduled_goal: Option<String>,
 }
 
 impl GoalRuntime {
     pub(crate) fn new(
         store: HostWorkflowStore,
         events: broadcast::Sender<GoalRuntimeEvent>,
+        verifier_config: Option<RuntimeConfig>,
     ) -> Self {
-        Self { store, events }
+        Self {
+            store,
+            events,
+            verifier_config,
+            pending_verification: None,
+            scheduled_goal: None,
+        }
     }
 
     pub(crate) fn plan_active(&self) -> bool {
@@ -54,12 +77,8 @@ impl GoalRuntime {
         self.store.load_goal_state()
     }
 
-    pub(crate) fn init_goal(&self, objective: &str) -> io::Result<GoalState> {
-        self.store.init_goal(objective)
-    }
-
     pub(crate) fn set_goal(
-        &self,
+        &mut self,
         objective: Option<&str>,
         status: Option<ThreadGoalStatus>,
         token_budget: Option<Option<i64>>,
@@ -97,11 +116,122 @@ impl GoalRuntime {
                     "objective is required when creating a goal",
                 )
             })?;
+        self.scheduled_goal = None;
         self.store.set_goal(objective, token_budget.flatten())
     }
 
-    pub(crate) fn clear_goal(&self) -> io::Result<bool> {
+    pub(crate) fn clear_goal(&mut self) -> io::Result<bool> {
+        self.pending_verification = None;
+        self.scheduled_goal = None;
         self.store.clear_goal()
+    }
+
+    pub(crate) fn reserve_turn(&mut self, goal_id: &str) -> bool {
+        if self.scheduled_goal.as_deref() == Some(goal_id) {
+            return false;
+        }
+        self.scheduled_goal = Some(goal_id.to_string());
+        true
+    }
+
+    pub(crate) fn release_turn(&mut self, goal_id: &str) {
+        if self.scheduled_goal.as_deref() == Some(goal_id) {
+            self.scheduled_goal = None;
+        }
+    }
+
+    pub(crate) fn mark_turn_started(
+        &mut self,
+        goal_id: &str,
+        turn_id: &TurnId,
+    ) -> io::Result<Option<GoalState>> {
+        self.scheduled_goal = None;
+        self.store.mark_goal_turn_started(goal_id, turn_id.as_str())
+    }
+
+    pub(crate) fn mark_turn_settled(
+        &self,
+        goal_id: &str,
+        turn_id: &TurnId,
+    ) -> io::Result<Option<GoalState>> {
+        self.store.mark_goal_turn_settled(goal_id, turn_id.as_str())
+    }
+
+    pub(crate) fn prepare_verification(
+        &mut self,
+        thread_id: ThreadId,
+        goal_id: &str,
+        checkpoint_seq: u64,
+        messages: Vec<Message>,
+    ) -> io::Result<Option<GoalVerificationRequest>> {
+        if self.pending_verification.is_some() {
+            return Ok(None);
+        }
+        let Some(state) = self.store.load_goal_state()? else {
+            return Ok(None);
+        };
+        let Some(turn_id) = state.active_turn_id.clone().map(TurnId::new) else {
+            return Ok(None);
+        };
+        if state.goal_id != goal_id
+            || state.status != mini_agent_host::GoalStatus::Running
+            || !state.active_turn_settled
+        {
+            return Ok(None);
+        }
+        let Some(runtime_config) = self.verifier_config.clone() else {
+            return Ok(None);
+        };
+        let criteria = self.store.verification_criteria()?;
+        self.pending_verification = Some((state.goal_id.clone(), turn_id.clone()));
+        Ok(Some(GoalVerificationRequest {
+            thread_id,
+            goal_id: state.goal_id,
+            turn_id,
+            checkpoint_seq,
+            messages,
+            criteria,
+            runtime_config,
+        }))
+    }
+
+    pub(crate) fn complete_verification(
+        &mut self,
+        goal_id: &str,
+        turn_id: &TurnId,
+        checkpoint_seq: u64,
+        result: Result<(String, VerifierVerdict), String>,
+    ) -> io::Result<Option<GoalState>> {
+        let pending =
+            self.pending_verification
+                .as_ref()
+                .is_some_and(|(pending_goal_id, pending_turn_id)| {
+                    pending_goal_id == goal_id && pending_turn_id == turn_id
+                });
+        if !pending {
+            return Ok(None);
+        }
+        self.pending_verification = None;
+        let Some(state) = self.store.load_goal_state()? else {
+            return Ok(None);
+        };
+        if state.goal_id != goal_id
+            || state.status != mini_agent_host::GoalStatus::Running
+            || state.active_turn_id.as_deref() != Some(turn_id.as_str())
+            || !state.active_turn_settled
+        {
+            return Ok(None);
+        }
+        let next = match result {
+            Ok((output, verdict)) => {
+                match self.store.record_verifier_verdict(checkpoint_seq, &output) {
+                    Ok(()) => self.store.advance_goal(Some(verdict)),
+                    Err(error) => self.store.fail_goal_with_reason(&error.to_string()),
+                }
+            }
+            Err(error) => self.store.fail_goal_with_reason(&error),
+        }?;
+        Ok(Some(next))
     }
 
     pub(crate) fn notify_updated(
@@ -113,7 +243,7 @@ impl GoalRuntime {
         let _ = self.events.send(GoalRuntimeEvent::Updated {
             thread_id,
             turn_id,
-            state,
+            state: Box::new(state),
         });
     }
 
@@ -121,28 +251,26 @@ impl GoalRuntime {
         let _ = self.events.send(GoalRuntimeEvent::Cleared { thread_id });
     }
 
-    pub(crate) fn verification_criteria(&self) -> io::Result<String> {
-        self.store.verification_criteria()
+    pub(crate) fn fail_goal_with_reason(&self, reason: &str) -> io::Result<GoalState> {
+        self.store.fail_goal_with_reason(reason)
     }
 
-    pub(crate) fn record_verifier_verdict(
+    pub(crate) fn fail_turn(
         &self,
-        checkpoint_seq: u64,
-        output: &str,
-    ) -> io::Result<()> {
-        self.store.record_verifier_verdict(checkpoint_seq, output)
-    }
-
-    pub(crate) fn advance_goal(&self, verdict: Option<VerifierVerdict>) -> io::Result<GoalState> {
-        self.store.advance_goal(verdict)
-    }
-
-    pub(crate) fn pause_goal(&self) -> io::Result<()> {
-        self.store.pause_goal()
-    }
-
-    pub(crate) fn fail_goal(&self) -> io::Result<GoalState> {
-        self.store.fail_goal()
+        goal_id: &str,
+        turn_id: &TurnId,
+        reason: &str,
+    ) -> io::Result<Option<GoalState>> {
+        let Some(state) = self.store.load_goal_state()? else {
+            return Ok(None);
+        };
+        if state.goal_id != goal_id
+            || state.status != mini_agent_host::GoalStatus::Running
+            || state.active_turn_id.as_deref() != Some(turn_id.as_str())
+        {
+            return Ok(None);
+        }
+        self.store.fail_goal_with_reason(reason).map(Some)
     }
 }
 
@@ -167,3 +295,7 @@ pub(crate) fn project_goal(thread_id: ThreadId, state: GoalState) -> ThreadGoal 
         updated_at: (state.updated_at_ms / 1000) as i64,
     }
 }
+
+#[cfg(test)]
+#[path = "goal_runtime_tests.rs"]
+mod tests;

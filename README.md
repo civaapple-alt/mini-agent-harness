@@ -54,14 +54,17 @@ limits, failures, and observation events.
   host-backed `AppServerRuntime`, typed facade, and versioned
   `mini-agent-app-server-protocol` support initialization, thread lifecycle,
   turn commands, steering, interruption, settled results, approval request and
-  resolution notifications, ordered event notifications, tool-free Goal verification turns, and local
+  resolution notifications, ordered event notifications, tool-free Goal
+  verification turns, Goal settled-checkpoint continuation, and local
   Session/World/MCP/Goal/Plan management through the runtime service. The App
   Server owns workflow commands; Host only supplies the wrapped
   `HostWorkflowStore` persistence seam. The
-  JSON-RPC surface exposes `thread/settings/update` with the typed
-  `collaborationMode` and bounded `builtinTools` settings, `workflow/state`, and typed Goal lifecycle
-  methods. The former `workflow/plan/set` method is intentionally removed;
-  clients must use the settings method.
+  JSON-RPC surface exposes `thread/settings/update` and its
+  `thread/settings/updated` notification with the typed `collaborationMode`
+  and bounded `builtinTools` settings, `workflow/state` as a read-only
+  aggregate, and the canonical typed Goal lifecycle methods. The former
+  `workflow/plan/set` and manual `workflow/goal/*` controls are intentionally
+  removed; clients must use the settings and `thread/goal/*` methods.
   `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess
   clients. Runtime actions are serialized by the App Server Actor and return
   `actionId`, `actionSequence`, and `stateRevision`; Core event sequence numbers
@@ -240,8 +243,9 @@ Turn commands accept the following options:
 `ask` reads at most 32 KiB from stdin when no prompt is supplied. `auto PROMPT`
 runs one autonomous turn; bare `auto` opens an interactive copilot.
 `resume SESSION_ID` resumes a session directly, while `fork SESSION_ID` creates
-an independent session. Goal verification is initiated through the App Server
-workflow contract and is not a standalone REPL command.
+an independent session. Goal verification is initiated automatically by the
+App Server `thread/goal/set|get|clear` contract and is not a standalone REPL
+command.
 
 `--trace-jsonl PATH` is an explicit one-shot diagnostic artifact. The parent directory
 must already exist, the file is created without overwrite, each record is capped at
@@ -322,9 +326,9 @@ history store.
   framework and Turn-flow comparison, VS Code harness lessons, bounded scenarios,
   and six-question validation records.
 - [Goal Runtime implementation appendix](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) —
-  Codex-shaped `thread/goal/*` and serialized GoalRuntime owner are landed;
-  settled-checkpoint continuation, settings notifications, and manual-API
-  retirement remain gated; initial scheduling and Goal notifications are landed.
+  Codex-shaped `thread/goal/*`, serialized GoalRuntime ownership,
+  settled-checkpoint continuation, settings notifications, resume/clear race
+  handling, and manual-API retirement are implemented.
 - [Codex-aligned capabilities and ThreadItems proposal](.agents/notes/proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md) — canonical
   Skill/Plugin/Builtin/Host/MCP/Dynamic Tool boundaries, `Thread` → `Turn` →
   `ThreadItem` projection, Goal Runtime integration, approval correlation, and
@@ -361,17 +365,18 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `18,419 / 20,000` lines and release
-Rust source `27,585 / 30,000` lines, excluding the experimental CLI/REPL. The
+The current hard-budget snapshot is runtime `18,709 / 20,000` lines and release
+Rust source `27,875 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.
 
 The Goal Runtime is now aligned to the Codex Thread model: the canonical
-`thread/goal/set|get|clear` control plane and serialized App Server owner are
-implemented. Follow the [Goal Runtime implementation appendix](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
-for settled-checkpoint continuation, settings notifications, and final manual-API
-retirement; those phases still require public boundary evidence.
+`thread/goal/set|get|clear` control plane, serialized App Server owner,
+settled-checkpoint verifier/continuation, settings notifications, resume/clear
+race guards, and retirement of manual Goal controls are implemented. Follow the
+[Goal Runtime implementation appendix](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
+for the state machine and boundary evidence.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
 scenarios pass, with current App Server boundary evidence and CLI interactive

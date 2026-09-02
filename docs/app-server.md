@@ -62,6 +62,25 @@ The App Server worker runs on a dedicated runtime thread, so a synchronous host
 approval callback does not block the connection's async transport. The worker
 still serializes one Thread at a time while that approval is pending.
 
+Thread settings and Goal control use the canonical Thread boundary:
+
+- `thread/settings/update` changes the typed `collaborationMode` and optional
+  bounded `builtinTools` selection. A changed setting emits one
+  `thread/settings/updated` notification with the effective values and the same
+  `stateRevision` as the action response.
+- `thread/goal/set`, `thread/goal/get`, and `thread/goal/clear` are the only
+  Goal lifecycle methods. A Goal turn is persisted as a settled checkpoint
+  before its isolated tool-free verifier runs; continuation and retry are then
+  scheduled by the Runtime Actor through the existing Thread worker.
+- `workflow/state` remains a read-only aggregate view. The former manual
+  `workflow/goal/*` methods are removed, so clients cannot submit an arbitrary
+  verifier verdict or advance a milestone behind GoalRuntime's lifecycle.
+
+On resume, an unsettled Goal schedules a new ordinary turn, while a settled
+checkpoint is re-verified without replaying that turn. Clearing an idle Goal
+invalidates any pending verifier association; a late verifier result cannot
+advance a cleared or replacement Goal.
+
 The Rust `LocalAppServerClient` uses the same DTOs and dispatch without stdio,
 which lets an embedded frontend migrate to the service boundary before it
 spawns a child process.

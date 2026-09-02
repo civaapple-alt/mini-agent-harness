@@ -1,6 +1,6 @@
 # Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems
 
-Status: proposed — canonical architecture; Goal Runtime implementation in progress
+Status: implemented — canonical architecture; Goal Runtime lifecycle converged
 
 ## Proposal
 
@@ -29,12 +29,12 @@ Stage 2 Skill slice now parses typed `builtin`/`mcp` dependencies and returns
   explicit local activation metadata; App Server Turn activation and Host
   allowlist resolution remain deferred until their own evidence is accepted.
   Goal Runtime now follows the execution appendix in
-  `2026-09-01-goal-runtime-thread-goal-plan.md`: the first Codex-shaped
-  `thread/goal/set|get|clear`, initial set scheduling, Goal notifications, and
-  serialized owner slice are landed; settled-checkpoint continuation and
-  settings notifications remain gated by the next batch. The two records are
-  implemented together; the appendix tracks execution batches and this note
-  remains the canonical architecture decision.
+  `2026-09-01-goal-runtime-thread-goal-plan.md`: the Codex-shaped
+  `thread/goal/set|get|clear`, initial set scheduling, settled-checkpoint
+  verifier/continuation, Goal/settings notifications, resume/clear race guards,
+  and serialized owner are landed. The two records are implemented together;
+  the appendix tracks evidence and this note remains the canonical architecture
+  decision.
 
 ## Why this direction
 
@@ -109,7 +109,7 @@ handles, approval callbacks, or unbounded Skill bodies.
 - ordered ThreadItems;
 - bounded error and usage information.
 
-Goal Runtime, when implemented, schedules Turns. It must not introduce a second
+Goal Runtime now schedules ordinary Turns. It must not introduce a second
 conversation loop or a second Item history.
 
 ### ThreadItem
@@ -617,7 +617,8 @@ and after; no estimate authorizes a budget breach.
   primitive. `set` schedules the first ordinary Thread Turn through the existing
   worker, and Goal update/clear notifications use one App Server source. See
   the execution appendix for the six-question record and exact migration order.
-- Goal Runtime schedules ordinary Thread Turns after settled checkpoint evidence.
+- **Landed:** Goal Runtime schedules ordinary Thread Turns only after settled
+  checkpoint evidence.
 - Milestone evidence references settled Turn/Item IDs and bounded result handles.
 - Verifier output remains an isolated derived artifact and cannot rewrite the
   main Thread history.
@@ -723,20 +724,19 @@ This proposal is ready for implementation only when:
 
 ## Current decision
 
-**Proposed: accept the direction; implementation is in progress.** The six-tool
-exposure preparation, Skill/Plugin bounded slices, ThreadItem projection, and
-  the first Codex-shaped Goal control-plane/owner and first-turn notification
-  slice are implemented.
+**Accepted and implemented for the current scope.** The six-tool exposure
+preparation, Skill/Plugin bounded slices, ThreadItem projection, and the
+Codex-shaped Goal control-plane/owner with settled-checkpoint continuation and
+settings notifications are implemented.
 
 The default Builtin catalog, its direct deletion, the first Host-owned Tool
 Catalog slice, Thread-level Builtin selection, bounded Skill dependency
 metadata/activation, bounded Plugin-to-provider-input selection, and the first
 ThreadItem projection are now landed. App Server Turn activation, Host
 dependency allowlist resolution, Plugin MCP tool loading, full Item lifecycle
-notifications/listing, Artifact APIs, settled-checkpoint Goal continuation,
-settings notifications, and retirement of manual Goal controls remain
-deferred; initial Goal scheduling and Goal update/clear notifications are
-implemented.
+notifications/listing, and Artifact APIs remain deferred; Goal
+settled-checkpoint continuation, settings notifications, resume/clear race
+handling, and manual Goal control retirement are implemented.
 
 ## Implementation record — 2026-09-01 Goal Runtime canonical contract
 
@@ -746,13 +746,13 @@ Six-question admission:
    supplying bounded durable Goal state. Core remains the ordinary Thread/Turn
    execution kernel.
 2. **Duplicate responsibility:** the new `thread/goal/*` actions and
-   `GoalRuntime` owner are canonical for new Goal control. Existing
-   `WorkflowService` methods remain a temporary migration facade; no second
-   state store or turn loop was added.
+   `GoalRuntime` owner are canonical for Goal control. `WorkflowService` now
+   only transports the canonical actions; no second state store or turn loop
+   was added.
 3. **Replace vs add:** replace new callers' dependence on milestone-oriented
-   `workflow/goal/start` with Codex-shaped set/get/clear semantics; retain old
-   manual criteria/verdict/advance calls only until automatic continuation has
-   public evidence.
+   `workflow/goal/start` and manual criteria/verdict/advance calls with
+   Codex-shaped `thread/goal/set|get|clear` semantics; automatic continuation
+   remains internal to GoalRuntime.
 4. **Net line delta:** runtime `17,626 → 18,194` (`+568`) and release source
    `26,792 → 27,360` (`+568`) for the canonical contract batch; the batch is
    below the repository few-hundred-line guidance and does not consume the
@@ -867,3 +867,38 @@ Six-question admission:
    delivery, filtering from `next_event`, set-triggered ordinary Turn activity,
    and clear notification delivery. Full verifier/continuation ordering remains
    the next acceptance gate.
+
+## Implementation record — 2026-09-02 Goal Runtime completion and API retirement
+
+Six-question admission:
+
+1. **Layer:** App Server Runtime Actor/GoalRuntime owns the lifecycle and
+   notification ordering; Host only persists bounded Goal state and artifacts.
+   Core remains the sole Thread/Turn executor and verifier uses an isolated,
+   tool-free harness.
+2. **Duplicate responsibility:** settled checkpoint handling, verifier result
+   application, retry/advance, and continuation now have one GoalRuntime path.
+   The old `workflow/goal/*` protocol, handlers, Local client facade, and
+   frontend re-exports were removed; `workflow/state` only projects the canonical
+   `ThreadGoal` read model.
+3. **Replace vs add:** replace manual client-submitted criteria/verdict/advance
+   operations with an internal verifier completion command; add only the
+   missing settings notification source and durable active-turn markers. No
+   second Goal store, turn loop, verifier history, or approval authority was
+   introduced.
+4. **Net line delta:** runtime `18,419 → 18,709` (`+290`) and release source
+   `27,585 → 27,875` (`+290`), excluding experimental CLI/REPL. The net growth
+   stays inside both hard ceilings; the physical deletion of the old manual API
+   offsets much of the lifecycle implementation.
+5. **Visible surface:** a Goal turn is marked settled only after its checkpoint
+   persistence succeeds; the isolated verifier receives bounded messages and
+   criteria, never writes to the main Thread history, and its result is guarded
+   by `goalId + turnId + checkpointSeq`. `thread/settings/updated` carries the
+   resulting mode, Builtin selection, and the same `stateRevision` as the
+   mutation response. Old manual Goal methods are breaking-removed.
+6. **Boundary evidence:** App Server public tests cover settings notification
+   and revision correlation, canonical read-only workflow projection, and the
+   existing Goal set/get/clear path. A GoalRuntime unit test proves a verifier
+   result arriving after clear is ignored. Resume schedules only an unsettled
+   Goal turn or re-verifies a settled checkpoint; an actual paid verifier
+   provider scenario remains an explicit environment-dependent follow-up.

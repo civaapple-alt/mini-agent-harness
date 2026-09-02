@@ -5,6 +5,84 @@ impl<M> AppServerConnection<M>
 where
     M: Model + Send + 'static,
 {
+    pub(super) async fn handle_thread_goal_set(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<ThreadGoalSetParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
+            return response_error(request.id, error);
+        }
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        match workflows
+            .set_goal_action(params.objective, params.status, params.token_budget)
+            .await
+        {
+            Ok(response) => {
+                let goal =
+                    crate::goal_runtime::project_goal(params.thread_id, response.value.clone());
+                response_action_with(request.id, response, ThreadGoalSetResponse { goal })
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
+        }
+    }
+
+    pub(super) async fn handle_thread_goal_get(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<ThreadGoalGetParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
+            return response_error(request.id, error);
+        }
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        match workflows.get_goal_action().await {
+            Ok(response) => {
+                let goal = response.value.clone().map(|state| {
+                    crate::goal_runtime::project_goal(params.thread_id.clone(), state)
+                });
+                response_action_with(request.id, response, ThreadGoalGetResponse { goal })
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
+        }
+    }
+
+    pub(super) async fn handle_thread_goal_clear(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<ThreadGoalClearParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
+            return response_error(request.id, error);
+        }
+        let workflows = match self.workflow_service() {
+            Ok(workflows) => workflows,
+            Err(error) => return response_error(request.id, error),
+        };
+        match workflows.clear_goal_action().await {
+            Ok(response) => {
+                let cleared = response.value;
+                response_action_with(request.id, response, ThreadGoalClearResponse { cleared })
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
+        }
+    }
+
     pub(super) async fn handle_thread_settings_update(
         &self,
         request: JsonRpcRequest,
@@ -13,7 +91,7 @@ where
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
-        if let Err(error) = self.check_thread(&params.thread_id) {
+        if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
             return response_error(request.id, error);
         }
         let workflows = match self.workflow_service() {

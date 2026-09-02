@@ -207,7 +207,8 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
                 .unwrap_or_else(|| world.workspace().to_path_buf()),
             goal_limits,
         )
-        .with_stable_system_prompt(stable_system_prompt.clone());
+        .with_stable_system_prompt(stable_system_prompt.clone())
+        .with_verifier_config(runtime_config.clone());
         let management = RuntimeManagementService::new(
             server.clone(),
             session,

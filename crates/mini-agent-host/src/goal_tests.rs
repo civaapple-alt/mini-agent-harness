@@ -128,7 +128,7 @@ fn rejected_verdict_does_not_advance_milestone() {
     assert_eq!(next.current_milestone, state.current_milestone);
     assert_eq!(next.status, GoalStatus::Running);
 
-    let failed = fail_goal(&dir).unwrap();
+    let failed = fail_goal_with_reason(&dir, None).unwrap();
     assert_eq!(failed.status, GoalStatus::Failed);
     fs::remove_dir_all(dir).unwrap();
 }

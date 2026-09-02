@@ -209,7 +209,14 @@ the core REPL remains focused on turn execution and run control:
   arbitrary raw system-prompt replacement is not accepted. Planning state is
   persisted in `plan_mode.json`. The former `workflow/plan/set` method is not
   supported for compatibility.
-- **Autonomous Goal Mode (`workflow/goal/*`)**: Materializes a dedicated `goal/` workspace containing `state.json` (milestone progress, loop counts, verifier scores) and `plan.md` (acceptance criteria). Integrates with an independent Goal verifier (`goal/verifier_verdict.md`) to provide blind validation gates before advancing milestones.
+- **Autonomous Goal Mode (`thread/goal/set|get|clear`)**: Materializes a
+  dedicated `goal/` workspace containing `state.json` (milestone progress, loop
+  counts, verifier scores) and `plan.md` (acceptance criteria). Each ordinary
+  Goal turn is persisted as a settled checkpoint before the independent,
+  tool-free verifier runs; approved, rejected, and verifier-error outcomes are
+  applied by the serialized GoalRuntime. There is no client-submitted manual
+  `workflow/goal/*` control path. `thread/settings/updated` reports settings
+  mutations with the same Runtime revision as their responses.
 
 Goal limits can be shortened in a workspace `.env` for deterministic local
 fixtures. A timeout stops the current milestone cooperatively, persists a
@@ -220,7 +227,10 @@ forcibly interrupt synchronous tool effects.
 ## Goal verification
 
 When Goal Mode has a verifier gate, set `VERIFIER_OPENAI_MODEL` to run a separate,
-tool-free check against the latest settled checkpoint:
+tool-free check against the latest settled checkpoint. On restart, an unsettled
+Goal schedules a new ordinary turn; a settled Goal checkpoint is verified again
+without replaying that turn. A clear operation invalidates pending verifier
+results, so a late result cannot advance a cleared or replaced Goal:
 
 The verifier inherits the primary credential and endpoint unless the
 verifier-specific overrides are set. It has a separate system role, exactly one

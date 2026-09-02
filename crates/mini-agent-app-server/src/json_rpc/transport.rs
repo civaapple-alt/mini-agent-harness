@@ -128,6 +128,7 @@ where
     let server = connection.server.clone();
     let mut events = server.subscribe();
     let mut goal_events = connection.subscribe_goal_notifications();
+    let mut settings_events = connection.subscribe_settings_notifications();
     let mut line = String::new();
     loop {
         tokio::select! {
@@ -140,6 +141,14 @@ where
                 write_json_line(&mut writer, &notification).await?;
             }
             event = next_goal_notification(&mut goal_events) => {
+                let notification = match event {
+                    Ok(notification) => notification,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => continue,
+                };
+                write_json_line(&mut writer, &notification).await?;
+            }
+            event = next_settings_notification(&mut settings_events) => {
                 let notification = match event {
                     Ok(notification) => notification,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -217,6 +226,16 @@ async fn next_goal_notification(
     };
     let event = events.recv().await?;
     Ok(super::goal_notification_request(event))
+}
+
+async fn next_settings_notification(
+    events: &mut Option<broadcast::Receiver<super::SettingsRuntimeEvent>>,
+) -> Result<JsonRpcRequest, broadcast::error::RecvError> {
+    let Some(events) = events.as_mut() else {
+        return std::future::pending().await;
+    };
+    let event = events.recv().await?;
+    Ok(super::settings_notification_request(event))
 }
 
 async fn write_json_line<W: AsyncWrite + Unpin, T: serde::Serialize>(

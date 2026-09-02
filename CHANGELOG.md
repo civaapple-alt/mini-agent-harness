@@ -48,20 +48,20 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   bounded objective, token budget, and timestamps with old-state defaults, and
   the App Server Runtime Actor owns a serialized `GoalRuntime` state component.
   The existing Thread/Turn loop remains the only execution loop; settled
-  continuation, settings notifications, and retirement of manual workflow
-  controls remain separately gated.
+  continuation, settings notifications, resume/clear race handling, and
+  retirement of manual workflow controls are owned by the same runtime.
 - **Goal Runtime first-turn seam:** make `thread/goal/set` schedule one bounded
   `StartIfIdle` ordinary Thread Turn through the existing App Server worker
   after durable state creation. Add one Goal notification source for
   `thread/goal/updated` and `thread/goal/cleared`; local clients can consume
   generic notifications while `next_event()` continues to expose only turn
   events. Settled-checkpoint verifier/continuation and settings notifications
-  remain deferred.
+  now run through the worker and App Server event bus.
 - **Planning:** merge the Goal Runtime plan into the Codex-aligned capabilities
-  record as its execution appendix. The remaining automatic continuation,
-  settings notifications, and retirement of manual Goal controls stay gated by
-  public boundary evidence; the initial Goal update/clear notifications are
-  implemented in the first-turn seam.
+  record as its execution appendix. Automatic continuation, settings
+  notifications, and retirement of manual Goal controls are now covered by the
+  serialized runtime path and targeted boundary/race tests; a provider-backed
+  verifier scenario remains environment-dependent follow-up evidence.
 - **Test maintenance:** remove duplicate App Server approval-broker coverage
   already exercised by the public Shell approval scenario, and remove the
   private image-magic unit check covered by the workspace `read_image` path.
@@ -75,8 +75,23 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   the bounded Host prompt and approval lock through the Runtime Actor, and
   persisted Plan Mode is restored when a runtime is rebound. No compatibility
   wrapper for the removed method is provided.
+- **Goal API retirement:** remove the manual `workflow/goal/start`, `pause`,
+  `fail`, `criteria`, `advance`, and `record_verdict` protocol methods, DTOs,
+  JSON-RPC handlers, Local client methods, and frontend re-exports. Goal
+  progression is now internal to `GoalRuntime`; clients use
+  `thread/goal/set|get|clear`.
 
 ### Added
+
+- **Settled Goal continuation:** persist the active Goal turn and its settled
+  checkpoint before invoking the tool-free verifier. Approved, rejected, and
+  verifier-error outcomes advance, retry, or fail through the serialized
+  `GoalRuntime`; restart resumes an unsettled turn or re-verifies a settled
+  checkpoint without replaying the turn. Late verifier results after clear are
+  ignored by the `goalId`/`turnId`/checkpoint guard.
+- **Settings notifications:** add `thread/settings/updated` on the same
+  Runtime Actor revision used by `thread/settings/update`; local and stdio
+  clients consume the single server-owned notification source.
 
 - Externalized stable Core, Capabilities, and App Server built-in prompt bodies
   into crate-owned Markdown templates embedded at compile time. Prompt bytes,

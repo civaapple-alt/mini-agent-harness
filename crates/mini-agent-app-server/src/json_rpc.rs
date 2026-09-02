@@ -10,6 +10,7 @@ use super::WorkflowService;
 use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::goal_runtime::GoalRuntimeEvent;
+use crate::management::SettingsRuntimeEvent;
 use mini_agent_app_server_protocol::ApprovalRequestNotification;
 use mini_agent_app_server_protocol::ApprovalResolvedNotification;
 use mini_agent_app_server_protocol::ApprovalRespondParams;
@@ -43,12 +44,6 @@ use mini_agent_app_server_protocol::METHOD_TURN_INTERRUPT;
 use mini_agent_app_server_protocol::METHOD_TURN_READ;
 use mini_agent_app_server_protocol::METHOD_TURN_START;
 use mini_agent_app_server_protocol::METHOD_TURN_STEER;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_ADVANCE;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_CRITERIA;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_FAIL;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_PAUSE;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_RECORD_VERDICT;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_GOAL_START;
 use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
 use mini_agent_app_server_protocol::METHOD_WORLD_REFRESH;
 use mini_agent_app_server_protocol::METHOD_WORLD_SET_EXECUTION;
@@ -77,6 +72,7 @@ use mini_agent_app_server_protocol::ThreadResumeParams;
 use mini_agent_app_server_protocol::ThreadResumeResult;
 use mini_agent_app_server_protocol::ThreadSettingsUpdateParams;
 use mini_agent_app_server_protocol::ThreadSettingsUpdateResult;
+use mini_agent_app_server_protocol::ThreadSettingsUpdatedNotification;
 use mini_agent_app_server_protocol::ThreadStartParams;
 use mini_agent_app_server_protocol::ThreadStartResult;
 use mini_agent_app_server_protocol::TurnEventNotification;
@@ -84,14 +80,7 @@ use mini_agent_app_server_protocol::TurnInterruptParams;
 use mini_agent_app_server_protocol::TurnReadParams;
 use mini_agent_app_server_protocol::TurnStartParams;
 use mini_agent_app_server_protocol::TurnSteerParams;
-use mini_agent_app_server_protocol::WorkflowGoalAdvanceParams;
-use mini_agent_app_server_protocol::WorkflowGoalRecordVerdictParams;
-use mini_agent_app_server_protocol::WorkflowGoalStartParams;
-use mini_agent_app_server_protocol::WorkflowGoalState;
-use mini_agent_app_server_protocol::WorkflowGoalStatus;
 use mini_agent_app_server_protocol::WorkflowState;
-use mini_agent_app_server_protocol::WorkflowVerdictOutcome;
-use mini_agent_app_server_protocol::WorkflowVerifierVerdict;
 use mini_agent_app_server_protocol::WorldRefreshResult;
 use mini_agent_app_server_protocol::WorldSetExecutionParams;
 use mini_agent_app_server_protocol::WorldSetExecutionResult;
@@ -130,6 +119,7 @@ pub struct AppServerConnection<M> {
     capability_manifest: CapabilityManifest,
     runtime: Option<RuntimeServices<M>>,
     goal_notifications: Option<broadcast::Receiver<GoalRuntimeEvent>>,
+    settings_notifications: Option<broadcast::Receiver<SettingsRuntimeEvent>>,
 }
 
 /// Host-owned services that share one runtime identity.
@@ -142,6 +132,7 @@ pub struct RuntimeServices<M> {
     management: RuntimeManagementService<M>,
     workflows: WorkflowService,
     goal_notifications: broadcast::Sender<GoalRuntimeEvent>,
+    settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
 }
 
 impl<M> RuntimeServices<M> {
@@ -154,10 +145,12 @@ impl<M> RuntimeServices<M> {
     {
         let (management, workflows) = management.bind_workflow(workflows)?;
         let goal_notifications = management.goal_notifications();
+        let settings_notifications = management.settings_notifications();
         Ok(Self {
             management,
             workflows,
             goal_notifications,
+            settings_notifications,
         })
     }
 
@@ -171,6 +164,10 @@ impl<M> RuntimeServices<M> {
 
     fn goal_notifications(&self) -> broadcast::Sender<GoalRuntimeEvent> {
         self.goal_notifications.clone()
+    }
+
+    fn settings_notifications(&self) -> broadcast::Sender<SettingsRuntimeEvent> {
+        self.settings_notifications.clone()
     }
 }
 
@@ -213,12 +210,14 @@ where
             capability_manifest,
             runtime: None,
             goal_notifications: None,
+            settings_notifications: None,
         }
     }
 
     /// Attaches the host-owned services for one runtime identity.
     pub fn with_runtime_services(mut self, runtime: RuntimeServices<M>) -> Self {
         self.goal_notifications = Some(runtime.goal_notifications().subscribe());
+        self.settings_notifications = Some(runtime.settings_notifications().subscribe());
         self.runtime = Some(runtime);
         self
     }
@@ -289,14 +288,6 @@ where
             METHOD_TURN_STEER => self.handle_turn_steer(request).await,
             METHOD_TURN_INTERRUPT => self.handle_turn_interrupt(request).await,
             METHOD_WORKFLOW_STATE => self.handle_workflow_state(request).await,
-            METHOD_WORKFLOW_GOAL_START => self.handle_workflow_goal_start(request).await,
-            METHOD_WORKFLOW_GOAL_PAUSE => self.handle_workflow_goal_pause(request).await,
-            METHOD_WORKFLOW_GOAL_FAIL => self.handle_workflow_goal_fail(request).await,
-            METHOD_WORKFLOW_GOAL_CRITERIA => self.handle_workflow_goal_criteria(request).await,
-            METHOD_WORKFLOW_GOAL_ADVANCE => self.handle_workflow_goal_advance(request).await,
-            METHOD_WORKFLOW_GOAL_RECORD_VERDICT => {
-                self.handle_workflow_goal_record_verdict(request).await
-            }
             METHOD_SESSION_INFO => self.handle_session_info(request).await,
             METHOD_WORLD_STATE => self.handle_world_state(request).await,
             METHOD_WORLD_REFRESH => self.handle_world_refresh(request).await,
@@ -312,12 +303,30 @@ where
     pub async fn next_notification(
         &mut self,
     ) -> Result<JsonRpcRequest, broadcast::error::RecvError> {
-        let Some(goal_notifications) = self.goal_notifications.as_mut() else {
-            return transport::next_event_notification(&mut self.events).await;
-        };
-        tokio::select! {
-            event = transport::next_event_notification(&mut self.events) => event,
-            event = goal_notifications.recv() => event.map(goal_notification_request),
+        match (
+            self.goal_notifications.as_mut(),
+            self.settings_notifications.as_mut(),
+        ) {
+            (None, None) => transport::next_event_notification(&mut self.events).await,
+            (Some(goal_notifications), None) => {
+                tokio::select! {
+                    event = transport::next_event_notification(&mut self.events) => event,
+                    event = goal_notifications.recv() => event.map(goal_notification_request),
+                }
+            }
+            (None, Some(settings_notifications)) => {
+                tokio::select! {
+                    event = transport::next_event_notification(&mut self.events) => event,
+                    event = settings_notifications.recv() => event.map(settings_notification_request),
+                }
+            }
+            (Some(goal_notifications), Some(settings_notifications)) => {
+                tokio::select! {
+                    event = transport::next_event_notification(&mut self.events) => event,
+                    event = goal_notifications.recv() => event.map(goal_notification_request),
+                    event = settings_notifications.recv() => event.map(settings_notification_request),
+                }
+            }
         }
     }
 
@@ -468,6 +477,14 @@ where
             .as_ref()
             .map(broadcast::Receiver::resubscribe)
     }
+
+    pub(crate) fn subscribe_settings_notifications(
+        &self,
+    ) -> Option<broadcast::Receiver<SettingsRuntimeEvent>> {
+        self.settings_notifications
+            .as_ref()
+            .map(broadcast::Receiver::resubscribe)
+    }
 }
 
 /// Optional services attached to a startup-created App Server connection.
@@ -524,7 +541,7 @@ pub(super) fn goal_notification_request(event: GoalRuntimeEvent) -> JsonRpcReque
             mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED,
             Some(
                 serde_json::to_value(ThreadGoalUpdatedNotification {
-                    goal: crate::goal_runtime::project_goal(thread_id.clone(), state),
+                    goal: crate::goal_runtime::project_goal(thread_id.clone(), *state),
                     thread_id,
                     turn_id,
                 })
@@ -539,6 +556,27 @@ pub(super) fn goal_notification_request(event: GoalRuntimeEvent) -> JsonRpcReque
             ),
         ),
     }
+}
+
+pub(super) fn settings_notification_request(event: SettingsRuntimeEvent) -> JsonRpcRequest {
+    JsonRpcRequest::notification(
+        mini_agent_app_server_protocol::METHOD_THREAD_SETTINGS_UPDATED,
+        Some(
+            serde_json::to_value(ThreadSettingsUpdatedNotification {
+                thread_id: event.thread_id,
+                collaboration_mode: CollaborationMode {
+                    mode: if event.active {
+                        CollaborationModeKind::Plan
+                    } else {
+                        CollaborationModeKind::Default
+                    },
+                },
+                builtin_tools: event.builtin_tools,
+                state_revision: event.state_revision,
+            })
+            .expect("settings update notification is serializable"),
+        ),
+    )
 }
 
 fn response_value<T: serde::Serialize>(id: Option<Value>, value: T) -> Option<JsonRpcResponse> {

@@ -5,12 +5,12 @@ This directory records architectural decision records (ADRs), technology selecti
 
 ---
 
-## Current Maintenance Gate (2026-09-01)
+## Current Maintenance Gate (2026-09-02)
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `18,419 / 20,000` lines (92.1%; 1,581 remaining)
-- release Rust source (excluding experimental CLI/REPL): `27,585 / 30,000` lines (92.0%; 2,415 remaining)
+- runtime (`core + protocol + host + app-server`): `18,709 / 20,000` lines (93.5%; 1,291 remaining)
+- release Rust source (excluding experimental CLI/REPL): `27,875 / 30,000` lines (92.9%; 2,125 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -74,10 +74,12 @@ bounded Builtin subset and Core Router applies a reversible visibility filter.
 The Runtime Actor applies both settings at one serialized mutation boundary;
 MCP/external tools are preserved. The active Thread and same-object resume path
 retain the filter, while new/forked factory Threads and durable capability
-checkpointing remain deferred. The current release-source margin is `2,415`
-lines; settled-checkpoint Goal continuation and settings notifications remain
-deferred. Initial Goal scheduling and Goal update/clear notifications are
-implemented through the serialized GoalRuntime owner.
+checkpointing remain deferred. `thread/settings/updated` is emitted from the
+same Runtime Actor revision as the mutation response. Settled-checkpoint Goal
+continuation, verifier retry/terminal transitions, resume/clear stale-result
+guards, and the removal of manual workflow Goal controls are implemented through
+the serialized GoalRuntime owner. The current release-source margin is `2,125`
+lines.
 
 The first Skill dependency/activation slice is implemented in Capabilities.
 Skill frontmatter may declare up to 16 bounded `builtin` or `mcp` references;
@@ -85,7 +87,7 @@ the metadata catalog exposes non-empty declarations, and
 `Discovery::activate_skill` returns a typed metadata-only activation. It does
 not read Skill bodies, start MCP, enable providers, or grant approval. App Server
 Turn activation and Host allowlist resolution remain the next Skill batch; the
-current release-source margin is `2,415` lines. The experimental CLI/REPL is
+  current release-source margin is `2,125` lines. The experimental CLI/REPL is
 still reported separately at `2,707` lines and does not consume this gate.
 
 The first Plugin provider slice is implemented in Capabilities: selecting a
@@ -103,61 +105,31 @@ or specialized source classification is introduced.
 
 The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative historical CLI scenarios pass, with current App Server boundary evidence and CLI interactive 12/12 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy and model/provider comparison remain explicitly open gaps. CLI `ask --trace-jsonl PATH` now has public-path evidence for redaction, per-record/total bounds, and overwrite refusal; implicit baseline export remains off. Docker CLI/server 29.6.1 and the `alpine` image are available on this host; Docker preflight now queries the daemon with `docker info`, and ordinary plus candidate-strict probes verify the `/workspace` mount and container-only temporary files, while the strict probe also observes network, capability, read-only-root, and bounded-cgroup behavior. These are current-host evidence only, not a complete cross-platform security claim. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists. The REPL now omits duplicate World/MCP/extension management; these remain available through App Server clients.
 
-Goal Runtime is being converged on the Codex Thread/Turn/ThreadItem model. The
-first bounded slice now provides the canonical `thread/goal/set|get|clear`
-contract and an App Server `GoalRuntime` owner over Host durable state. Follow
-the [Goal Runtime implementation appendix](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
-for the remaining settled-checkpoint continuation, settings notifications, and
-final manual-API retirement gates; Goal update/clear notifications and initial
-set scheduling are already implemented.
+Goal Runtime is converged on the Codex Thread/Turn/ThreadItem model. The
+canonical `thread/goal/set|get|clear` contract, settled-checkpoint verifier and
+continuation, settings notifications, resume/clear stale-result guards, and
+manual Goal API retirement are implemented. Follow the [Goal Runtime
+implementation appendix](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
+for the state machine and evidence record.
 
 ### Next iteration order (evidence-triggered)
 
 1. Keep both hard ceilings and the six-question admission gate active; no Rust
    feature starts without net-zero growth or an explicit offset.
-2. Keep the REPL as a core-capability reference surface. The Plan/Goal workflow
-   UI and orchestration stay in App Server clients such as Studio/SDK; any further
-   World/MCP/extension presentation removal is now complete; future changes must
-   preserve Host/App Server ownership and add public-path evidence.
-3. Preserve the first `ToolExecutionDelegate`/Host `ToolOrchestrator` slice and the
-   Shell typed-admission migration. The public App Server Shell approval scenario
-   and `requestId`/`turnId`/`callId` correlation are covered, and synchronous approval
-   waits are isolated from the connection runtime. Before moving another tool, keep
-   the worker ownership boundary and provide net-zero growth or an explicit
-   line-budget offset. Do not add a generic router/sandbox wrapper or leave two
-   approval authorities active.
-4. The active Thread Builtin selection is implemented as the first reversible
-   Catalog consumer. The first Skill dependency/activation metadata slice is
-   also implemented, without provider startup or permission grants. The next
-   Skill batch must add explicit Turn input and Host allowlist resolution only
-   with a measured offset and public boundary evidence; do not introduce a
-   second router or let Skills silently enable providers.
-5. The Plugin provider-input selection slice is implemented by the existing
-    Discovery/MCP path. Plugin MCP tool loading and Dynamic Tool mapping require
-   a separate offset and public approval/startup evidence.
- 6. The bounded ThreadItem projection is implemented alongside existing
-    `turn/event` and `turn/read` data. Full Item lifecycle/listing and persisted
-    identity require separate evidence and budget; do not add an Artifact store
-    or Goal Runtime coupling to this projection.
- 7. The bounded opt-in CLI Trace contract is implemented and covered by CLI public
-   scenarios: explicit `ask --trace-jsonl PATH`, create-new ownership, redaction,
-   8 KiB per-record and 256 KiB total limits, and fail-on-write/finalization error.
-   The baseline recipe remains explicit and does not create traces implicitly.
-6. Revisit CLI public MCP-timeout projection only if a bounded fault-injection
-   seam can be justified; otherwise keep the current capability/App Server
-   coverage and record the CLI transport gap as deferred.
-7. The measurable Core compaction-trigger scenario is now recorded: it checks a
-   trigger at least 70% of the bounded fixture budget and recent-tail retention;
-   production remains at the documented 50% trigger unless later evidence proves
-   that threshold unsuitable.
-8. Docker availability and workspace-mount evidence are now recorded. The next
-   action is to review the [Docker isolation policy proposal](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md),
-   covering threat model, supported platforms, defaults/opt-outs, compatibility,
-   and fail-closed behavior. A current-host feasibility probe accepted the
-   candidate flags and strict workspace mounting, but cross-platform evidence is
-   still required before stronger isolation may be implemented.
-9. Defer provider comparison and retry/backoff until a second provider or an
-   explicit bounded policy exists; paid-provider CI is not a default gate.
+2. Keep the REPL as a core-capability reference surface; Plan/Goal workflow UI
+   and orchestration stay in App Server clients such as Studio/SDK.
+3. Extend Skill activation from metadata to explicit Turn input and Host
+   allowlist resolution only with a measured offset and public evidence.
+4. Add Plugin MCP tool loading and Dynamic Tool mapping only through the existing
+   provider/approval path; no Plugin-specific executor.
+5. Extend ThreadItem lifecycle/listing and persisted identity before introducing
+   bounded sidecar Artifact references.
+6. Add a real or fault-injected Goal verifier scenario covering approved,
+   rejected, timeout, restart/resume, and clear races; paid provider calls are
+   not a default gate.
+7. Review the Docker isolation policy and cross-platform evidence before
+   changing sandbox defaults. Defer provider comparison and retry/backoff until
+   a second provider or an explicit bounded policy exists.
 
 Every item must remain a few-hundred-line batch, pass affected tests and Clippy,
 refresh the budget report, update the relevant note/CHANGELOG, and land in its

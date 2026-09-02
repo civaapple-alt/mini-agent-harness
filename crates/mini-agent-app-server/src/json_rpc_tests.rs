@@ -301,13 +301,12 @@ async fn requires_initialize_and_handles_turn_start() {
 }
 
 #[tokio::test]
-async fn exposes_workflow_management_without_host_paths() {
+async fn exposes_read_only_workflow_state_from_thread_goal() {
     let (mut connection, root) = managed_connection("workflow-rpc");
-    let response = connection
+    connection
         .handle_request(initialize_request(1, "workflow-test"))
         .await
         .unwrap();
-    assert_eq!(response.result.unwrap()["capabilities"]["workflows"], true);
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -321,29 +320,23 @@ async fn exposes_workflow_management_without_host_paths() {
         ))
         .await
         .unwrap();
-    let result = response.result.unwrap();
-    assert_eq!(result["value"]["collaborationMode"]["mode"], "plan");
-    assert_eq!(
-        result["value"]["builtinTools"],
-        serde_json::json!(["shell", "read_file"])
-    );
-    assert_eq!(result["actionId"], 1);
-    assert_eq!(result["actionSequence"], 1);
-    assert_eq!(result["stateRevision"], 1);
+    assert_eq!(response.result.unwrap()["stateRevision"], 1);
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
             3,
-            METHOD_WORKFLOW_GOAL_START,
-            serde_json::json!({"objective": "rpc goal"}),
+            METHOD_THREAD_GOAL_SET,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "objective": "rpc goal"
+            }),
         ))
         .await
         .unwrap();
-    let result = response.result.unwrap();
-    assert_eq!(result["value"]["status"], "running");
-    assert_eq!(result["actionId"], 2);
-    assert_eq!(result["actionSequence"], 2);
-    assert_eq!(result["stateRevision"], 2);
+    assert_eq!(
+        response.result.unwrap()["value"]["goal"]["status"],
+        "active"
+    );
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -356,39 +349,48 @@ async fn exposes_workflow_management_without_host_paths() {
     let result = response.result.unwrap();
     let state = result["value"].clone();
     assert_eq!(state["collaborationMode"]["mode"], "plan");
-    assert_eq!(state["goal"]["status"], "running");
-    assert!(state["goal"].get("planFile").is_none());
-    assert_eq!(result["actionId"], 3);
-    assert_eq!(result["actionSequence"], 3);
-    assert_eq!(result["stateRevision"], 2);
+    assert_eq!(state["goal"]["status"], "active");
+    assert_eq!(state["goal"]["objective"], "rpc goal");
+    assert!(state["goal"].get("path").is_none());
+    std::fs::remove_dir_all(root).unwrap();
+}
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
-            5,
-            METHOD_WORKFLOW_GOAL_PAUSE,
-            serde_json::json!({}),
-        ))
+#[tokio::test]
+async fn broadcasts_thread_settings_updates_with_action_revision() {
+    let (mut connection, root) = managed_connection("thread-settings-notification");
+    connection
+        .handle_request(initialize_request(1, "thread-settings-test"))
         .await
         .unwrap();
-    let result = response.result.unwrap();
-    assert_eq!(result["value"]["status"], "user_paused");
-    assert_eq!(result["actionId"], 4);
-    assert_eq!(result["actionSequence"], 4);
-    assert_eq!(result["stateRevision"], 3);
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
-            6,
+            2,
             METHOD_THREAD_SETTINGS_UPDATE,
             serde_json::json!({
                 "threadId": "thread-1",
-                "collaborationMode": {"mode": "default"},
-                "builtinTools": ["not-a-builtin"]
+                "collaborationMode": {"mode": "plan"},
+                "builtinTools": ["shell", "read_file"]
             }),
         ))
         .await
         .unwrap();
-    assert_eq!(response.error.unwrap().code, -32602);
+    let response_revision = response.result.unwrap()["stateRevision"].clone();
+
+    let notification = loop {
+        let notification = connection.next_notification().await.unwrap();
+        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_SETTINGS_UPDATED {
+            break notification;
+        }
+    };
+    let params = notification.params.unwrap();
+    assert_eq!(params["threadId"], "thread-1");
+    assert_eq!(params["collaborationMode"]["mode"], "plan");
+    assert_eq!(
+        params["builtinTools"],
+        serde_json::json!(["shell", "read_file"])
+    );
+    assert_eq!(params["stateRevision"], response_revision);
     std::fs::remove_dir_all(root).unwrap();
 }
 

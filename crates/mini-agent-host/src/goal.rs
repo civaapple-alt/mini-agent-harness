@@ -9,6 +9,7 @@ pub const MAX_GOAL_PLAN_BYTES: usize = 32 * 1024;
 pub const DEFAULT_GOAL_MAX_LOOPS: usize = 20;
 pub const DEFAULT_GOAL_MILESTONE_STEPS: usize = 50;
 pub const DEFAULT_GOAL_MILESTONE_TIMEOUT_SECS: u64 = 600;
+const MAX_GOAL_ERROR_CHARS: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GoalLimits {
@@ -56,6 +57,12 @@ pub struct GoalState {
     #[serde(default)]
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
+    #[serde(default)]
+    pub active_turn_id: Option<String>,
+    #[serde(default)]
+    pub active_turn_settled: bool,
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -117,10 +124,6 @@ impl HostWorkflowStore {
         is_plan_mode_active(&self.session_dir)
     }
 
-    pub fn init_goal(&self, objective: &str) -> io::Result<GoalState> {
-        init_goal_workspace_with_limits(&self.session_dir, objective, self.goal_limits)
-    }
-
     pub fn set_goal(&self, objective: &str, token_budget: Option<i64>) -> io::Result<GoalState> {
         let mut state =
             init_goal_workspace_with_limits(&self.session_dir, objective, self.goal_limits)?;
@@ -135,6 +138,40 @@ impl HostWorkflowStore {
 
     pub fn clear_goal(&self) -> io::Result<bool> {
         clear_goal(&self.session_dir)
+    }
+
+    pub fn mark_goal_turn_started(
+        &self,
+        goal_id: &str,
+        turn_id: &str,
+    ) -> io::Result<Option<GoalState>> {
+        update_goal_state(&self.session_dir, |state| {
+            if state.goal_id != goal_id || state.status != GoalStatus::Running {
+                return Ok(None);
+            }
+            state.active_turn_id = Some(turn_id.to_string());
+            state.active_turn_settled = false;
+            state.updated_at_ms = current_time_ms();
+            Ok(Some(state.clone()))
+        })
+    }
+
+    pub fn mark_goal_turn_settled(
+        &self,
+        goal_id: &str,
+        turn_id: &str,
+    ) -> io::Result<Option<GoalState>> {
+        update_goal_state(&self.session_dir, |state| {
+            if state.goal_id != goal_id
+                || state.status != GoalStatus::Running
+                || state.active_turn_id.as_deref() != Some(turn_id)
+            {
+                return Ok(None);
+            }
+            state.active_turn_settled = true;
+            state.updated_at_ms = current_time_ms();
+            Ok(Some(state.clone()))
+        })
     }
 
     pub fn verification_criteria(&self) -> io::Result<String> {
@@ -153,8 +190,8 @@ impl HostWorkflowStore {
         pause_goal(&self.session_dir)
     }
 
-    pub fn fail_goal(&self) -> io::Result<GoalState> {
-        fail_goal(&self.session_dir)
+    pub fn fail_goal_with_reason(&self, reason: &str) -> io::Result<GoalState> {
+        fail_goal_with_reason(&self.session_dir, Some(reason))
     }
 }
 
@@ -273,7 +310,7 @@ pub fn init_goal_workspace_with_limits(
     let goal_dir = session_dir.join("goal");
     fs::create_dir_all(&goal_dir)?;
 
-    let goal_id = format!("g_{}", current_time_ms() / 1000);
+    let goal_id = format!("g_{}", current_time_ms());
     let created_at_ms = current_time_ms();
     let state = GoalState {
         schema_version: GOAL_SCHEMA_VERSION,
@@ -297,6 +334,9 @@ pub fn init_goal_workspace_with_limits(
         token_budget: None,
         created_at_ms,
         updated_at_ms: created_at_ms,
+        active_turn_id: None,
+        active_turn_settled: false,
+        last_error: None,
     };
 
     write_goal_state(session_dir, &state)?;
@@ -342,6 +382,21 @@ fn write_goal_state(session_dir: &Path, state: &GoalState) -> io::Result<()> {
     fs::write(session_dir.join("goal").join("state.json"), state_json)
 }
 
+fn update_goal_state<F>(session_dir: &Path, update: F) -> io::Result<Option<GoalState>>
+where
+    F: FnOnce(&mut GoalState) -> io::Result<Option<GoalState>>,
+{
+    let mut state = load_goal_state(session_dir)?;
+    let Some(state) = state.as_mut() else {
+        return Ok(None);
+    };
+    let updated = update(state)?;
+    if updated.is_some() {
+        write_goal_state(session_dir, state)?;
+    }
+    Ok(updated)
+}
+
 pub fn clear_goal(session_dir: &Path) -> io::Result<bool> {
     let state_file = session_dir.join("goal").join("state.json");
     match fs::remove_file(state_file) {
@@ -377,11 +432,12 @@ pub fn record_verifier_verdict(
     fs::write(session_dir.join("goal").join("verifier_verdict.md"), record)
 }
 
-pub fn fail_goal(session_dir: &Path) -> io::Result<GoalState> {
+pub fn fail_goal_with_reason(session_dir: &Path, reason: Option<&str>) -> io::Result<GoalState> {
     let state_file = session_dir.join("goal").join("state.json");
     let mut state = load_goal_state(session_dir)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "goal state not found"))?;
     state.status = GoalStatus::Failed;
+    state.last_error = reason.map(|reason| reason.chars().take(MAX_GOAL_ERROR_CHARS).collect());
     state.updated_at_ms = current_time_ms();
     let state_json = serde_json::to_vec_pretty(&state)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -463,6 +519,9 @@ pub fn advance_goal_milestone(
     }
 
     state.updated_at_ms = current_time_ms();
+    state.active_turn_id = None;
+    state.active_turn_settled = false;
+    state.last_error = None;
     let state_json = serde_json::to_vec_pretty(&state)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     fs::write(state_file, state_json)?;

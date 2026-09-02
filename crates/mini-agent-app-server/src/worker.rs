@@ -13,6 +13,13 @@ use mini_agent_core::TurnResult;
 use mini_agent_protocol::Event;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::EventSink;
+use std::collections::VecDeque;
+
+#[derive(Clone)]
+pub(super) enum TurnOrigin {
+    Client,
+    Goal { goal_id: String },
+}
 
 pub(super) enum Command {
     InstallRuntime {
@@ -23,7 +30,15 @@ pub(super) enum Command {
         thread_id: ThreadId,
         request: TurnStart,
         expected_turn_id: Option<TurnId>,
+        origin: TurnOrigin,
         reply: oneshot::Sender<ActionResult<TurnSubmission>>,
+    },
+    GoalVerificationCompleted {
+        thread_id: ThreadId,
+        goal_id: String,
+        turn_id: TurnId,
+        checkpoint_seq: u64,
+        result: Result<(String, crate::workflows::VerifierVerdict), String>,
     },
     Cancel {
         thread_id: ThreadId,
@@ -115,6 +130,7 @@ pub(super) async fn worker_loop<M>(
         .map(|thread| (thread.id().as_str().to_string(), thread))
         .collect::<HashMap<_, _>>();
     let mut settled_turns = HashMap::new();
+    let mut deferred_goal_verifications = VecDeque::new();
     while let Some(command) = commands.recv().await {
         if let Command::InstallRuntime { state } = command {
             runtime = Some(*state);
@@ -126,6 +142,16 @@ pub(super) async fn worker_loop<M>(
                     runtime_actor::set_collaboration_mode(&mut threads, state, true, None)
             {
                 eprintln!("warning: failed to restore collaboration mode: {error}");
+            }
+            let command_sender = runtime.as_ref().map(|state| state.commands.clone());
+            match runtime_actor::resume_goal(&mut runtime, &mut threads) {
+                Ok(Some(request)) => {
+                    if let Some(command_sender) = command_sender {
+                        spawn_goal_verifier(command_sender, request);
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!("warning: failed to resume goal runtime: {error}"),
             }
             continue;
         }
@@ -152,6 +178,7 @@ pub(super) async fn worker_loop<M>(
                 thread_id,
                 request,
                 expected_turn_id,
+                origin,
                 reply,
             } => {
                 if expected_turn_id.is_some() {
@@ -192,11 +219,24 @@ pub(super) async fn worker_loop<M>(
 
                 let mut next_input = Some(request.input);
                 let mut initial_reply = Some(reply);
+                let mut origin = origin;
                 loop {
                     let input = next_input
                         .take()
                         .expect("app-server turn input must exist before execution");
                     let turn_id = thread.next_turn_id();
+                    let goal_id = match &origin {
+                        TurnOrigin::Client => None,
+                        TurnOrigin::Goal { goal_id } => Some(goal_id.clone()),
+                    };
+                    if let Some(goal_id) = goal_id.as_deref() {
+                        let accepted =
+                            runtime_actor::goal_turn_started(&mut runtime, goal_id, &turn_id)
+                                .unwrap_or(false);
+                        if !accepted {
+                            break;
+                        }
+                    }
                     let started_at_ms = timestamp_ms();
                     let prompt = input.text.clone();
                     let previous_message_count = thread.harness().messages().len();
@@ -239,6 +279,7 @@ pub(super) async fn worker_loop<M>(
                                     &control,
                                     &thread_id,
                                     &turn_id,
+                                    &mut deferred_goal_verifications,
                                     RunningCommandContext {
                                         runtime: &mut runtime,
                                         threads: &mut threads,
@@ -255,6 +296,7 @@ pub(super) async fn worker_loop<M>(
                         }
                     };
                     drop(turn);
+                    let mut goal_turn_completed = false;
                     match turn_result {
                         Ok(result) => {
                             let projected = project_turn_result(&result);
@@ -277,6 +319,9 @@ pub(super) async fn worker_loop<M>(
                                 })
                                 .err()
                                 .map(|error| error.to_string());
+                            goal_turn_completed = result.status
+                                == mini_agent_protocol::TurnStatus::Completed
+                                && persistence_error.is_none();
                             settled_turns.insert(
                                 result.id.as_str().to_string(),
                                 SettledTurn {
@@ -332,15 +377,81 @@ pub(super) async fn worker_loop<M>(
                     if let Some(event) = sink.take_pending_finish() {
                         let _ = events.send(event);
                     }
+                    if let Some(goal_id) = goal_id {
+                        if goal_turn_completed {
+                            let settled =
+                                runtime_actor::goal_turn_settled(&mut runtime, &goal_id, &turn_id)
+                                    .unwrap_or(false);
+                            if settled
+                                && let Ok(Some(request)) = runtime_actor::prepare_goal_verification(
+                                    &mut runtime,
+                                    &thread,
+                                    &goal_id,
+                                    &turn_id,
+                                )
+                                && let Some(command_sender) =
+                                    runtime.as_ref().map(|state| state.commands.clone())
+                            {
+                                spawn_goal_verifier(command_sender, request);
+                            }
+                        } else {
+                            let _ = runtime_actor::goal_turn_failed(
+                                &mut runtime,
+                                &goal_id,
+                                &turn_id,
+                                "goal turn did not complete successfully",
+                            );
+                        }
+                    }
                     runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                     next_input = control
                         .take_steer_input()
                         .or_else(|| control.take_follow_up_input());
                     if next_input.is_none() {
+                        while let Some(command) = deferred_goal_verifications.pop_front() {
+                            if let Command::GoalVerificationCompleted {
+                                thread_id,
+                                goal_id,
+                                turn_id,
+                                checkpoint_seq,
+                                result,
+                            } = command
+                            {
+                                complete_goal_verification(
+                                    &mut runtime,
+                                    &runtime_revision,
+                                    thread_id,
+                                    goal_id,
+                                    turn_id,
+                                    checkpoint_seq,
+                                    result,
+                                );
+                            }
+                        }
+                    }
+                    origin = TurnOrigin::Client;
+                    if next_input.is_none() {
                         break;
                     }
                 }
                 threads.insert(key, thread);
+            }
+            Command::GoalVerificationCompleted {
+                thread_id,
+                goal_id,
+                turn_id,
+                checkpoint_seq,
+                result,
+            } => {
+                complete_goal_verification(
+                    &mut runtime,
+                    &runtime_revision,
+                    thread_id,
+                    goal_id,
+                    turn_id,
+                    checkpoint_seq,
+                    result,
+                );
             }
             Command::Cancel { reply, .. } => {
                 respond(reply, receipt, Err(AppServerError::NoActiveTurn));
@@ -459,6 +570,19 @@ pub(super) async fn worker_loop<M>(
                 );
                 if result.is_ok() {
                     runtime_actor::advance_revision(&mut runtime, &runtime_revision);
+                    match runtime_actor::resume_goal(&mut runtime, &mut threads) {
+                        Ok(Some(request)) => {
+                            if let Some(command_sender) =
+                                runtime.as_ref().map(|state| state.commands.clone())
+                            {
+                                spawn_goal_verifier(command_sender, request);
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            eprintln!("warning: failed to resume goal runtime: {error}")
+                        }
+                    }
                 }
                 respond(reply, receipt, result);
             }
@@ -469,6 +593,50 @@ pub(super) async fn worker_loop<M>(
     }
 }
 
+fn spawn_goal_verifier(
+    commands: mpsc::Sender<Command>,
+    request: crate::goal_runtime::GoalVerificationRequest,
+) {
+    tokio::spawn(async move {
+        let result = crate::verifier::verify_goal_checkpoint(
+            &request.runtime_config,
+            &request.messages,
+            &request.criteria,
+        )
+        .await;
+        let _ = commands
+            .send(Command::GoalVerificationCompleted {
+                thread_id: request.thread_id,
+                goal_id: request.goal_id,
+                turn_id: request.turn_id,
+                checkpoint_seq: request.checkpoint_seq,
+                result,
+            })
+            .await;
+    });
+}
+
+fn complete_goal_verification(
+    runtime: &mut Option<RuntimeActorState>,
+    runtime_revision: &AtomicU64,
+    thread_id: ThreadId,
+    goal_id: String,
+    turn_id: TurnId,
+    checkpoint_seq: u64,
+    result: Result<(String, crate::workflows::VerifierVerdict), String>,
+) {
+    if let Err(error) = runtime_actor::complete_goal_verification(
+        runtime,
+        runtime_revision,
+        thread_id,
+        goal_id,
+        turn_id,
+        checkpoint_seq,
+        result,
+    ) {
+        eprintln!("warning: Goal verification completion failed: {error}");
+    }
+}
 pub(super) fn apply_thread_update<M>(
     thread: &mut Thread<M>,
     update: ThreadUpdate,
@@ -616,6 +784,7 @@ fn handle_running_command<M>(
     control: &RunControl,
     active_thread_id: &ThreadId,
     turn_id: &TurnId,
+    deferred_goal_verifications: &mut VecDeque<Command>,
     context: RunningCommandContext<'_, M>,
 ) where
     M: Model,
@@ -627,6 +796,7 @@ fn handle_running_command<M>(
             thread_id,
             request,
             expected_turn_id,
+            origin: _,
             reply,
         } => {
             if thread_id != *active_thread_id {
@@ -700,6 +870,9 @@ fn handle_running_command<M>(
         }
         Command::ResumeThread { reply, .. } => {
             respond(reply, receipt, Err(AppServerError::Busy));
+        }
+        command @ Command::GoalVerificationCompleted { .. } => {
+            deferred_goal_verifications.push_back(command);
         }
         Command::InstallRuntime { .. } => {}
         Command::Runtime(request) => runtime_actor::handle_running(

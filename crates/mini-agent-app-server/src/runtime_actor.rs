@@ -5,6 +5,7 @@ use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::action::RuntimeRevision;
 use crate::management::RuntimeActorState;
+use crate::management::SettingsRuntimeEvent;
 pub(super) use crate::runtime_command::{RuntimeCommand, RuntimeRequest};
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::McpLoadResult;
@@ -14,6 +15,7 @@ use mini_agent_core::ThreadCheckpoint;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ThreadId;
+use mini_agent_protocol::TurnId;
 use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnStart;
@@ -185,11 +187,24 @@ pub(super) fn handle<M>(
             builtin_tools,
             reply,
         } => {
-            let result = mutate(runtime, runtime_revision, |state| {
-                set_collaboration_mode(threads, state, active, builtin_tools)
-                    .map(|selection| (selection, true))
+            let result = mutate::<(Vec<String>, bool), _>(runtime, runtime_revision, |state| {
+                let previous_active = state.goal_runtime.plan_active();
+                let previous_tools = state.builtin_tools.names().to_vec();
+                set_collaboration_mode(threads, state, active, builtin_tools).map(|selection| {
+                    let changed = previous_active != active || previous_tools != selection;
+                    ((selection, changed), changed)
+                })
             });
-            respond(reply, receipt, result);
+            let changed = result.as_ref().is_ok_and(|(_, changed)| *changed);
+            if changed && let Some(state) = runtime.as_ref() {
+                let _ = state.settings_notifications.send(SettingsRuntimeEvent {
+                    thread_id: state.management.thread_id(),
+                    active,
+                    builtin_tools: state.builtin_tools.names().to_vec(),
+                    state_revision: state.revision().value(),
+                });
+            }
+            respond(reply, receipt, result.map(|(selection, _)| selection));
         }
         RuntimeCommand::GoalSet {
             objective,
@@ -240,81 +255,6 @@ pub(super) fn handle<M>(
             });
             respond(reply, receipt, result);
         }
-        RuntimeCommand::WorkflowInitGoal { objective, reply } => {
-            let result = mutate(runtime, runtime_revision, |state| {
-                state
-                    .goal_runtime
-                    .init_goal(&objective)
-                    .map(|goal| (goal, true))
-                    .map_err(workflow_error)
-            });
-            respond(reply, receipt, result);
-        }
-        RuntimeCommand::WorkflowLoadGoal { reply } => respond(
-            reply,
-            receipt,
-            runtime
-                .as_ref()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| state.goal_runtime.load_goal_state().map_err(workflow_error)),
-        ),
-        RuntimeCommand::WorkflowCriteria { reply } => respond(
-            reply,
-            receipt,
-            runtime
-                .as_ref()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| {
-                    state
-                        .goal_runtime
-                        .verification_criteria()
-                        .map_err(workflow_error)
-                }),
-        ),
-        RuntimeCommand::WorkflowRecordVerdict {
-            checkpoint_seq,
-            output,
-            reply,
-        } => {
-            let result = mutate(runtime, runtime_revision, |state| {
-                state
-                    .goal_runtime
-                    .record_verifier_verdict(checkpoint_seq, &output)
-                    .map(|()| ((), true))
-                    .map_err(workflow_error)
-            });
-            respond(reply, receipt, result);
-        }
-        RuntimeCommand::WorkflowAdvance { verdict, reply } => {
-            let result = mutate(runtime, runtime_revision, |state| {
-                state
-                    .goal_runtime
-                    .advance_goal(verdict)
-                    .map(|goal| (goal, true))
-                    .map_err(workflow_error)
-            });
-            respond(reply, receipt, result);
-        }
-        RuntimeCommand::WorkflowPause { reply } => {
-            let result = mutate(runtime, runtime_revision, |state| {
-                state
-                    .goal_runtime
-                    .pause_goal()
-                    .map(|()| ((), true))
-                    .map_err(workflow_error)
-            });
-            respond(reply, receipt, result);
-        }
-        RuntimeCommand::WorkflowFail { reply } => {
-            let result = mutate(runtime, runtime_revision, |state| {
-                state
-                    .goal_runtime
-                    .fail_goal()
-                    .map(|goal| (goal, true))
-                    .map_err(workflow_error)
-            });
-            respond(reply, receipt, result);
-        }
     }
 }
 
@@ -336,13 +276,6 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::GoalSet { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::GoalGet { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::GoalClear { reply } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::WorkflowInitGoal { reply, .. } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::WorkflowLoadGoal { reply } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::WorkflowCriteria { reply } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::WorkflowRecordVerdict { reply, .. } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::WorkflowAdvance { reply, .. } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::WorkflowPause { reply } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::WorkflowFail { reply } => respond(reply, receipt, Err(error)),
     }
 }
 
@@ -468,11 +401,14 @@ where
 }
 
 fn schedule_goal_turn(
-    state: &RuntimeActorState,
+    state: &mut RuntimeActorState,
     goal: &crate::workflows::GoalState,
 ) -> Result<(), AppServerError> {
+    if !state.goal_runtime.reserve_turn(&goal.goal_id) {
+        return Ok(());
+    }
     let (reply, _response) = oneshot::channel();
-    state
+    if state
         .commands
         .try_send(crate::worker::Command::Start {
             thread_id: state.management.thread_id(),
@@ -485,9 +421,195 @@ fn schedule_goal_turn(
                 ),
             )),
             expected_turn_id: None,
+            origin: crate::worker::TurnOrigin::Goal {
+                goal_id: goal.goal_id.clone(),
+            },
             reply,
         })
-        .map_err(|_| AppServerError::Disconnected)
+        .is_err()
+    {
+        state.goal_runtime.release_turn(&goal.goal_id);
+        return Err(AppServerError::Disconnected);
+    }
+    Ok(())
+}
+
+pub(super) fn goal_turn_started(
+    runtime: &mut Option<RuntimeActorState>,
+    goal_id: &str,
+    turn_id: &mini_agent_protocol::TurnId,
+) -> Result<bool, AppServerError> {
+    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    let updated = state
+        .goal_runtime
+        .mark_turn_started(goal_id, turn_id)
+        .map_err(workflow_error)?;
+    if let Some(goal) = updated {
+        state.goal_runtime.notify_updated(
+            state.management.thread_id(),
+            Some(turn_id.clone()),
+            goal,
+        );
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+pub(super) fn goal_turn_settled(
+    runtime: &mut Option<RuntimeActorState>,
+    goal_id: &str,
+    turn_id: &mini_agent_protocol::TurnId,
+) -> Result<bool, AppServerError> {
+    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    let updated = state
+        .goal_runtime
+        .mark_turn_settled(goal_id, turn_id)
+        .map_err(workflow_error)?;
+    if let Some(goal) = updated {
+        state.goal_runtime.notify_updated(
+            state.management.thread_id(),
+            Some(turn_id.clone()),
+            goal,
+        );
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+pub(super) fn goal_turn_failed(
+    runtime: &mut Option<RuntimeActorState>,
+    goal_id: &str,
+    turn_id: &mini_agent_protocol::TurnId,
+    reason: &str,
+) -> Result<bool, AppServerError> {
+    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    let updated = state
+        .goal_runtime
+        .fail_turn(goal_id, turn_id, reason)
+        .map_err(workflow_error)?;
+    if let Some(goal) = updated {
+        state.goal_runtime.notify_updated(
+            state.management.thread_id(),
+            Some(turn_id.clone()),
+            goal,
+        );
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+pub(super) fn prepare_goal_verification<M>(
+    runtime: &mut Option<RuntimeActorState>,
+    thread: &Thread<M>,
+    goal_id: &str,
+    turn_id: &mini_agent_protocol::TurnId,
+) -> Result<Option<crate::goal_runtime::GoalVerificationRequest>, AppServerError>
+where
+    M: Model,
+{
+    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    let checkpoint = thread
+        .checkpoint()
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
+    let thread_id = state.management.thread_id();
+    state
+        .goal_runtime
+        .prepare_verification(
+            thread_id.clone(),
+            goal_id,
+            state.management.checkpoint_seq().unwrap_or_default(),
+            checkpoint.session.messages().to_vec(),
+        )
+        .map_err(workflow_error)
+        .map(|request| {
+            request.map(|mut request| {
+                request.turn_id = turn_id.clone();
+                request
+            })
+        })
+}
+
+pub(super) fn complete_goal_verification(
+    runtime: &mut Option<RuntimeActorState>,
+    runtime_revision: &AtomicU64,
+    thread_id: ThreadId,
+    goal_id: String,
+    turn_id: mini_agent_protocol::TurnId,
+    checkpoint_seq: u64,
+    result: Result<(String, crate::workflows::VerifierVerdict), String>,
+) -> Result<(), AppServerError> {
+    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    let Some(goal) = state
+        .goal_runtime
+        .complete_verification(&goal_id, &turn_id, checkpoint_seq, result)
+        .map_err(workflow_error)?
+    else {
+        return Ok(());
+    };
+    let goal = if goal.status == mini_agent_host::GoalStatus::Running {
+        match schedule_goal_turn(state, &goal) {
+            Ok(()) => goal,
+            Err(error) => state
+                .goal_runtime
+                .fail_goal_with_reason(&error.to_string())
+                .map_err(workflow_error)?,
+        }
+    } else {
+        goal
+    };
+    state
+        .goal_runtime
+        .notify_updated(thread_id, Some(turn_id), goal);
+    let revision = state.advance_revision();
+    runtime_revision.store(revision.value(), Ordering::SeqCst);
+    Ok(())
+}
+
+pub(super) fn resume_goal<M>(
+    runtime: &mut Option<RuntimeActorState>,
+    threads: &mut HashMap<String, Thread<M>>,
+) -> Result<Option<crate::goal_runtime::GoalVerificationRequest>, AppServerError>
+where
+    M: Model,
+{
+    let goal = runtime
+        .as_ref()
+        .ok_or(AppServerError::RuntimeUnavailable)?
+        .goal_runtime
+        .load_goal_state()
+        .map_err(workflow_error)?;
+    let Some(goal) = goal else {
+        return Ok(None);
+    };
+    if goal.status != mini_agent_host::GoalStatus::Running {
+        return Ok(None);
+    }
+
+    let thread_id = runtime
+        .as_ref()
+        .ok_or(AppServerError::RuntimeUnavailable)?
+        .management
+        .thread_id();
+    if goal.active_turn_settled {
+        let turn_id = goal
+            .active_turn_id
+            .as_deref()
+            .map(TurnId::new)
+            .ok_or_else(|| {
+                AppServerError::Checkpoint("settled goal is missing its active turn".to_string())
+            })?;
+        let thread = threads
+            .get(thread_id.as_str())
+            .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
+        return prepare_goal_verification(runtime, thread, &goal.goal_id, &turn_id);
+    }
+
+    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    schedule_goal_turn(state, &goal)?;
+    Ok(None)
 }
 
 fn append_context_and_persist<M>(
