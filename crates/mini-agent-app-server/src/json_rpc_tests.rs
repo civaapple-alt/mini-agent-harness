@@ -150,6 +150,22 @@ fn managed_connection(name: &str) -> (AppServerConnection<DoneModel>, std::path:
     )
 }
 
+async fn wait_for_blocked_goal(connection: &mut AppServerConnection<DoneModel>) -> Value {
+    loop {
+        let notification =
+            tokio::time::timeout(Duration::from_secs(3), connection.next_notification())
+                .await
+                .expect("Goal preparation failure should settle within the test deadline")
+                .unwrap();
+        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
+            let params = notification.params.unwrap();
+            if params["goal"]["status"] == "blocked" {
+                return params;
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn exposes_session_world_and_mcp_management() {
     let (mut connection, root) = managed_connection("management-rpc");
@@ -337,6 +353,7 @@ async fn exposes_read_only_workflow_state_from_thread_goal() {
         response.result.unwrap()["value"]["goal"]["status"],
         "active"
     );
+    wait_for_blocked_goal(&mut connection).await;
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -349,7 +366,7 @@ async fn exposes_read_only_workflow_state_from_thread_goal() {
     let result = response.result.unwrap();
     let state = result["value"].clone();
     assert_eq!(state["collaborationMode"]["mode"], "plan");
-    assert_eq!(state["goal"]["status"], "active");
+    assert_eq!(state["goal"]["status"], "blocked");
     assert_eq!(state["goal"]["objective"], "rpc goal");
     assert!(state["goal"].get("path").is_none());
     std::fs::remove_dir_all(root).unwrap();
@@ -432,16 +449,8 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     assert_eq!(result["value"]["goal"]["status"], "active");
     assert_eq!(result["value"]["goal"]["tokenBudget"], 1200);
     assert!(result["value"]["goal"].get("path").is_none());
-    let notification = loop {
-        let notification = connection.next_notification().await.unwrap();
-        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
-            break notification;
-        }
-    };
-    assert_eq!(
-        notification.params.unwrap()["goal"]["objective"],
-        "ship the next iteration"
-    );
+    let notification = wait_for_blocked_goal(&mut connection).await;
+    assert_eq!(notification["goal"]["objective"], "ship the next iteration");
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -449,12 +458,16 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
             METHOD_THREAD_GOAL_SET,
             serde_json::json!({
                 "threadId": "thread-1",
-                "objective": "replace while running"
+                "objective": "replace after verifier preparation failure"
             }),
         ))
         .await
         .unwrap();
-    assert_eq!(response.error.unwrap().code, -32000);
+    assert_eq!(
+        response.result.unwrap()["value"]["goal"]["objective"],
+        "replace after verifier preparation failure"
+    );
+    wait_for_blocked_goal(&mut connection).await;
 
     let response = connection
         .handle_request(JsonRpcRequest::request(

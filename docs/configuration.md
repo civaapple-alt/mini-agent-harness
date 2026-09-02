@@ -221,8 +221,8 @@ the core REPL remains focused on turn execution and run control:
   path is bound to this session-owned workspace rather than the project root.
 
 Goal limits can be shortened in a workspace `.env` for deterministic local
-fixtures. A timeout stops the current milestone cooperatively, persists a
-failed Goal state, and returns control to the App Server client; it does not
+fixtures. The step and timeout values are persisted with Goal state and are
+reserved for the automatic Goal-turn budget enforcement batch; they do not yet
 forcibly interrupt synchronous tool effects.
 - **Built-in Foundations & Personas**: Supports 3 core agent roles (`explore`, `plan`, `general`) and 3 bounded personas (`reviewer`, `implementer`, `researcher`).
 
@@ -238,6 +238,10 @@ The verifier inherits the primary credential and endpoint unless the
 verifier-specific overrides are set. It has a separate system role, exactly one
 model step, and an empty tool catalog. Its bounded verdict is stored in the
 Goal workspace and is not replayed as primary conversation history.
+If verifier preparation fails, or the verifier is not configured, the active
+Goal is durably marked failed with a bounded reason. A verifier result is only
+accepted when its `goalId`, `turnId`, and settled checkpoint sequence still
+match the current Goal runtime state.
 
 ## Project extensions
 

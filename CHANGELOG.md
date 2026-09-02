@@ -57,6 +57,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   generic notifications while `next_event()` continues to expose only turn
   events. Settled-checkpoint verifier/continuation and settings notifications
   now run through the worker and App Server event bus.
+- **Goal verifier safety:** retain `goalId`, `turnId`, and `checkpointSeq` in
+  the pending verifier association, reject results that do not match the
+  current settled checkpoint, and persist a bounded failed Goal when verifier
+  preparation cannot start.
 - **Planning:** merge the Goal Runtime plan into the Codex-aligned capabilities
   record as its execution appendix. Automatic continuation, settings
   notifications, and retirement of manual Goal controls are now covered by the

@@ -32,6 +32,13 @@ pub(crate) struct GoalVerificationRequest {
     pub(crate) runtime_config: RuntimeConfig,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingVerification {
+    goal_id: String,
+    turn_id: TurnId,
+    checkpoint_seq: u64,
+}
+
 /// Serialized owner of one Thread Goal's durable state and lifecycle actions.
 ///
 /// This is an App Server state component, not a second turn loop. It owns
@@ -42,7 +49,7 @@ pub(crate) struct GoalRuntime {
     store: HostWorkflowStore,
     events: broadcast::Sender<GoalRuntimeEvent>,
     verifier_config: Option<RuntimeConfig>,
-    pending_verification: Option<(String, TurnId)>,
+    pending_verification: Option<PendingVerification>,
     scheduled_goal: Option<String>,
 }
 
@@ -184,10 +191,17 @@ impl GoalRuntime {
             return Ok(None);
         }
         let Some(runtime_config) = self.verifier_config.clone() else {
-            return Ok(None);
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "goal verifier is not configured",
+            ));
         };
         let criteria = self.store.verification_criteria()?;
-        self.pending_verification = Some((state.goal_id.clone(), turn_id.clone()));
+        self.pending_verification = Some(PendingVerification {
+            goal_id: state.goal_id.clone(),
+            turn_id: turn_id.clone(),
+            checkpoint_seq,
+        });
         Ok(Some(GoalVerificationRequest {
             thread_id,
             goal_id: state.goal_id,
@@ -204,19 +218,18 @@ impl GoalRuntime {
         goal_id: &str,
         turn_id: &TurnId,
         checkpoint_seq: u64,
+        current_checkpoint_seq: u64,
         result: Result<(String, VerifierVerdict), String>,
     ) -> io::Result<Option<GoalState>> {
-        let pending =
-            self.pending_verification
-                .as_ref()
-                .is_some_and(|(pending_goal_id, pending_turn_id)| {
-                    pending_goal_id == goal_id && pending_turn_id == turn_id
-                });
-        if !pending {
+        let Some(pending) = self.pending_verification.as_ref() else {
+            return Ok(None);
+        };
+        if pending.goal_id != goal_id || pending.turn_id != *turn_id {
             return Ok(None);
         }
-        self.pending_verification = None;
+        let pending_checkpoint_seq = pending.checkpoint_seq;
         let Some(state) = self.store.load_goal_state()? else {
+            self.pending_verification = None;
             return Ok(None);
         };
         if state.goal_id != goal_id
@@ -224,8 +237,19 @@ impl GoalRuntime {
             || state.active_turn_id.as_deref() != Some(turn_id.as_str())
             || !state.active_turn_settled
         {
+            self.pending_verification = None;
             return Ok(None);
         }
+        if pending_checkpoint_seq != checkpoint_seq
+            || pending_checkpoint_seq != current_checkpoint_seq
+        {
+            self.pending_verification = None;
+            return self
+                .store
+                .fail_goal_with_reason("goal verifier result was stale for the settled checkpoint")
+                .map(Some);
+        }
+        self.pending_verification = None;
         let next = match result {
             Ok((output, verdict)) => {
                 match self.store.record_verifier_verdict(checkpoint_seq, &output) {

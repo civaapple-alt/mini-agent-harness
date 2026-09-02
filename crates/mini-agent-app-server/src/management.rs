@@ -54,6 +54,7 @@ pub(crate) struct RuntimeManagementState {
     active_thread_id: ThreadId,
     world: WorldState,
     mcp: McpRuntimeState,
+    local_checkpoint_seq: u64,
 }
 
 struct McpRuntimeState {
@@ -107,6 +108,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         approval: ApprovalController,
     ) -> Self {
         let active_thread_id = server.thread_id().clone();
+        let local_checkpoint_seq = 0;
         let (goal_notifications, _) = broadcast::channel(64);
         let (settings_notifications, _) = broadcast::channel(64);
         Self {
@@ -120,6 +122,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                     tool_count: mcp_tool_count,
                     retry_servers: retry_mcp_servers,
                 },
+                local_checkpoint_seq,
             }),
             approval,
             goal_notifications,
@@ -319,6 +322,10 @@ impl RuntimeManagementState {
             .map(|opened| opened.store.checkpoint_seq())
     }
 
+    pub(crate) fn current_checkpoint_seq(&self) -> u64 {
+        self.checkpoint_seq().unwrap_or(self.local_checkpoint_seq)
+    }
+
     pub(crate) fn thread_id(&self) -> ThreadId {
         self.session
             .as_ref()
@@ -377,6 +384,7 @@ impl RuntimeManagementState {
         checkpoint: &ThreadCheckpoint,
     ) -> Result<(), AppServerError> {
         let Some(session) = self.session.as_mut() else {
+            self.local_checkpoint_seq = self.local_checkpoint_seq.saturating_add(1);
             return Ok(());
         };
         let context = checkpoint
@@ -403,6 +411,7 @@ impl RuntimeManagementState {
         checkpoint: &[Message],
     ) -> Result<(), AppServerError> {
         let Some(session) = self.session.as_mut() else {
+            self.local_checkpoint_seq = self.local_checkpoint_seq.saturating_add(1);
             return Ok(());
         };
         let status = match result.status {

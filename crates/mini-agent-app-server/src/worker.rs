@@ -383,12 +383,13 @@ pub(super) async fn worker_loop<M>(
                                 runtime_actor::goal_turn_settled(&mut runtime, &goal_id, &turn_id)
                                     .unwrap_or(false);
                             if settled
-                                && let Ok(Some(request)) = runtime_actor::prepare_goal_verification(
-                                    &mut runtime,
-                                    &thread,
-                                    &goal_id,
-                                    &turn_id,
-                                )
+                                && let Ok(Some(request)) =
+                                    runtime_actor::prepare_goal_verification_or_fail(
+                                        &mut runtime,
+                                        &thread,
+                                        &goal_id,
+                                        &turn_id,
+                                    )
                                 && let Some(command_sender) =
                                     runtime.as_ref().map(|state| state.commands.clone())
                             {

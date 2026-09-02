@@ -524,7 +524,7 @@ where
         .prepare_verification(
             thread_id.clone(),
             goal_id,
-            state.management.checkpoint_seq().unwrap_or_default(),
+            state.management.current_checkpoint_seq(),
             checkpoint.session.messages().to_vec(),
         )
         .map_err(workflow_error)
@@ -534,6 +534,25 @@ where
                 request
             })
         })
+}
+
+pub(super) fn prepare_goal_verification_or_fail<M>(
+    runtime: &mut Option<RuntimeActorState>,
+    thread: &Thread<M>,
+    goal_id: &str,
+    turn_id: &mini_agent_protocol::TurnId,
+) -> Result<Option<crate::goal_runtime::GoalVerificationRequest>, AppServerError>
+where
+    M: Model,
+{
+    match prepare_goal_verification(runtime, thread, goal_id, turn_id) {
+        Ok(request) => Ok(request),
+        Err(error) => {
+            let reason = format!("goal verifier preparation failed: {error}");
+            goal_turn_failed(runtime, goal_id, turn_id, &reason)?;
+            Ok(None)
+        }
+    }
 }
 
 pub(super) fn complete_goal_verification(
@@ -546,9 +565,16 @@ pub(super) fn complete_goal_verification(
     result: Result<(String, crate::workflows::VerifierVerdict), String>,
 ) -> Result<(), AppServerError> {
     let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    let current_checkpoint_seq = state.management.current_checkpoint_seq();
     let Some(goal) = state
         .goal_runtime
-        .complete_verification(&goal_id, &turn_id, checkpoint_seq, result)
+        .complete_verification(
+            &goal_id,
+            &turn_id,
+            checkpoint_seq,
+            current_checkpoint_seq,
+            result,
+        )
         .map_err(workflow_error)?
     else {
         return Ok(());
@@ -608,7 +634,7 @@ where
         let thread = threads
             .get(thread_id.as_str())
             .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
-        return prepare_goal_verification(runtime, thread, &goal.goal_id, &turn_id);
+        return prepare_goal_verification_or_fail(runtime, thread, &goal.goal_id, &turn_id);
     }
 
     let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;

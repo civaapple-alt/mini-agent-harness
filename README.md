@@ -367,8 +367,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `18,775 / 20,000` lines and release
-Rust source `27,941 / 30,000` lines, excluding the experimental CLI/REPL. The
+The current hard-budget snapshot is runtime `18,927 / 20,000` lines and release
+Rust source `28,093 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.
@@ -378,7 +378,9 @@ The Goal Runtime is now aligned to the Codex Thread model: the canonical
 settled-checkpoint verifier/continuation, settings notifications, resume/clear
 race guards, and retirement of manual Goal controls are implemented. Follow the
 [Goal Runtime implementation appendix](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
-for the state machine and boundary evidence.
+for the state machine and boundary evidence. Pending verifier results are
+checked against their original settled checkpoint, and preparation failures
+become durable failed Goal states instead of leaving a Goal stuck.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
 scenarios pass, with current App Server boundary evidence and CLI interactive
