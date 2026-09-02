@@ -25,8 +25,9 @@ Goal verification can send the complete latest settled checkpoint to the
 effective verifier endpoint, which may differ from `OPENAI_BASE_URL`. This can
 include all of the durable content described above. The verifier runs with one
 model step and no tools, and stores only a bounded verdict in the Goal
-workspace. The verdict is not sent to later primary turns unless a user
-explicitly copies it into the conversation.
+workspace. The verdict is not appended to later primary-turn history; an
+automatic retry may explicitly read the bounded artifact through the Goal
+turn prompt.
 
 Result handles are appended to the same `session.jsonl` log and are restored when
 the session is resumed. The input queue and in-flight turns remain process-local.

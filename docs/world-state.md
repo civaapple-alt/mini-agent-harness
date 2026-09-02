@@ -75,13 +75,11 @@ implemented.
 ## Goal verifier boundary
 
 A Goal verifier is a separately configured model profile, not a hidden second
-voice inside the primary turn. It reads the latest settled checkpoint and
-writes a bounded verdict linked to:
-
-- the source session, thread, and authoritative checkpoint sequence;
-- a deterministic fingerprint of the exact checkpoint messages;
-- the verifier provider and model;
-- bounded acceptance criteria and verification output.
+voice inside the primary turn. It reads the latest settled checkpoint. The
+Runtime Actor associates its result with the Goal, source Thread, verifier
+turn, and authoritative checkpoint sequence before applying it. The
+`goal/verifier_verdict.md` artifact stores only the source checkpoint sequence
+and bounded verifier output.
 
 The verifier uses a separate harness with an empty tool catalog, a zero
 tool-call limit, and one model step. It cannot edit the primary transcript,
@@ -90,8 +88,9 @@ against immutable evidence. This keeps verifier output reproducible and makes
 disagreement inspectable rather than allowing an auxiliary model to mutate
 live state invisibly.
 
-The verdict is intentionally ignored by normal resume, so repeated verifier
-runs do not contaminate the evidence seen by later primary turns. World state
-is already part of the checkpoint and therefore covered by its fingerprint.
-The FNV-1a fingerprint is non-cryptographic change detection; the checkpoint
-sequence remains the authoritative immutable reference.
+The verdict is not appended to the primary conversation history. A retry Goal
+turn may explicitly read the bounded `goal/verifier_verdict.md` artifact to
+address rejected findings, while an ordinary session resume does not inject
+the verdict automatically. World state is already part of the settled
+checkpoint; the checkpoint sequence remains the authoritative source
+reference.

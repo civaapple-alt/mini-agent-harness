@@ -130,7 +130,6 @@ lock is never ignored automatically.
 
 Goal verifier analysis restores only the newest settled checkpoint under the same
 session lock. It uses the normal 1 MiB context and 64 KiB response ceilings,
-rejects any proposed tool call, and appends its result under the existing
-512 KiB record and 32 MiB session limits. Its deterministic FNV-1a source
-fingerprint is a change-detection aid, not a cryptographic integrity proof; the
-monotonic checkpoint sequence is the authoritative source reference.
+rejects any proposed tool call, and stores a bounded 32 KiB result in the Goal
+workspace without appending verifier output to the primary session history.
+The monotonic checkpoint sequence is the authoritative source reference.
