@@ -434,11 +434,12 @@ fn plan_mode_allows_read_only_shell_inspection() {
     assert!(output.contains("note.txt") || output.contains(root.to_string_lossy().as_ref()));
 
     let chained = if cfg!(windows) {
-        "Write-Output '---workspace---'; Get-ChildItem -Force | Select-Object Name"
+        "Write-Host '---workspace---'; Get-ChildItem -Force | Select-Object Name"
     } else {
         "pwd; ls"
     };
     assert!(shell.execute(&json!({"command": chained})).is_ok());
+    assert!(shell.execute(&json!({"command": "git ls-files"})).is_ok());
 
     remove_test_root(&session);
     remove_test_root(&root);

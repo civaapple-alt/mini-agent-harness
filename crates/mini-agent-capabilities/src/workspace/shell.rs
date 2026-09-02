@@ -122,7 +122,7 @@ fn is_read_only_shell_segment(segment: &str) -> bool {
         }
         return matches!(
             tokens.next().map(str::to_ascii_lowercase).as_deref(),
-            Some("status" | "log" | "diff" | "show" | "branch" | "rev-parse")
+            Some("status" | "log" | "diff" | "show" | "branch" | "rev-parse" | "ls-files",)
         );
     }
     if cfg!(windows) {
@@ -150,6 +150,7 @@ fn is_read_only_shell_segment(segment: &str) -> bool {
                 | "test-path"
                 | "tree"
                 | "write-output"
+                | "write-host"
         )
     } else {
         matches!(
