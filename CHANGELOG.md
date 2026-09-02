@@ -5,6 +5,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.7.0] - 2026-09-02
+
 ### Changed
 
 - **Architecture proposal:** add a complete Codex-aligned design for Skill,

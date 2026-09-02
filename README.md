@@ -499,7 +499,7 @@ The line-budget report breaks Rust source down by the runtime layers: `core`,
   tests, while Rust files below a `tests/` directory are counted as
   integration tests. The enforced ceilings are 20,000 lines for the runtime
   layers (`core` + `protocol` + `host` + `app-server`). The 30,000-line
-  release-source total is enforced for the 0.6.0 release, including tests in
+  release-source total is enforced for the 0.7.0 release, including tests in
   supported packages. Both ceilings block the release gate; experimental
   CLI/REPL lines remain visible but do not block the release.
 
