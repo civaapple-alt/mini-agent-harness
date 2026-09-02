@@ -11,6 +11,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   commands, including PowerShell listing pipelines, read-only command sequences,
   and `git ls-files`, while keeping mutations, redirections, script blocks, and
   command substitution locked before approval.
+- **Plan Mode Shell guardrails:** add common read-only PowerShell inspection
+  cmdlets, reject side-effect flags such as `git branch -D`, `fd --exec`, and
+  `rg --pre`, and report unsupported Shell syntax explicitly.
   Read-only Shell calls still retain the normal approval correlation path.
 
 ## [0.7.0] - 2026-09-02

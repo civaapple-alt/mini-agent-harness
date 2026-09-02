@@ -51,6 +51,10 @@ impl Shell {
     fn ensure_allowed(&self, command: &str) -> Result<(), ToolError> {
         if is_read_only_shell_command(command) {
             Ok(())
+        } else if self.0.approval.living_plan().is_some() {
+            Err(ToolError(
+                "workspace mutations locked in Plan Mode; Shell command is not in the bounded read-only inspection subset".to_string(),
+            ))
         } else {
             self.0.approval.ensure_plan_mode_unlocked()
         }
@@ -120,10 +124,28 @@ fn is_read_only_shell_segment(segment: &str) -> bool {
         }) {
             return false;
         }
+        let subcommand = tokens.next().map(str::to_ascii_lowercase);
+        if subcommand.as_deref() == Some("branch") {
+            return tokens.all(|token| token.eq_ignore_ascii_case("--show-current"));
+        }
         return matches!(
-            tokens.next().map(str::to_ascii_lowercase).as_deref(),
-            Some("status" | "log" | "diff" | "show" | "branch" | "rev-parse" | "ls-files",)
+            subcommand.as_deref(),
+            Some("status" | "log" | "diff" | "show" | "rev-parse" | "ls-files",)
         );
+    }
+    if (program == "fd"
+        && tokens.clone().any(|token| {
+            matches!(
+                token.to_ascii_lowercase().as_str(),
+                "--exec" | "--exec-batch" | "-x"
+            )
+        }))
+        || (program == "rg"
+            && tokens
+                .clone()
+                .any(|token| token.eq_ignore_ascii_case("--pre")))
+    {
+        return false;
     }
     if cfg!(windows) {
         matches!(
@@ -133,12 +155,15 @@ fn is_read_only_shell_segment(segment: &str) -> bool {
                 | "echo"
                 | "fd"
                 | "format-table"
+                | "format-list"
                 | "gci"
                 | "gc"
+                | "get-command"
                 | "get-childitem"
                 | "get-content"
                 | "get-item"
                 | "get-location"
+                | "get-member"
                 | "gi"
                 | "measure-object"
                 | "pwd"
@@ -146,6 +171,8 @@ fn is_read_only_shell_segment(segment: &str) -> bool {
                 | "rg"
                 | "select-object"
                 | "select"
+                | "select-string"
+                | "sort-object"
                 | "stat"
                 | "test-path"
                 | "tree"
@@ -177,7 +204,7 @@ pub(super) fn shell_description(approval: ApprovalMode) -> String {
     };
     if cfg!(windows) {
         format!(
-            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Plan Mode permits only bounded read-only inspection commands; workspace mutations remain locked. Use PowerShell syntax and cmdlets; do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`."
+            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Plan Mode permits only bounded read-only inspection commands; workspace mutations remain locked. Use simple cmdlet pipelines such as Get-ChildItem, Get-Content, Select-Object, Sort-Object, and Format-Table; do not use script blocks, variables, subexpressions, redirection, or process/build commands. Do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`."
         )
     } else {
         format!(

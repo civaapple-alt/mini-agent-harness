@@ -23,7 +23,7 @@ use mini_agent_protocol::ToolSpec;
 use serde_json::Value;
 use serde_json::json;
 #[cfg(test)]
-use shell::{Shell, capture_bounded, run_shell};
+use shell::{Shell, capture_bounded, is_read_only_shell_command, run_shell};
 #[cfg(test)]
 #[path = "workspace_tests.rs"]
 mod tests;

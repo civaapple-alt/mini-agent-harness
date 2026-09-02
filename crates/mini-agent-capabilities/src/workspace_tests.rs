@@ -446,6 +446,17 @@ fn plan_mode_allows_read_only_shell_inspection() {
 }
 
 #[test]
+fn read_only_shell_subset_rejects_side_effect_flags() {
+    assert!(is_read_only_shell_command("git branch --show-current"));
+    assert!(!is_read_only_shell_command("git branch -D stale"));
+    assert!(!is_read_only_shell_command("fd --exec echo value"));
+    assert!(!is_read_only_shell_command("rg --pre formatter --files"));
+    assert!(!is_read_only_shell_command(
+        "Get-ChildItem | Where-Object { $_.Name }"
+    ));
+}
+
+#[test]
 fn read_only_agent_rule_locks_workspace_mutations() {
     let root = test_root();
     let approval = ApprovalController::new(ApprovalMode::Automatic);

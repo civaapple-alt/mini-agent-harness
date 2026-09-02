@@ -112,6 +112,10 @@ now covers the approval-gated model tool calls; read-only tools retain the legac
 In Plan Mode, Shell admits only a conservative bounded set of read-only inspection
 commands (including the normal PowerShell listing pipeline); those calls still use
 the approval path, while mutation syntax is rejected before approval and execution.
+On Windows, keep these commands to simple cmdlet pipelines such as
+`Get-ChildItem | Select-Object Name`; script blocks (`Where-Object { ... }`), variables,
+subexpressions, redirection, process/build commands, and side-effect flags such as
+`git branch -D`, `fd --exec`, and `rg --pre` remain blocked.
 
 Runtime state has one authority: the App Server Runtime Actor orders Thread,
 World, Workflow, MCP, Session, and revision changes. Host implements the
