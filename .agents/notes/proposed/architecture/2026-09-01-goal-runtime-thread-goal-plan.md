@@ -280,6 +280,34 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
    cooperative timeout 和 provider usage/token budget；普通 turn 与已有
    verifier/checkpoint tests 继续通过。
 
+### Batch 7：补齐 verifier fault-injection 与 Goal 通知证据 — 已完成
+
+- `goal_runtime_tests.rs` 直接注入 bounded verifier result，覆盖 rejected
+  不推进 milestone、verifier execution error 持久化为 failed，以及清理
+  pending association 后迟到结果被丢弃；不增加生产 provider 或第二个
+  verifier loop。
+- App Server public JSON-RPC Goal 场景现在记录并断言同一 `turnId` 下的
+  `active -> blocked` Goal notification 顺序。Core `turn/event` 与 Goal
+  notification 之间仍没有共享的 wire sequence，因此跨流全序不在本批
+  声称已证明。
+
+六项准入记录：
+
+1. Layer：测试只位于 App Server GoalRuntime 与 JSON-RPC 公共边界；生产
+   Core、Host、protocol 和 verifier provider wiring 不变。
+2. Duplicate responsibility：复用现有 `complete_verification`、Goal event
+   bus 和 `next_notification`，没有新增 verifier、通知或状态 owner。
+3. Replace vs add：把此前“有实现但缺少 rejected/error evidence”的空档补成
+   可回归证据；不恢复手工 Goal API，也不新增 restart 专用路径。
+4. Net line delta：仅增加小批测试和文档；以本提交后的 line-budget 报告为
+   准，runtime 仍需保持在 20,000 行硬门禁内。
+5. Visible surface：只验证既有 bounded Goal status、`turnId` 和 last error；
+   不新增模型上下文、持久化字段或公共协议字段。
+6. Boundary evidence：覆盖 rejected、verifier error、late result、公开
+   preparation failure、timeout/limit，以及 Goal notification 的同流顺序；
+   provider-backed verifier、跨流全序和 restart/resume 的专门 public case
+   继续作为后续证据项。
+
 ## 6. 每个实现批次的六项准入模板
 
 ```text
@@ -336,9 +364,10 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 
 ## 8. 下一步
 
-Batch 1–6 的 Goal contract、serialized owner、settled-checkpoint verifier、
+Batch 1–7 的 Goal contract、serialized owner、settled-checkpoint verifier、
 自动 continuation、settings notification、resume/clear stale-result guard、
-旧手工 API 退役和 step/timeout/token budget 执行均已完成，并通过 Host、App
-Server Protocol、App Server 定向测试。后续只维护真实 provider 场景、跨平台
-证据和 Codex ThreadItem/Artifact 扩展，不再恢复第二个 Goal loop 或手工
-advance API。
+旧手工 API 退役、step/timeout/token budget 执行，以及 rejected/error
+fault-injection evidence 均已完成，并通过 Host、App Server Protocol、App
+Server 定向测试。后续只补有明确边界的 restart/resume public case、真实
+provider/跨平台证据和 Codex ThreadItem/Artifact 扩展，不再恢复第二个 Goal
+loop 或手工 advance API。

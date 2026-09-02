@@ -545,8 +545,26 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     assert_eq!(result["value"]["goal"]["status"], "active");
     assert_eq!(result["value"]["goal"]["tokenBudget"], 1200);
     assert!(result["value"]["goal"].get("path").is_none());
-    let notification = wait_for_blocked_goal(&mut connection).await;
+    let mut active_turn_seen = false;
+    let notification = loop {
+        let notification =
+            tokio::time::timeout(Duration::from_secs(3), connection.next_notification())
+                .await
+                .expect("Goal preparation failure should settle within the test deadline")
+                .unwrap();
+        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
+            let params = notification.params.unwrap();
+            if params["goal"]["status"] == "active" && params["turnId"] == "turn-1" {
+                active_turn_seen = true;
+            }
+            if params["goal"]["status"] == "blocked" {
+                break params;
+            }
+        }
+    };
+    assert!(active_turn_seen);
     assert_eq!(notification["goal"]["objective"], "ship the next iteration");
+    assert_eq!(notification["turnId"], "turn-1");
 
     let response = connection
         .handle_request(JsonRpcRequest::request(

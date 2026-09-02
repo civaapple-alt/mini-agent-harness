@@ -96,6 +96,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Added
 
+- **Goal verifier validation evidence:** add bounded fault-injection coverage
+  for rejected verdicts, verifier execution errors, and late-result disposal;
+  the public JSON-RPC Goal path now asserts the `active(turnId)` to
+  `blocked(turnId)` notification sequence. Provider-backed verifier calls and
+  a dedicated restart/resume public scenario remain explicitly deferred.
 - **Settled Goal continuation:** persist the active Goal turn and its settled
   checkpoint before invoking the tool-free verifier. Approved, rejected, and
   verifier-error outcomes advance, retry, or fail through the serialized

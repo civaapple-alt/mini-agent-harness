@@ -106,6 +106,87 @@ fn applies_approved_verdict_after_settled_checkpoint() {
 }
 
 #[test]
+fn handles_rejected_and_failed_verifier_results() {
+    let session_dir = temporary_session_dir();
+    let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());
+    let state = store.set_goal("retain rejected milestone", None).unwrap();
+    store
+        .mark_goal_turn_started(&state.goal_id, "turn-1")
+        .unwrap();
+    store
+        .mark_goal_turn_settled(&state.goal_id, "turn-1")
+        .unwrap();
+    let (events, _) = broadcast::channel(4);
+    let mut runtime = GoalRuntime::new(store.clone(), events, None);
+    runtime.pending_verification = Some(PendingVerification {
+        goal_id: state.goal_id.clone(),
+        turn_id: TurnId::new("turn-1"),
+        checkpoint_seq: 1,
+    });
+
+    let rejected = runtime
+        .complete_verification(
+            &state.goal_id,
+            &TurnId::new("turn-1"),
+            1,
+            1,
+            Ok((
+                "verdict: rejected\nsummary: more evidence needed".to_string(),
+                VerifierVerdict {
+                    outcome: VerdictOutcome::Rejected,
+                    score: Some(40),
+                    summary: "more evidence needed".to_string(),
+                },
+            )),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(rejected.status, mini_agent_host::GoalStatus::Running);
+    assert_eq!(rejected.current_milestone, state.current_milestone);
+    assert_eq!(rejected.last_verifier_score, Some(40));
+
+    store
+        .mark_goal_turn_started(&state.goal_id, "turn-2")
+        .unwrap();
+    store
+        .mark_goal_turn_settled(&state.goal_id, "turn-2")
+        .unwrap();
+    runtime.pending_verification = Some(PendingVerification {
+        goal_id: state.goal_id.clone(),
+        turn_id: TurnId::new("turn-2"),
+        checkpoint_seq: 2,
+    });
+    let failed = runtime
+        .complete_verification(
+            &state.goal_id,
+            &TurnId::new("turn-2"),
+            2,
+            2,
+            Err("verifier provider timed out".to_string()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed.status, mini_agent_host::GoalStatus::Failed);
+    assert_eq!(
+        failed.last_error.as_deref(),
+        Some("verifier provider timed out")
+    );
+    assert!(
+        runtime
+            .complete_verification(
+                &state.goal_id,
+                &TurnId::new("turn-2"),
+                2,
+                2,
+                Err("late verifier result".to_string()),
+            )
+            .unwrap()
+            .is_none()
+    );
+    std::fs::remove_dir_all(session_dir).unwrap();
+}
+
+#[test]
 fn ignores_verifier_result_for_changed_checkpoint() {
     let session_dir = temporary_session_dir();
     let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());

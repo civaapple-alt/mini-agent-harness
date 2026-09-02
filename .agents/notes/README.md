@@ -9,8 +9,8 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `19,355 / 20,000` lines (96.8%; 645 remaining)
-- release Rust source (excluding experimental CLI/REPL): `28,521 / 30,000` lines (95.1%; 1,479 remaining)
+- runtime (`core + protocol + host + app-server`): `19,454 / 20,000` lines (97.3%; 546 remaining)
+- release Rust source (excluding experimental CLI/REPL): `28,620 / 30,000` lines (95.4%; 1,380 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -122,7 +122,11 @@ enforcement is now wired to Core/App Server turn execution: Goal step and
 timeout exhaustion project as `usageLimited`, provider-reported usage is
 durable, and token-budget exhaustion projects as `budgetLimited`. Timeout is
 cooperative and does not kill a synchronous tool effect. Cross-stream
-notification ordering and provider-backed verifier evidence remain open.
+notification ordering remains open. GoalRuntime now has direct fault-injection
+evidence for rejected verdicts, verifier execution errors, and late-result
+disposal; the public App Server path asserts the bounded active-to-blocked
+Goal notification sequence. A provider-backed verifier and dedicated
+restart/resume public scenario remain optional follow-up evidence.
 
 ### Next iteration order (evidence-triggered)
 
@@ -136,9 +140,10 @@ notification ordering and provider-backed verifier evidence remain open.
    provider/approval path; no Plugin-specific executor.
 5. Extend ThreadItem lifecycle/listing and persisted identity before introducing
    bounded sidecar Artifact references.
-6. Add a real or fault-injected Goal verifier scenario covering approved,
-   rejected, timeout, restart/resume, and clear races; paid provider calls are
-   not a default gate.
+6. Keep the new fault-injected rejected/error/late-result evidence and add the
+   remaining restart/resume public scenario when its bounded seam is ready;
+   provider-backed verifier calls remain optional and paid calls are not a
+   default gate.
 7. Review the Docker isolation policy and cross-platform evidence before
    changing sandbox defaults. Defer provider comparison and retry/backoff until
    a second provider or an explicit bounded policy exists.
