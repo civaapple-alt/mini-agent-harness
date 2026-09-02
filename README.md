@@ -109,6 +109,9 @@ and `callId` from `turn/start` through `approval/request`, `approval/respond`,
 `approval/resolved`, and `turn/event`. Approval remains synchronous internally;
 the App Server worker isolates that wait from the connection runtime. Typed admission
 now covers the approval-gated model tool calls; read-only tools retain the legacy path.
+In Plan Mode, Shell admits only a conservative bounded set of read-only inspection
+commands (including the normal PowerShell listing pipeline); those calls still use
+the approval path, while mutation syntax is rejected before approval and execution.
 
 Runtime state has one authority: the App Server Runtime Actor orders Thread,
 World, Workflow, MCP, Session, and revision changes. Host implements the

@@ -18,7 +18,7 @@ impl ToolHandler for Shell {
 
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let command = self.validated_command(&request.arguments)?;
-        self.0.approval.ensure_plan_mode_unlocked()?;
+        self.ensure_allowed(command)?;
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("shell command `{command}`"),
         })
@@ -28,7 +28,7 @@ impl ToolHandler for Shell {
 impl ToolRuntime for Shell {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let command = self.validated_command(arguments)?;
-        self.0.approval.ensure_plan_mode_unlocked()?;
+        self.ensure_allowed(command)?;
         self.0.approve(&format!("shell command `{command}`"))?;
         self.run_command(command)
     }
@@ -36,7 +36,10 @@ impl ToolRuntime for Shell {
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
         let result = self
             .validated_command(&request.arguments)
-            .and_then(|command| self.run_command(command));
+            .and_then(|command| {
+                self.ensure_allowed(command)
+                    .and_then(|_| self.run_command(command))
+            });
         match result {
             Ok(content) => ToolExecutionOutcome::completed(content),
             Err(error) => ToolExecutionOutcome::failed(error.to_string()),
@@ -45,6 +48,14 @@ impl ToolRuntime for Shell {
 }
 
 impl Shell {
+    fn ensure_allowed(&self, command: &str) -> Result<(), ToolError> {
+        if is_read_only_shell_command(command) {
+            Ok(())
+        } else {
+            self.0.approval.ensure_plan_mode_unlocked()
+        }
+    }
+
     fn validated_command<'a>(&self, arguments: &'a Value) -> Result<&'a str, ToolError> {
         let command = string_arg(arguments, "command")?;
         if command.is_empty() || command.len() > MAX_COMMAND_BYTES {
@@ -74,6 +85,86 @@ impl Shell {
     }
 }
 
+pub(super) fn is_read_only_shell_command(command: &str) -> bool {
+    if command.chars().any(|character| {
+        matches!(
+            character,
+            '\n' | '\r' | ';' | '&' | '>' | '<' | '`' | '(' | ')' | '{' | '}'
+        )
+    }) || command.contains("$(")
+    {
+        return false;
+    }
+    command.split('|').all(is_read_only_shell_segment)
+}
+
+fn is_read_only_shell_segment(segment: &str) -> bool {
+    let mut tokens = segment.split_whitespace();
+    let Some(program) = tokens.next() else {
+        return false;
+    };
+    let program = program
+        .trim_matches(['\'', '"'])
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    if program == "git" {
+        if tokens.clone().any(|token| {
+            let token = token.to_ascii_lowercase();
+            token.starts_with("--output") || token == "--ext-diff" || token == "--textconv"
+        }) {
+            return false;
+        }
+        return matches!(
+            tokens.next().map(str::to_ascii_lowercase).as_deref(),
+            Some("status" | "log" | "diff" | "show" | "branch" | "rev-parse")
+        );
+    }
+    if cfg!(windows) {
+        matches!(
+            program.as_str(),
+            "cat"
+                | "dir"
+                | "echo"
+                | "fd"
+                | "format-table"
+                | "gci"
+                | "gc"
+                | "get-childitem"
+                | "get-content"
+                | "get-item"
+                | "get-location"
+                | "gi"
+                | "measure-object"
+                | "pwd"
+                | "resolve-path"
+                | "rg"
+                | "select-object"
+                | "select"
+                | "stat"
+                | "test-path"
+                | "tree"
+                | "write-output"
+        )
+    } else {
+        matches!(
+            program.as_str(),
+            "cat"
+                | "echo"
+                | "fd"
+                | "file"
+                | "head"
+                | "ls"
+                | "pwd"
+                | "rg"
+                | "stat"
+                | "tail"
+                | "tree"
+        )
+    }
+}
+
 pub(super) fn shell_description(approval: ApprovalMode) -> String {
     let approval = match approval {
         ApprovalMode::Interactive => "after user approval",
@@ -81,10 +172,12 @@ pub(super) fn shell_description(approval: ApprovalMode) -> String {
     };
     if cfg!(windows) {
         format!(
-            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Use PowerShell syntax and cmdlets; do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`."
+            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Plan Mode permits only bounded read-only inspection commands; workspace mutations remain locked. Use PowerShell syntax and cmdlets; do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`."
         )
     } else {
-        format!("Run one POSIX sh command in the workspace {approval}, with a 120-second deadline.")
+        format!(
+            "Run one POSIX sh command in the workspace {approval}, with a 120-second deadline. Plan Mode permits only bounded read-only inspection commands; workspace mutations remain locked."
+        )
     }
 }
 

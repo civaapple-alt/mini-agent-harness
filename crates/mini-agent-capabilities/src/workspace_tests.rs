@@ -383,14 +383,55 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
     assert!(fs::read_to_string(&plan).unwrap().contains("- add restore"));
 
     let shell = Shell(Arc::clone(&workspace), ResultStore::default());
-    let locked_shell = shell
-        .execute(&json!({"command": "printf should-not-run"}))
-        .unwrap_err();
+    let marker = root.join("should-not-run.txt");
+    let marker_text = marker.to_string_lossy();
+    let command = if cfg!(windows) {
+        format!("Set-Content -LiteralPath '{marker_text}' -Value blocked")
+    } else {
+        format!("printf blocked > '{marker_text}'")
+    };
+    let locked_shell = shell.execute(&json!({"command": command})).unwrap_err();
     assert!(
         locked_shell
             .0
             .contains("workspace mutations locked in Plan Mode")
     );
+    assert!(!marker.exists());
+
+    remove_test_root(&session);
+    remove_test_root(&root);
+}
+
+#[test]
+fn plan_mode_allows_read_only_shell_inspection() {
+    let root = test_root();
+    fs::write(root.join("note.txt"), "workspace note").unwrap();
+    let session = test_root();
+    let plan = session.join("plan.md");
+    fs::write(&plan, "# Plan\n").unwrap();
+    let approval = ApprovalController::new(ApprovalMode::Automatic);
+    approval.set_living_plan(Some(plan));
+    let workspace = Arc::new(
+        Workspace::with_read_roots(root.clone(), approval, Vec::new(), SandboxKind::Native)
+            .unwrap(),
+    );
+    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+    let command = if cfg!(windows) {
+        "Get-ChildItem -Force | Select-Object Name | Format-Table -AutoSize"
+    } else {
+        "pwd"
+    };
+    let request =
+        ToolExecutionRequest::new("call-shell-read-only", "shell", json!({"command": command}));
+
+    assert_eq!(
+        shell.admission(&request).unwrap(),
+        ToolAdmission::ApprovalRequired {
+            action: format!("shell command `{command}`"),
+        }
+    );
+    let output = shell.execute(&request.arguments).unwrap();
+    assert!(output.contains("note.txt") || output.contains(root.to_string_lossy().as_ref()));
 
     remove_test_root(&session);
     remove_test_root(&root);
