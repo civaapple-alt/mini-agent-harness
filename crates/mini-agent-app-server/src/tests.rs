@@ -429,6 +429,7 @@ async fn projects_mcp_timeout_through_public_app_server() {
             is_error: true,
             outcome: Some(ToolExecutionStatus::Failed),
             truncated: false,
+            ..
         } if call_id == "mcp-timeout-call"
             && name == "mcp__fixture__slow"
             && content == "MCP tool call timed out"

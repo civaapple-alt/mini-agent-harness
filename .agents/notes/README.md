@@ -9,8 +9,8 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `19,535 / 20,000` lines (97.7%; 465 remaining)
-- release Rust source (excluding experimental CLI/REPL): `28,701 / 30,000` lines (95.7%; 1,299 remaining)
+- runtime (`core + protocol + host + app-server`): `19,799 / 20,000` lines (99.0%; 201 remaining)
+- release Rust source (excluding experimental CLI/REPL): `28,965 / 30,000` lines (96.6%; 1,035 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -37,7 +37,9 @@ The line-budget release work has completed its low-risk Stage 1 audit and the ta
   `283` release-source lines, and the Goal step/timeout/token-budget execution
   batch adds `428` runtime / `428` all-Rust lines, the verifier validation batch
   adds `99` runtime / `99` all-Rust lines, and the restart/resume public evidence
-  batch adds `81` runtime / `81` all-Rust lines. The current release-source total excludes the
+  batch adds `81` runtime / `81` all-Rust lines. The ordered notification,
+  bounded ToolCall projection, and verifier-history batch adds `264` runtime /
+  `264` all-Rust lines. The current release-source total excludes the
   experimental CLI/REPL and is now below the approximate `26,900` reference.
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, duplicate Python test fixture probing, dead Plan slash-command parsing and prompt facades, dead local WorldState summary accessors, and the REPL `/status`/`/info` management projection. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
@@ -102,12 +104,15 @@ inputs, while individual server labels remain selectable. This does not start a
 server, load tools, grant approval, or add a Plugin-specific execution path;
 those remain Host/MCP work for a later bounded batch.
 
-The first bounded ThreadItem projection is implemented in App Server Protocol.
+The bounded ThreadItem projection is implemented in App Server Protocol.
 `turn/event` and `turn/read` expose `UserMessage`, `AgentMessage`, `Reasoning`,
 generic `ToolCall`, and `ContextCompaction` items derived from existing Core
-events/messages. Tool items reuse `callId` and text is bounded to 16 KiB. This
-is a projection only: no second Session log, Item listing method, Artifact API,
-or specialized source classification is introduced.
+events/messages. Tool items reuse `callId`, preserve the original arguments
+through completion, redact sensitive keys, and apply recursive byte/depth/count
+bounds; text and output remain bounded to 16 KiB. This is still a projection
+only: no second Session log, Item listing method, Artifact API, or specialized
+source classification is introduced. Core, Goal, and settings notifications
+now share one ordered runtime bus at the App Server boundary.
 
 The first bounded scenario baseline is now implemented and recorded in the [harness iteration note](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md): 8 representative historical CLI scenarios pass, with current App Server boundary evidence and CLI interactive 12/12 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy and model/provider comparison remain explicitly open gaps. CLI `ask --trace-jsonl PATH` now has public-path evidence for redaction, per-record/total bounds, and overwrite refusal; implicit baseline export remains off. Docker CLI/server 29.6.1 and the `alpine` image are available on this host; Docker preflight now queries the daemon with `docker info`, and ordinary plus candidate-strict probes verify the `/workspace` mount and container-only temporary files, while the strict probe also observes network, capability, read-only-root, and bounded-cgroup behavior. These are current-host evidence only, not a complete cross-platform security claim. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists. The REPL now omits duplicate World/MCP/extension management; these remain available through App Server clients.
 
@@ -123,13 +128,16 @@ freshness and preparation failure handling are now explicit and tested. Budget
 enforcement is now wired to Core/App Server turn execution: Goal step and
 timeout exhaustion project as `usageLimited`, provider-reported usage is
 durable, and token-budget exhaustion projects as `budgetLimited`. Timeout is
-cooperative and does not kill a synchronous tool effect. Cross-stream
-notification ordering remains open. GoalRuntime now has direct fault-injection
-evidence for rejected verdicts, verifier execution errors, and late-result
-disposal; the public App Server path asserts the bounded active-to-blocked
-Goal notification sequence. A fresh App Server rebind public scenario verifies
-that a settled Goal resumes through verifier preparation without replaying its
-main turn. A provider-backed verifier remains optional follow-up evidence.
+cooperative and does not kill a synchronous tool effect. Core, Goal, and
+  settings notifications now share one ordered runtime bus; a public
+  settings-before-Goal scenario covers the cross-stream boundary. GoalRuntime
+  now has direct fault-injection evidence for rejected verdicts, verifier
+  execution errors, and late-result disposal; the public App Server path asserts
+  the bounded active-to-blocked Goal notification sequence. A fresh App Server
+  rebind public scenario verifies that a settled Goal resumes through verifier
+  preparation without replaying its main turn. Verifier input is cropped to the
+  newest 24 settled messages before Core's byte-level context guard. A
+  provider-backed verifier remains optional follow-up evidence.
 
 ### Next iteration order (evidence-triggered)
 

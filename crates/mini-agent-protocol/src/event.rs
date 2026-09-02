@@ -9,6 +9,7 @@ use crate::TurnInputMode;
 use crate::TurnStatus;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -50,6 +51,10 @@ pub enum Event {
     ToolFinished {
         call_id: String,
         name: String,
+        /// The original call arguments let public Item projections merge the
+        /// completed result into the started ToolCall without new state.
+        #[serde(skip, default)]
+        arguments: Value,
         content: String,
         is_error: bool,
         truncated: bool,

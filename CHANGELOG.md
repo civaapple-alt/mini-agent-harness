@@ -93,6 +93,17 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   usage in durable Goal state. Step and timeout exhaustion project as
   `usageLimited`; reaching `tokenBudget` projects as `budgetLimited` without
   interrupting synchronous tool effects.
+- **Ordered runtime notifications:** merge Core, Goal, and settings delivery
+  onto one App Server runtime notification stream so transport readiness cannot
+  reorder those public notifications across source-specific broadcasts.
+- **ThreadItem lifecycle safety:** preserve the original ToolCall arguments in
+  `ToolFinished`, project them with recursive bounds and sensitive-key
+  redaction, and let clients merge started/completed items by stable `callId`.
+  The existing `turn/event` and `turn/read` projection remains the only Item
+  source; no Item store or generic Artifact API is added.
+- **Verifier context bound:** restore only the newest 24 settled messages for a
+  Goal verifier. Core's existing byte-level context limits remain the final
+  guard, and verifier history is never written back to the main Thread.
 
 ### Added
 

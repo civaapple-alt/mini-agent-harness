@@ -6,6 +6,7 @@ use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::action::ActionSequencer;
 use crate::management::RuntimeActorState;
+use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeRequest;
 use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_core::SteeringMode;
@@ -89,6 +90,7 @@ pub(super) enum Command {
 
 struct BroadcastSink {
     events: broadcast::Sender<EventEnvelope>,
+    notifications: broadcast::Sender<RuntimeNotification>,
     pending_finish: Option<EventEnvelope>,
     tokens_used: u64,
 }
@@ -96,6 +98,11 @@ struct BroadcastSink {
 impl BroadcastSink {
     fn take_pending_finish(&mut self) -> Option<EventEnvelope> {
         self.pending_finish.take()
+    }
+
+    fn send_event(&self, event: EventEnvelope) {
+        let _ = self.events.send(event.clone());
+        let _ = self.notifications.send(RuntimeNotification::Event(event));
     }
 
     fn record_usage(&mut self, usage: Option<ModelUsage>) {
@@ -125,15 +132,17 @@ impl EventSink for BroadcastSink {
         if matches!(event.event, Event::TurnFinished { .. }) {
             self.pending_finish = Some(event);
         } else {
-            let _ = self.events.send(event);
+            self.send_event(event);
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn worker_loop<M>(
     threads: Vec<Thread<M>>,
     mut commands: mpsc::Receiver<Command>,
     events: broadcast::Sender<EventEnvelope>,
+    notifications: broadcast::Sender<RuntimeNotification>,
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
     runtime_revision: Arc<AtomicU64>,
     factory: Option<Arc<dyn ThreadFactory<M>>>,
@@ -301,6 +310,7 @@ pub(super) async fn worker_loop<M>(
                     let input = TurnInput::new(TurnInputMode::Start, input.text);
                     let mut sink = BroadcastSink {
                         events: events.clone(),
+                        notifications: notifications.clone(),
                         pending_finish: None,
                         tokens_used: 0,
                     };
@@ -458,7 +468,7 @@ pub(super) async fn worker_loop<M>(
                             goal.status == mini_agent_host::GoalStatus::BudgetLimited;
                     }
                     if let Some(event) = sink.take_pending_finish() {
-                        let _ = events.send(event);
+                        sink.send_event(event);
                     }
                     if let Some(goal_id) = goal_id {
                         if goal_turn_completed && !goal_budget_exhausted && !timeout_requested {

@@ -31,7 +31,7 @@ fn ignores_verifier_result_after_goal_clear() {
         .mark_goal_turn_settled(&state.goal_id, "turn-1")
         .unwrap();
     let (events, _) = broadcast::channel(4);
-    let mut runtime = GoalRuntime::new(store.clone(), events, None);
+    let mut runtime = GoalRuntime::with_notifications(store.clone(), events, None, None);
     runtime.pending_verification = Some(PendingVerification {
         goal_id: state.goal_id.clone(),
         turn_id: TurnId::new("turn-1"),
@@ -73,7 +73,7 @@ fn applies_approved_verdict_after_settled_checkpoint() {
         .mark_goal_turn_settled(&state.goal_id, "turn-1")
         .unwrap();
     let (events, _) = broadcast::channel(4);
-    let mut runtime = GoalRuntime::new(store, events, None);
+    let mut runtime = GoalRuntime::with_notifications(store, events, None, None);
     runtime.pending_verification = Some(PendingVerification {
         goal_id: state.goal_id.clone(),
         turn_id: TurnId::new("turn-1"),
@@ -117,7 +117,7 @@ fn handles_rejected_and_failed_verifier_results() {
         .mark_goal_turn_settled(&state.goal_id, "turn-1")
         .unwrap();
     let (events, _) = broadcast::channel(4);
-    let mut runtime = GoalRuntime::new(store.clone(), events, None);
+    let mut runtime = GoalRuntime::with_notifications(store.clone(), events, None, None);
     runtime.pending_verification = Some(PendingVerification {
         goal_id: state.goal_id.clone(),
         turn_id: TurnId::new("turn-1"),
@@ -198,7 +198,7 @@ fn ignores_verifier_result_for_changed_checkpoint() {
         .mark_goal_turn_settled(&state.goal_id, "turn-1")
         .unwrap();
     let (events, _) = broadcast::channel(4);
-    let mut runtime = GoalRuntime::new(store, events, None);
+    let mut runtime = GoalRuntime::with_notifications(store, events, None, None);
     runtime.pending_verification = Some(PendingVerification {
         goal_id: state.goal_id.clone(),
         turn_id: TurnId::new("turn-1"),
@@ -243,7 +243,7 @@ fn missing_verifier_configuration_is_a_preparation_error() {
         .mark_goal_turn_settled(&state.goal_id, "turn-1")
         .unwrap();
     let (events, _) = broadcast::channel(4);
-    let mut runtime = GoalRuntime::new(store, events, None);
+    let mut runtime = GoalRuntime::with_notifications(store, events, None, None);
 
     assert!(
         runtime

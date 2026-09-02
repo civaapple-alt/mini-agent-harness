@@ -583,6 +583,8 @@ and after; no estimate authorizes a budget breach.
   backed by current Core events: `UserMessage`, `AgentMessage`, `Reasoning`,
   `ToolCall`, and `ContextCompaction`.
 - Use `callId` as the initial tool Item id and bound projected text to 16 KiB.
+- Tool arguments are recursively bounded and sensitive keys are redacted; the
+  completed ToolCall preserves the same projection as its started item.
 - Current generic ToolCall projection covers all existing tools; specialized
   Shell/Edit/MCP/Dynamic variants remain deferred until their source metadata
   is available without guessing.
@@ -594,8 +596,12 @@ and after; no estimate authorizes a budget breach.
 
 - **Landed (bounded first slice):** expose bounded `items` on `turn/event` and
   `turn/read`, preserving the existing Core event alongside the projection.
-- Next add v2 `Turn.items` lifecycle notifications only after persisted Item
-  identity and resume semantics are stable.
+- The bounded lifecycle is represented by the existing event stream: the same
+  `callId` appears in started and completed ToolCall items, with completion
+  status/output and the original bounded argument projection. No second event
+  stream is introduced.
+- Dedicated v2 Item lifecycle notifications and persisted Item listing remain
+  deferred until a separate public identity/resume decision is justified.
 - Add cursor-based `thread/items/list` only when persisted projection and resume
   semantics are stable.
 - Update App Server README, generated schemas, Python SDK, TypeScript output,
@@ -731,9 +737,10 @@ settings notifications are implemented.
 
 The default Builtin catalog, its direct deletion, the first Host-owned Tool
 Catalog slice, Thread-level Builtin selection, bounded Skill dependency
-metadata/activation, bounded Plugin-to-provider-input selection, and the first
-ThreadItem projection are now landed. App Server Turn activation, Host
-dependency allowlist resolution, Plugin MCP tool loading, full Item lifecycle
+metadata/activation, bounded Plugin-to-provider-input selection, the bounded
+ThreadItem lifecycle projection, and ordered App Server runtime notifications
+are now landed. App Server Turn activation, Host dependency allowlist
+resolution, Plugin MCP tool loading, dedicated Item lifecycle
 notifications/listing, and Artifact APIs remain deferred; Goal
 settled-checkpoint continuation, settings notifications, resume/clear race
 handling, and manual Goal control retirement are implemented.
@@ -839,9 +846,42 @@ Six-question admission:
    bounded text; App Server tests pass the public event/read paths and preserve
    the existing event trace.
 
-Decision: **accept the minimal projection; defer specialized Item variants,
-Item listing, and Artifact references until persisted identity evidence exists.
-Goal Runtime integration proceeds through the linked execution appendix.**
+Decision: **accept the bounded lifecycle projection; defer specialized Item
+variants, dedicated Item notifications/listing, and Artifact references until
+persisted identity evidence exists. Goal Runtime integration proceeds through
+the linked execution appendix.**
+
+## Implementation record — 2026-09-02 ordered notifications and bounded Item lifecycle
+
+Six-question admission:
+
+1. **Layer:** App Server notification transport, App Server Protocol Item
+   projection, Core event construction, and the isolated Goal verifier input
+   adapter. Core remains the event/history owner; App Server remains the public
+   projection owner.
+2. **Duplicate responsibility:** replace source-specific JSON-RPC readiness
+   races with one runtime notification bus; reuse `EventEnvelope`, GoalRuntime,
+   existing settings events, and `turn/event`/`turn/read`. No Item store or
+   second verifier history is introduced.
+3. **Replace vs add:** replace the transport's `tokio::select!` merge of Core,
+   Goal, and settings streams; add only the missing completed-call arguments,
+   bounded/redacted projection, and verifier history window.
+4. **Net line delta:** runtime `19,535 → 19,799` (`+264`); release source
+   `28,701 → 28,965` (`+264`), excluding experimental CLI/REPL. Remaining
+   margins are `201` runtime lines and `1,035` release-source lines.
+5. **Visible surface:** ToolCall arguments are bounded by depth/count/bytes and
+   redact sensitive keys; completed items keep stable `callId` and add bounded
+   output. Core, Goal, and settings notifications share one runtime stream.
+   Verifier restores only the newest 24 settled messages and never writes them
+   into the main Thread history. No Item listing or Artifact method is added.
+6. **Boundary evidence:** Protocol tests cover argument redaction/bounds and
+   completed-call identity; App Server tests cover settings-before-Goal
+   cross-stream order; verifier tests cover the fixed history window. Targeted
+   Protocol, Core, and App Server test suites all pass.
+
+Decision: **accept the bounded lifecycle and ordered notification slice; defer
+dedicated Item notifications/listing, specialized variants, Artifact APIs, and
+provider-backed verifier quality evidence.**
 
 ## Implementation record — 2026-09-01 Goal Runtime first-turn and notification seam
 

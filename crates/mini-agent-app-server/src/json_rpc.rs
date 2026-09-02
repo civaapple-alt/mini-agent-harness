@@ -11,6 +11,7 @@ use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::goal_runtime::GoalRuntimeEvent;
 use crate::management::SettingsRuntimeEvent;
+use crate::notification::RuntimeNotification;
 use mini_agent_app_server_protocol::ApprovalRequestNotification;
 use mini_agent_app_server_protocol::ApprovalResolvedNotification;
 use mini_agent_app_server_protocol::ApprovalRespondParams;
@@ -113,13 +114,12 @@ pub use transport::{
 pub struct AppServerConnection<M> {
     server: AppServer<M>,
     events: broadcast::Receiver<EventEnvelope>,
+    notifications: Option<broadcast::Receiver<RuntimeNotification>>,
     initialized: bool,
     approval: ApprovalBroker,
     approval_enabled: bool,
     capability_manifest: CapabilityManifest,
     runtime: Option<RuntimeServices<M>>,
-    goal_notifications: Option<broadcast::Receiver<GoalRuntimeEvent>>,
-    settings_notifications: Option<broadcast::Receiver<SettingsRuntimeEvent>>,
 }
 
 /// Host-owned services that share one runtime identity.
@@ -131,8 +131,7 @@ pub struct AppServerConnection<M> {
 pub struct RuntimeServices<M> {
     management: RuntimeManagementService<M>,
     workflows: WorkflowService,
-    goal_notifications: broadcast::Sender<GoalRuntimeEvent>,
-    settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
+    notifications: broadcast::Sender<RuntimeNotification>,
 }
 
 impl<M> RuntimeServices<M> {
@@ -144,13 +143,11 @@ impl<M> RuntimeServices<M> {
         M: Model + Send + 'static,
     {
         let (management, workflows) = management.bind_workflow(workflows)?;
-        let goal_notifications = management.goal_notifications();
-        let settings_notifications = management.settings_notifications();
+        let notifications = management.notifications();
         Ok(Self {
             management,
             workflows,
-            goal_notifications,
-            settings_notifications,
+            notifications,
         })
     }
 
@@ -162,12 +159,8 @@ impl<M> RuntimeServices<M> {
         &self.workflows
     }
 
-    fn goal_notifications(&self) -> broadcast::Sender<GoalRuntimeEvent> {
-        self.goal_notifications.clone()
-    }
-
-    fn settings_notifications(&self) -> broadcast::Sender<SettingsRuntimeEvent> {
-        self.settings_notifications.clone()
+    fn notifications(&self) -> broadcast::Sender<RuntimeNotification> {
+        self.notifications.clone()
     }
 }
 
@@ -204,20 +197,18 @@ where
         Self {
             server,
             events,
+            notifications: None,
             initialized: false,
             approval,
             approval_enabled,
             capability_manifest,
             runtime: None,
-            goal_notifications: None,
-            settings_notifications: None,
         }
     }
 
     /// Attaches the host-owned services for one runtime identity.
     pub fn with_runtime_services(mut self, runtime: RuntimeServices<M>) -> Self {
-        self.goal_notifications = Some(runtime.goal_notifications().subscribe());
-        self.settings_notifications = Some(runtime.settings_notifications().subscribe());
+        self.notifications = Some(runtime.notifications().subscribe());
         self.runtime = Some(runtime);
         self
     }
@@ -303,31 +294,10 @@ where
     pub async fn next_notification(
         &mut self,
     ) -> Result<JsonRpcRequest, broadcast::error::RecvError> {
-        match (
-            self.goal_notifications.as_mut(),
-            self.settings_notifications.as_mut(),
-        ) {
-            (None, None) => transport::next_event_notification(&mut self.events).await,
-            (Some(goal_notifications), None) => {
-                tokio::select! {
-                    event = transport::next_event_notification(&mut self.events) => event,
-                    event = goal_notifications.recv() => event.map(goal_notification_request),
-                }
-            }
-            (None, Some(settings_notifications)) => {
-                tokio::select! {
-                    event = transport::next_event_notification(&mut self.events) => event,
-                    event = settings_notifications.recv() => event.map(settings_notification_request),
-                }
-            }
-            (Some(goal_notifications), Some(settings_notifications)) => {
-                tokio::select! {
-                    event = transport::next_event_notification(&mut self.events) => event,
-                    event = goal_notifications.recv() => event.map(goal_notification_request),
-                    event = settings_notifications.recv() => event.map(settings_notification_request),
-                }
-            }
+        if let Some(notifications) = self.notifications.as_mut() {
+            return notifications.recv().await.map(runtime_notification_request);
         }
+        transport::next_event_notification(&mut self.events).await
     }
 
     async fn handle_initialize(&mut self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
@@ -470,18 +440,10 @@ where
         self.management_service().map_err(|error| error.message)
     }
 
-    pub(crate) fn subscribe_goal_notifications(
+    pub(crate) fn subscribe_notifications(
         &self,
-    ) -> Option<broadcast::Receiver<GoalRuntimeEvent>> {
-        self.goal_notifications
-            .as_ref()
-            .map(broadcast::Receiver::resubscribe)
-    }
-
-    pub(crate) fn subscribe_settings_notifications(
-        &self,
-    ) -> Option<broadcast::Receiver<SettingsRuntimeEvent>> {
-        self.settings_notifications
+    ) -> Option<broadcast::Receiver<RuntimeNotification>> {
+        self.notifications
             .as_ref()
             .map(broadcast::Receiver::resubscribe)
     }
@@ -577,6 +539,18 @@ pub(super) fn settings_notification_request(event: SettingsRuntimeEvent) -> Json
             .expect("settings update notification is serializable"),
         ),
     )
+}
+
+pub(super) fn runtime_notification_request(event: RuntimeNotification) -> JsonRpcRequest {
+    match event {
+        RuntimeNotification::Event(event) => {
+            let params = serde_json::to_value(TurnEventNotification::from(event))
+                .expect("event notification is serializable");
+            JsonRpcRequest::notification(METHOD_TURN_EVENT, Some(params))
+        }
+        RuntimeNotification::Goal(event) => goal_notification_request(event),
+        RuntimeNotification::Settings(event) => settings_notification_request(event),
+    }
 }
 
 fn response_value<T: serde::Serialize>(id: Option<Value>, value: T) -> Option<JsonRpcResponse> {

@@ -197,12 +197,16 @@ pub(super) fn handle<M>(
             });
             let changed = result.as_ref().is_ok_and(|(_, changed)| *changed);
             if changed && let Some(state) = runtime.as_ref() {
-                let _ = state.settings_notifications.send(SettingsRuntimeEvent {
+                let event = SettingsRuntimeEvent {
                     thread_id: state.management.thread_id(),
                     active,
                     builtin_tools: state.builtin_tools.names().to_vec(),
                     state_revision: state.revision().value(),
-                });
+                };
+                let _ = state.settings_notifications.send(event.clone());
+                let _ = state
+                    .notifications
+                    .send(crate::RuntimeNotification::Settings(event));
             }
             respond(reply, receipt, result.map(|(selection, _)| selection));
         }

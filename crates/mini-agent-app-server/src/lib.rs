@@ -196,6 +196,7 @@ mod goal_runtime;
 pub mod json_rpc;
 pub mod local;
 pub mod management;
+mod notification;
 pub mod runtime;
 mod runtime_actor;
 mod runtime_command;
@@ -214,6 +215,7 @@ pub use mini_agent_app_server_protocol::{
     McpRetryResult as ProtocolMcpRetryResult, McpStatusResult, SessionInfoResult,
     WorldRefreshResult, WorldSetExecutionResult, WorldStateResult,
 };
+pub(crate) use notification::RuntimeNotification;
 pub use runtime::capability_manifest_to_protocol;
 pub use runtime::{
     AppServerRuntime, McpRetryResult, RuntimeSessionInfo, RuntimeStartOptions, RuntimeTurnBatch,
@@ -316,6 +318,7 @@ impl std::error::Error for AppServerError {}
 pub struct AppServer<M> {
     commands: mpsc::Sender<Command>,
     events: broadcast::Sender<EventEnvelope>,
+    notifications: broadcast::Sender<RuntimeNotification>,
     control: Arc<RunControl>,
     thread_id: ThreadId,
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
@@ -329,6 +332,7 @@ impl<M> Clone for AppServer<M> {
         Self {
             commands: self.commands.clone(),
             events: self.events.clone(),
+            notifications: self.notifications.clone(),
             control: self.control.clone(),
             thread_id: self.thread_id.clone(),
             thread_ids: self.thread_ids.clone(),
@@ -427,7 +431,9 @@ where
         let runtime_revision = Arc::new(AtomicU64::new(0));
         let (commands, command_receiver) = mpsc::channel(COMMAND_BUFFER);
         let (events, _) = broadcast::channel(EVENT_BUFFER);
+        let (notifications, _) = broadcast::channel(EVENT_BUFFER);
         let worker_events = events.clone();
+        let worker_notifications = notifications.clone();
         let worker_thread_ids = thread_ids.clone();
         let worker_revision = runtime_revision.clone();
         let worker_factory = factory.clone();
@@ -443,6 +449,7 @@ where
                     threads,
                     command_receiver,
                     worker_events,
+                    worker_notifications,
                     worker_thread_ids,
                     worker_revision,
                     worker_factory,
@@ -453,6 +460,7 @@ where
         Self {
             commands,
             events,
+            notifications,
             control,
             thread_id: start.thread_id,
             thread_ids,
@@ -464,6 +472,10 @@ where
 
     pub(crate) fn command_sender(&self) -> mpsc::Sender<Command> {
         self.commands.clone()
+    }
+
+    pub(crate) fn notifications(&self) -> broadcast::Sender<RuntimeNotification> {
+        self.notifications.clone()
     }
 
     pub(crate) fn runtime_revision(&self) -> RuntimeRevision {

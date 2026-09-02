@@ -45,10 +45,13 @@ JSON-RPC error's `data`; requests rejected before admission do not claim an
 action. The protocol negotiation and thread index responses remain structural
 responses rather than action results.
 
-The service also emits ordered `turn/event` notifications containing the core
-event type, thread/turn identity, and `sequence` number. That sequence belongs
-to the Core Thread event stream and is intentionally distinct from
-`actionSequence`. `turn/steer` validates the supplied active `turnId`;
+The service emits `turn/event`, Goal, and settings notifications from one
+ordered runtime stream. Core `turn/event` notifications contain the event type,
+thread/turn identity, and `sequence` number; that sequence belongs to the Core
+Thread event stream and is intentionally distinct from `actionSequence`. The
+single runtime stream prevents a ready Goal/settings notification from racing
+past an earlier Core notification at the transport boundary. `turn/steer`
+validates the supplied active `turnId`;
 `turn/interrupt` requests cooperative cancellation; `turn/read` returns the
 settled result and messages. When the host runtime is wired with
 an `ApprovalBroker`, sensitive tool calls emit an `approval/request`
@@ -80,6 +83,14 @@ On resume, an unsettled Goal schedules a new ordinary turn, while a settled
 checkpoint is re-verified without replaying that turn. Clearing an idle Goal
 invalidates any pending verifier association; a late verifier result cannot
 advance a cleared or replacement Goal.
+
+`turn/event` and `turn/read` include bounded `items` projections. A ToolCall
+uses the model `callId` as its stable item identity; its in-progress and
+completed events can therefore be merged by clients. Arguments are recursively
+bounded and sensitive keys are redacted, while completed items preserve the
+same argument projection and add bounded output. The verifier keeps only the
+newest bounded settled-message window. There is still no separate Item history,
+item-list method, or generic Artifact API.
 
 The Rust `LocalAppServerClient` uses the same DTOs and dispatch without stdio,
 which lets an embedded frontend migrate to the service boundary before it

@@ -10,6 +10,7 @@ use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::goal_runtime::GoalRuntime;
 use crate::goal_runtime::GoalRuntimeEvent;
+use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeCommand;
 use crate::runtime_actor::RuntimeRequest;
 use crate::worker::Command;
@@ -38,6 +39,7 @@ pub(crate) struct RuntimeActorState {
     pub(crate) builtin_tools: mini_agent_host::BuiltinToolSelection,
     pub(crate) stable_system_prompt: Option<String>,
     pub(crate) settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
+    pub(crate) notifications: broadcast::Sender<RuntimeNotification>,
     revision: crate::action::RuntimeRevision,
 }
 
@@ -81,6 +83,7 @@ pub struct RuntimeManagementService<M> {
     approval: ApprovalController,
     goal_notifications: broadcast::Sender<GoalRuntimeEvent>,
     settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
+    notifications: broadcast::Sender<RuntimeNotification>,
 }
 
 impl<M> Clone for RuntimeManagementService<M> {
@@ -92,6 +95,7 @@ impl<M> Clone for RuntimeManagementService<M> {
             approval: self.approval.clone(),
             goal_notifications: self.goal_notifications.clone(),
             settings_notifications: self.settings_notifications.clone(),
+            notifications: self.notifications.clone(),
         }
     }
 }
@@ -111,6 +115,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         let local_checkpoint_seq = 0;
         let (goal_notifications, _) = broadcast::channel(64);
         let (settings_notifications, _) = broadcast::channel(64);
+        let notifications = server.notifications();
         Self {
             server,
             state: Some(RuntimeManagementState {
@@ -127,6 +132,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             approval,
             goal_notifications,
             settings_notifications,
+            notifications,
         }
     }
 
@@ -140,6 +146,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             approval,
             goal_notifications,
             settings_notifications,
+            notifications,
         } = self;
         let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
         let stable_system_prompt = workflows.stable_system_prompt().map(str::to_string);
@@ -150,8 +157,12 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .map_err(|error| error.to_string())?
             .map(|_| store.goal_dir());
         approval.set_goal_dir(goal_dir);
-        let goal_runtime =
-            GoalRuntime::new(store, goal_notifications.clone(), verifier_config.clone());
+        let goal_runtime = GoalRuntime::with_notifications(
+            store,
+            goal_notifications.clone(),
+            verifier_config.clone(),
+            Some(notifications.clone()),
+        );
         let commands = server.command_sender();
         server
             .install_runtime_state(RuntimeActorState {
@@ -162,6 +173,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
                 stable_system_prompt: stable_system_prompt.clone(),
                 settings_notifications: settings_notifications.clone(),
+                notifications: notifications.clone(),
                 revision: crate::action::RuntimeRevision::default(),
             })
             .map_err(|error| error.to_string())?;
@@ -178,6 +190,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 approval,
                 goal_notifications,
                 settings_notifications,
+                notifications,
             },
             workflows,
         ))
@@ -190,12 +203,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
-    pub(crate) fn goal_notifications(&self) -> broadcast::Sender<GoalRuntimeEvent> {
-        self.goal_notifications.clone()
-    }
-
-    pub(crate) fn settings_notifications(&self) -> broadcast::Sender<SettingsRuntimeEvent> {
-        self.settings_notifications.clone()
+    pub(crate) fn notifications(&self) -> broadcast::Sender<RuntimeNotification> {
+        self.notifications.clone()
     }
 
     pub async fn checkpoint_seq(&self) -> Result<Option<u64>, String> {

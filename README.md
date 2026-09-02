@@ -305,7 +305,10 @@ Selecting a validated Plugin name retains that Plugin's MCP provider inputs,
 but does not start a server or create a Plugin-specific execution path.
 App Server `turn/event` and `turn/read` also expose bounded ThreadItems derived
 from existing Core events/messages; these items are a projection, not a second
-history store.
+history store. Tool items reuse `callId`, carry the same bounded/redacted
+arguments through started and completed states, and keep bounded output in the
+existing event/read projection. Core, Goal, and settings notifications for a
+runtime connection share one ordered App Server notification stream.
 
 ## Documentation
 
@@ -367,8 +370,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `19,535 / 20,000` lines and release
-Rust source `28,701 / 30,000` lines, excluding the experimental CLI/REPL. The
+The current hard-budget snapshot is runtime `19,799 / 20,000` lines and release
+Rust source `28,965 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.
@@ -393,7 +396,19 @@ verifier execution errors, and late-result disposal. The public App Server path
 asserts the bounded `active(turnId) -> blocked(turnId)` Goal notification
 sequence. A fresh App Server rebind public scenario verifies that a settled
 Goal resumes through verifier preparation without replaying its main turn. A
-real provider-backed verifier remains optional follow-up evidence.
+real provider-backed verifier remains optional follow-up evidence. Verifier
+input keeps only the newest bounded history window; it does not create a second
+conversation source. Cross-stream Core/Goal/settings ordering is now emitted
+through one runtime notification bus, with a public settings-before-Goal
+ordering scenario. This is transport-level ordering; no new global wire
+sequence or durable-write receipt is exposed.
+
+The current ThreadItem lifecycle scope is the bounded projection in
+`turn/event` and `turn/read`: stable `callId`, started/completed status, bounded
+output, and bounded/redacted `arguments`. Dedicated `item/started`,
+`item/completed`, Item listing, and persisted Item replay remain deferred. The
+raw `ModelResponded` event retains its existing event payload; the redaction
+guarantee applies to the ThreadItem projection.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
 scenarios pass, with current App Server boundary evidence and CLI interactive

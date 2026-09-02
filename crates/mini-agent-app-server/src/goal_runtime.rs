@@ -1,3 +1,4 @@
+use crate::notification::RuntimeNotification;
 use crate::workflows::GoalState;
 use crate::workflows::VerifierVerdict;
 use mini_agent_app_server_protocol::ThreadGoal;
@@ -48,20 +49,23 @@ struct PendingVerification {
 pub(crate) struct GoalRuntime {
     store: HostWorkflowStore,
     events: broadcast::Sender<GoalRuntimeEvent>,
+    notifications: Option<broadcast::Sender<RuntimeNotification>>,
     verifier_config: Option<RuntimeConfig>,
     pending_verification: Option<PendingVerification>,
     scheduled_goal: Option<String>,
 }
 
 impl GoalRuntime {
-    pub(crate) fn new(
+    pub(crate) fn with_notifications(
         store: HostWorkflowStore,
         events: broadcast::Sender<GoalRuntimeEvent>,
         verifier_config: Option<RuntimeConfig>,
+        notifications: Option<broadcast::Sender<RuntimeNotification>>,
     ) -> Self {
         Self {
             store,
             events,
+            notifications,
             verifier_config,
             pending_verification: None,
             scheduled_goal: None,
@@ -269,14 +273,27 @@ impl GoalRuntime {
         state: GoalState,
     ) {
         let _ = self.events.send(GoalRuntimeEvent::Updated {
-            thread_id,
-            turn_id,
-            state: Box::new(state),
+            thread_id: thread_id.clone(),
+            turn_id: turn_id.clone(),
+            state: Box::new(state.clone()),
         });
+        if let Some(notifications) = &self.notifications {
+            let _ = notifications.send(RuntimeNotification::Goal(GoalRuntimeEvent::Updated {
+                thread_id,
+                turn_id,
+                state: Box::new(state),
+            }));
+        }
     }
 
     pub(crate) fn notify_cleared(&self, thread_id: ThreadId) {
-        let _ = self.events.send(GoalRuntimeEvent::Cleared { thread_id });
+        let event = GoalRuntimeEvent::Cleared {
+            thread_id: thread_id.clone(),
+        };
+        let _ = self.events.send(event.clone());
+        if let Some(notifications) = &self.notifications {
+            let _ = notifications.send(RuntimeNotification::Goal(event));
+        }
     }
 
     pub(crate) fn fail_goal_with_reason(&self, reason: &str) -> io::Result<GoalState> {

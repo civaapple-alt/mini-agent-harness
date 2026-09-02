@@ -126,13 +126,12 @@ where
     W: AsyncWrite + Unpin,
 {
     let server = connection.server.clone();
-    let mut events = server.subscribe();
-    let mut goal_events = connection.subscribe_goal_notifications();
-    let mut settings_events = connection.subscribe_settings_notifications();
+    let mut runtime_events = connection.subscribe_notifications();
+    let mut events = (runtime_events.is_none()).then(|| server.subscribe());
     let mut line = String::new();
     loop {
         tokio::select! {
-            event = next_event_notification(&mut events) => {
+            event = next_event_notification_optional(&mut events) => {
                 let notification = match event {
                     Ok(notification) => notification,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -140,15 +139,7 @@ where
                 };
                 write_json_line(&mut writer, &notification).await?;
             }
-            event = next_goal_notification(&mut goal_events) => {
-                let notification = match event {
-                    Ok(notification) => notification,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => continue,
-                };
-                write_json_line(&mut writer, &notification).await?;
-            }
-            event = next_settings_notification(&mut settings_events) => {
+            event = next_runtime_notification(&mut runtime_events) => {
                 let notification = match event {
                     Ok(notification) => notification,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -218,24 +209,23 @@ pub(super) async fn next_event_notification(
     ))
 }
 
-async fn next_goal_notification(
-    events: &mut Option<broadcast::Receiver<super::GoalRuntimeEvent>>,
+async fn next_event_notification_optional(
+    events: &mut Option<broadcast::Receiver<EventEnvelope>>,
 ) -> Result<JsonRpcRequest, broadcast::error::RecvError> {
     let Some(events) = events.as_mut() else {
         return std::future::pending().await;
     };
-    let event = events.recv().await?;
-    Ok(super::goal_notification_request(event))
+    next_event_notification(events).await
 }
 
-async fn next_settings_notification(
-    events: &mut Option<broadcast::Receiver<super::SettingsRuntimeEvent>>,
+async fn next_runtime_notification(
+    events: &mut Option<broadcast::Receiver<super::RuntimeNotification>>,
 ) -> Result<JsonRpcRequest, broadcast::error::RecvError> {
     let Some(events) = events.as_mut() else {
         return std::future::pending().await;
     };
     let event = events.recv().await?;
-    Ok(super::settings_notification_request(event))
+    Ok(super::runtime_notification_request(event))
 }
 
 async fn write_json_line<W: AsyncWrite + Unpin, T: serde::Serialize>(

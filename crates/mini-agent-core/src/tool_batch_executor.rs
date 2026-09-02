@@ -34,6 +34,7 @@ pub(super) fn execute_tool_batch<O: Observer>(
         observer.observe(&Event::ToolFinished {
             call_id: call.id.clone(),
             name: call.name.clone(),
+            arguments: call.arguments.clone(),
             content: content.clone(),
             is_error,
             truncated,

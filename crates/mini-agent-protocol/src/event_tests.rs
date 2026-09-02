@@ -29,6 +29,7 @@ fn tool_finished_round_trips_structured_outcome() {
     let event = Event::ToolFinished {
         call_id: "call-1".to_string(),
         name: "shell".to_string(),
+        arguments: serde_json::json!({"command": "pwd"}),
         content: "retry later".to_string(),
         is_error: true,
         truncated: false,
@@ -36,5 +37,7 @@ fn tool_finished_round_trips_structured_outcome() {
     };
 
     let encoded = serde_json::to_value(&event).unwrap();
-    assert_eq!(serde_json::from_value::<Event>(encoded).unwrap(), event);
+    assert!(encoded.get("arguments").is_none());
+    let decoded = serde_json::from_value::<Event>(encoded).unwrap();
+    assert!(matches!(decoded, Event::ToolFinished { arguments, .. } if arguments.is_null()));
 }

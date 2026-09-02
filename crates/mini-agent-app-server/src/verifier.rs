@@ -22,8 +22,21 @@ use mini_agent_protocol::ThreadStart;
 use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 
+const MAX_VERIFIER_HISTORY_MESSAGES: usize = 24;
+
 fn verify_system_prompt() -> &'static str {
     include_str!("../builtin/prompts/system/verifier.md").trim_end()
+}
+
+/// Keeps verifier input bounded while preserving the newest settled history.
+/// Core still applies its byte-level context limits when the isolated turn is
+/// run; this window prevents a long Goal from paying for all prior turns.
+fn bounded_verifier_history(messages: &[Message]) -> Vec<Message> {
+    messages
+        .iter()
+        .skip(messages.len().saturating_sub(MAX_VERIFIER_HISTORY_MESSAGES))
+        .cloned()
+        .collect()
 }
 
 struct DiscardEvents;
@@ -60,7 +73,7 @@ pub async fn verify_goal_checkpoint(
         HarnessConfig::default(),
     );
     harness
-        .restore_history(messages.to_vec())
+        .restore_history(bounded_verifier_history(messages))
         .map_err(|error| format!("cannot restore goal verifier source: {error}"))?;
     harness.replace_config(config);
     let prompt = format!(
@@ -80,6 +93,10 @@ pub async fn verify_goal_checkpoint(
     let verdict = crate::workflows::parse_verifier_verdict(&final_text);
     Ok((final_text, verdict))
 }
+
+#[cfg(test)]
+#[path = "verifier_tests.rs"]
+mod tests;
 
 async fn run_harness_turn<M, S>(
     harness: Harness<M>,

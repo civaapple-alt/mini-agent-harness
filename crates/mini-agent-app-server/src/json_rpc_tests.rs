@@ -540,6 +540,48 @@ async fn broadcasts_thread_settings_updates_with_action_revision() {
 }
 
 #[tokio::test]
+async fn preserves_cross_stream_notification_order() {
+    let (mut connection, root) = managed_connection("cross-stream-order");
+    connection
+        .handle_request(initialize_request(1, "cross-stream-test"))
+        .await
+        .unwrap();
+    connection
+        .handle_request(JsonRpcRequest::request(
+            2,
+            METHOD_THREAD_SETTINGS_UPDATE,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "collaborationMode": {"mode": "plan"}
+            }),
+        ))
+        .await
+        .unwrap();
+    connection
+        .handle_request(JsonRpcRequest::request(
+            3,
+            METHOD_THREAD_GOAL_SET,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "objective": "preserve notification order"
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        connection.next_notification().await.unwrap().method,
+        mini_agent_app_server_protocol::METHOD_THREAD_SETTINGS_UPDATED
+    );
+    assert_eq!(
+        connection.next_notification().await.unwrap().method,
+        mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED
+    );
+    wait_for_blocked_goal(&mut connection).await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn exposes_codex_shaped_thread_goal_lifecycle() {
     let (mut connection, root) = managed_connection("thread-goal-rpc");
     connection

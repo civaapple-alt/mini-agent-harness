@@ -333,6 +333,35 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 6. Boundary evidence：fresh rebind、settled resume、preparation failure 和
    no-main-turn-replay 均有公共证据；跨流全序和真实 provider verifier 仍开放。
 
+### Batch 9：统一跨流通知、ThreadItem 生命周期和 verifier 上下文边界 — 已完成
+
+- Core `turn/event`、Goal 更新和 settings 更新现在进入同一个 App Server
+  runtime notification bus；JSON-RPC connection 与 stdio transport 不再用
+  `tokio::select!` 在多个 ready stream 之间竞争。Goal/settings 的既有内部
+  broadcast 仍保留给 Runtime Actor 所有权边界，公共消费只使用统一流。
+- `ToolFinished` 保留原始 `callId` 对应的 arguments，ThreadItem 对参数做
+  深度、条目数、字符串和总字节限制，并对敏感 key 脱敏。started/completed
+  Item 可用同一 `callId` 合并；不新增 Item history、list API 或 Artifact API。
+- Goal verifier 只恢复最近 24 条 settled message，再由 Core 的现有字节级
+  context guard 做最终限制；裁剪结果不会写回主 Thread Session。
+
+六项准入记录：
+
+1. Layer：App Server notification/Item projection、Core completion event 和
+   Goal verifier input adapter；不移动 Core、Host 或 Session authority。
+2. Duplicate responsibility：统一替换 transport 层多流 select merge，复用
+   现有 Event/Goal/settings source、ThreadItem projection 和 Core context guard。
+3. Replace vs add：替换跨流 ready-race；仅补齐 completed ToolCall 参数投影、
+   bounded/redacted arguments 和 verifier history window，不增加第二个存储或 loop。
+4. Net line delta：runtime `19,535 → 19,799`（`+264`）；release Rust
+   `28,701 → 28,965`（`+264`），实验 CLI/REPL 不计入 release 门禁。
+5. Visible surface：公共 Item 参数 bounded/redacted，Goal/Core/settings 通知
+   共享发送顺序；verifier 只接收最近 24 条历史；无新的 Item listing 或 Artifact
+   公共协议。
+6. Boundary evidence：App Server public test 覆盖 settings-before-Goal 顺序，
+   Protocol test 覆盖 ToolCall 参数安全投影与 completed identity，verifier test
+   覆盖历史窗口；Protocol 11、Core 33、App Server 46 个定向测试通过。
+
 ## 6. 每个实现批次的六项准入模板
 
 ```text
@@ -389,10 +418,11 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 
 ## 8. 下一步
 
-Batch 1–8 的 Goal contract、serialized owner、settled-checkpoint verifier、
+Batch 1–9 的 Goal contract、serialized owner、settled-checkpoint verifier、
 自动 continuation、settings notification、resume/clear stale-result guard、
 旧手工 API 退役、step/timeout/token budget 执行，以及 rejected/error
-fault-injection evidence 和 restart/resume public evidence 均已完成，并通过
-Host、App Server Protocol、App Server 定向测试。后续只补有明确边界的真实
-provider/跨平台证据和 Codex ThreadItem/Artifact 扩展，不再恢复第二个 Goal
-loop 或手工 advance API。
+fault-injection evidence、restart/resume public evidence、跨流通知顺序、
+bounded ThreadItem lifecycle 和 verifier history bound 均已完成，并通过
+Protocol、Core、App Server 定向测试。后续只补有明确边界的真实 provider/
+跨平台证据、专用 Item notification/listing 和 Codex ThreadItem/Artifact
+扩展，不再恢复第二个 Goal loop 或手工 advance API。
