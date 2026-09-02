@@ -9,8 +9,8 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `18,709 / 20,000` lines (93.5%; 1,291 remaining)
-- release Rust source (excluding experimental CLI/REPL): `27,875 / 30,000` lines (92.9%; 2,125 remaining)
+- runtime (`core + protocol + host + app-server`): `18,775 / 20,000` lines (93.9%; 1,225 remaining)
+- release Rust source (excluding experimental CLI/REPL): `27,941 / 30,000` lines (93.1%; 2,059 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -27,7 +27,8 @@ The line-budget release work has completed its low-risk Stage 1 audit and the ta
   removes `112` runtime / `188` all-Rust lines, and the P1 duplicate-test batch
   removes `11` runtime / `17` all-Rust lines, and the REPL core-surface follow-up
   removes `78` all-Rust lines, and the REPL 30% compression batch removes `246`
-  all-Rust lines. The Host Catalog and reversible
+  all-Rust lines, and the Goal admission boundary batch adds `66` runtime /
+  `66` all-Rust lines. The Host Catalog and reversible
   Thread `builtinTools` selection batches add `404` runtime / `404` all-Rust
   lines, and the first typed Skill dependency/activation metadata slice adds
   `191` all-Rust lines, and Plugin-to-provider-input selection adds `38`
@@ -78,7 +79,7 @@ checkpointing remain deferred. `thread/settings/updated` is emitted from the
 same Runtime Actor revision as the mutation response. Settled-checkpoint Goal
 continuation, verifier retry/terminal transitions, resume/clear stale-result
 guards, and the removal of manual workflow Goal controls are implemented through
-the serialized GoalRuntime owner. The current release-source margin is `2,125`
+the serialized GoalRuntime owner. The current release-source margin is `2,059`
 lines.
 
 The first Skill dependency/activation slice is implemented in Capabilities.
@@ -87,7 +88,7 @@ the metadata catalog exposes non-empty declarations, and
 `Discovery::activate_skill` returns a typed metadata-only activation. It does
 not read Skill bodies, start MCP, enable providers, or grant approval. App Server
 Turn activation and Host allowlist resolution remain the next Skill batch; the
-  current release-source margin is `2,125` lines. The experimental CLI/REPL is
+  current release-source margin is `2,059` lines. The experimental CLI/REPL is
 still reported separately at `2,707` lines and does not consume this gate.
 
 The first Plugin provider slice is implemented in Capabilities: selecting a
@@ -110,7 +111,11 @@ canonical `thread/goal/set|get|clear` contract, settled-checkpoint verifier and
 continuation, settings notifications, resume/clear stale-result guards, and
 manual Goal API retirement are implemented. Follow the [Goal Runtime
 implementation appendix](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
-for the state machine and evidence record.
+for the state machine and evidence record. The active Goal now binds relative
+`goal/...` tool paths to the session-owned Goal workspace, and Host rejects
+objectives larger than 8 KiB before creating Goal state. Verifier checkpoint
+freshness, budget enforcement, and cross-stream notification ordering remain
+the next lifecycle hardening items.
 
 ### Next iteration order (evidence-triggered)
 

@@ -221,6 +221,9 @@ pub(super) fn handle<M>(
                     .goal_runtime
                     .set_goal(objective.as_deref(), status, token_budget)
                     .map_err(workflow_error)?;
+                state
+                    .approval
+                    .set_goal_dir(Some(state.goal_runtime.goal_dir()));
                 let changed = previous.as_ref().is_none_or(|previous| {
                     previous.goal_id != goal.goal_id || previous.token_budget != goal.token_budget
                 });
@@ -246,6 +249,7 @@ pub(super) fn handle<M>(
         RuntimeCommand::GoalClear { reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 let cleared = state.goal_runtime.clear_goal().map_err(workflow_error)?;
+                state.approval.set_goal_dir(None);
                 if cleared {
                     state
                         .goal_runtime

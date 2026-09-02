@@ -77,6 +77,10 @@ impl GoalRuntime {
         self.store.load_goal_state()
     }
 
+    pub(crate) fn goal_dir(&self) -> std::path::PathBuf {
+        self.store.goal_dir()
+    }
+
     pub(crate) fn set_goal(
         &mut self,
         objective: Option<&str>,

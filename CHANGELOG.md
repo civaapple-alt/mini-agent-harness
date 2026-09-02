@@ -80,6 +80,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   JSON-RPC handlers, Local client methods, and frontend re-exports. Goal
   progression is now internal to `GoalRuntime`; clients use
   `thread/goal/set|get|clear`.
+- **Goal admission boundary:** bind an active Goal's relative `goal/...` tool
+  paths to the session-owned Goal workspace and reject objectives over 8 KiB at
+  the Host creation boundary.
 
 ### Added
 

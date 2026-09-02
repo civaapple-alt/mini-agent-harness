@@ -485,6 +485,39 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
 }
 
 #[tokio::test]
+async fn binds_active_goal_workspace_to_approval_controller() {
+    let root = rpc_root("goal-approval-path");
+    mini_agent_host::HostWorkflowStore::new(root.clone(), crate::workflows::GoalLimits::default())
+        .set_goal("bind the goal workspace", None)
+        .unwrap();
+    let approval = ApprovalController::with_preset(ApprovalMode::Automatic, Default::default());
+    let observed_approval = approval.clone();
+    let server = crate::tests::server(DoneModel);
+    let management = RuntimeManagementService::new(
+        server.clone(),
+        None,
+        mini_agent_host::WorldState::detect(
+            &root,
+            ApprovalMode::Automatic,
+            false,
+            SandboxKind::Native,
+        ),
+        Vec::new(),
+        0,
+        Vec::new(),
+        approval,
+    );
+    let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
+    let _connection = AppServerConnection::new(server)
+        .with_runtime_services(RuntimeServices::new(management, workflows).unwrap());
+    assert_eq!(
+        observed_approval.goal_dir(),
+        Some(mini_agent_capabilities::normalize_path(&root.join("goal")))
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn rejects_an_unavailable_requested_provider() {
     let mut connection = connection();
     let response = connection

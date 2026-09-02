@@ -216,7 +216,9 @@ the core REPL remains focused on turn execution and run control:
   tool-free verifier runs; approved, rejected, and verifier-error outcomes are
   applied by the serialized GoalRuntime. There is no client-submitted manual
   `workflow/goal/*` control path. `thread/settings/updated` reports settings
-  mutations with the same Runtime revision as their responses.
+  mutations with the same Runtime revision as their responses. Goal objectives
+  are capped at 8 KiB, and while a Goal is active the relative `goal/...` tool
+  path is bound to this session-owned workspace rather than the project root.
 
 Goal limits can be shortened in a workspace `.env` for deterministic local
 fixtures. A timeout stops the current milestone cooperatively, persists a

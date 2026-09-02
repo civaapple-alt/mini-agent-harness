@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const GOAL_SCHEMA_VERSION: u32 = 2;
+pub const MAX_GOAL_OBJECTIVE_BYTES: usize = 8 * 1024;
 pub const MAX_GOAL_PLAN_BYTES: usize = 32 * 1024;
 pub const DEFAULT_GOAL_MAX_LOOPS: usize = 20;
 pub const DEFAULT_GOAL_MILESTONE_STEPS: usize = 50;
@@ -110,6 +111,10 @@ impl HostWorkflowStore {
 
     pub fn goal_limits(&self) -> GoalLimits {
         self.goal_limits
+    }
+
+    pub fn goal_dir(&self) -> PathBuf {
+        self.session_dir.join("goal")
     }
 
     pub fn init_plan_mode(&self, prompt: Option<&str>) -> io::Result<PathBuf> {
@@ -307,6 +312,12 @@ pub fn init_goal_workspace_with_limits(
     objective: &str,
     limits: GoalLimits,
 ) -> io::Result<GoalState> {
+    if objective.len() > MAX_GOAL_OBJECTIVE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("goal objective exceeds {MAX_GOAL_OBJECTIVE_BYTES} byte limit"),
+        ));
+    }
     let goal_dir = session_dir.join("goal");
     fs::create_dir_all(&goal_dir)?;
 

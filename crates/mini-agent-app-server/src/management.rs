@@ -141,11 +141,14 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
         let stable_system_prompt = workflows.stable_system_prompt().map(str::to_string);
         let verifier_config = workflows.verifier_config();
-        let goal_runtime = GoalRuntime::new(
-            workflows.into_store().map_err(|error| error.to_string())?,
-            goal_notifications.clone(),
-            verifier_config.clone(),
-        );
+        let store = workflows.into_store().map_err(|error| error.to_string())?;
+        let goal_dir = store
+            .load_goal_state()
+            .map_err(|error| error.to_string())?
+            .map(|_| store.goal_dir());
+        approval.set_goal_dir(goal_dir);
+        let goal_runtime =
+            GoalRuntime::new(store, goal_notifications.clone(), verifier_config.clone());
         let commands = server.command_sender();
         server
             .install_runtime_state(RuntimeActorState {

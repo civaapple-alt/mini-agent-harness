@@ -64,7 +64,9 @@ limits, failures, and observation events.
   and bounded `builtinTools` settings, `workflow/state` as a read-only
   aggregate, and the canonical typed Goal lifecycle methods. The former
   `workflow/plan/set` and manual `workflow/goal/*` controls are intentionally
-  removed; clients must use the settings and `thread/goal/*` methods.
+  removed; clients must use the settings and `thread/goal/*` methods. Active
+  Goals bind relative `goal/...` tool paths to the session Goal workspace, and
+  Goal objectives are capped at 8 KiB.
   `serve_stdio` provides newline-delimited JSON-RPC framing for subprocess
   clients. Runtime actions are serialized by the App Server Actor and return
   `actionId`, `actionSequence`, and `stateRevision`; Core event sequence numbers
@@ -365,8 +367,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `18,709 / 20,000` lines and release
-Rust source `27,875 / 30,000` lines, excluding the experimental CLI/REPL. The
+The current hard-budget snapshot is runtime `18,775 / 20,000` lines and release
+Rust source `27,941 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.

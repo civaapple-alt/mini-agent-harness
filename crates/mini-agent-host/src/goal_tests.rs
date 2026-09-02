@@ -105,6 +105,17 @@ fn goal_workspace_lifecycle_and_milestones() {
 }
 
 #[test]
+fn goal_objective_is_bounded_at_creation() {
+    let dir = test_dir();
+    let objective = "x".repeat(MAX_GOAL_OBJECTIVE_BYTES + 1);
+    let error = init_goal_workspace_with_limits(&dir, &objective, GoalLimits::default())
+        .expect_err("oversized objective should be rejected");
+    assert!(error.to_string().contains("goal objective exceeds"));
+    assert!(!dir.join("goal").exists());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn rejected_verdict_does_not_advance_milestone() {
     let dir = test_dir();
     let state = init_goal_workspace_with_limits(
