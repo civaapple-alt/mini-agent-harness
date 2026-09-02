@@ -308,6 +308,31 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
    provider-backed verifier、跨流全序和 restart/resume 的专门 public case
    继续作为后续证据项。
 
+### Batch 8：restart/resume settled Goal 公共证据 — 已完成
+
+- App Server public JSON-RPC 测试先写入一个 `active_turn_settled` 的 durable
+  Goal，再通过 fresh connection/rebind 恢复 Runtime；收到的 blocked 通知仍
+  关联原 `turn-1`，且 test model 调用计数为 0，证明没有重放主 turn。
+- 该测试复用现有 Runtime Actor `InstallRuntime -> resume_goal` 路径；没有
+  增加 restart 专用状态、第二个 turn loop 或新的协议字段。由于测试没有
+  配置真实 verifier，它验证的是恢复分支和 preparation failure 的公共行为，
+  不是 provider 质量。
+
+六项准入记录：
+
+1. Layer：测试位于 App Server public JSON-RPC/runtime rebind 边界；生产
+   resume 路径不变。
+2. Duplicate responsibility：复用现有 durable Host Goal state、
+   `resume_goal` 和 `InstallRuntime`，没有新增恢复协调器。
+3. Replace vs add：补齐原计划缺失的 restart/resume public evidence；不增加
+   兼容 API、手工 advance 或新的 Goal owner。
+4. Net line delta：本批增加 81 行测试 Rust，runtime 从 `19,454` 到
+   `19,535`，仍低于 20,000 行硬门禁。
+5. Visible surface：只验证原有 `blocked`、`turnId` 和 durable status；不新增
+   模型可见内容、事件类型、持久化字段或公共协议字段。
+6. Boundary evidence：fresh rebind、settled resume、preparation failure 和
+   no-main-turn-replay 均有公共证据；跨流全序和真实 provider verifier 仍开放。
+
 ## 6. 每个实现批次的六项准入模板
 
 ```text
@@ -364,10 +389,10 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 
 ## 8. 下一步
 
-Batch 1–7 的 Goal contract、serialized owner、settled-checkpoint verifier、
+Batch 1–8 的 Goal contract、serialized owner、settled-checkpoint verifier、
 自动 continuation、settings notification、resume/clear stale-result guard、
 旧手工 API 退役、step/timeout/token budget 执行，以及 rejected/error
-fault-injection evidence 均已完成，并通过 Host、App Server Protocol、App
-Server 定向测试。后续只补有明确边界的 restart/resume public case、真实
+fault-injection evidence 和 restart/resume public evidence 均已完成，并通过
+Host、App Server Protocol、App Server 定向测试。后续只补有明确边界的真实
 provider/跨平台证据和 Codex ThreadItem/Artifact 扩展，不再恢复第二个 Goal
 loop 或手工 advance API。

@@ -9,8 +9,8 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `19,454 / 20,000` lines (97.3%; 546 remaining)
-- release Rust source (excluding experimental CLI/REPL): `28,620 / 30,000` lines (95.4%; 1,380 remaining)
+- runtime (`core + protocol + host + app-server`): `19,535 / 20,000` lines (97.7%; 465 remaining)
+- release Rust source (excluding experimental CLI/REPL): `28,701 / 30,000` lines (95.7%; 1,299 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -35,7 +35,9 @@ The line-budget release work has completed its low-risk Stage 1 audit and the ta
   `191` all-Rust lines, and Plugin-to-provider-input selection adds `38`
   all-Rust lines. The bounded ThreadItem projection adds `283` runtime /
   `283` release-source lines, and the Goal step/timeout/token-budget execution
-  batch adds `428` runtime / `428` all-Rust lines. The current release-source total excludes the
+  batch adds `428` runtime / `428` all-Rust lines, the verifier validation batch
+  adds `99` runtime / `99` all-Rust lines, and the restart/resume public evidence
+  batch adds `81` runtime / `81` all-Rust lines. The current release-source total excludes the
   experimental CLI/REPL and is now below the approximate `26,900` reference.
 
 The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, duplicate Python test fixture probing, dead Plan slash-command parsing and prompt facades, dead local WorldState summary accessors, and the REPL `/status`/`/info` management projection. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
@@ -125,8 +127,9 @@ cooperative and does not kill a synchronous tool effect. Cross-stream
 notification ordering remains open. GoalRuntime now has direct fault-injection
 evidence for rejected verdicts, verifier execution errors, and late-result
 disposal; the public App Server path asserts the bounded active-to-blocked
-Goal notification sequence. A provider-backed verifier and dedicated
-restart/resume public scenario remain optional follow-up evidence.
+Goal notification sequence. A fresh App Server rebind public scenario verifies
+that a settled Goal resumes through verifier preparation without replaying its
+main turn. A provider-backed verifier remains optional follow-up evidence.
 
 ### Next iteration order (evidence-triggered)
 
@@ -140,10 +143,9 @@ restart/resume public scenario remain optional follow-up evidence.
    provider/approval path; no Plugin-specific executor.
 5. Extend ThreadItem lifecycle/listing and persisted identity before introducing
    bounded sidecar Artifact references.
-6. Keep the new fault-injected rejected/error/late-result evidence and add the
-   remaining restart/resume public scenario when its bounded seam is ready;
-   provider-backed verifier calls remain optional and paid calls are not a
-   default gate.
+6. Keep the fault-injected and restart/resume Goal evidence; add provider-backed
+   verifier evidence only when an explicit bounded seam exists. Paid calls are
+   not a default gate.
 7. Review the Docker isolation policy and cross-platform evidence before
    changing sandbox defaults. Defer provider comparison and retry/backoff until
    a second provider or an explicit bounded policy exists.

@@ -27,6 +27,8 @@ use mini_agent_protocol::ToolExecutionStatus;
 use mini_agent_protocol::TurnInput;
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
@@ -80,6 +82,10 @@ struct ShellApprovalModel;
 struct StepLimitModel;
 
 struct BudgetModel;
+
+struct CountingModel {
+    calls: Arc<AtomicUsize>,
+}
 
 struct TimeoutModel {
     release: Arc<tokio::sync::Notify>,
@@ -165,6 +171,24 @@ impl Model for BudgetModel {
     }
 }
 
+impl Model for CountingModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        _request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: "replayed".to_string(),
+            tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
+
 impl Model for TimeoutModel {
     type Error = Infallible;
 
@@ -204,6 +228,14 @@ fn managed_connection_with<M: Model + Send + 'static>(
     goal_limits: crate::workflows::GoalLimits,
 ) -> (AppServerConnection<M>, std::path::PathBuf) {
     let root = rpc_root(name);
+    managed_connection_at(model, root, goal_limits)
+}
+
+fn managed_connection_at<M: Model + Send + 'static>(
+    model: M,
+    root: std::path::PathBuf,
+    goal_limits: crate::workflows::GoalLimits,
+) -> (AppServerConnection<M>, std::path::PathBuf) {
     let workflows = WorkflowService::new(root.clone(), goal_limits);
     let server = crate::tests::server(model);
     let management = RuntimeManagementService::new(
@@ -608,6 +640,55 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
         .await
         .unwrap();
     assert!(response.result.unwrap()["value"]["goal"].is_null());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn resumes_settled_goal_without_replaying_turn() {
+    let root = rpc_root("goal-resume-settled");
+    let store = mini_agent_host::HostWorkflowStore::new(
+        root.clone(),
+        crate::workflows::GoalLimits::default(),
+    );
+    let state = store.set_goal("resume settled goal", None).unwrap();
+    store
+        .mark_goal_turn_started(&state.goal_id, "turn-1")
+        .unwrap();
+    store
+        .mark_goal_turn_settled(&state.goal_id, "turn-1")
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (mut connection, root) = managed_connection_at(
+        CountingModel {
+            calls: calls.clone(),
+        },
+        root,
+        crate::workflows::GoalLimits::default(),
+    );
+    connection
+        .handle_request(initialize_request(1, "goal-resume-test"))
+        .await
+        .unwrap();
+
+    let notification = loop {
+        let notification =
+            tokio::time::timeout(Duration::from_secs(3), connection.next_notification())
+                .await
+                .expect("settled Goal resume should reach a terminal notification")
+                .unwrap();
+        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
+            let params = notification.params.unwrap();
+            if params["goal"]["status"] == "blocked" {
+                break params;
+            }
+        }
+    };
+    assert_eq!(notification["turnId"], "turn-1");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        store.load_goal_state().unwrap().unwrap().status,
+        mini_agent_host::GoalStatus::Failed
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 

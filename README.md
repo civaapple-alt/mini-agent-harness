@@ -367,8 +367,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `19,454 / 20,000` lines and release
-Rust source `28,620 / 30,000` lines, excluding the experimental CLI/REPL. The
+The current hard-budget snapshot is runtime `19,535 / 20,000` lines and release
+Rust source `28,701 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.
@@ -391,8 +391,9 @@ exhaustion use `usageLimited` and retain a bounded reason.
 GoalRuntime also has direct fault-injection evidence for rejected verdicts,
 verifier execution errors, and late-result disposal. The public App Server path
 asserts the bounded `active(turnId) -> blocked(turnId)` Goal notification
-sequence. A real provider-backed verifier and a dedicated restart/resume
-public scenario remain optional follow-up evidence.
+sequence. A fresh App Server rebind public scenario verifies that a settled
+Goal resumes through verifier preparation without replaying its main turn. A
+real provider-backed verifier remains optional follow-up evidence.
 
 The first bounded harness scenario baseline is active: 8 representative CLI
 scenarios pass, with current App Server boundary evidence and CLI interactive
