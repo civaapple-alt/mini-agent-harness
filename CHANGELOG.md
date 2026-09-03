@@ -15,6 +15,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   cmdlets, reject side-effect flags such as `git branch -D`, `fd --exec`, and
   `rg --pre`, and report unsupported Shell syntax explicitly.
   Read-only Shell calls still retain the normal approval correlation path.
+- **App Server test maintenance:** remove duplicate blocked-Goal waiting logic,
+  generic approval forwarding, and first-event smoke coverage already exercised
+  by the public approval and event-trace scenarios.
 
 ## [0.7.0] - 2026-09-02
 

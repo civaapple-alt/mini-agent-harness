@@ -64,6 +64,28 @@ fn turn_start_request(id: u64, prompt: &str) -> JsonRpcRequest {
     )
 }
 
+async fn initialize_connection<M: Model + Send + 'static>(
+    connection: &mut AppServerConnection<M>,
+    client_name: &str,
+) {
+    connection
+        .handle_request(initialize_request(1, client_name))
+        .await
+        .unwrap();
+}
+
+async fn rpc_result<M: Model + Send + 'static>(
+    connection: &mut AppServerConnection<M>,
+    request: JsonRpcRequest,
+) -> Value {
+    connection
+        .handle_request(request)
+        .await
+        .unwrap()
+        .result
+        .unwrap()
+}
+
 fn rpc_root(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!(
         "mini-agent-{name}-{}-{}",
@@ -278,22 +300,6 @@ async fn wait_for_goal_status<M: Model + Send + 'static>(
     }
 }
 
-async fn wait_for_blocked_goal(connection: &mut AppServerConnection<DoneModel>) -> Value {
-    loop {
-        let notification =
-            tokio::time::timeout(Duration::from_secs(3), connection.next_notification())
-                .await
-                .expect("Goal preparation failure should settle within the test deadline")
-                .unwrap();
-        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
-            let params = notification.params.unwrap();
-            if params["goal"]["status"] == "blocked" {
-                return params;
-            }
-        }
-    }
-}
-
 #[tokio::test]
 async fn exposes_session_world_and_mcp_management() {
     let (mut connection, root) = managed_connection("management-rpc");
@@ -306,15 +312,11 @@ async fn exposes_session_world_and_mcp_management() {
         true
     );
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_SESSION_INFO,
-            serde_json::json!({}),
-        ))
-        .await
-        .unwrap();
-    let result = response.result.unwrap();
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(2, METHOD_SESSION_INFO, serde_json::json!({})),
+    )
+    .await;
     assert!(result["value"].is_null());
     assert_eq!(
         result["actionId"], 1,
@@ -323,29 +325,21 @@ async fn exposes_session_world_and_mcp_management() {
     assert_eq!(result["actionSequence"], 1);
     assert_eq!(result["stateRevision"], 0);
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
-            3,
-            METHOD_WORLD_STATE,
-            serde_json::json!({}),
-        ))
-        .await
-        .unwrap();
-    let result = response.result.unwrap();
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(3, METHOD_WORLD_STATE, serde_json::json!({})),
+    )
+    .await;
     assert_eq!(result["value"]["workspace"], root.display().to_string());
     assert_eq!(result["actionId"], 2);
     assert_eq!(result["actionSequence"], 2);
     assert_eq!(result["stateRevision"], 0);
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
-            4,
-            METHOD_MCP_STATUS,
-            serde_json::json!({}),
-        ))
-        .await
-        .unwrap();
-    let result = response.result.unwrap();
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(4, METHOD_MCP_STATUS, serde_json::json!({})),
+    )
+    .await;
     assert_eq!(result["value"]["toolCount"], 0);
     assert_eq!(result["actionId"], 3);
     assert_eq!(result["actionSequence"], 3);
@@ -447,13 +441,11 @@ async fn requires_initialize_and_handles_turn_start() {
 #[tokio::test]
 async fn exposes_read_only_workflow_state_from_thread_goal() {
     let (mut connection, root) = managed_connection("workflow-rpc");
-    connection
-        .handle_request(initialize_request(1, "workflow-test"))
-        .await
-        .unwrap();
+    initialize_connection(&mut connection, "workflow-test").await;
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
             2,
             METHOD_THREAD_SETTINGS_UPDATE,
             serde_json::json!({
@@ -461,37 +453,31 @@ async fn exposes_read_only_workflow_state_from_thread_goal() {
                 "collaborationMode": {"mode": "plan"},
                 "builtinTools": ["shell", "read_file"]
             }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.result.unwrap()["stateRevision"], 1);
+        ),
+    )
+    .await;
+    assert_eq!(result["stateRevision"], 1);
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
             3,
             METHOD_THREAD_GOAL_SET,
             serde_json::json!({
                 "threadId": "thread-1",
                 "objective": "rpc goal"
             }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(
-        response.result.unwrap()["value"]["goal"]["status"],
-        "active"
-    );
-    wait_for_blocked_goal(&mut connection).await;
+        ),
+    )
+    .await;
+    assert_eq!(result["value"]["goal"]["status"], "active");
+    wait_for_goal_status(&mut connection, "blocked").await;
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
-            4,
-            METHOD_WORKFLOW_STATE,
-            serde_json::json!({}),
-        ))
-        .await
-        .unwrap();
-    let result = response.result.unwrap();
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(4, METHOD_WORKFLOW_STATE, serde_json::json!({})),
+    )
+    .await;
     let state = result["value"].clone();
     assert_eq!(state["collaborationMode"]["mode"], "plan");
     assert_eq!(state["goal"]["status"], "blocked");
@@ -503,10 +489,7 @@ async fn exposes_read_only_workflow_state_from_thread_goal() {
 #[tokio::test]
 async fn broadcasts_thread_settings_updates_with_action_revision() {
     let (mut connection, root) = managed_connection("thread-settings-notification");
-    connection
-        .handle_request(initialize_request(1, "thread-settings-test"))
-        .await
-        .unwrap();
+    initialize_connection(&mut connection, "thread-settings-test").await;
 
     let response = connection
         .handle_request(JsonRpcRequest::request(
@@ -542,10 +525,7 @@ async fn broadcasts_thread_settings_updates_with_action_revision() {
 #[tokio::test]
 async fn preserves_cross_stream_notification_order() {
     let (mut connection, root) = managed_connection("cross-stream-order");
-    connection
-        .handle_request(initialize_request(1, "cross-stream-test"))
-        .await
-        .unwrap();
+    initialize_connection(&mut connection, "cross-stream-test").await;
     connection
         .handle_request(JsonRpcRequest::request(
             2,
@@ -577,30 +557,29 @@ async fn preserves_cross_stream_notification_order() {
         connection.next_notification().await.unwrap().method,
         mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED
     );
-    wait_for_blocked_goal(&mut connection).await;
+    wait_for_goal_status(&mut connection, "blocked").await;
     std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]
 async fn exposes_codex_shaped_thread_goal_lifecycle() {
     let (mut connection, root) = managed_connection("thread-goal-rpc");
-    connection
-        .handle_request(initialize_request(1, "thread-goal-test"))
-        .await
-        .unwrap();
+    initialize_connection(&mut connection, "thread-goal-test").await;
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
             2,
             METHOD_THREAD_GOAL_GET,
             serde_json::json!({"threadId": "thread-1"}),
-        ))
-        .await
-        .unwrap();
-    assert!(response.result.unwrap()["value"]["goal"].is_null());
+        ),
+    )
+    .await;
+    assert!(result["value"]["goal"].is_null());
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
             3,
             METHOD_THREAD_GOAL_SET,
             serde_json::json!({
@@ -608,10 +587,9 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
                 "objective": "ship the next iteration",
                 "tokenBudget": 1200
             }),
-        ))
-        .await
-        .unwrap();
-    let result = response.result.unwrap();
+        ),
+    )
+    .await;
     assert_eq!(
         result["value"]["goal"]["objective"],
         "ship the next iteration"
@@ -640,32 +618,34 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     assert_eq!(notification["goal"]["objective"], "ship the next iteration");
     assert_eq!(notification["turnId"], "turn-1");
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
             4,
             METHOD_THREAD_GOAL_SET,
             serde_json::json!({
                 "threadId": "thread-1",
                 "objective": "replace after verifier preparation failure"
             }),
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     assert_eq!(
-        response.result.unwrap()["value"]["goal"]["objective"],
+        result["value"]["goal"]["objective"],
         "replace after verifier preparation failure"
     );
-    wait_for_blocked_goal(&mut connection).await;
+    wait_for_goal_status(&mut connection, "blocked").await;
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
             5,
             METHOD_THREAD_GOAL_CLEAR,
             serde_json::json!({"threadId": "thread-1"}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.result.unwrap()["value"]["cleared"], true);
+        ),
+    )
+    .await;
+    assert_eq!(result["value"]["cleared"], true);
     loop {
         let notification = connection.next_notification().await.unwrap();
         if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_CLEARED {
@@ -673,15 +653,16 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
         }
     }
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
+    let result = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
             6,
             METHOD_THREAD_GOAL_GET,
             serde_json::json!({"threadId": "thread-1"}),
-        ))
-        .await
-        .unwrap();
-    assert!(response.result.unwrap()["value"]["goal"].is_null());
+        ),
+    )
+    .await;
+    assert!(result["value"]["goal"].is_null());
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -707,10 +688,7 @@ async fn resumes_settled_goal_without_replaying_turn() {
         root,
         crate::workflows::GoalLimits::default(),
     );
-    connection
-        .handle_request(initialize_request(1, "goal-resume-test"))
-        .await
-        .unwrap();
+    initialize_connection(&mut connection, "goal-resume-test").await;
 
     let notification = loop {
         let notification =
@@ -744,10 +722,7 @@ async fn enforces_goal_step_budget_at_the_core_boundary() {
             ..crate::workflows::GoalLimits::default()
         },
     );
-    connection
-        .handle_request(initialize_request(1, "goal-step-budget-test"))
-        .await
-        .unwrap();
+    initialize_connection(&mut connection, "goal-step-budget-test").await;
     connection
         .handle_request(JsonRpcRequest::request(
             2,
@@ -772,10 +747,7 @@ async fn records_goal_usage_and_enforces_token_budget() {
         "goal-token-budget",
         crate::workflows::GoalLimits::default(),
     );
-    connection
-        .handle_request(initialize_request(1, "goal-token-budget-test"))
-        .await
-        .unwrap();
+    initialize_connection(&mut connection, "goal-token-budget-test").await;
     connection
         .handle_request(JsonRpcRequest::request(
             2,
@@ -807,10 +779,7 @@ async fn enforces_goal_timeout_with_cooperative_cancellation() {
             ..crate::workflows::GoalLimits::default()
         },
     );
-    connection
-        .handle_request(initialize_request(1, "goal-timeout-test"))
-        .await
-        .unwrap();
+    initialize_connection(&mut connection, "goal-timeout-test").await;
     connection
         .handle_request(JsonRpcRequest::request(
             2,
@@ -905,20 +874,6 @@ async fn rejects_an_unavailable_requested_provider() {
 
     assert_eq!(response.error.unwrap().code, -32602);
     assert!(!connection.initialized());
-}
-
-#[tokio::test]
-async fn projects_core_events_as_notifications() {
-    let mut connection = connection();
-    let _ = connection
-        .handle_request(initialize_request(1, "test"))
-        .await;
-    let _ = connection
-        .handle_request(turn_start_request(2, "hello"))
-        .await;
-    let notification = connection.next_notification().await.unwrap();
-    assert_eq!(notification.method, METHOD_TURN_EVENT);
-    assert!(notification.id.is_none());
 }
 
 #[tokio::test]
@@ -1196,37 +1151,6 @@ async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
         .await
         .unwrap();
     assert_eq!(thread.result.unwrap()["value"]["status"], "idle");
-}
-
-#[tokio::test]
-async fn forwards_approval_response_through_json_rpc_connection() {
-    let server = connection().server.clone();
-    let broker = ApprovalBroker::new();
-    let requester = broker.clone();
-    let mut connection = AppServerConnection::with_approval_broker_and_capability_manifest(
-        server,
-        broker.clone(),
-        default_capability_manifest(),
-    );
-    let _ = connection
-        .handle_request(initialize_request(1, "approval-test"))
-        .await;
-    let task = tokio::task::spawn_blocking(move || requester.request("edit file"));
-    let pending = connection.next_approval_request().await;
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_APPROVAL_RESPOND,
-            serde_json::json!(ApprovalRespondParams {
-                request_id: pending.request_id,
-                approved: true,
-                remember: false,
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.result.unwrap()["accepted"], true);
-    assert!(task.await.unwrap().unwrap());
 }
 
 #[tokio::test]
