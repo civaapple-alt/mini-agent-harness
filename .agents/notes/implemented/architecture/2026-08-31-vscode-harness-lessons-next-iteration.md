@@ -2081,3 +2081,31 @@ preparation failure 全部行为证据。
 
 Decision: **accept this bounded cleanup batch**. Runtime is `233` lines below the
 `18,799` target; release-source cleanup still needs `476` lines to reach `27,150`.
+
+#### 2026-09-03：Capabilities post-admission outcome projection 收敛
+
+本批将 built-in Workspace 与 MCP runtime 中重复的
+`Result<String, ToolError> -> ToolExecutionOutcome` 映射收敛到 Capabilities
+crate 内部 helper。审批前的 legacy `execute`、审批后的
+`execute_after_admission`、沙箱和工具副作用顺序均未改变。
+
+本批六项准入记录：
+
+```text
+1. Layer: Capabilities internal outcome projection; ToolRouter, ToolHandler,
+   Host ToolOrchestrator, approval, sandbox, and Core event boundaries are unchanged.
+2. Duplicate responsibility: five built-in/MCP post-admission paths repeated the
+   same success/error conversion.
+3. Replace vs add: one crate-private helper replaces repeated mapping code; no new
+   execution path, public API, or compatibility layer is added.
+4. Net line delta: runtime `18,566 -> 18,566` (`0`); release Rust source
+   `27,626 -> 27,620` (`-6`).
+5. Visible surface: no model-visible input, event, persistence, or public protocol
+   behavior changes; only internal result projection changed.
+6. Boundary evidence: `cargo test -p mini-agent-capabilities` (60 passed),
+   `cargo fmt --all`, `git diff --check`, and `python scripts/line_budget.py all`
+   passed.
+```
+
+Decision: **accept this bounded cleanup batch**. Runtime remains `233` lines below
+the `18,799` target; release-source cleanup still needs `470` lines to reach `27,150`.

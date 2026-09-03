@@ -181,10 +181,7 @@ impl ToolRuntime for McpTool {
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
-        self.call(&request.arguments).map_or_else(
-            |error| ToolExecutionOutcome::failed(error.to_string()),
-            ToolExecutionOutcome::completed,
-        )
+        crate::into_tool_outcome(self.call(&request.arguments))
     }
 }
 

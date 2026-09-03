@@ -91,11 +91,8 @@ impl ToolRuntime for ReadImage {
             .workspace
             .local_file_path_with_admission(&request.arguments)
         {
-            Ok((path, _)) => self.read(path).map_or_else(
-                |error| ToolExecutionOutcome::failed(error.to_string()),
-                ToolExecutionOutcome::completed,
-            ),
-            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+            Ok((path, _)) => crate::into_tool_outcome(self.read(path)),
+            Err(error) => crate::into_tool_outcome(Err(error)),
         }
     }
 }
@@ -204,11 +201,8 @@ impl ToolRuntime for EditFile {
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
         match self.prepared(&request.arguments) {
-            Ok((path, updated)) => self.write(&path, updated).map_or_else(
-                |error| ToolExecutionOutcome::failed(error.to_string()),
-                ToolExecutionOutcome::completed,
-            ),
-            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+            Ok((path, updated)) => crate::into_tool_outcome(self.write(&path, updated)),
+            Err(error) => crate::into_tool_outcome(Err(error)),
         }
     }
 }
@@ -276,11 +270,8 @@ impl ToolRuntime for WriteFile {
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
         match self.prepared(&request.arguments) {
-            Ok((path, content)) => self.write(&path, &content).map_or_else(
-                |error| ToolExecutionOutcome::failed(error.to_string()),
-                ToolExecutionOutcome::completed,
-            ),
-            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+            Ok((path, content)) => crate::into_tool_outcome(self.write(&path, &content)),
+            Err(error) => crate::into_tool_outcome(Err(error)),
         }
     }
 }

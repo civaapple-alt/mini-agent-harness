@@ -79,3 +79,12 @@ pub const BUILTIN_EXTENSION_PROVIDER: &str = "builtin";
 
 /// Stable identifier for the built-in policy provider.
 pub const BUILTIN_POLICY_PROVIDER: &str = "builtin";
+
+fn into_tool_outcome(
+    result: Result<String, mini_agent_protocol::ToolError>,
+) -> mini_agent_protocol::ToolExecutionOutcome {
+    result.map_or_else(
+        |error| mini_agent_protocol::ToolExecutionOutcome::failed(error.to_string()),
+        mini_agent_protocol::ToolExecutionOutcome::completed,
+    )
+}

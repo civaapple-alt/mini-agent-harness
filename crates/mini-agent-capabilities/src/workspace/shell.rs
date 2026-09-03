@@ -40,10 +40,7 @@ impl ToolRuntime for Shell {
                 self.ensure_allowed(command)
                     .and_then(|_| self.run_command(command))
             });
-        match result {
-            Ok(content) => ToolExecutionOutcome::completed(content),
-            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
-        }
+        crate::into_tool_outcome(result)
     }
 }
 

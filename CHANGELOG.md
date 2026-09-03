@@ -46,6 +46,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **Goal Runtime test fixtures:** share settled-checkpoint setup and pending
   verifier construction while retaining clear, approved, rejected, failed, stale,
   and preparation-error coverage.
+- **Capabilities outcome mapping:** share the post-admission success/error
+  projection used by built-in and MCP runtimes without changing execution order.
 - **Capabilities runtime/test cleanup:** share the identical blocking-runtime
   helper and remove lower-level duplicate path-policy, Shell admission,
   bounded-capture, and Docker availability tests; public approval, bounded

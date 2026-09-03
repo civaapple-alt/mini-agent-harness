@@ -378,7 +378,7 @@ admission confirmations is checked exactly once; reviewers remain responsible fo
 answer quality.
 
 The current hard-budget snapshot is runtime `18,566 / 20,000` lines and release
-Rust source `27,626 / 30,000` lines, excluding the experimental CLI/REPL. The
+Rust source `27,620 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.
