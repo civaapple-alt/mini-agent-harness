@@ -755,6 +755,29 @@ The UI should expose the resulting state as blocked, waiting for approval,
 approved by a Project grant, or executing, rather than showing a single
 “allowed” boolean.
 
+### Project-owned approval versus Session-effective settings
+
+`current_project` is a Project-owned approval lifetime, so a matching grant
+can be reused by Sessions in that Web Studio Project. The effective `access`
+and `approval` values still belong to each Runtime/Session and must be visible
+in its status. Joining a Project does not silently turn a Session into
+`current_project`, and it never silently grants `Full access`.
+
+The safe user flow is:
+
+1. The user explicitly enables `current_project` for the Project approval
+   surface and approves the first bounded action.
+2. A new or resumed Session explicitly declares its effective access and
+   approval mode; App Server may reuse the Project grant only when every key
+   field matches.
+3. Machine-wide `Full access` remains an explicit high-risk Runtime/Session
+   choice. If a future “apply to all Sessions” control is offered, it must be
+   a separate, visible Project action with high-risk confirmation, not an
+   implicit Project default or a Profile.
+
+This gives the Project the requested shared approval scope without making
+Project membership an ambient machine-wide authorization.
+
 ### Project approval lifecycle
 
 `current_project` means that an approval decision is shared by a Project; it
@@ -1335,6 +1358,10 @@ The following scenarios are required before the proposal can move to
 31. The server resolves Project and WorkspaceSpec identity from its trusted
     registry, rejects stale/cross-scope envelopes, and creates authoritative
     execution IDs; Web cannot fall back to `default` or manufacture a `callId`.
+32. A Project-owned `current_project` grant is reusable by matching Sessions,
+    but Project membership alone never grants `Full access` or changes a
+    Session's effective approval mode; any apply-to-all control is explicit and
+    high-risk.
 
 Provider-backed verification remains opt-in and must not use paid calls by
 default. The normal evidence path uses mock providers, protocol fixtures, and

@@ -589,6 +589,24 @@ SecurityPolicy 设为 Allow”。`current_project` 只在有界生命周期内�
 不能把 `Deny` 变成 `Ask`/`Allow`，也不能扩大路径范围。UI 应展示最终状态为被策略阻止、等待批准、
 由 Project 批准通过或执行中，而不是一个单独的“已允许”布尔值。
 
+### Project 所有的批准与 Session 生效设置
+
+`current_project` 是由 Project 所有的批准生命周期，因此匹配的批准条目可以被该 Web Studio
+Project 下的 Session 复用。每个 Runtime/Session 仍然拥有自己的生效 `access` 和 `approval`
+值，并且必须在状态中可见。Session 加入 Project 不会静默变成 `current_project`，也绝不会
+静默获得 `Full access`。
+
+安全的用户流程是：
+
+1. 用户在 Project 批准面板中明确启用 `current_project`，并批准第一个有界操作；
+2. 新建或恢复的 Session 明确声明自己的生效访问范围和批准模式；App Server 只有在所有关键
+   字段匹配时才能复用 Project 批准；
+3. 整机范围的 `Full access` 始终是 Runtime/Session 的明确高风险选择。如果未来提供“应用到
+   所有 Session”，它必须是单独、可见且需要高风险确认的 Project 操作，不能成为隐式 Project
+   默认值或 Profile。
+
+这样既能提供用户要求的 Project 共享批准范围，也不会把 Project 成员资格变成环境式的整机授权。
+
 ### Project 批准生命周期
 
 `current_project` 表示“批准决定由 Project 共享”，不表示 Project 自动获得某个访问范围。
@@ -1033,6 +1051,9 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture，优�
     `planScratchRoot` 归 Session 所有，不属于 Project 根目录。
 31. Server 必须从可信注册表解析 Project 和 WorkspaceSpec 身份，拒绝过期/跨范围的
     Envelope，并创建权威执行 ID；Web 不能回退到 `default`，也不能伪造 `callId`。
+32. Project 所有的 `current_project` 批准可以被匹配的 Session 复用，但 Project 成员资格本身
+    绝不会授予 `Full access` 或改变 Session 的生效批准模式；任何“应用到全部 Session”的操作
+    都必须明确且需要高风险确认。
 
 Provider 支持的验证保持为可选，默认不能使用付费调用。正常证据路径使用 Mock Provider、
 Protocol Fixture 和 Harness Scenario。
