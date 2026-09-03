@@ -47,20 +47,23 @@ fn goal_runtime_supports_pause_and_resume() {
     let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());
     let state = store.set_goal("pause and resume", None).unwrap();
     let (events, _) = broadcast::channel(4);
-    let mut runtime = super::GoalRuntimeHandle::with_notifications(store, events, None, None);
+    let mut runtime = super::GoalService::with_notifications(store, events, None, None);
 
     let paused = runtime
         .set_goal(None, Some(ThreadGoalStatus::Paused), None)
         .unwrap();
-    assert_eq!(paused.goal_id, state.goal_id);
-    assert_eq!(paused.status, mini_agent_host::GoalStatus::UserPaused);
-    assert_eq!(paused.active_turn_id, None);
+    assert_eq!(paused.current.goal_id, state.goal_id);
+    assert_eq!(
+        paused.current.status,
+        mini_agent_host::GoalStatus::UserPaused
+    );
+    assert_eq!(paused.current.active_turn_id, None);
 
     let resumed = runtime
         .set_goal(None, Some(ThreadGoalStatus::Active), None)
         .unwrap();
-    assert_eq!(resumed.goal_id, state.goal_id);
-    assert_eq!(resumed.status, mini_agent_host::GoalStatus::Running);
+    assert_eq!(resumed.current.goal_id, state.goal_id);
+    assert_eq!(resumed.current.status, mini_agent_host::GoalStatus::Running);
     std::fs::remove_dir_all(session_dir).unwrap();
 }
 

@@ -207,23 +207,15 @@ pub(super) fn handle<M>(
             reply,
         } => {
             let result = mutate(runtime, runtime_revision, |state| {
-                let previous = state
-                    .goal_runtime_handle
-                    .load_goal_state()
-                    .map_err(workflow_error)?;
-                let goal = state
+                let outcome = state
                     .goal_runtime_handle
                     .set_goal(objective.as_deref(), status, token_budget)
                     .map_err(workflow_error)?;
+                let changed = outcome.changed();
+                let goal = outcome.current;
                 state
                     .approval
                     .set_goal_dir(Some(state.goal_runtime_handle.goal_dir()));
-                let changed = previous.as_ref().is_none_or(|previous| {
-                    previous.goal_id != goal.goal_id
-                        || previous.objective != goal.objective
-                        || previous.status != goal.status
-                        || previous.token_budget != goal.token_budget
-                });
                 if changed {
                     let thread_id = state.management.thread_id();
                     if goal.status == mini_agent_host::GoalStatus::Running {

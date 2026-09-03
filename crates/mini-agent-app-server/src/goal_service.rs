@@ -13,6 +13,24 @@ use std::path::PathBuf;
 pub(crate) use mini_agent_host::VerifierVerdict;
 pub(crate) use mini_agent_host::parse_verifier_verdict;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GoalSetOutcome {
+    pub(crate) previous: Option<GoalState>,
+    pub(crate) current: GoalState,
+}
+
+impl GoalSetOutcome {
+    pub(crate) fn changed(&self) -> bool {
+        let Some(previous) = &self.previous else {
+            return true;
+        };
+        previous.goal_id != self.current.goal_id
+            || previous.objective != self.current.objective
+            || previous.status != self.current.status
+            || previous.token_budget != self.current.token_budget
+    }
+}
+
 /// Protocol request boundary for one Thread Goal runtime.
 #[derive(Clone)]
 pub struct ThreadGoalRequestProcessor {

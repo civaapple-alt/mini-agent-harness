@@ -1,3 +1,4 @@
+use crate::goal_service::GoalSetOutcome;
 use crate::goal_service::GoalState;
 use crate::goal_service::VerifierVerdict;
 use crate::notification::RuntimeNotification;
@@ -9,8 +10,6 @@ use mini_agent_protocol::Message;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::TurnId;
 use std::io;
-use std::ops::Deref;
-use std::ops::DerefMut;
 use tokio::sync::broadcast;
 
 #[derive(Clone, Debug)]
@@ -79,19 +78,130 @@ impl GoalService {
             ),
         }
     }
-}
 
-impl Deref for GoalService {
-    type Target = GoalRuntimeHandle;
-
-    fn deref(&self) -> &Self::Target {
-        &self.handle
+    pub(crate) fn plan_active(&self) -> bool {
+        self.handle.plan_active()
     }
-}
 
-impl DerefMut for GoalService {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.handle
+    pub(crate) fn init_plan_mode(&self, prompt: Option<&str>) -> io::Result<std::path::PathBuf> {
+        self.handle.init_plan_mode(prompt)
+    }
+
+    pub(crate) fn disable_plan_mode(&self) -> io::Result<()> {
+        self.handle.disable_plan_mode()
+    }
+
+    pub(crate) fn load_goal_state(&self) -> io::Result<Option<GoalState>> {
+        self.handle.load_goal_state()
+    }
+
+    pub(crate) fn goal_dir(&self) -> std::path::PathBuf {
+        self.handle.goal_dir()
+    }
+
+    pub(crate) fn set_goal(
+        &mut self,
+        objective: Option<&str>,
+        status: Option<ThreadGoalStatus>,
+        token_budget: Option<Option<i64>>,
+    ) -> io::Result<GoalSetOutcome> {
+        let previous = self.handle.load_goal_state()?;
+        let current = self
+            .handle
+            .apply_goal_set(objective, status, token_budget)?;
+        Ok(GoalSetOutcome { previous, current })
+    }
+
+    pub(crate) fn clear_goal(&mut self) -> io::Result<bool> {
+        self.handle.clear_goal()
+    }
+
+    pub(crate) fn reserve_turn(&mut self, goal_id: &str) -> bool {
+        self.handle.reserve_turn(goal_id)
+    }
+
+    pub(crate) fn release_turn(&mut self, goal_id: &str) {
+        self.handle.release_turn(goal_id);
+    }
+
+    pub(crate) fn mark_turn_started(
+        &mut self,
+        goal_id: &str,
+        turn_id: &TurnId,
+    ) -> io::Result<Option<GoalState>> {
+        self.handle.mark_turn_started(goal_id, turn_id)
+    }
+
+    pub(crate) fn mark_turn_settled(
+        &self,
+        goal_id: &str,
+        turn_id: &TurnId,
+    ) -> io::Result<Option<GoalState>> {
+        self.handle.mark_turn_settled(goal_id, turn_id)
+    }
+
+    pub(crate) fn prepare_verification(
+        &mut self,
+        thread_id: ThreadId,
+        goal_id: &str,
+        checkpoint_seq: u64,
+        messages: Vec<Message>,
+    ) -> io::Result<Option<GoalVerificationRequest>> {
+        self.handle
+            .prepare_verification(thread_id, goal_id, checkpoint_seq, messages)
+    }
+
+    pub(crate) fn complete_verification(
+        &mut self,
+        goal_id: &str,
+        turn_id: &TurnId,
+        checkpoint_seq: u64,
+        current_checkpoint_seq: u64,
+        result: Result<(String, VerifierVerdict), String>,
+    ) -> io::Result<Option<GoalState>> {
+        self.handle.complete_verification(
+            goal_id,
+            turn_id,
+            checkpoint_seq,
+            current_checkpoint_seq,
+            result,
+        )
+    }
+
+    pub(crate) fn notify_updated(
+        &self,
+        thread_id: ThreadId,
+        turn_id: Option<TurnId>,
+        state: GoalState,
+    ) {
+        self.handle.notify_updated(thread_id, turn_id, state);
+    }
+
+    pub(crate) fn notify_cleared(&self, thread_id: ThreadId) {
+        self.handle.notify_cleared(thread_id);
+    }
+
+    pub(crate) fn fail_goal_with_reason(&self, reason: &str) -> io::Result<GoalState> {
+        self.handle.fail_goal_with_reason(reason)
+    }
+
+    pub(crate) fn limit_turn(
+        &self,
+        goal_id: &str,
+        turn_id: &TurnId,
+        status: mini_agent_host::GoalStatus,
+        reason: &str,
+    ) -> io::Result<Option<GoalState>> {
+        self.handle.limit_turn(goal_id, turn_id, status, reason)
+    }
+
+    pub(crate) fn record_turn_usage(
+        &self,
+        goal_id: &str,
+        turn_id: &TurnId,
+        tokens: u64,
+    ) -> io::Result<Option<GoalState>> {
+        self.handle.record_turn_usage(goal_id, turn_id, tokens)
     }
 }
 
@@ -132,7 +242,7 @@ impl GoalRuntimeHandle {
         self.store.goal_dir()
     }
 
-    pub(crate) fn set_goal(
+    fn apply_goal_set(
         &mut self,
         objective: Option<&str>,
         status: Option<ThreadGoalStatus>,
