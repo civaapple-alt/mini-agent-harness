@@ -16,7 +16,7 @@ where
         if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
             return response_error(request.id, error);
         }
-        let goals = match self.goal_service() {
+        let goals = match self.thread_goal_request_processor() {
             Ok(goals) => goals,
             Err(error) => return response_error(request.id, error),
         };
@@ -44,7 +44,7 @@ where
         if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
             return response_error(request.id, error);
         }
-        let goals = match self.goal_service() {
+        let goals = match self.thread_goal_request_processor() {
             Ok(goals) => goals,
             Err(error) => return response_error(request.id, error),
         };
@@ -70,7 +70,7 @@ where
         if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
             return response_error(request.id, error);
         }
-        let goals = match self.goal_service() {
+        let goals = match self.thread_goal_request_processor() {
             Ok(goals) => goals,
             Err(error) => return response_error(request.id, error),
         };

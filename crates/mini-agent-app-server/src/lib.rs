@@ -207,7 +207,7 @@ pub mod trace;
 pub mod verifier;
 
 pub use client::LocalAppServerClient;
-pub use goal_service::GoalService;
+pub use goal_service::ThreadGoalRequestProcessor;
 pub use json_rpc::AppServerConnection;
 pub use json_rpc::RuntimeServices;
 pub use json_rpc::StartupServices;

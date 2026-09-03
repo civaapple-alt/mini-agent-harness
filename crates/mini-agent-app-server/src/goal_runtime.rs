@@ -9,6 +9,8 @@ use mini_agent_protocol::Message;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::TurnId;
 use std::io;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use tokio::sync::broadcast;
 
 #[derive(Clone, Debug)]
@@ -55,6 +57,44 @@ pub(crate) struct GoalRuntimeHandle {
     scheduled_goal: Option<String>,
 }
 
+/// Domain owner for one Thread Goal. The handle contains the serialized
+/// runtime behavior; this service is the App Server's mutation boundary.
+pub(crate) struct GoalService {
+    handle: GoalRuntimeHandle,
+}
+
+impl GoalService {
+    pub(crate) fn with_notifications(
+        store: HostWorkflowStore,
+        events: broadcast::Sender<GoalRuntimeEvent>,
+        verifier_config: Option<RuntimeConfig>,
+        notifications: Option<broadcast::Sender<RuntimeNotification>>,
+    ) -> Self {
+        Self {
+            handle: GoalRuntimeHandle::with_notifications(
+                store,
+                events,
+                verifier_config,
+                notifications,
+            ),
+        }
+    }
+}
+
+impl Deref for GoalService {
+    type Target = GoalRuntimeHandle;
+
+    fn deref(&self) -> &Self::Target {
+        &self.handle
+    }
+}
+
+impl DerefMut for GoalService {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.handle
+    }
+}
+
 impl GoalRuntimeHandle {
     pub(crate) fn with_notifications(
         store: HostWorkflowStore,
@@ -99,28 +139,64 @@ impl GoalRuntimeHandle {
         token_budget: Option<Option<i64>>,
     ) -> io::Result<GoalState> {
         let current = self.store.load_goal_state()?;
-        if current
-            .as_ref()
-            .is_some_and(|goal| goal.status == mini_agent_host::GoalStatus::Running)
-        {
-            if objective.is_none()
-                && status.is_none_or(|status| status == ThreadGoalStatus::Active)
-                && token_budget.is_none()
-            {
-                return current
-                    .as_ref()
-                    .cloned()
-                    .ok_or_else(|| io::Error::other("goal state disappeared"));
+        if let Some(current) = current {
+            let default_status = match current.status {
+                mini_agent_host::GoalStatus::Running => ThreadGoalStatus::Active,
+                mini_agent_host::GoalStatus::UserPaused => ThreadGoalStatus::Paused,
+                _ => {
+                    return self.create_goal(objective, status, token_budget);
+                }
+            };
+            let requested_status = status.unwrap_or(default_status);
+            if !matches!(
+                requested_status,
+                ThreadGoalStatus::Active | ThreadGoalStatus::Paused
+            ) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Goal can only transition to active or paused",
+                ));
             }
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "running goal must be cleared before replacement",
-            ));
+            let mut goal = if objective.is_some() || token_budget.is_some() {
+                self.store
+                    .update_goal(objective, token_budget)?
+                    .ok_or_else(|| io::Error::other("goal state disappeared"))?
+            } else {
+                current
+            };
+            match (goal.status, requested_status) {
+                (mini_agent_host::GoalStatus::Running, ThreadGoalStatus::Paused) => {
+                    goal = self
+                        .store
+                        .pause_goal()?
+                        .ok_or_else(|| io::Error::other("goal state disappeared"))?;
+                }
+                (mini_agent_host::GoalStatus::UserPaused, ThreadGoalStatus::Active) => {
+                    goal = self
+                        .store
+                        .resume_goal()?
+                        .ok_or_else(|| io::Error::other("goal state disappeared"))?;
+                }
+                _ => {}
+            }
+            if goal.status != mini_agent_host::GoalStatus::Running {
+                self.scheduled_goal = None;
+            }
+            return Ok(goal);
         }
+        self.create_goal(objective, status, token_budget)
+    }
+
+    fn create_goal(
+        &mut self,
+        objective: Option<&str>,
+        status: Option<ThreadGoalStatus>,
+        token_budget: Option<Option<i64>>,
+    ) -> io::Result<GoalState> {
         if status.is_some_and(|status| status != ThreadGoalStatus::Active) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "a new goal must start with active status",
+                "a new Goal must start with active status",
             ));
         }
         let objective = objective
@@ -128,7 +204,7 @@ impl GoalRuntimeHandle {
             .ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "objective is required when creating a goal",
+                    "objective is required when creating a Goal",
                 )
             })?;
         self.scheduled_goal = None;

@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
         let thread_settings = mini_agent_app_server::ThreadSettingsService::new()
             .with_stable_system_prompt(stable_system_prompt);
-        let goals = mini_agent_app_server::GoalService::new(
+        let goals = mini_agent_app_server::ThreadGoalRequestProcessor::new(
             startup_config.workspace(),
             startup_config.goal_limits(),
         )

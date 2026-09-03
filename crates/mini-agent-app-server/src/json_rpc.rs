@@ -5,8 +5,8 @@ use super::AppServerError;
 use super::ApprovalBroker;
 use super::ApprovalEvent;
 use super::ApprovalRequest;
-use super::GoalService;
 use super::RuntimeManagementService;
+use super::ThreadGoalRequestProcessor;
 use super::ThreadSettingsService;
 use crate::action::ActionFailure;
 use crate::action::ActionResponse;
@@ -134,7 +134,7 @@ pub struct AppServerConnection<M> {
 pub struct RuntimeServices<M> {
     management: RuntimeManagementService<M>,
     thread_settings: ThreadSettingsService,
-    goals: GoalService,
+    goals: ThreadGoalRequestProcessor,
     state: RuntimeCommandClient,
     notifications: broadcast::Sender<RuntimeNotification>,
 }
@@ -143,7 +143,7 @@ impl<M> RuntimeServices<M> {
     pub fn new(
         management: RuntimeManagementService<M>,
         thread_settings: ThreadSettingsService,
-        goals: GoalService,
+        goals: ThreadGoalRequestProcessor,
     ) -> Result<Self, String>
     where
         M: Model + Send + 'static,
@@ -169,7 +169,7 @@ impl<M> RuntimeServices<M> {
         &self.thread_settings
     }
 
-    fn goals(&self) -> &GoalService {
+    fn thread_goal_processor(&self) -> &ThreadGoalRequestProcessor {
         &self.goals
     }
 
@@ -469,10 +469,12 @@ where
             .ok_or_else(|| JsonRpcError::server_error("thread settings service is unavailable"))
     }
 
-    pub(crate) fn goal_service(&self) -> Result<&GoalService, JsonRpcError> {
+    pub(crate) fn thread_goal_request_processor(
+        &self,
+    ) -> Result<&ThreadGoalRequestProcessor, JsonRpcError> {
         self.runtime
             .as_ref()
-            .map(RuntimeServices::goals)
+            .map(RuntimeServices::thread_goal_processor)
             .ok_or_else(|| JsonRpcError::server_error("thread goal service is unavailable"))
     }
 

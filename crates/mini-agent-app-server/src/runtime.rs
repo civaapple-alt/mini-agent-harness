@@ -10,7 +10,7 @@ use crate::AppServerConnection;
 use crate::LocalAppServerClient;
 use crate::RuntimeManagementService;
 use crate::RuntimeServices;
-use crate::goal_service::GoalService;
+use crate::goal_service::ThreadGoalRequestProcessor;
 use crate::thread_settings::ThreadSettingsService;
 use mini_agent_app_server_protocol::CapabilityManifest as ProtocolCapabilityManifest;
 use mini_agent_app_server_protocol::ContextLimits as ProtocolContextLimits;
@@ -203,7 +203,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         );
         let thread_settings =
             ThreadSettingsService::new().with_stable_system_prompt(stable_system_prompt.clone());
-        let goals = GoalService::new(
+        let goals = ThreadGoalRequestProcessor::new(
             session
                 .as_ref()
                 .and_then(|opened| opened.store.path().parent().map(PathBuf::from))

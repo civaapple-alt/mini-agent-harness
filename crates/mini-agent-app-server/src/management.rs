@@ -9,8 +9,8 @@ use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::goal_runtime::GoalRuntimeEvent;
-use crate::goal_runtime::GoalRuntimeHandle;
-use crate::goal_service::GoalService;
+use crate::goal_runtime::GoalService;
+use crate::goal_service::ThreadGoalRequestProcessor;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeCommand;
 use crate::runtime_actor::RuntimeRequest;
@@ -35,7 +35,7 @@ use tokio::sync::oneshot;
 
 pub(crate) struct RuntimeActorState {
     pub(crate) management: RuntimeManagementState,
-    pub(crate) goal_runtime_handle: GoalRuntimeHandle,
+    pub(crate) goal_runtime_handle: GoalService,
     pub(crate) commands: mpsc::Sender<Command>,
     pub(crate) approval: ApprovalController,
     pub(crate) builtin_tools: mini_agent_host::BuiltinToolSelection,
@@ -141,8 +141,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     pub(crate) fn bind_thread_services(
         self,
         settings: ThreadSettingsService,
-        goals: GoalService,
-    ) -> Result<(Self, ThreadSettingsService, GoalService), String> {
+        goals: ThreadGoalRequestProcessor,
+    ) -> Result<(Self, ThreadSettingsService, ThreadGoalRequestProcessor), String> {
         let Self {
             server,
             state,
@@ -160,7 +160,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .map_err(|error| error.to_string())?
             .map(|_| store.goal_dir());
         approval.set_goal_dir(goal_dir);
-        let goal_runtime_handle = GoalRuntimeHandle::with_notifications(
+        let goal_service = GoalService::with_notifications(
             store,
             goal_notifications.clone(),
             verifier_config.clone(),
@@ -170,7 +170,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         server
             .install_runtime_state(RuntimeActorState {
                 management,
-                goal_runtime_handle,
+                goal_runtime_handle: goal_service,
                 commands,
                 approval: approval.clone(),
                 builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
@@ -183,7 +183,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         let client =
             RuntimeCommandClient::new(server.command_sender(), server.runtime_revision_handle());
         let settings = ThreadSettingsService::bound(client.clone(), stable_system_prompt);
-        let goals = GoalService::bound(client, verifier_config);
+        let goals = ThreadGoalRequestProcessor::bound(client, verifier_config);
         Ok((
             Self {
                 server,

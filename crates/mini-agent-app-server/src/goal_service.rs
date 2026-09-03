@@ -13,15 +13,15 @@ use std::path::PathBuf;
 pub(crate) use mini_agent_host::VerifierVerdict;
 pub(crate) use mini_agent_host::parse_verifier_verdict;
 
-/// App Server Goal boundary for one Thread runtime.
+/// Protocol request boundary for one Thread Goal runtime.
 #[derive(Clone)]
-pub struct GoalService {
+pub struct ThreadGoalRequestProcessor {
     store: Option<HostWorkflowStore>,
     client: Option<RuntimeCommandClient>,
     verifier_config: Option<RuntimeConfig>,
 }
 
-impl GoalService {
+impl ThreadGoalRequestProcessor {
     pub fn new(session_dir: impl Into<PathBuf>, goal_limits: GoalLimits) -> Self {
         Self {
             store: Some(HostWorkflowStore::new(session_dir, goal_limits)),

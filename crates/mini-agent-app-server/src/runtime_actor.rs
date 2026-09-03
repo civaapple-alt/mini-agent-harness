@@ -230,11 +230,16 @@ pub(super) fn handle<M>(
                     .approval
                     .set_goal_dir(Some(state.goal_runtime_handle.goal_dir()));
                 let changed = previous.as_ref().is_none_or(|previous| {
-                    previous.goal_id != goal.goal_id || previous.token_budget != goal.token_budget
+                    previous.goal_id != goal.goal_id
+                        || previous.objective != goal.objective
+                        || previous.status != goal.status
+                        || previous.token_budget != goal.token_budget
                 });
                 if changed {
                     let thread_id = state.management.thread_id();
-                    schedule_goal_turn(state, &goal)?;
+                    if goal.status == mini_agent_host::GoalStatus::Running {
+                        schedule_goal_turn(state, &goal)?;
+                    }
                     state
                         .goal_runtime_handle
                         .notify_updated(thread_id, None, goal.clone());
@@ -312,7 +317,7 @@ pub(super) fn handle_running<M>(
         return;
     }
     let command = request.command;
-    if command.is_mutation() {
+    if command.is_mutation() && !is_safe_goal_mutation_while_running(&command) {
         reject_runtime(command, receipt, AppServerError::Busy);
     } else {
         handle(
@@ -324,6 +329,19 @@ pub(super) fn handle_running<M>(
             runtime_revision,
         );
     }
+}
+
+fn is_safe_goal_mutation_while_running(command: &RuntimeCommand) -> bool {
+    matches!(
+        command,
+        RuntimeCommand::ThreadGoalClear { .. }
+            | RuntimeCommand::ThreadGoalSet {
+                objective: None,
+                status: Some(mini_agent_app_server_protocol::ThreadGoalStatus::Paused),
+                token_budget: None,
+                ..
+            }
+    )
 }
 
 fn check_revision(

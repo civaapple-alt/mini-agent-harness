@@ -146,6 +146,38 @@ impl HostWorkflowStore {
         Ok(state)
     }
 
+    pub fn update_goal(
+        &self,
+        objective: Option<&str>,
+        token_budget: Option<Option<i64>>,
+    ) -> io::Result<Option<GoalState>> {
+        if objective.is_some_and(|value| value.trim().is_empty()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "goal objective must not be empty",
+            ));
+        }
+        if token_budget.flatten().is_some_and(|budget| budget <= 0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "goal token budget must be positive",
+            ));
+        }
+        update_goal_state(&self.session_dir, |state| {
+            if objective.is_none() && token_budget.is_none() {
+                return Ok(Some(state.clone()));
+            }
+            if let Some(objective) = objective {
+                state.objective = objective.trim().to_string();
+            }
+            if let Some(token_budget) = token_budget {
+                state.token_budget = token_budget;
+            }
+            state.updated_at_ms = current_time_ms();
+            Ok(Some(state.clone()))
+        })
+    }
+
     pub fn load_goal_state(&self) -> io::Result<Option<GoalState>> {
         load_goal_state(&self.session_dir)
     }
@@ -200,8 +232,12 @@ impl HostWorkflowStore {
         advance_goal_milestone(&self.session_dir, verdict)
     }
 
-    pub fn pause_goal(&self) -> io::Result<()> {
+    pub fn pause_goal(&self) -> io::Result<Option<GoalState>> {
         pause_goal(&self.session_dir)
+    }
+
+    pub fn resume_goal(&self) -> io::Result<Option<GoalState>> {
+        resume_goal(&self.session_dir)
     }
 
     pub fn fail_goal_with_reason(&self, reason: &str) -> io::Result<GoalState> {
@@ -607,17 +643,28 @@ pub fn advance_goal_milestone(
     Ok(state)
 }
 
-pub fn pause_goal(session_dir: &Path) -> io::Result<()> {
-    let goal_dir = session_dir.join("goal");
-    let state_file = goal_dir.join("state.json");
-    if let Some(mut state) = load_goal_state(session_dir)? {
+pub fn pause_goal(session_dir: &Path) -> io::Result<Option<GoalState>> {
+    update_goal_state(session_dir, |state| {
+        if state.status == GoalStatus::UserPaused {
+            return Ok(None);
+        }
         state.status = GoalStatus::UserPaused;
+        state.active_turn_id = None;
+        state.active_turn_settled = false;
         state.updated_at_ms = current_time_ms();
-        let state_json = serde_json::to_vec_pretty(&state)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        fs::write(state_file, state_json)?;
-    }
-    Ok(())
+        Ok(Some(state.clone()))
+    })
+}
+
+pub fn resume_goal(session_dir: &Path) -> io::Result<Option<GoalState>> {
+    update_goal_state(session_dir, |state| {
+        if state.status != GoalStatus::UserPaused {
+            return Ok(None);
+        }
+        state.status = GoalStatus::Running;
+        state.updated_at_ms = current_time_ms();
+        Ok(Some(state.clone()))
+    })
 }
 
 #[cfg(test)]

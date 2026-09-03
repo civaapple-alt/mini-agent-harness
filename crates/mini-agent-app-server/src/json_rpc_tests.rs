@@ -217,7 +217,7 @@ fn managed_connection_at<M: Model + Send + 'static>(
     goal_limits: crate::goal_service::GoalLimits,
 ) -> (AppServerConnection<M>, std::path::PathBuf) {
     let thread_settings = ThreadSettingsService::new();
-    let goals = GoalService::new(root.clone(), goal_limits);
+    let goals = ThreadGoalRequestProcessor::new(root.clone(), goal_limits);
     let server = crate::tests::server(model);
     let management = RuntimeManagementService::new(
         server.clone(),
@@ -675,6 +675,106 @@ async fn resumes_settled_goal_without_replaying_turn() {
 }
 
 #[tokio::test]
+async fn exposes_goal_pause_and_resume_through_thread_protocol() {
+    let release = Arc::new(tokio::sync::Notify::new());
+    let (mut connection, root) = managed_connection_with(
+        ScenarioModel::Timeout(release.clone()),
+        "thread-goal-pause-resume",
+        crate::goal_service::GoalLimits::default(),
+    );
+    initialize_connection(&mut connection, "thread-goal-pause-resume-test").await;
+
+    let started = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
+            2,
+            METHOD_THREAD_GOAL_SET,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "objective": "pause before the next milestone"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(started["value"]["goal"]["status"], "active");
+    loop {
+        let notification =
+            tokio::time::timeout(Duration::from_secs(3), connection.next_notification())
+                .await
+                .expect("Goal turn should start before pause")
+                .unwrap();
+        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
+            let params = notification.params.unwrap();
+            if params["goal"]["status"] == "active" && params["turnId"] == "turn-1" {
+                break;
+            }
+        }
+    }
+
+    let paused = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
+            3,
+            METHOD_THREAD_GOAL_SET,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "status": "paused"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(paused["value"]["goal"]["status"], "paused");
+
+    release.notify_one();
+    loop {
+        let notification =
+            tokio::time::timeout(Duration::from_secs(3), connection.next_notification())
+                .await
+                .expect("paused Goal turn should settle")
+                .unwrap();
+        if notification.method == METHOD_TURN_EVENT {
+            break;
+        }
+    }
+
+    let root = root;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn resumes_a_paused_goal_through_thread_protocol() {
+    let root = rpc_root("thread-goal-resume");
+    let store = mini_agent_host::HostWorkflowStore::new(
+        root.clone(),
+        crate::goal_service::GoalLimits::default(),
+    );
+    let state = store
+        .set_goal("resume before the next milestone", None)
+        .unwrap();
+    store.pause_goal().unwrap();
+    let (mut connection, root) =
+        managed_connection_at(DoneModel, root, crate::goal_service::GoalLimits::default());
+    initialize_connection(&mut connection, "thread-goal-resume-test").await;
+
+    let resumed = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
+            2,
+            METHOD_THREAD_GOAL_SET,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "status": "active"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(resumed["value"]["goal"]["status"], "active");
+    assert_eq!(resumed["value"]["goal"]["objective"], state.objective);
+    wait_for_goal_status(&mut connection, "blocked").await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn enforces_goal_step_budget_at_the_core_boundary() {
     let (mut connection, root) = managed_connection_with(
         ScenarioModel::StepLimit,
@@ -807,7 +907,8 @@ async fn binds_active_goal_workspace_to_approval_controller() {
         approval,
     );
     let thread_settings = ThreadSettingsService::new();
-    let goals = GoalService::new(root.clone(), crate::goal_service::GoalLimits::default());
+    let goals =
+        ThreadGoalRequestProcessor::new(root.clone(), crate::goal_service::GoalLimits::default());
     let _connection = AppServerConnection::new(server)
         .with_runtime_services(RuntimeServices::new(management, thread_settings, goals).unwrap());
     assert_eq!(
