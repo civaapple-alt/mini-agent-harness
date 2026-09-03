@@ -420,34 +420,73 @@ App Server 初始化和 Runtime 创建应直接接收类型化输入：Provider/
 
 ### Approval 协议
 
-保留现有方法，通过增加有界字段来扩展，不创建第二套批准传输：
+保留 `approval/request`、`approval/respond` 和 `approval/resolved` 方法名，但将参数替换为
+下面这套类型化、有界的模型；不创建第二套批准传输，也不在新公共契约中保留旧字段：
 
 ```json
 {
   "requestId": "approval-1",
+  "projectId": "project-1",
+  "workspaceId": "workspace-1",
+  "workspaceRevision": 3,
+  "sessionId": "session-a",
   "threadId": "thread-1",
   "turnId": "turn-1",
   "callId": "call-1",
   "toolName": "shell",
-  "action": "shell command `cargo test`",
-  "accessScopes": ["project", "machine"],
-  "approvalModes": ["per_action", "current_session", "current_project"]
+  "actionClass": "shell_execute",
+  "actionSummary": "shell command: cargo test",
+  "pathScope": {"kind": "machine"},
+  "access": "machine",
+  "allowedApprovalModes": ["per_action", "current_session", "current_project"],
+  "highRisk": true
 }
 ```
+
+`pathScope` 必须是规范化的有界路径描述：Project 范围只能引用当前 WorkspaceSpec 的根
+目录，machine 范围使用明确的 `machine` 标记；不能把无限制原始命令、密钥或任意 Prompt
+文本保存为批准规则。`actionSummary` 只用于 UI 展示，不是准入匹配的唯一身份。
 
 ```json
 {
   "requestId": "approval-1",
-  "approved": true,
+  "decision": "approve",
   "access": "machine",
   "approval": "current_project",
   "reason": ""
 }
 ```
 
-`approval/resolved` 必须回显最终访问范围、批准模式和关联字段。新的线协议只接受类型化的
-`access` 和 `approval` 字段；旧的 `remember` 和只有布尔值的批准响应直接拒绝。App Server
-不得再静默地记住每次成功的布尔批准。
+`decision` 只允许 `approve` 或 `deny`。`approval/resolved` 必须回显最终访问范围、批准
+模式和关联字段，并用类型化的 `outcome` 表达 `approved`、`denied`、`expired`、`revoked`
+或 `unavailable`。新的线协议不接受 `approved` 布尔值、旧的 `remember`，或只有布尔值的
+批准响应；修改内部实现时必须删除这些路径，不能继续接受或翻译它们。App Server 不得再
+静默地把一次成功的布尔批准写入全局缓存。
+
+Host 生成请求，App Server 只负责校验关联、排队和路由，SDK 只负责类型解析和传输，FastAPI
+只负责连接映射，Studio 只提交用户决定。响应必须匹配未结算的 `requestId` 及其全部关联
+字段；迟到、重复、跨 Thread/Session/Project 或扩展访问范围的响应必须拒绝，并且不能
+恢复工具调用。
+
+Host/Capabilities 只允许一条准入顺序：
+
+```text
+校验身份与规范化 pathScope
+    → 检查工具是否已暴露且可用
+    → 应用硬性 Security Deny
+    → 校验 access 是否覆盖目标路径/资源
+    → 应用 Plan 锁和 Sandbox 边界
+    → 若 SecurityPolicy=Allow，直接执行且不创建批准条目
+    → 若 SecurityPolicy=Ask，按完整批准键查找精确匹配
+    → 未命中时向用户请求 typed decision
+    → 仅在 approve 后记录对应生命周期的有界批准并执行
+```
+
+因此，`Full access` 只是把当前 Runtime/Session 的访问范围设为 machine-wide，不能越过
+硬性 Deny、Plan 锁、Sandbox 或工具 allowlist；它也不保证每种工具都跳过询问。
+`current_project` 只作用于 Host 判定为可询问的操作，并且只能复用精确匹配的批准键。
+这两个设置叠加后才构成 Auto Copilot 所需的执行能力和批准生命周期，但仍不是无条件的
+allow-all。
 
 `current_project` 决定由 App Server/Host 的批准权威负责，并以 `projectId` 为所有者；
 Web `state.json` 只能展示或引用该设置，不能保存或执行批准。只有在 WorkspaceSpec revision、
@@ -852,6 +891,10 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture，优�
 25. `current_project` 在同一 App Server 控制面内跨 Session 切换和新建 Session 共享，撤销、
     WorkspaceSpec revision 变化和 App Server 重启都会阻止后续复用；Web `state.json` 不会
     恢复该批准。
+26. 批准 Fixture 接受 `decision=approve|deny` 和类型化的 `outcome`，回显完整关联字段，
+    并拒绝 `approved` 布尔值、`remember` 以及迟到、重复、跨 Project 或扩大范围的响应。
+27. Host 准入顺序证明 `Full access` 只扩大访问范围，`current_project` 只复用可询问操作的
+    精确批准；硬性 Deny、Plan 锁、Sandbox 和工具可用性不能被任一 UI 选择覆盖。
 
 Provider 支持的验证保持为可选，默认不能使用付费调用。正常证据路径使用 Mock Provider、
 Protocol Fixture 和 Harness Scenario。

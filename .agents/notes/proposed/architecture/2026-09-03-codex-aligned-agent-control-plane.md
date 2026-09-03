@@ -555,37 +555,83 @@ input is rejected; it is not parsed or translated.
 
 ### Approval protocol
 
-Keep the existing methods and add bounded fields rather than inventing a second
-approval transport:
+Keep the method names `approval/request`, `approval/respond`, and
+`approval/resolved`, but replace their parameters with the following typed,
+bounded models. Do not invent a second approval transport or retain legacy
+fields in the new public contract:
 
 ```json
 {
   "requestId": "approval-1",
+  "projectId": "project-1",
+  "workspaceId": "workspace-1",
+  "workspaceRevision": 3,
+  "sessionId": "session-a",
   "threadId": "thread-1",
   "turnId": "turn-1",
   "callId": "call-1",
   "toolName": "shell",
-  "action": "shell command `cargo test`",
-  "accessScopes": ["project", "machine"],
-  "approvalModes": ["per_action", "current_session", "current_project"]
+  "actionClass": "shell_execute",
+  "actionSummary": "shell command: cargo test",
+  "pathScope": {"kind": "machine"},
+  "access": "machine",
+  "allowedApprovalModes": ["per_action", "current_session", "current_project"],
+  "highRisk": true
 }
 ```
+
+`pathScope` must be a normalized, bounded path descriptor: Project scope may
+refer only to roots in the current WorkspaceSpec, while machine scope uses an
+explicit `machine` marker. An unbounded raw command, secret, or arbitrary
+prompt text must never be stored as an approval rule. `actionSummary` is for UI
+display and is not the sole admission identity.
 
 ```json
 {
   "requestId": "approval-1",
-  "approved": true,
+  "decision": "approve",
   "access": "machine",
   "approval": "current_project",
   "reason": ""
 }
 ```
 
-`approval/resolved` must echo the final access, approval mode, and correlation
-fields. The new wire contract accepts only the typed `access` and `approval`
-fields; legacy `remember` and boolean-only approval responses are rejected.
-The App Server must no longer silently remember every successful boolean
-approval.
+`decision` accepts only `approve` or `deny`. `approval/resolved` must echo the
+final access, approval mode, and correlation fields, and use a typed `outcome`
+of `approved`, `denied`, `expired`, `revoked`, or `unavailable`. The new wire
+contract rejects an `approved` boolean, legacy `remember`, or a boolean-only
+approval response; internal implementation work must delete those paths rather
+than continue to accept or translate them. The App Server must no longer
+silently write a successful boolean approval into a global cache.
+
+Host creates the request; App Server only validates correlation, queues, and
+routes it; the SDK only transports and parses types; FastAPI only maps
+connections; and Studio only submits the user decision. A response must match
+an unsettled `requestId` and all of its correlation fields. Late, duplicate,
+cross-Thread/Session/Project, or scope-expanding responses are rejected and
+must not resume the tool call.
+
+Host/Capabilities must use one admission order:
+
+```text
+validate identity and normalize pathScope
+    → check that the tool is exposed and available
+    → apply hard Security Deny
+    → verify that access covers the target path/resource
+    → apply Plan lock and Sandbox boundaries
+    → if SecurityPolicy=Allow, execute without creating an approval entry
+    → if SecurityPolicy=Ask, look up an exact approval-key match
+    → on a miss, request a typed decision from the user
+    → record a bounded approval for the selected lifetime only after approve, then execute
+```
+
+`Full access` therefore sets the current Runtime/Session's access scope to
+machine-wide; it cannot bypass hard Deny, the Plan lock, Sandbox, or the tool
+allowlist, and it does not guarantee that every tool skips confirmation.
+`current_project` applies only to actions Host has classified as askable and
+can reuse only an exact approval-key match. Together they provide the execution
+scope and approval lifetime required by Auto Copilot, but they are still not an
+unconditional allow-all.
 
 `current_project` decisions are owned by the App Server/Host approval authority
 and keyed by `projectId`; Web `state.json` may display or reference the setting
@@ -1116,6 +1162,13 @@ The following scenarios are required before the proposal can move to
     Sessions within the same App Server control plane; revocation, a
     WorkspaceSpec revision change, and App Server restart prevent later reuse.
     Web `state.json` never restores the approval.
+26. The approval fixture accepts `decision=approve|deny` and typed `outcome`,
+    echoes every correlation field, and rejects an `approved` boolean,
+    `remember`, or late, duplicate, cross-Project, or scope-expanding responses.
+27. The Host admission trace proves that `Full access` only expands access
+    scope and `current_project` only reuses exact approvals for askable actions;
+    hard Deny, Plan lock, Sandbox, and tool availability cannot be overridden by
+    either UI selection.
 
 Provider-backed verification remains opt-in and must not use paid calls by
 default. The normal evidence path uses mock providers, protocol fixtures, and
