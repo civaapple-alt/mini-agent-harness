@@ -14,50 +14,7 @@ use std::time::Duration;
 fn loads_and_calls_stdio_server_through_rmcp() {
     let root = test_root();
     let script = root.join("server.py");
-    fs::write(
-        &script,
-        r#"import json
-import sys
-import time
-
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get("method")
-    if method == "initialize":
-        result = {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "fixture", "version": "1.0.0"},
-        }
-    elif method == "tools/list":
-        result = {
-            "resultType": "complete",
-            "tools": [{
-                "name": "echo",
-                "description": "Echo text",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"text": {"type": "string"}},
-                    "required": ["text"],
-                },
-            }],
-        }
-    elif method == "tools/call":
-        text = request.get("params", {}).get("arguments", {}).get("text", "")
-        if text == "slow":
-            time.sleep(1)
-        result = {
-            "resultType": "complete",
-            "content": [{"type": "text", "text": "echo:" + text}],
-            "isError": False,
-        }
-    else:
-        continue
-    response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
-    print(json.dumps(response), flush=True)
-"#,
-    )
-    .unwrap();
+    fs::write(&script, include_str!("../testdata/mcp_stdio_server.py")).unwrap();
     fs::create_dir(root.join(".agents")).unwrap();
     let python = python_command();
     let config = McpServerConfig {

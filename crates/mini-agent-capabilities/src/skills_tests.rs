@@ -173,22 +173,7 @@ fn discovers_and_selects_bounded_mcp_transports() {
     let plugin = root.join(".agents/plugins/tools");
     write_plugin_manifest(&plugin, "example.tools");
     let script = root.join("server.py");
-    fs::write(
-        &script,
-        r#"import json
-import sys
-for line in sys.stdin:
-    request = json.loads(line)
-    if request.get("method") == "initialize":
-        result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "fixture", "version": "1.0.0"}}
-    elif request.get("method") == "tools/list":
-        result = {"resultType": "complete", "tools": []}
-    else:
-        continue
-    print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
-"#,
-    )
-    .unwrap();
+    fs::write(&script, include_str!("../testdata/mcp_discovery_server.py")).unwrap();
     fs::write(
         plugin.join("mcp.json"),
         serde_json::to_vec(&json!({

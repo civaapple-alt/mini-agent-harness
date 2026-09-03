@@ -22,6 +22,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   implementations without changing the public lifecycle coverage.
 - **Goal test fixtures:** consolidate repeated verifier verdict construction
   while retaining every Goal transition and retry-budget assertion.
+- **Capabilities test fixtures:** move embedded MCP Python servers into bounded
+  testdata files without changing transport, timeout, or discovery coverage.
 
 ## [0.7.0] - 2026-09-02
 
