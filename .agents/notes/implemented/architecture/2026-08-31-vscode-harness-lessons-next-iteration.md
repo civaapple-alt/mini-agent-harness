@@ -2109,3 +2109,54 @@ crate 内部 helper。审批前的 legacy `execute`、审批后的
 
 Decision: **accept this bounded cleanup batch**. Runtime remains `233` lines below
 the `18,799` target; release-source cleanup still needs `470` lines to reach `27,150`.
+
+#### 2026-09-03：从“工具堆砌”转向少量内核工具与可选能力
+
+本批针对 Harness 的工具面做一次收敛和能力升级，采用 Pi 的设计取向：模型默认只
+看到少数高频、边界清晰的工具，兼容性工具仍由 Host Catalog 显式选择，MCP/外部
+Provider 继续作为 extension 边界。默认 Builtin 从六个收敛为四个：
+`read_file`、`apply_patch`、`shell`、`read_image`；`edit_file`、`write_file`、
+`web_fetch` 保留为可选工具。
+
+`read_file` 不再以 128 KiB 整体失败，改为一次读取有界 UTF-8 source，再返回默认
+200 行、最多 2,000 行且低于 16 KiB 的带行号页面；结果包含 `next_offset`，长文件
+可以继续读取，不需要退回 Shell 的 `Get-Content`。新增 `apply_patch` 复用既有
+Workspace path policy、ApprovalController 和 ToolOrchestrator 边界，支持受限的
+Add/Update/Move/Delete；整个 patch 的路径和 hunk 在任何写入前完成校验，跨文件
+修改不会因为后续 hunk 无法匹配而留下前半段变更；执行阶段若文件系统写入失败，
+会尝试回滚已完成的效果。
+
+本批六项准入记录：
+
+```text
+1. Layer: Capabilities owns ReadFile/ApplyPatch concrete behavior; Host owns the
+   default/available Builtin catalog; App Server Protocol projects the active
+   selection; Core loop, ToolRouter, approval, sandbox, Session, and Actor authority
+   remain unchanged.
+2. Duplicate responsibility: whole-file ReadFile output forced callers to invent a
+   shell fallback, and the Web gateway reconstructed Builtin defaults because the
+   workflow projection omitted the active selection. The new patch tool replaces
+   repeated single-file mutation calls for the Codex-style patch boundary.
+3. Replace vs add: replace ReadFile's hard whole-file cutoff with bounded paging;
+   replace the six-tool default with a four-tool default; add one patch format because
+   prevalidated multi-file mutation cannot be expressed safely by edit/write alone. No new
+   policy, plugin, storage, scheduler, or execution loop framework is introduced.
+4. Net line delta: runtime `18,566 -> 18,614` (`+48`); release Rust source
+   `27,620 -> 28,470` (`+850`). The added source is the bounded patch parser/runtime,
+   paged ReadFile, the workflow projection field, and boundary tests.
+5. Visible surface: model-visible default tools, ReadFile schema/result shape,
+   `thread/settings/update` accepted names, and App Server `workflow/state` now
+   change. No unbounded input is added: patch bytes/files/lines, source bytes, page
+   lines, and rendered output are all capped. Existing MCP/external tool surfaces stay
+   outside Builtin selection.
+6. Boundary evidence: Capabilities tests (65 passed) cover long-source paging,
+   seeking past the former 128 KiB cutoff, patch add/update/delete/move, and
+   validate-before-write behavior. Host tests (30 passed) cover default/available
+   selection and explicit empty selection; App Server tests (43 passed) cover the
+   workflow projection. `cargo check` and `cargo fmt --all` passed; affected Clippy
+   and the Web Python/frontend suites remain part of final validation.
+```
+
+Decision: **accept this bounded capability upgrade**. The default surface is smaller
+while the concrete tools are more useful, and the remaining compatibility tools can be
+enabled explicitly by a Thread or frontend.

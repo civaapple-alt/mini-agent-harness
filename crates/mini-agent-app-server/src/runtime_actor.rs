@@ -179,6 +179,7 @@ pub(super) fn handle<M>(
                             .goal_runtime
                             .load_goal_state()
                             .map_err(workflow_error)?,
+                        state.builtin_tools.names().to_vec(),
                     ))
                 }),
         ),

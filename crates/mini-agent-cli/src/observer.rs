@@ -389,6 +389,7 @@ fn tool_detail(call: &ToolCall) -> Option<String> {
     let argument = match call.name.as_str() {
         "shell" => "command",
         "read_file" | "edit_file" | "write_file" | "read_image" => "path",
+        "apply_patch" => "patch",
         "web_fetch" => "url",
         _ => return None,
     };

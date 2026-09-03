@@ -50,7 +50,7 @@ pub(super) enum RuntimeCommand {
         reply: oneshot::Sender<ActionResult<()>>,
     },
     WorkflowState {
-        reply: oneshot::Sender<ActionResult<(bool, Option<crate::workflows::GoalState>)>>,
+        reply: oneshot::Sender<ActionResult<crate::workflows::WorkflowStateSnapshot>>,
     },
     SetCollaborationMode {
         active: bool,

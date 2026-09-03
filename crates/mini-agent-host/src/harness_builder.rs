@@ -14,6 +14,7 @@ use crate::profile::{
     ToolScope,
 };
 use crate::project_context;
+use crate::tool_catalog::BuiltinToolSelection;
 use crate::tool_orchestrator::ToolOrchestrator;
 use crate::world::WorldState;
 use mini_agent_capabilities::ApprovalController;
@@ -267,6 +268,7 @@ where
     let tool_executor = Arc::new(ToolOrchestrator::new(approval.clone()));
     let tool_registry = ToolRegistry::with_executor(tools, tool_executor);
     let mut harness = Harness::new(model, tool_registry, config);
+    harness.set_hidden_tools(BuiltinToolSelection::default().hidden_names());
     harness
         .append_context(world_context)
         .map_err(|error| error.to_string())?;

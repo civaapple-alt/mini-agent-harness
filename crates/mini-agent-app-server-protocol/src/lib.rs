@@ -411,12 +411,15 @@ pub struct ThreadGoalClearedNotification {
 /// Secret-free workflow state projected by the App Server.
 ///
 /// Filesystem paths and Host implementation types stay private to the
-/// workflow service. Clients only receive whether Plan mode is active and the
-/// bounded Goal state needed to render progress or resume control.
+/// workflow service. Clients only receive whether Plan mode is active, the
+/// active bounded Builtin selection, and the bounded Goal state needed to
+/// render progress or resume control.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowState {
     pub collaboration_mode: CollaborationMode,
+    #[serde(default)]
+    pub builtin_tools: Vec<String>,
     pub goal: Option<ThreadGoal>,
 }
 

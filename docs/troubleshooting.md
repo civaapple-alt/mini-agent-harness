@@ -83,6 +83,8 @@ preserved.
 workspace, whether given as relative paths (e.g. `src/main.rs`) or absolute paths
 (e.g. `D:\workspace\src\main.rs`). Paths that escape the workspace (such as
 `../secret` or external directories) or point to `.git` are strictly rejected.
+`apply_patch` is intentionally stricter: its Codex-style patch paths must be relative to the
+workspace, and it validates every affected file before writing.
 
 ## Real-time web search and network data
 
@@ -96,8 +98,9 @@ dev server, use `web_fetch` instead of `curl` or PowerShell download cmdlets. `w
 public `http`/`https` URLs and loopback (`localhost`, `127.0.0.1`, `[::1]`). It still rejects
 credentials, LAN/private IPs, cloud metadata (`169.254.169.254`), and `file:` paths, and it
 does not run JavaScript. A public page cannot redirect onto loopback. Client-only SPAs may
-come back as a thin shell with a warning; SSR HTML is returned as markdown. `read_file` is for
-source. There is no screenshot, vision,
+come back as a thin shell with a warning; SSR HTML is returned as markdown. `read_file` returns
+bounded, line-numbered pages; pass its `next_offset` back as `offset` to continue. `apply_patch`
+is the preferred multi-file mutation path and validates all affected files before writing. There is no screenshot, vision,
 or headless-browser tool.
 
 ## Image understanding

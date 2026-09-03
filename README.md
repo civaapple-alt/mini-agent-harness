@@ -15,8 +15,9 @@ the [MIT License](LICENSE).
 
 - Interactive agent sessions and one-shot `ask` commands.
 - An autonomous `auto` mode with bounded context compaction.
-- Six bounded default Builtin tools: `read_file`, `write_file`, `edit_file`,
-  `shell`, `web_fetch`, and `read_image`; MCP remains an explicit extension.
+- Four bounded default Builtin tools: `read_file`, `apply_patch`, `shell`, and
+  `read_image`; `write_file`, `edit_file`, and `web_fetch` remain opt-in
+  compatibility tools, while MCP remains an explicit extension.
 - Active Threads can select a bounded Builtin subset through
   `thread/settings/update` `builtinTools`; omission preserves the current
   selection and external/MCP tools remain separate.
@@ -377,8 +378,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `18,566 / 20,000` lines and release
-Rust source `27,620 / 30,000` lines, excluding the experimental CLI/REPL. The
+The current hard-budget snapshot is runtime `18,614 / 20,000` lines and release
+Rust source `28,470 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.

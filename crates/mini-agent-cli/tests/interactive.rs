@@ -702,22 +702,9 @@ fn ask_completes_bounded_cross_file_refactor_on_public_path() {
             ("read-a", "read_file", json!({"path": "src/a.txt"})),
             ("read-b", "read_file", json!({"path": "src/b.txt"})),
             (
-                "edit-a",
-                "edit_file",
-                json!({
-                    "path": "src/a.txt",
-                    "old_text": "shared_name",
-                    "new_text": "renamed_name"
-                }),
-            ),
-            (
-                "edit-b",
-                "edit_file",
-                json!({
-                    "path": "src/b.txt",
-                    "old_text": "shared_name",
-                    "new_text": "renamed_name"
-                }),
+                "patch-both",
+                "apply_patch",
+                json!({"patch": "*** Begin Patch\n*** Update File: src/a.txt\n@@\n-use shared_name here\n+use renamed_name here\n*** Update File: src/b.txt\n@@\n-also uses shared_name\n+also uses renamed_name\n*** End Patch"}),
             ),
         ];
         for (call_id, name, arguments) in calls {
@@ -759,7 +746,7 @@ fn ask_completes_bounded_cross_file_refactor_on_public_path() {
         .env_remove("OPENAI_BASE_URL")
         .output()
         .unwrap();
-    let requests = (0..5)
+    let requests = (0..4)
         .map(|_| requests_rx.recv().unwrap())
         .collect::<Vec<_>>();
     server.join().unwrap();
@@ -846,7 +833,7 @@ fn auto_session_starts_with_automatic_execution() {
         .collect::<Vec<_>>();
     assert_eq!(requests[0]["instructions"], requests[1]["instructions"]);
     assert!(
-        requests[0]["tools"][3]["description"]
+        requests[0]["tools"][2]["description"]
             .as_str()
             .unwrap()
             .contains("without per-command approval")

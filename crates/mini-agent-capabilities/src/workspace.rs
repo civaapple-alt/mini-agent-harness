@@ -1,5 +1,6 @@
 mod approval;
 mod files;
+mod patch;
 mod shell;
 
 use crate::result_store::ResultStore;
@@ -20,6 +21,8 @@ use mini_agent_protocol::ToolExecutionRequest;
 use mini_agent_protocol::ToolHandler;
 use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
+#[cfg(test)]
+use patch::ApplyPatch;
 use serde_json::Value;
 use serde_json::json;
 #[cfg(test)]
@@ -48,7 +51,10 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-const MAX_READ_BYTES: u64 = 128 * 1024;
+const MAX_READ_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
+const DEFAULT_READ_LINES: usize = 200;
+const MAX_READ_LINES: usize = 2_000;
+const MAX_READ_PAGE_BYTES: usize = 15 * 1024;
 const MAX_WRITE_BYTES: usize = 1024 * 1024;
 const MAX_COMMAND_BYTES: usize = 16 * 1024;
 const MAX_COMMAND_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
@@ -71,6 +77,7 @@ pub fn workspace_tools_with_read_roots_and_results(
     )?);
     let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(files::ReadFile(Arc::clone(&workspace))),
+        Box::new(patch::ApplyPatch(Arc::clone(&workspace))),
         Box::new(files::EditFile(Arc::clone(&workspace))),
         Box::new(files::WriteFile(Arc::clone(&workspace))),
         Box::new(shell::Shell(Arc::clone(&workspace), results.clone())),

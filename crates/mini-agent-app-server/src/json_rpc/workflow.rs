@@ -15,12 +15,13 @@ where
         let thread_id = self.thread_id().await;
         match workflows.state_action().await {
             Ok(response) => {
-                let (plan_active, goal) = response.value.clone();
+                let (plan_active, goal, builtin_tools) = response.value.clone();
                 response_action_with(
                     request.id,
                     response,
                     WorkflowState {
                         collaboration_mode: collaboration_mode(plan_active),
+                        builtin_tools,
                         goal: goal.map(|state| crate::goal_runtime::project_goal(thread_id, state)),
                     },
                 )

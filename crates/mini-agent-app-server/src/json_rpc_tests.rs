@@ -438,6 +438,10 @@ async fn exposes_read_only_workflow_state_from_thread_goal() {
     .await;
     let state = result["value"].clone();
     assert_eq!(state["collaborationMode"]["mode"], "plan");
+    assert_eq!(
+        state["builtinTools"],
+        serde_json::json!(["shell", "read_file"])
+    );
     assert_eq!(state["goal"]["status"], "blocked");
     assert_eq!(state["goal"]["objective"], "rpc goal");
     assert!(state["goal"].get("path").is_none());

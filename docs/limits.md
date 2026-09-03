@@ -76,7 +76,8 @@ Host tools add their own effect-side bounds before results reach core:
 
 | Host boundary | Default |
 | --- | ---: |
-| file read | 128 KiB |
+| file source read | 8 MiB; UTF-8 text only |
+| `read_file` page | 200 lines by default, 2,000 maximum, 15 KiB rendered page |
 | `read_image` file | 4 MiB; JPEG/PNG/GIF/WebP by magic; 4 images / request; Files API 60s, 7-day expiry; session `attachments/` reloaded on resume and copied on fork |
 | `web_fetch` body / extracted text | 128 KiB / 50k characters; 15s; 5 same-class redirects |
 | new file or edited file | 1 MiB |

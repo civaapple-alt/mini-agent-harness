@@ -43,15 +43,13 @@ fn reads_and_edits_inside_workspace() {
     let read = ReadFile(Arc::clone(&workspace));
     let edit = EditFile(workspace);
 
-    assert_eq!(
-        read.execute(&json!({"path": "note.txt"})).unwrap(),
-        "hello world"
-    );
+    let first = read.execute(&json!({"path": "note.txt"})).unwrap();
+    assert!(first.contains("total_lines=1 | offset=0 | limit=200"));
+    assert!(first.contains("1: hello world"));
     let abs_path = root.join("note.txt").to_string_lossy().to_string();
-    assert_eq!(
-        read.execute(&json!({"path": abs_path})).unwrap(),
-        "hello world"
-    );
+    let absolute = read.execute(&json!({"path": abs_path})).unwrap();
+    assert!(absolute.contains("total_lines=1 | offset=0 | limit=200"));
+    assert!(absolute.contains("1: hello world"));
     edit.execute(&json!({
         "path": abs_path,
         "old_text": "world",
@@ -62,6 +60,174 @@ fn reads_and_edits_inside_workspace() {
         fs::read_to_string(root.join("note.txt")).unwrap(),
         "hello agent"
     );
+
+    remove_test_root(&root);
+}
+
+#[test]
+fn read_file_paginates_large_sources_without_shell_fallback() {
+    let root = test_root();
+    let content = (0..900)
+        .map(|index| format!("line-{index:04}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(root.join("large.txt"), content).unwrap();
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
+    );
+    let read = ReadFile(workspace);
+
+    let first = read
+        .execute(&json!({"path": "large.txt", "limit": 40}))
+        .unwrap();
+    assert!(first.contains("total_lines=900"));
+    assert!(first.contains("1: line-0000"));
+    assert!(first.contains("next_offset=40"));
+    assert!(first.len() <= MAX_READ_PAGE_BYTES);
+
+    let later = read
+        .execute(&json!({"path": "large.txt", "offset": 400, "limit": 3}))
+        .unwrap();
+    assert!(later.contains("401: line-0400"));
+    assert!(later.contains("next_offset=403"));
+    assert!(!later.contains("1: line-0000"));
+
+    remove_test_root(&root);
+}
+
+#[test]
+fn read_file_can_seek_past_the_legacy_128_kibibyte_limit() {
+    let root = test_root();
+    let content = (0..40_000)
+        .map(|index| format!("source-line-{index:05}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(content.len() > 128 * 1024);
+    fs::write(root.join("generated.rs"), content).unwrap();
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
+    );
+
+    let output = ReadFile(workspace)
+        .execute(&json!({
+            "path": "generated.rs",
+            "offset": 39_999,
+            "limit": 1
+        }))
+        .unwrap();
+    assert!(output.contains("40000: source-line-39999"));
+
+    remove_test_root(&root);
+}
+
+#[test]
+fn apply_patch_updates_adds_and_deletes_as_one_validated_change() {
+    let root = test_root();
+    fs::write(root.join("old.txt"), "one\ntwo\nthree\n").unwrap();
+    fs::write(root.join("remove.txt"), "remove me\n").unwrap();
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
+    );
+    let patch = ApplyPatch(workspace);
+
+    patch
+        .execute(&json!({
+            "patch": "*** Begin Patch\n*** Update File: old.txt\n@@\n one\n-two\n+TWO\n three\n*** Add File: created.txt\n+created\n*** Delete File: remove.txt\n*** End Patch"
+        }))
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(root.join("old.txt")).unwrap(),
+        "one\nTWO\nthree\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("created.txt")).unwrap(),
+        "created\n"
+    );
+    assert!(!root.join("remove.txt").exists());
+
+    patch
+        .execute(&json!({
+            "patch": "*** Begin Patch\n*** Update File: old.txt\n*** Move to: moved.txt\n@@\n one\n-TWO\n+two\n three\n*** End Patch"
+        }))
+        .unwrap();
+    assert!(!root.join("old.txt").exists());
+    assert_eq!(
+        fs::read_to_string(root.join("moved.txt")).unwrap(),
+        "one\ntwo\nthree\n"
+    );
+
+    remove_test_root(&root);
+}
+
+#[test]
+fn apply_patch_validates_every_file_before_writing_any_file() {
+    let root = test_root();
+    fs::write(root.join("first.txt"), "first\n").unwrap();
+    fs::write(root.join("second.txt"), "second\n").unwrap();
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
+    );
+    let patch = ApplyPatch(workspace);
+
+    let error = patch
+        .execute(&json!({
+            "patch": "*** Begin Patch\n*** Update File: first.txt\n@@\n-first\n+changed\n*** Update File: second.txt\n@@\n-not-present\n+changed\n*** End Patch"
+        }))
+        .unwrap_err();
+    assert!(error.0.contains("did not match"), "{error:?}");
+    assert_eq!(
+        fs::read_to_string(root.join("first.txt")).unwrap(),
+        "first\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("second.txt")).unwrap(),
+        "second\n"
+    );
+
+    remove_test_root(&root);
+}
+
+#[test]
+fn apply_patch_denial_is_explicit_and_has_no_effect() {
+    let root = test_root();
+    fs::write(root.join("note.txt"), "keep\n").unwrap();
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
+        Vec::new(),
+        SandboxKind::Native,
+    );
+    let patch = ApplyPatch(workspace);
+    let request = ToolExecutionRequest::new(
+        "patch-denied",
+        "apply_patch",
+        json!({
+            "patch": "*** Begin Patch\n*** Update File: note.txt\n@@\n-keep\n+changed\n*** End Patch"
+        }),
+    );
+
+    assert_eq!(
+        patch.admission(&request).unwrap(),
+        ToolAdmission::ApprovalRequired {
+            action: "apply patch to 1 file(s)".to_string(),
+        }
+    );
+    let error = patch.execute(&request.arguments).unwrap_err();
+    assert!(error.0.contains("denied"), "{error:?}");
+    assert_eq!(fs::read_to_string(root.join("note.txt")).unwrap(), "keep\n");
 
     remove_test_root(&root);
 }
@@ -225,9 +391,10 @@ fn read_file_accepts_configured_extension_roots() {
     let read = ReadFile(Arc::clone(&workspace));
     let edit = EditFile(Arc::clone(&workspace));
 
-    assert_eq!(
-        read.execute(&json!({"path": location})).unwrap(),
-        "extension body"
+    assert!(
+        read.execute(&json!({"path": location}))
+            .unwrap()
+            .contains("1: extension body")
     );
     assert!(
         edit.execute(&json!({
@@ -289,7 +456,11 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
     let living = fs::read_to_string(&plan).unwrap();
     assert!(living.contains("- implement auth"));
     assert!(!root.join("plan.md").exists());
-    assert_eq!(read.execute(&json!({"path": "plan.md"})).unwrap(), living);
+    assert!(
+        read.execute(&json!({"path": "plan.md"}))
+            .unwrap()
+            .contains("1: # Implementation Plan")
+    );
 
     edit.execute(&json!({
         "path": "plan.md",
@@ -612,9 +783,11 @@ fn full_machine_preset_permits_paths_outside_workspace() {
         SandboxKind::Native,
     );
     let full_read = ReadFile(full_workspace);
-    assert_eq!(
-        full_read.execute(&json!({"path": &outside_file})).unwrap(),
-        "outside data"
+    assert!(
+        full_read
+            .execute(&json!({"path": &outside_file}))
+            .unwrap()
+            .contains("1: outside data")
     );
 
     remove_test_root(&root);

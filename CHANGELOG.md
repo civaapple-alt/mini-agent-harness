@@ -5,6 +5,23 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+### Changed
+
+- **Builtin tool surface:** reduce the default model-visible set to four focused
+  tools: `read_file`, `apply_patch`, `shell`, and `read_image`. Keep
+  `edit_file`, `write_file`, and `web_fetch` available as explicit compatibility
+  selections instead of sending them to every new Thread.
+- **ReadFile:** replace the whole-file 128 KiB failure mode with bounded UTF-8
+  source loading (8 MiB), line-numbered pages, explicit `offset`/`limit`, and a
+  `next_offset` continuation hint capped below the core tool-result limit.
+- **ApplyPatch:** add a Codex-style bounded patch tool for prevalidated multi-file
+  add, update, move, and delete operations. All paths and hunks are validated
+  before any side effect, with rollback attempted if a later filesystem write
+  fails; the existing approval/Plan Mode boundary remains active.
+- **Workflow projection:** include the active bounded `builtinTools` selection in
+  `workflow/state` so App Server clients preserve explicit empty selections and
+  do not reconstruct state from a hard-coded default.
+
 ### Fixed
 
 - **Plan Mode Shell admission:** allow conservative read-only Shell inspection
@@ -34,7 +51,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   experimental CLI edge. CLI behavior and its tests are unchanged, while the
   runtime budget no longer carries terminal presentation code.
 - **Host test surface:** remove static catalog assertions and generic fake-tool
-  Orchestrator approval tests now covered by the real six-tool catalog and the
+  Orchestrator approval tests now covered by the real Builtin catalog and the
   public App Server Shell approval path; Core and lifecycle-boundary coverage is
   unchanged.
 - **Host catalog:** reduce the internal Builtin selection catalog to the six

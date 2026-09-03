@@ -27,6 +27,8 @@ use tokio::sync::oneshot;
 
 pub(crate) use mini_agent_host::parse_verifier_verdict;
 
+pub(crate) type WorkflowStateSnapshot = (bool, Option<GoalState>, Vec<String>);
+
 /// App Server bound workflow service for one durable session directory.
 #[derive(Clone)]
 pub struct WorkflowService {
@@ -94,7 +96,7 @@ impl WorkflowService {
 
     pub(crate) async fn state_action(
         &self,
-    ) -> Result<ActionResponse<(bool, Option<GoalState>)>, ActionFailure> {
+    ) -> Result<ActionResponse<WorkflowStateSnapshot>, ActionFailure> {
         self.request_action(|reply| RuntimeCommand::WorkflowState { reply })
             .await
     }

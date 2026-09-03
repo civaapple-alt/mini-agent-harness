@@ -101,26 +101,41 @@ pub(super) struct ReadFile(pub(super) Arc<Workspace>);
 
 impl ToolHandler for ReadFile {
     fn spec(&self) -> ToolSpec {
-        file_tool_spec(
-            "read_file",
-            "Read a UTF-8 file in the workspace or a configured local extension root",
-            false,
-        )
+        ToolSpec {
+            name: "read_file".to_string(),
+            description: "Read a bounded page from a UTF-8 workspace or configured extension-root file. offset is a zero-based line offset and limit is the maximum number of lines; use the returned next_offset to continue through long files. Output includes stable 1-based line numbers and never relies on shell output truncation.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "offset": {"type": "integer", "minimum": 0, "default": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": MAX_READ_LINES, "default": DEFAULT_READ_LINES}
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        }
     }
 }
 
 impl ToolRuntime for ReadFile {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let path = self.0.read_path(arguments)?;
+        if !path.is_file() {
+            return Err(ToolError(format!(
+                "cannot read {:?}: not a regular file",
+                path.display()
+            )));
+        }
         let mut bytes = Vec::new();
-        File::open(path)
+        File::open(&path)
             .map_err(io_error)?
-            .take(MAX_READ_BYTES + 1)
+            .take(MAX_READ_SOURCE_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(io_error)?;
-        if bytes.len() as u64 > MAX_READ_BYTES {
+        if bytes.len() as u64 > MAX_READ_SOURCE_BYTES {
             return Err(ToolError(format!(
-                "file exceeds {MAX_READ_BYTES} byte read limit"
+                "file exceeds {MAX_READ_SOURCE_BYTES} byte source limit"
             )));
         }
         if crate::image::detect_image(&bytes).is_some() {
@@ -128,8 +143,92 @@ impl ToolRuntime for ReadFile {
                 "file is not UTF-8; use read_image for PNG/JPEG/GIF/WebP".to_string(),
             ));
         }
-        String::from_utf8(bytes).map_err(|_| ToolError("file is not UTF-8".to_string()))
+        let text = String::from_utf8(bytes)
+            .map_err(|_| ToolError("file is not UTF-8 text".to_string()))?;
+        let offset = bounded_usize(arguments, "offset", 0, usize::MAX)?;
+        let limit = bounded_usize(arguments, "limit", DEFAULT_READ_LINES, MAX_READ_LINES)?;
+        Ok(format_read_page(&path, &text, offset, limit))
     }
+}
+
+fn bounded_usize(
+    arguments: &Value,
+    name: &str,
+    default: usize,
+    maximum: usize,
+) -> Result<usize, ToolError> {
+    let Some(value) = arguments.get(name) else {
+        return Ok(default);
+    };
+    let value = value
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| ToolError(format!("{name} must be a non-negative integer")))?;
+    if value > maximum || (name == "limit" && value == 0) {
+        return Err(ToolError(format!(
+            "{name} must be {}..={maximum}",
+            if name == "limit" { 1 } else { 0 }
+        )));
+    }
+    Ok(value)
+}
+
+fn format_read_page(path: &Path, text: &str, offset: usize, limit: usize) -> String {
+    let normalized = text.replace("\r\n", "\n");
+    let mut lines: Vec<&str> = normalized.split('\n').collect();
+    if normalized.is_empty() {
+        lines.clear();
+    } else if normalized.ends_with('\n') {
+        lines.pop();
+    }
+    let total = lines.len();
+    let requested_end = offset.saturating_add(limit).min(total);
+    let display = path.display();
+    let mut output = format!(
+        "--- file: {display} | total_lines={total} | offset={offset} | limit={limit} ---\n"
+    );
+    let body_limit = MAX_READ_PAGE_BYTES.saturating_sub(180);
+    let mut cursor = offset.min(total);
+    let mut line_truncated = false;
+    while cursor < requested_end {
+        let line = lines[cursor];
+        let prefix = format!("{}: ", cursor + 1);
+        let rendered_len = prefix.len() + line.len() + 1;
+        if output.len().saturating_add(rendered_len) <= body_limit {
+            output.push_str(&prefix);
+            output.push_str(line);
+            output.push('\n');
+            cursor += 1;
+            continue;
+        }
+        let marker = " …[line truncated]\n";
+        let available = body_limit.saturating_sub(output.len() + prefix.len() + marker.len());
+        output.push_str(&prefix);
+        let end = floor_char_boundary(line, available);
+        output.push_str(&line[..end]);
+        output.push_str(marker);
+        cursor += 1;
+        line_truncated = true;
+        break;
+    }
+    if cursor < total {
+        output.push_str(&format!(
+            "[page boundary: next_offset={cursor}; call read_file with the same path and this offset]\n"
+        ));
+    }
+    if line_truncated {
+        output.push_str(
+            "[one source line was clipped to keep this tool result below the harness limit]\n",
+        );
+    }
+    output
+}
+
+fn floor_char_boundary(text: &str, mut index: usize) -> usize {
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
 }
 
 pub(super) struct EditFile(pub(super) Arc<Workspace>);
