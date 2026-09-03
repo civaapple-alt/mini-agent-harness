@@ -737,7 +737,6 @@ async fn exposes_goal_pause_and_resume_through_thread_protocol() {
         }
     }
 
-    let root = root;
     std::fs::remove_dir_all(root).unwrap();
 }
 
