@@ -18,20 +18,45 @@ Web Studio
     → mini-agent-core turn loop
 ```
 
-The control plane must keep three independent dimensions separate:
+The control plane must keep user controls and execution ownership explicit,
+without introducing a standalone Profile layer:
 
 ```text
-Host Profile (startup): interactive | ask | auto
 Thread Mode (session): chat | plan | goal
-Approval (runtime): policy + bounded decision scope
+Access and Approval (runtime): access scope + policy + bounded lifetime
+Execution ownership: Core Turn | Plan lifecycle | Goal lifecycle
 ```
 
 The runtime also binds every Thread/Session to one immutable workspace
 manifest:
 
 ```text
-Workspace Binding (Session): primaryRoot + associatedReadRoots + write policy
+Workspace Binding (Session): primaryRoot + associatedRoots + per-root access policy
 ```
+
+The intended user-facing flow is deliberately simple:
+
+1. Create a Project in Web Studio and start a task.
+2. When the task needs editing, choose the `Full access` preset once. It means
+   machine-wide access for the current Runtime/Session, with an explicit
+   high-risk confirmation. It still preserves non-overridable Host Deny,
+   Plan locks, and any security-prescribed shell confirmation. A separate
+   `Project access` preset is available when least privilege is desired.
+3. If the task spans more directories, add them in Project editing as either
+   editable workspace roots or reference-only roots. The agent receives the
+   resulting immutable manifest.
+4. If a directory is mentioned only in a message, treat it as a one-time
+   reference request by default. A request to synchronize or update it must
+   create explicit path-scoped write intent. If machine-wide `Full access` is
+   already active, Host may admit it under that scope and its remaining
+   guardrails; otherwise ask for explicit approval or offer to add it to the
+   Project as an editable root. A model-authored path must never silently
+   expand the Project.
+5. Enter Plan with `/plan`; Plan is read-mostly but may run bounded exploration,
+   create scratch scripts/outputs, clean them up, and retain an explicit
+   `plan.md`. Enter Goal with `/goal`. Goal remains visible above the
+   conversation for the selected Thread and exposes Start/Resume, Pause,
+   Update, and Delete actions.
 
 Plan and Goal remain the existing canonical Thread boundaries. This proposal
 does not create a second Workflow service, a second turn loop, or a generic
@@ -45,8 +70,8 @@ semantics are split across the three repositories:
 1. `ApprovalController` caches every approved action in `ApprovalStore`. As a
    result, a UI choice intended as “allow once” can behave like “always allow”.
 2. `ApprovalRespondParams` carries `remember`, but the App Server response path
-   currently consumes only the boolean approval result. The requested scope is
-   therefore lost before Host execution resumes.
+   currently consumes only the boolean approval result. The requested access
+   scope and lifetime are therefore lost before Host execution resumes.
 3. `mini-agent-web` also keeps `_remembered_approvals` and broadcasts pending
    approvals to every WebSocket client. This creates a second approval authority
    and permits cross-Thread presentation or response races.
@@ -75,6 +100,10 @@ semantics are split across the three repositories:
     catalog with runtime status, pause reason, lock/read-only state, active
     turn, and resumability. The UI's global client/active state is insufficient
     for switching among historical, running, and paused Sessions.
+11. Core's default `max_steps` is 8. Web Studio currently exposes a technical
+    `Turn Settled`/`step_limit` result as if the Turn were interrupted, without
+    explaining that this is an implementation loop guard rather than a useful
+    user task state.
 
 Relevant existing owners are:
 
@@ -91,27 +120,74 @@ Relevant existing owners are:
 
 ## Target semantics
 
-### Profile is not the same as Mode
+### No standalone Profile layer
 
-The Host profile remains an initialization-time composition of provider,
-prompt/rule sources, extension depth, tool scope, sandbox, and security preset.
-It is not a live replacement for Plan or Goal.
+The product and protocol should not model `Profile` as a separate control-plane
+layer. Runtime startup receives the actual bounded inputs it needs: provider,
+prompt/rule sources, extensions, tools, sandbox/security, access scope, and the
+immutable WorkspaceSpec. If an implementation needs to pass these values as an
+internal struct, it remains a private runtime configuration object rather than
+a user-visible Profile, a selectable workflow, or a persisted Session axis.
 
-The Studio main control should therefore present:
+Studio should show the current mode and Goal state, but mode activation should
+follow the user's explicit slash commands rather than requiring a second mode
+selector:
 
 | Studio label | Canonical operation | Runtime meaning |
 | --- | --- | --- |
-| Interactive / Chat | `thread/settings/update` with `collaborationMode=default` | Ordinary user-driven Turns |
-| Plan | `thread/settings/update` with `collaborationMode=plan` | Read-only project mutations; living plan remains writable |
-| Goal | `thread/goal/set|get|clear` | Thread-owned autonomous lifecycle and verifier |
+| Interactive / Chat | Normal composer or `/plan off` | Ordinary user-driven Turns |
+| Plan | `/plan` or `/plan on\|off` → `thread/settings/update` | Read-mostly exploration runtime; scratch scripts/outputs and `plan.md` allowed, formal project mutation deferred |
+| Goal | `/goal ...` → `thread/goal/set|get|clear` | Thread-owned autonomous lifecycle and verifier |
 
-The current Host profiles `interactive`, `ask`, and `auto` remain available as
-startup or advanced configuration. Selecting a different Host profile at
-runtime must either restart/recreate the App Server Runtime or be explicitly
-described as “effective on next Runtime”. It must not silently update only a
-Python preference field.
+The current code does not justify three distinct user-facing presets: the Host
+`interactive`, `ask`, and `auto` built-ins share the same named baseline unless
+overridden by workspace configuration. In the stdio App Server path, selecting
+`auto` also does not remove the default `HarnessConfig` eight-step limit. The
+legacy embedded/local `automatic` path changes loop budgeting and context
+compaction; that is an execution implementation detail, not a user persona.
 
-### Approval policy and approval scope are different
+Therefore Web Studio and the REPL should remove the profile selector and the
+`profile=auto` runtime option. A compatibility parser may accept the old field
+only during migration and must translate it to explicit runtime inputs before
+construction; no runtime or Session should retain a Profile identity. Expose
+the actual user decisions independently:
+
+- access: `project` or `machine`;
+- approval policy: `per_action`, `auto_approve`, or `strict`;
+- mode: Chat/Plan through `/plan`;
+- the selected Thread's Plan runtime state and Goal lifecycle through `/goal`
+  and its persistent header.
+
+Changing startup inputs requires Runtime recreation or an explicit next-Runtime
+operation. It must not silently update only a Python preference field.
+
+### Plan is read-mostly, not read-only
+
+Plan owns a bounded exploration runtime for the selected Thread. It may read
+the declared Project roots, run analysis commands or scripts, write temporary
+scripts and generated outputs into a Session-owned `planScratchRoot`, and write
+the explicit `plan.md` artifact. The scratch area is not a Project root and is
+not a durable implementation workspace.
+
+Formal Project mutation means changing source files, Project configuration, or
+business/generated artifacts that the user expects to keep. Plan defers those
+mutations behind its existing Plan gate even when the selected access scope is
+machine-wide. Approval and Full access authorize admission scope; they do not
+silently turn Plan into implementation mode.
+
+The Plan runtime must maintain a bounded cleanup manifest. On normal Plan
+settlement, cancellation, or explicit exit, it removes scratch scripts and
+outputs while retaining `plan.md` and a bounded summary of the exploration.
+Cleanup failure is surfaced as `cleanup_pending` and never silently presented
+as a clean Plan completion. If the user explicitly asks to keep an exploratory
+output, that becomes a separately reviewed Project mutation.
+
+For Plan exploration, the shell/tool working directory should default to the
+Session-owned scratch root, with declared Project roots mounted or exposed as
+read inputs. Chat and Goal may keep the Project primary root as their normal
+working directory according to their own Runtime rules.
+
+### Approval policy, access scope, and lifetime are different
 
 `per_action` describes when an action must ask. It does not mean that every
 action is automatically allowed. Tool exposure, Host security policy, Plan
@@ -121,18 +197,24 @@ The public decision vocabulary is:
 
 ```text
 policy: per_action | auto_approve | strict
-scope:  once | session | workspace
+access:  project | machine
+lifetime: once | session
 ```
 
 Rules:
 
+- `per_action` means that each approval-gated action can ask; it does not mean
+  that every action is automatically allowed;
 - `once` approves only the current `requestId`;
 - `session` allows the same bounded action class within the current Thread or
   App Server session, according to the selected lifetime;
-- `workspace` allows only the current workspace, tool, and normalized action
-  class; it is not unrestricted machine-wide permission;
+- `project` limits file/process admission to the immutable Project
+  WorkspaceSpec;
+- `machine` means machine-wide access scope for the current Runtime/Session;
 - explicit security Deny always wins over a UI approval;
-- Plan Mode mutation locks cannot be bypassed by approval;
+- Plan Mode's formal Project-mutation gate cannot be bypassed by approval;
+  bounded writes under the Session-owned Plan scratch root and the explicit
+  `plan.md` artifact remain allowed;
 - `auto_approve` may skip interactive waiting for admissible actions but cannot
   override explicit Deny or Plan restrictions;
 - `strict` denies approval-gated actions without opening a user prompt.
@@ -141,17 +223,147 @@ The approval key must include the bounded owner and action identity, for
 example:
 
 ```text
-(workspace root, thread/session scope, tool name, normalized action class)
+(access scope, thread/session scope, tool name, normalized action class)
 ```
 
 Raw unbounded commands, secrets, or arbitrary prompt text must not become an
 approval rule.
 
+### Product presets: Project access and machine-wide Full access
+
+The common user path should not require selecting a new lifetime or scope for
+every tool call. The Studio-facing presets are deliberately few. The normal
+default remains `per_action`. When an approval request appears, the user can
+choose machine-wide `Full access` for the current Runtime/Session instead of
+configuring another runtime preset or answering the same class of request repeatedly:
+
+```text
+Project access:
+  access scope: current Project WorkspaceSpec
+  coverage: primaryRoot + associatedRoots marked editable/reference
+
+Full access:
+  access scope: machine-wide for the current Runtime/Session
+  confirmation: explicit high-risk confirmation before activation
+```
+
+`Full access` is the user-facing name for machine-wide access; it must not be
+renamed or documented as Project-scoped access. The current implementation
+baseline is `SecurityPreset::FullMachine`: file actions can address paths
+outside the Project workspace, while hard safety Deny remains in force and
+shell actions may still ask for confirmation. If a future product option also
+removes those shell prompts, it must be a separately named, explicitly
+confirmed high-risk preset rather than being hidden behind `per_action` or
+`profile=auto`.
+
+`Project access` remains bounded by the current Project's immutable
+WorkspaceSpec, explicit security Deny, Plan locks, and configured tool scope.
+The approval policy is independent of both presets. The UI detail text must
+say either “current Project workspace” or “entire machine”, and identify any
+remaining Deny/confirmation guardrails.
+
+Project editing is the durable way to expand the workspace. It should offer
+two explicit directory intents: `Add as reference` and `Add as editable
+workspace`. A path mentioned in a normal message is temporary context, not a
+workspace mutation. `reference <path>` may grant bounded one-time reading;
+`sync/update <path>` must create explicit path-scoped write intent. If
+machine-wide `Full access` is already active, Host may admit that intent under
+the machine scope and its remaining guardrails; otherwise it must request
+explicit approval or offer to add the path as an editable Project root. The
+model cannot persistently expand the Project by emitting a path in its own
+message.
+
+### Thread-owned runtimes and internal safety guard
+
+`HarnessConfig::default()` currently sets `max_steps = 8`. This is an
+implementation loop guard, not a useful user task setting. Remove
+`max_steps`/`step_limit` from the normal Web Studio, SDK, and REPL control
+contract; do not offer “increase the step budget” as a routine recovery path.
+
+Core still needs a non-user-configurable safety guard against a runaway
+provider/tool loop. That guard belongs to Core's limits and may retain a raw
+legacy `StepLimit` classification during migration, but it must be treated as
+an exceptional `runtime_guard` diagnostic rather than normal progress. It must
+not be rendered as “8 steps”, “Turn interrupted”, or “task failed” without
+explaining the safety-guard cause.
+
+Plan and Goal own their own runtime lifecycle:
+
+- Chat runs one user-requested Core Turn and ends on provider completion, an
+  explicit cancellation, or an exceptional runtime guard.
+- Plan owns the planning Turn and Plan lock/state for the selected Thread; it
+  does not depend on a global user-tunable step budget.
+- Goal owns continuation, verification, pause/resume, and completion for the
+  selected Thread. It may use an internal cycle guard, but no `max_steps`
+  setting is exposed as Goal progress semantics.
+- App Server routes and serializes these Thread-owned runtimes; it does not
+  add a global Profile or step-budget layer.
+
+“Settled” remains an internal persistence/lifecycle term and does not mean
+“completed”. App Server and SDK should preserve the final semantic status and
+the raw diagnostic fields for debugging. Web Studio should show Completed,
+Cancelled, Waiting for approval, or “Runtime protection triggered; inspect or
+retry” only when those outcomes actually occur. Raw `step_limit` and `steps`
+belong in advanced diagnostics, if retained for compatibility.
+
+The `turn_finished` notification or its SDK projection must carry the final
+semantic status (and raw diagnostics when available), so Web Studio never
+infers “interrupted” from a generic stream close. Continuation is an explicit
+next Turn or Goal action, not an unbounded automatic loop.
+
+### Goal is the objective-driven autonomous runtime
+
+Goal should be understood as a long-lived, objective-driven Agent/Copilot
+runtime, not as a `profile=auto` switch and not as a larger single Turn. Its
+unit of progress is a verified cycle across multiple Turns in the same
+Thread:
+
+```text
+/goal <objective>
+    → run one Goal Turn
+    → persist the settled checkpoint and evidence
+    → run the independent Goal verifier
+    ├─ approved / objective complete → complete Goal
+    ├─ rejected or insufficient evidence → schedule the next Turn
+    │                                      in the same Thread
+    ├─ user pause → paused
+    └─ blocked / usage or safety limit → stop with an actionable status
+```
+
+The distinction between the layers is intentional:
+
+- Core owns one bounded Turn and its tool/event/history semantics;
+- App Server owns Goal scheduling, serialization, verifier dispatch, stale
+  checkpoint rejection, and Thread-scoped notifications;
+- Host owns Goal state and bounded evidence/plan persistence;
+- SDK and Web Studio project the same Goal state and expose Start/Resume,
+  Pause, Update, and Clear.
+
+Each continuation creates a new `turnId` but keeps the same `threadId`,
+`sessionId`, workspace binding, approval scope, and Goal identity. A rejected
+verification is not a user-visible Turn failure: it is evidence for the next
+attempt, and the Goal prompt must direct the agent to address the verifier's
+findings. Completion requires verifier evidence, not merely a model claim.
+
+Goal may use milestones as internal progress/evidence checkpoints, but
+milestones are not a second user workflow. `max_steps`, per-Turn step budgets,
+and loop counts must not be presented as the Goal's task model. Keep only a
+non-user-configurable runaway/safety guard and, where needed, a bounded
+resource/usage stop. These stops must produce `blocked`, `usage_limited`, or a
+clear runtime-protection diagnostic and must be resumable or inspectable; they
+must not be rendered as an unexplained “Turn interrupted”.
+
+Plan and Goal are deliberately different: Plan is a user-invoked,
+read-mostly exploration runtime that produces a plan artifact; Goal is the
+user-invoked autonomous runtime that can carry out approved Project changes,
+verify them, and continue across Turns until completion, pause, or a terminal
+guard condition. Neither requires a Profile selector.
+
 ## Ownership model
 
 | Layer | Owns | Must not own |
 | --- | --- | --- |
-| Core | Turn loop, limits, stop classification, events, history writeback | UI, approval dialogs, persistence, profile composition |
+| Core | Turn loop, internal safety limits, stop classification, events, history writeback | UI, approval dialogs, persistence, runtime startup composition |
 | Protocol | Typed Thread settings, Goal, approval request/response/resolution | Transport-specific UI state |
 | Capabilities/Host | Tool admission, security Deny/Ask/Allow, Plan lock, scope-aware approval enforcement | WebSocket, React, JSON-RPC parsing |
 | App Server | Thread state, Runtime Actor ordering, Approval Broker, public notifications | A second execution loop or arbitrary prompt replacement |
@@ -180,6 +392,16 @@ Do not reintroduce an aggregate `workflow/state` wire authority. An SDK helper
 may combine settings and Goal for presentation, but the App Server remains
 authoritative through the independent canonical methods.
 
+### Runtime startup inputs without Profile
+
+App Server initialization and Runtime construction should receive direct typed
+inputs: provider/model selection, bounded tool and extension selection,
+prompt/rule sources, sandbox/security, access scope, and WorkspaceSpec. There
+is no `profile` field in the new public startup contract. Once a Runtime/Session
+is created, these startup inputs are immutable for that identity; changing them
+requires an explicit Runtime recreation or a new Session. A legacy `profile`
+field may be parsed only to produce these inputs during migration.
+
 ### Approval lifecycle
 
 Keep the existing methods and add bounded fields rather than inventing a second
@@ -193,7 +415,8 @@ approval transport:
   "callId": "call-1",
   "toolName": "shell",
   "action": "shell command `cargo test`",
-  "scopes": ["once", "session", "workspace"]
+  "accessScopes": ["project", "machine"],
+  "lifetimes": ["once", "session"]
 }
 ```
 
@@ -201,15 +424,17 @@ approval transport:
 {
   "requestId": "approval-1",
   "approved": true,
-  "scope": "once",
+  "access": "machine",
+  "lifetime": "once",
   "reason": ""
 }
 ```
 
-`approval/resolved` must echo the final scope and correlation fields. For
-wire-compatibility, accept legacy `remember`: `false` maps to `once`, `true`
-maps to `session`; new clients use `scope`. The App Server must no longer
-silently remember every successful boolean approval.
+`approval/resolved` must echo the final access, lifetime, and correlation
+fields. For wire-compatibility, accept legacy `remember`: `false` maps to
+`lifetime=once`, `true` maps to `lifetime=session`; new clients use the typed
+`access` and `lifetime` fields. The App Server must no longer silently remember
+every successful boolean approval.
 
 ### Explicit compaction
 
@@ -249,7 +474,10 @@ The target layout is:
 │           ├── prompt_context.json
 │           ├── session.lock         # single-writer ownership
 │           ├── attachments/
-│           └── plan/goal artifacts when enabled
+│           └── plan/
+│               ├── plan.md             # retained explicit Plan artifact
+│               ├── scratch/            # disposable exploration scripts/outputs
+│               └── cleanup.json        # bounded cleanup manifest
 ├── web/
 │   ├── state.json                   # projects, UI preferences, selections
 │   └── session-index.json           # optional derived/cache index only
@@ -271,6 +499,17 @@ registry, UI preferences, and references such as `projectId`, `workspaceId`,
 `sessionId`, and `threadId`. It must not contain a transcript or a duplicate
 Thread checkpoint.
 
+Plan scratch belongs under the canonical Session directory, not under the
+Project root and not under Web-only state. Its path is generated and bounded by
+the Session/Plan Runtime. `plan.md` is the retained Plan artifact; scratch
+contents are disposable and are removed according to `cleanup.json`.
+
+There is no need for a `~/.mini-agent/profile/` directory or per-Session
+Profile files. The existing project-local `.agents/profile.json`, if accepted
+during migration, is only a bounded startup-input source. It must be translated
+to explicit runtime inputs, must not create a Profile identity, and must never
+be copied into canonical Session history or Web state.
+
 ### Project, WorkspaceSpec, and Session binding
 
 Web Studio's Project is a user-facing identity. It must resolve to an explicit
@@ -280,7 +519,7 @@ runtime `WorkspaceSpec`:
 Project
 └── WorkspaceSpec
     ├── primaryRoot
-    ├── associatedReadRoots[]
+    ├── associatedRoots[] (reference | editable)
     └── bounded write/execution policy
 ```
 
@@ -300,7 +539,7 @@ The implementation must close that gap across the chain:
 Project source_folders
     → WorkspaceSpec in FastAPI
     → SDK/App Server trusted runtime configuration
-    → Host ToolBuildRequest.extra_read_roots
+    → Host ToolBuildRequest.extra_read_roots + bounded write roots
     → Capabilities Workspace path admission
 ```
 
@@ -315,22 +554,30 @@ The initial policy is deliberately asymmetric:
 | Root kind | Read tools | `apply_patch`/create | Shell cwd | Default write authority |
 | --- | --- | --- | --- | --- |
 | `primaryRoot` | allowed | allowed subject to Plan/security/approval | `primaryRoot` | yes |
-| `associatedReadRoots[]` | allowed after canonical path check | denied | never changes cwd | no |
+| `associatedRoots[]: reference` | allowed after canonical path check | denied | never changes cwd | no |
+| `associatedRoots[]: editable` | allowed after canonical path check | allowed with explicit Project or machine access, Plan/security/approval | never changes cwd | yes, only for this root |
+| Session-owned `planScratchRoot` | bounded Plan exploration | allowed for temporary scripts/outputs and cleanup only | `planScratchRoot` in Plan | temporary only |
 
-Associated roots are read roots, not an implicit “all project folders are
-writable” grant. They must be passed to the existing bounded
-`extra_read_roots`/`Workspace::with_read_roots` path rather than merely shown
-in the UI. Nested/duplicate roots are normalized; symlink and escape cases are
-rejected or reduced to the canonical root manifest before runtime creation.
+Associated roots are not an implicit “all project folders are writable” grant.
+Project editing must make the intent visible by adding a directory as either
+`reference` or `editable`. Reference roots are passed to the existing bounded
+`extra_read_roots`/`Workspace::with_read_roots` path; editable roots additionally
+need an explicit bounded write-root admission path. Both kinds must be passed
+to Runtime creation rather than merely shown in the UI. Nested/duplicate roots
+are normalized; symlink and escape cases are rejected or reduced to the
+canonical root manifest before Runtime creation.
 
-Native shell execution starts in `primaryRoot`. Because a native child process
-can issue arbitrary filesystem writes that file-tool checks cannot observe,
-associated-root access from shell commands is not treated as a write grant. A
-strict enforcement mode must use the configured process sandbox or require an
-explicit approval describing the affected path; the UI must not claim that
+Normal Chat and Goal shell execution starts in `primaryRoot`; Plan exploration
+starts in `planScratchRoot`. Because a native child process can issue arbitrary
+filesystem writes that file-tool checks cannot observe, associated-root access
+from shell commands is not treated as a write grant. A Plan shell action that
+writes outside its scratch root is a formal Project mutation, not exploration.
+A strict enforcement mode must use the configured process sandbox or require
+an explicit approval describing the affected path; the UI must not claim that
 `per_action` alone makes native shell path writes safe. Docker/sandbox mounts
-must include only the declared roots and preserve the same primary-versus-read
-only distinction where the sandbox supports it.
+must include the declared Project roots plus the bounded scratch root, and
+preserve the reference-versus-editable distinction where the sandbox supports
+it.
 
 The protocol needs small explicit limits for the root manifest (number of
 associated roots, path length, and aggregate serialized bytes). The exact
@@ -345,6 +592,7 @@ The product must distinguish live runtime state from Goal state:
 | --- | --- | --- |
 | Runtime | `running`, `idle`, `closed` | App Server Actor/turn state |
 | Session UI projection | `running`, `paused`, `historical`, `locked` | Web projection of runtime + lock + summary |
+| Plan | `none`, `exploring`, `settling`, `cleanup_pending` | Selected Thread's Plan runtime |
 | Goal | `none`, `active`, `paused`, `completed`, `failed` | Thread Goal lifecycle |
 
 “Paused Session” means a resumable Session whose active turn has been
@@ -433,12 +681,15 @@ The approval dock should expose:
 请求批准
 允许一次
 本会话允许
-当前工作区范围允许
+Project access（当前项目工作区）
+Full access（整机范围，高风险）
 拒绝并说明原因
 ```
 
-“完全范围” must be rendered with its actual bounded scope, such as “当前
-工作区 + 当前工具类别”，not as unrestricted “allow everything”.
+`Full access` must be rendered as machine-wide access with its high-risk
+confirmation and remaining Deny/confirmation guardrails. `Project access` must
+identify the current Project workspace and its reference/editable roots. The
+two access scopes must not be collapsed into a vague “allow everything” label.
 
 The plus menu and slash commands should call typed APIs:
 
@@ -446,8 +697,11 @@ The plus menu and slash commands should call typed APIs:
 | --- | --- |
 | `/status` | Read world, active Thread settings, Goal, and MCP status |
 | `/compact` | Call explicit Thread compaction |
-| `/plan on\|off` | Update active Thread collaboration mode |
-| `/goal <objective>` | Set a bounded Thread Goal |
+| `/plan on\|off` | Start/stop the active Thread's read-mostly exploration runtime |
+| `/goal <objective>` | Create and start a bounded Thread Goal |
+| `/goal start\|resume` | Start or resume the active Thread Goal |
+| `/goal pause` | Pause the active Thread Goal without deleting its objective |
+| `/goal update <objective>` | Update the active Goal objective |
 | `/goal clear` | Clear the active Goal |
 | `/mcp` / `/mcp retry` | Read or retry MCP state |
 | `/review` | Launch an allowlisted review workflow |
@@ -458,22 +712,55 @@ Plugin activation must remain allowlisted and bounded. Dynamic hot-loading of
 arbitrary extension instructions is outside this proposal; if it needs a new
 runtime activation contract, it receives a separate admission record.
 
+### Persistent Goal header
+
+When a Thread Goal is set through `/goal <objective>`, Studio must render a
+persistent Goal header above the conversation for that selected Thread. The
+header is a projection of the canonical Goal state, not a second UI-owned
+workflow record, and remains visible across reloads and Session switching.
+
+The header must expose:
+
+- the bounded objective and current status (`active`, `paused`, `blocked`,
+  `usage-limited`, `budget-limited`, or `complete`);
+- Start/Resume when the Goal is not running;
+- Pause when it is active;
+- Update/Edit, which sends an explicit Thread Goal update;
+- Delete/Clear, which clears the active Goal after the normal confirmation;
+- the latest verifier/continuation summary when available, without embedding
+  an unbounded transcript in the header.
+
+`/goal <objective>` creates and starts the Goal. `/goal pause` preserves the
+objective for later `/goal start` or `/goal resume`; `/goal clear` deletes the
+active Goal configuration while the Session history remains available. When
+the user switches Threads, the header changes to the selected Thread's Goal
+and must not display another Thread's objective or controls.
+
 ## Implementation batches
 
 ### Batch 0 — Contract and trace fixtures
 
-Document the state axes, approval scope vocabulary, and correlation rules. Add
-offline protocol fixtures before changing execution. No provider call is
-needed.
+Document the user control axes, access/approval vocabulary, Thread-owned
+Plan/Goal runtime lifecycle, internal safety-guard semantics, and correlation
+rules. Define the direct startup inputs that replace Profile and the
+non-configurable Core guard that replaces routine `max_steps`. Add offline
+protocol fixtures before changing execution. No provider call is needed.
 
 ### Batch 1 — Canonical storage, WorkspaceSpec, and Session catalog
 
 - define the versioned `WorkspaceSpec`, stable `workspaceId`, immutable
   per-Session `workspace.json`, and bounded root-manifest limits;
-- pass the Project primary root and associated read roots from Web Studio all
-  the way to Host tool construction;
-- make the primary root the agent cwd/write root and associated roots explicit
-  read roots; add path, symlink, sandbox, and native-shell boundary tests;
+- pass the Project primary root and associated roots, including each root's
+  `reference`/`editable` intent, from Web Studio all the way to Host tool
+  construction;
+- make the primary root the agent cwd/write root and enforce explicit
+  reference/editable root admission; add path, symlink, sandbox, and
+  native-shell boundary tests;
+- implement distinct Project access and machine-wide `Full access` presets;
+  preserve `SecurityPreset::FullMachine` guardrails and distinguish configured
+  roots from one-off paths mentioned in a user message;
+- add the Session-owned Plan scratch root, retained `plan.md`, bounded cleanup
+  manifest, and cleanup-pending recovery path;
 - add the bounded App Server/SDK/Web session list and inspect path backed by
   canonical `SessionStore` summaries and locks;
 - move Web state under the Web-owned subdirectory, remove ongoing writes to
@@ -494,9 +781,13 @@ state.
 ### Batch 2 — Approval correctness and routing
 
 - make `once` genuinely one-shot;
-- make `session`/`workspace` explicit bounded cache entries;
+- make `session` lifetime and `project`/`machine` access explicit bounded
+  decision entries;
+- carry `project` versus `machine` access scope separately from approval
+  lifetime and policy;
 - preserve Deny and Plan lock precedence;
-- pass scope through App Server → SDK → FastAPI → Studio;
+- pass access scope and approval lifetime through App Server → SDK → FastAPI →
+  Studio;
 - remove Web's duplicate approval authority;
 - route pending requests by Thread and request ID;
 - add Core/Host/App Server boundary tests and one SDK/Web approval scenario.
@@ -508,8 +799,10 @@ This is the first implementation batch and is a security correctness gate.
 - pass active `threadId` through every Plan, Goal, Builtin, and status call;
 - hydrate settings and Goal independently after Thread selection;
 - emit and consume authoritative settings/Goal notifications;
-- stop treating profile preference changes as live Runtime changes unless a
-  restart/recreate operation is explicitly performed.
+- bind Plan runtime state and Goal lifecycle to the selected Thread; remove
+  legacy profile updates from the live control path entirely;
+- make Plan exploration, settlement, cleanup, and `plan.md` retention ordered
+  Thread events rather than Web-local state;
 
 ### Batch 4 — SDK and FastAPI convergence
 
@@ -521,8 +814,17 @@ This is the first implementation batch and is a security correctness gate.
 
 ### Batch 5 — Studio control surface
 
-- rename the main selector to Mode: Interactive, Plan, Goal;
-- keep Security/Approval as a separate selector;
+- show the current Mode and Goal state, with `/plan` and `/goal` as the explicit
+  activation controls;
+- show Plan exploration/cleanup state and the retained `plan.md` without
+  presenting Plan as read-only;
+- keep Security/Approval as a separate setting and approval dock, with
+  `Project access` and machine-wide `Full access` clearly distinguished;
+- remove `interactive`/`ask`/`auto` and `profile=auto` from the normal and
+  runtime control paths; expose only effective bounded runtime inputs in
+  advanced status;
+- render an exceptional runtime-guard outcome as a protection diagnostic, not
+  as “8 steps”, “step limit reached”, or “interrupted”;
 - implement the plus menu and approval dock;
 - add active Thread status indicators for mode, Goal, approval policy, MCP,
   and Runtime revision.
@@ -540,38 +842,64 @@ The following scenarios are required before the proposal can move to
 
 1. `allow once` causes a second identical action to request approval again.
 2. `session` approval affects only the intended Thread/session.
-3. `workspace` approval does not affect another workspace or unrelated action
-   class.
+3. `project` access/approval does not affect another Project or unrelated
+   action class.
 4. Security Deny cannot be overridden by any UI scope.
-5. Plan Mode defers project mutation while allowing living-plan mutation.
+5. Plan Mode permits declared-root reads, bounded exploration commands, temporary
+   scripts/outputs under `planScratchRoot`, and the retained `plan.md`; formal
+   Project source/configuration mutation remains behind the Plan gate.
 6. Goal set, update, clear, resume, verifier, and continuation events remain
-   ordered and Thread-scoped.
+   ordered and Thread-scoped. A settled Goal Turn is followed by verifier
+   evidence; an incomplete/rejected verdict schedules a new Turn with the
+   same `threadId`, while an approved verdict completes the Goal.
 7. Two active Threads cannot display or resolve each other's approvals.
-8. Profile changes are either effective after Runtime recreation or clearly
-   reported as next-Runtime settings.
+8. Web Studio and the REPL have no Profile control or retained Profile identity;
+   a legacy `profile=auto` input, if accepted during migration, is translated
+   to explicit runtime inputs before construction and cannot change approval,
+   mode, or loop semantics by itself.
 9. `/status`, `/plan`, `/goal`, `/mcp`, and `/compact` use control APIs rather
    than accidental model prompts.
 10. `item/started`, approval events, `approval/resolved`, `item/completed`, and
     `turn/read` preserve the same bounded call identity and final outcome.
 11. A Project with one primary root and multiple associated roots can read
-    files from every declared associated root, while `apply_patch` and create
-    remain limited to the primary root by default.
-12. A root outside the Project manifest, a symlink escape, and an undeclared
-    shell write are denied or require the documented sandbox/approval path; the
-    UI never presents associated roots as unrestricted write scope.
+    files from every declared root; `reference` roots are read-only and
+    `editable` roots can be written only through explicit Project or machine
+    access, subject to Plan/security/approval gates; Plan scratch writes remain
+    isolated in `planScratchRoot`.
+12. The user-facing `Project access` preset is limited to the declared Project
+    workspace, while `Full access` explicitly covers machine-wide scope for
+    the current Runtime/Session. Both preserve hard security Deny; shell
+    confirmation and other remaining guardrails are visible in the details.
 13. Changing a Project's associated roots does not change an existing Session's
-    `workspace.json`; a new Session or explicit fork receives the new manifest.
-14. Legacy Web checkpoints can be discovered and migrated/reported
+   `workspace.json`; a new Session or explicit fork receives the new manifest.
+14. A path mentioned only in a message can be used as bounded reference
+    context, while a request to sync/update it creates explicit path-scoped
+    intent; active machine-wide `Full access` may admit it under its guardrails,
+    otherwise it requires explicit approval or an explicit Project-root
+    addition.
+15. Legacy Web checkpoints can be discovered and migrated/reported
     idempotently, while canonical `SessionStore` history always wins and no
     second checkpoint is written afterward.
-15. Project history lists bounded historical, running, paused, and locked
+16. Project history lists bounded historical, running, paused, and locked
     Sessions with stable `sessionId`/`threadId`/`workspaceId` correlations.
-16. Switching to a running Session attaches to its event stream without
+17. Switching to a running Session attaches to its event stream without
     canceling another running Session; switching to a paused Session resumes
     only after the canonical lock is reacquired and never duplicates a turn.
-17. A Session locked by another owner remains readable as history but cannot
+18. A Session locked by another owner remains readable as history but cannot
     be resumed or approve a pending action; a WebSocket disconnect is shown as
     reconnecting/unknown until server reconciliation.
+19. `/plan` starts/stops the selected Thread's Plan exploration runtime, while
+    `/goal <objective>` creates and starts a Goal whose persistent header
+    supports Start/Resume, Pause, Update, and Delete without exposing another
+    Thread's Goal.
+20. Plan scratch scripts and outputs are removed on normal settlement,
+    cancellation, or explicit exit; cleanup failure is visible as
+    `cleanup_pending`, while `plan.md` and its bounded summary remain.
+21. No user-facing `max_steps` or routine `step_limit` control exists. Plan and
+    Goal runtime state owns continuation and completion; an exceptional Core
+    safety-guard outcome is preserved as an internal diagnostic and rendered
+    as protection-triggered/inspect-or-retry, while only an actual cancellation
+    is rendered as “interrupted/cancelled”.
 
 Provider-backed verification remains opt-in and must not use paid calls by
 default. The normal evidence path uses mock providers, protocol fixtures, and
@@ -603,10 +931,14 @@ Harness scenarios.
    Rust batch must identify a measured offset or remain net-zero, run
    `python scripts/line_budget.py`, and record actual before/after counts.
 5. **Visible surface:** Add only bounded WorkspaceSpec root metadata,
-   Session catalog/status fields, approval scope metadata, typed control fields,
-   and Thread-scoped notifications. Do not expose arbitrary prompt
-   replacement, unlimited root lists/paths, unrestricted extension activation,
-   or unbounded event payload. Associated roots are read-only by default.
+   Session catalog/status fields, access scope and approval lifetime metadata,
+   typed control fields, and Thread-scoped notifications. Do not expose
+   arbitrary prompt replacement, unlimited root lists/paths, unrestricted
+   extension activation, or unbounded event payload. Reference roots are
+   read-only; editable roots require an explicit Project or machine access
+   decision and remain approval/Plan constrained. Plan scratch roots,
+   `plan.md`, and cleanup state are bounded Thread-owned artifacts. Do not add
+   a standalone Profile layer or make Profile names a user-facing control.
 6. **Boundary evidence:** Existing Session, Workspace, Protocol, Host, App
    Server, SDK, and Web tests cover portions of the path. New multi-root path
    admission, storage migration, Session list/lock, historical/running/paused
@@ -616,28 +948,36 @@ Harness scenarios.
 
 ## Change test
 
-- **Hypothesis:** Explicit approval scopes and Thread ownership let a client
-  reproduce Codex-like controls without weakening Host security, losing
-  multi-root boundaries, or duplicating execution state.
+- **Hypothesis:** Independent Project/machine access, bounded approval
+  lifetime, and Thread-owned Plan/Goal runtimes let a client reproduce
+  Codex-like controls without weakening Host security, losing multi-root
+  boundaries, or duplicating execution state. Removing Profile and routine
+  step-budget controls keeps ownership understandable.
 - **Distinguishing trace:** `projectId → workspaceId → sessionId → threadId →
   turnId → callId → requestId`, followed by root admission, Session lock/status,
-  approval scope, resolved outcome, ToolItem completion, and canonical
-  readback. The same trace must prove that history selection and a paused
-  Session resume do not create a duplicate checkpoint or turn.
+  access scope/lifetime, resolved outcome, ToolItem completion, Plan scratch
+  cleanup state, retained `plan.md`, stop reason, and canonical readback. The
+  same trace must prove that history selection and a paused Session resume do
+  not create a duplicate checkpoint or turn. It must also distinguish a
+  Project-configured editable root from a one-off message path used only for
+  reference or an explicitly approved sync/update.
 - **Why it cannot live only in a host adapter:** root admission and Session
   identity must cross the App Server/SDK boundary, while canonical history and
   lock ownership must be observable by Web Studio. A UI adapter alone cannot
   preserve either invariant; a host-only root list would also leave the current
   Web process-cwd gap unresolved.
 - **Permanent complexity:** one typed bounded WorkspaceSpec, one canonical
-  SessionStore ownership path, one bounded Session catalog projection, and one
-  scope-aware approval contract. Generic hooks, policy engines, storage
-  frameworks, or extension frameworks are explicitly excluded.
+  SessionStore ownership path, one bounded Session catalog projection, one
+  scope-aware approval contract, one bounded Plan scratch/cleanup path, and one
+  internal Core runaway guard. Generic
+  hooks, Profile/policy engines, storage frameworks, or extension frameworks
+  are explicitly excluded.
 
 ## Non-goals
 
 - Do not modify `D:/gh-ws/codex` or copy the official Codex repository.
-- Do not implement unrestricted machine-wide “allow all” approval.
+- Do not equate machine-wide `Full access` with unrestricted “allow all”:
+  hard security Deny and documented shell/confirmation guardrails remain.
 - Do not add a second Core execution loop, Goal verifier history, or Web-side
   persistence authority.
 - Do not make the Web `state.json` or checkpoint directory a second Session
@@ -646,8 +986,16 @@ Harness scenarios.
   claim that native shell cwd alone enforces multi-root filesystem isolation.
 - Do not support two concurrent writers for one Session or silently rebind an
   existing Session to a changed Project workspace manifest.
+- Do not make Plan strictly read-only, and do not let its scratch root become
+  an undeclared durable Project write area.
 - Do not make arbitrary raw system-prompt replacement public.
 - Do not make dynamic Skill/Plugin hot-loading part of the first approval batch.
+- Do not add a standalone `Profile` layer or retain `interactive`/`ask`/`auto`
+  as Runtime/Session identity. A legacy parser may translate old input during
+  migration only.
+- Do not expose `max_steps` or routine `step_limit` as a task control; the Core
+  safety guard remains internal and continuation belongs to Plan/Goal runtime
+  state.
 
 The external alignment principle is to make autonomy and approval boundaries
 explicit, name safe local actions, and require confirmation for destructive,
