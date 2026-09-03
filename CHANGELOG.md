@@ -37,6 +37,12 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   Orchestrator approval tests now covered by the real six-tool catalog and the
   public App Server Shell approval path; Core and lifecycle-boundary coverage is
   unchanged.
+- **Host catalog:** reduce the internal Builtin selection catalog to the six
+  names it currently consumes and remove the duplicate provider filtering
+  facade; future origin/admission metadata can be added when a consumer exists.
+- **Capabilities test fixtures:** share workspace, image-uploader, Responses
+  request, and web-fetch setup helpers while retaining the same 66 provider and
+  security tests.
 
 ## [0.7.0] - 2026-09-02
 

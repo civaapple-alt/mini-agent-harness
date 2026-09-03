@@ -359,22 +359,36 @@ mod tests {
         )
     }
 
+    fn request<'a>(
+        config: &'a HarnessConfig,
+        messages: &'a [Message],
+        tools: &'a [ToolSpec],
+    ) -> ModelRequest<'a> {
+        ModelRequest {
+            system_prompt: &config.system_prompt,
+            messages,
+            tools,
+            max_response_bytes: config.max_model_response_bytes,
+        }
+    }
+
+    fn render_body(
+        model: &str,
+        config: &HarnessConfig,
+        messages: &[Message],
+        tools: &[ToolSpec],
+        web_search: bool,
+        images: &ImageStore,
+    ) -> Value {
+        request_body(model, &request(config, messages, tools), web_search, images)
+    }
+
     #[test]
     fn serializes_responses_input_and_tools() {
         let (messages, tools) = lookup_messages();
         let config = HarnessConfig::default();
         let images = crate::image::ImageStore::memory_only();
-        let body = request_body(
-            "test-model",
-            &ModelRequest {
-                system_prompt: &config.system_prompt,
-                messages: &messages,
-                tools: &tools,
-                max_response_bytes: config.max_model_response_bytes,
-            },
-            true,
-            &images,
-        );
+        let body = render_body("test-model", &config, &messages, &tools, true, &images);
 
         assert_eq!(body["model"], "test-model");
         assert_eq!(body["input"][0]["role"], "developer");
@@ -386,28 +400,15 @@ mod tests {
         assert_eq!(body["tools"][1]["type"], "web_search");
         assert_eq!(body["parallel_tool_calls"], false);
 
-        let body_no_search = request_body(
-            "test-model",
-            &ModelRequest {
-                system_prompt: &config.system_prompt,
-                messages: &messages,
-                tools: &tools,
-                max_response_bytes: config.max_model_response_bytes,
-            },
-            false,
-            &images,
-        );
+        let body_no_search = render_body("test-model", &config, &messages, &tools, false, &images);
         assert_eq!(body_no_search["tools"].as_array().unwrap().len(), 1);
 
-        let empty_tools = [];
-        let body_empty_tools = request_body(
+        let empty_tools: [ToolSpec; 0] = [];
+        let body_empty_tools = render_body(
             "test-model",
-            &ModelRequest {
-                system_prompt: &config.system_prompt,
-                messages: &messages,
-                tools: &empty_tools,
-                max_response_bytes: config.max_model_response_bytes,
-            },
+            &config,
+            &messages,
+            &empty_tools,
             true,
             &images,
         );
@@ -420,12 +421,7 @@ mod tests {
         let images = crate::image::ImageStore::memory_only();
         let body = request_body_with_limit(
             "test-model",
-            &ModelRequest {
-                system_prompt: &config.system_prompt,
-                messages: &[],
-                tools: &[],
-                max_response_bytes: config.max_model_response_bytes,
-            },
+            &request(&config, &[], &[]),
             false,
             &images,
             Some(64),
@@ -464,14 +460,11 @@ mod tests {
             parameters: json!({"type": "object"}),
         }];
         let config = HarnessConfig::default();
-        let body = request_body(
+        let body = render_body(
             "deepseek-v4-flash",
-            &ModelRequest {
-                system_prompt: &config.system_prompt,
-                messages: &messages,
-                tools: &tools,
-                max_response_bytes: config.max_model_response_bytes,
-            },
+            &config,
+            &messages,
+            &tools,
             false,
             &images,
         );
@@ -482,17 +475,7 @@ mod tests {
         assert!(output[1].get("image_url").is_none());
         assert!(!body.to_string().contains("data:image"));
 
-        let compacted = request_body(
-            "deepseek-v4-flash",
-            &ModelRequest {
-                system_prompt: &config.system_prompt,
-                messages: &messages,
-                tools: &[],
-                max_response_bytes: config.max_model_response_bytes,
-            },
-            true,
-            &images,
-        );
+        let compacted = render_body("deepseek-v4-flash", &config, &messages, &[], true, &images);
         assert_eq!(compacted["model"], "deepseek-v4-flash");
         assert_eq!(compacted["input"][2]["output"], envelope);
     }

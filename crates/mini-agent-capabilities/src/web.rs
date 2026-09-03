@@ -620,6 +620,15 @@ mod tests {
         })
     }
 
+    fn fetch(get: HttpGet, url: &str) -> String {
+        WebFetch {
+            get,
+            results: ResultStore::default(),
+        }
+        .execute(&json!({"url": url}))
+        .unwrap()
+    }
+
     #[test]
     fn admit_url_allows_public_https() {
         assert_eq!(
@@ -731,13 +740,7 @@ mod tests {
             );
             let _ = stream.write_all(response.as_bytes());
         });
-        let fetch = WebFetch {
-            get: http_get,
-            results: ResultStore::default(),
-        };
-        let out = fetch
-            .execute(&json!({"url": format!("http://127.0.0.1:{port}/")}))
-            .unwrap();
+        let out = fetch(http_get, &format!("http://127.0.0.1:{port}/"));
         assert!(out.contains("hello from localhost"), "{out}");
         assert!(out.contains("title: Dev"), "{out}");
         server.join().unwrap();
@@ -745,13 +748,7 @@ mod tests {
 
     #[test]
     fn web_fetch_renders_readable_html() {
-        let fetch = WebFetch {
-            get: stub_ok,
-            results: ResultStore::default(),
-        };
-        let out = fetch
-            .execute(&json!({"url": "https://example.com/"}))
-            .unwrap();
+        let out = fetch(stub_ok, "https://example.com/");
         assert!(out.contains("url: https://example.com/"));
         assert!(out.contains("status: 200"));
         assert!(out.contains("title: Example Domain"));
@@ -762,26 +759,14 @@ mod tests {
 
     #[test]
     fn web_fetch_warns_on_javascript_shell() {
-        let fetch = WebFetch {
-            get: stub_shell,
-            results: ResultStore::default(),
-        };
-        let out = fetch
-            .execute(&json!({"url": "https://example.com/app"}))
-            .unwrap();
+        let out = fetch(stub_shell, "https://example.com/app");
         assert!(out.contains("warning:"));
         assert!(out.contains("does not execute JavaScript"));
     }
 
     #[test]
     fn web_fetch_caches_long_output_as_bounded_artifact() {
-        let fetch = WebFetch {
-            get: stub_long,
-            results: ResultStore::default(),
-        };
-        let preview = fetch
-            .execute(&json!({"url": "https://example.com/long"}))
-            .unwrap();
+        let preview = fetch(stub_long, "https://example.com/long");
         assert!(preview.contains("tool_result_preview"), "{preview}");
         assert!(
             preview.contains("default builtin catalog does not expose result continuation"),

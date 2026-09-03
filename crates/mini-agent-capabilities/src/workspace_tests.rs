@@ -3,6 +3,23 @@ use crate::test_support::{remove_test_root, test_root};
 use mini_agent_protocol::ToolExecutionStatus;
 use std::io::Cursor;
 
+struct StubFiles(&'static str);
+
+impl crate::image::FileUploader for StubFiles {
+    fn upload(&self, _: &str, _: &str, _: &[u8]) -> Result<String, ToolError> {
+        Ok(self.0.to_string())
+    }
+}
+
+fn workspace(
+    root: PathBuf,
+    approval: ApprovalController,
+    extra_read_roots: Vec<PathBuf>,
+    sandbox: SandboxKind,
+) -> Arc<Workspace> {
+    Arc::new(Workspace::with_read_roots(root, approval, extra_read_roots, sandbox).unwrap())
+}
+
 #[test]
 fn policy_can_be_replaced_after_frontend_callback_creation() {
     let approval = ApprovalController::with_callback(ApprovalMode::Interactive, |_| {
@@ -49,14 +66,11 @@ fn default_builtin_tools_are_bounded_to_core_catalog() {
 fn reads_and_edits_inside_workspace() {
     let root = test_root();
     fs::write(root.join("note.txt"), "hello world").unwrap();
-    let workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::new(ApprovalMode::Automatic),
-            Vec::new(),
-            SandboxKind::Native,
-        )
-        .unwrap(),
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
     );
     let read = ReadFile(Arc::clone(&workspace));
     let edit = EditFile(workspace);
@@ -86,28 +100,18 @@ fn reads_and_edits_inside_workspace() {
 
 #[test]
 fn read_image_uploads_and_rejects_type_mismatch() {
-    struct StubFiles;
-    impl crate::image::FileUploader for StubFiles {
-        fn upload(&self, _: &str, _: &str, _: &[u8]) -> Result<String, ToolError> {
-            Ok("file-api-test".to_string())
-        }
-    }
-
     let root = test_root();
     fs::write(root.join("shot.png"), crate::image::TINY_PNG).unwrap();
     fs::write(root.join("shot.jpg"), crate::image::TINY_PNG).unwrap();
-    let workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::new(ApprovalMode::Automatic),
-            Vec::new(),
-            SandboxKind::Native,
-        )
-        .unwrap(),
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
     );
     let ok = ReadImage {
         workspace: Arc::clone(&workspace),
-        store: crate::image::ImageStore::with_uploader(Arc::new(StubFiles)),
+        store: crate::image::ImageStore::with_uploader(Arc::new(StubFiles("file-api-test"))),
     };
     let out = ok.execute(&json!({"path": "shot.png"})).unwrap();
     assert!(out.contains("file_id=\"file-api-test\""));
@@ -122,29 +126,19 @@ fn read_image_uploads_and_rejects_type_mismatch() {
 
 #[test]
 fn read_image_accepts_absolute_path_outside_workspace_after_approval() {
-    struct StubFiles;
-    impl crate::image::FileUploader for StubFiles {
-        fn upload(&self, _: &str, _: &str, _: &[u8]) -> Result<String, ToolError> {
-            Ok("file-api-outside".to_string())
-        }
-    }
-
     let root = test_root();
     let pictures = test_root();
     fs::write(pictures.join("outside.png"), crate::image::TINY_PNG).unwrap();
     let abs = pictures.join("outside.png").canonicalize().unwrap();
-    let workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::new(ApprovalMode::Automatic),
-            Vec::new(),
-            SandboxKind::Native,
-        )
-        .unwrap(),
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
     );
     let tool = ReadImage {
         workspace: Arc::clone(&workspace),
-        store: crate::image::ImageStore::with_uploader(Arc::new(StubFiles)),
+        store: crate::image::ImageStore::with_uploader(Arc::new(StubFiles("file-api-outside"))),
     };
     let out = tool
         .execute(&json!({"path": abs.to_string_lossy().to_string()}))
@@ -165,14 +159,11 @@ fn read_image_outside_workspace_can_be_denied() {
     let pictures = test_root();
     fs::write(pictures.join("secret.png"), crate::image::TINY_PNG).unwrap();
     let abs = pictures.join("secret.png").canonicalize().unwrap();
-    let workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
-            Vec::new(),
-            SandboxKind::Native,
-        )
-        .unwrap(),
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
+        Vec::new(),
+        SandboxKind::Native,
     );
     let tool = ReadImage {
         workspace,
@@ -196,14 +187,11 @@ fn shell_denial_is_explicit_before_sandbox_execution() {
     } else {
         format!("printf blocked > '{marker_text}'")
     };
-    let workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
-            Vec::new(),
-            SandboxKind::Docker,
-        )
-        .unwrap(),
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
+        Vec::new(),
+        SandboxKind::Docker,
     );
     let shell = Shell(workspace, ResultStore::default());
 
@@ -222,14 +210,11 @@ fn shell_denial_is_explicit_before_sandbox_execution() {
 fn shell_admission_describes_approval_before_execution() {
     let root = test_root();
     let shell = Shell(
-        Arc::new(
-            Workspace::with_read_roots(
-                root.clone(),
-                ApprovalController::new(ApprovalMode::Automatic),
-                Vec::new(),
-                SandboxKind::Native,
-            )
-            .unwrap(),
+        workspace(
+            root.clone(),
+            ApprovalController::new(ApprovalMode::Automatic),
+            Vec::new(),
+            SandboxKind::Native,
         ),
         ResultStore::default(),
     );
@@ -255,14 +240,11 @@ fn rejects_escape_and_git_paths() {
     fs::write(other.join("secret.txt"), "secret data").unwrap();
     let outside_abs = other.join("secret.txt").to_string_lossy().to_string();
 
-    let workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::new(ApprovalMode::Automatic),
-            Vec::new(),
-            SandboxKind::Native,
-        )
-        .unwrap(),
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
     );
 
     assert!(workspace.candidate(&json!({"path": "../secret"})).is_err());
@@ -292,14 +274,11 @@ fn read_file_accepts_configured_extension_roots() {
     fs::write(extra.join("SKILL.md"), "extension body").unwrap();
     let extra_root = extra.canonicalize().unwrap();
     let skill = extra.join("SKILL.md").canonicalize().unwrap();
-    let workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::new(ApprovalMode::Automatic),
-            vec![extra_root],
-            SandboxKind::Native,
-        )
-        .unwrap(),
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        vec![extra_root],
+        SandboxKind::Native,
     );
     let location = skill.to_string_lossy().replace('\\', "/");
     let read = ReadFile(Arc::clone(&workspace));
@@ -335,10 +314,7 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
     fs::write(&plan, "# Implementation Plan\n").unwrap();
     let approval = ApprovalController::new(ApprovalMode::Automatic);
     approval.set_living_plan(Some(plan.clone()));
-    let workspace = Arc::new(
-        Workspace::with_read_roots(root.clone(), approval, Vec::new(), SandboxKind::Native)
-            .unwrap(),
-    );
+    let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let read = ReadFile(Arc::clone(&workspace));
     let edit = EditFile(Arc::clone(&workspace));
     let write = WriteFile(Arc::clone(&workspace));
@@ -411,10 +387,7 @@ fn plan_mode_allows_read_only_shell_inspection() {
     fs::write(&plan, "# Plan\n").unwrap();
     let approval = ApprovalController::new(ApprovalMode::Automatic);
     approval.set_living_plan(Some(plan));
-    let workspace = Arc::new(
-        Workspace::with_read_roots(root.clone(), approval, Vec::new(), SandboxKind::Native)
-            .unwrap(),
-    );
+    let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let shell = Shell(Arc::clone(&workspace), ResultStore::default());
     let command = if cfg!(windows) {
         "Get-ChildItem -Force | Select-Object Name | Format-Table -AutoSize"
@@ -461,10 +434,7 @@ fn read_only_agent_rule_locks_workspace_mutations() {
     let root = test_root();
     let approval = ApprovalController::new(ApprovalMode::Automatic);
     approval.set_read_only_agent(true);
-    let workspace = Arc::new(
-        Workspace::with_read_roots(root.clone(), approval, Vec::new(), SandboxKind::Native)
-            .unwrap(),
-    );
+    let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let write = WriteFile(Arc::clone(&workspace));
 
     let error = write
@@ -491,10 +461,7 @@ fn goal_mode_allows_session_goal_plan_reads_and_workspace_writes() {
     .unwrap();
     let approval = ApprovalController::new(ApprovalMode::Automatic);
     approval.set_goal_dir(Some(goal_dir.clone()));
-    let workspace = Arc::new(
-        Workspace::with_read_roots(root.clone(), approval, Vec::new(), SandboxKind::Native)
-            .unwrap(),
-    );
+    let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let read = ReadFile(Arc::clone(&workspace));
     let write = WriteFile(Arc::clone(&workspace));
 
@@ -536,14 +503,11 @@ fn goal_mode_allows_session_goal_plan_reads_and_workspace_writes() {
 fn write_file_creates_but_does_not_replace() {
     let root = test_root();
     fs::write(root.join("existing.txt"), "keep me").unwrap();
-    let workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::new(ApprovalMode::Automatic),
-            Vec::new(),
-            SandboxKind::Native,
-        )
-        .unwrap(),
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
     );
     let write = WriteFile(workspace);
 
@@ -646,14 +610,11 @@ fn shell_preserves_utf8_from_workspace_files() {
 #[test]
 fn large_shell_output_is_retained_as_bounded_artifact() {
     let root = test_root();
-    let workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::new(ApprovalMode::Automatic),
-            Vec::new(),
-            SandboxKind::Native,
-        )
-        .unwrap(),
+    let workspace = workspace(
+        root.clone(),
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
     );
     let results = ResultStore::default();
     let shell = Shell(workspace, results.clone());
@@ -714,14 +675,11 @@ fn full_machine_preset_permits_paths_outside_workspace() {
     fs::write(outside.join("outside.txt"), "outside data").unwrap();
     let outside_file = outside.join("outside.txt").to_string_lossy().to_string();
 
-    let default_workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::with_preset(ApprovalMode::Automatic, SecurityPreset::Default),
-            Vec::new(),
-            SandboxKind::Native,
-        )
-        .unwrap(),
+    let default_workspace = workspace(
+        root.clone(),
+        ApprovalController::with_preset(ApprovalMode::Automatic, SecurityPreset::Default),
+        Vec::new(),
+        SandboxKind::Native,
     );
     let default_read = ReadFile(default_workspace);
     assert!(
@@ -730,14 +688,11 @@ fn full_machine_preset_permits_paths_outside_workspace() {
             .is_err()
     );
 
-    let full_workspace = Arc::new(
-        Workspace::with_read_roots(
-            root.clone(),
-            ApprovalController::with_preset(ApprovalMode::Automatic, SecurityPreset::FullMachine),
-            Vec::new(),
-            SandboxKind::Native,
-        )
-        .unwrap(),
+    let full_workspace = workspace(
+        root.clone(),
+        ApprovalController::with_preset(ApprovalMode::Automatic, SecurityPreset::FullMachine),
+        Vec::new(),
+        SandboxKind::Native,
     );
     let full_read = ReadFile(full_workspace);
     assert_eq!(

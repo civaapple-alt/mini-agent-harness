@@ -1962,3 +1962,31 @@ Decision: **accept and commit this P1 batch**. Runtime is below the current targ
 (`18,799`); release-source cleanup still needs `845` lines to reach the requested
 `27,150` target. Continue with bounded Capabilities duplicate/compatibility cleanup,
 without weakening security, MCP, Goal, Session, or public App Server evidence.
+
+#### 2026-09-03：Host catalog 与 Capabilities fixture 收敛
+
+本批删除 Host 内建选择目录中当前没有消费者的 origin、exposure、admission 元数据，
+保留 Thread 选择实际需要的六个工具名；同时删除 provider 已经保证返回六个内建工具后
+仍重复执行的 Host 过滤 facade。Capabilities 测试只共享重复的 Workspace、图片上传器、
+Responses request 和 WebFetch 构造，不减少测试场景或改变 provider 行为。
+
+本批六项准入记录：
+
+```text
+1. Layer: Host catalog production glue and Capabilities unit-test fixtures; Core,
+   Actor/CAS/Session, approval, security, MCP, Goal, and public App Server paths stay intact.
+2. Duplicate responsibility: unconsumed catalog metadata and provider-result filtering
+   duplicated the current built-in provider contract; test setup repeated identical constructors.
+3. Replace vs add: use one bounded six-name selection source and shared test constructors;
+   no second provider, execution loop, approval path, or compatibility endpoint was added.
+4. Net line delta: runtime `18,726 -> 18,615` (`-111`); release Rust source
+   `27,995 -> 27,807` (`-188`).
+5. Visible surface: no model-visible input, event, persistence, or public protocol behavior
+   changes; only unconsumed internal metadata and fixture repetition were removed.
+6. Boundary evidence: Capabilities tests (66 passed), Host tests (28 passed), App Server tests
+   (43 passed), `cargo fmt --all`, `git diff --check`, and `python scripts/line_budget.py all`
+   passed.
+```
+
+Decision: **accept this bounded cleanup batch**. Runtime is `184` lines below the requested
+`18,799` target; release-source cleanup still needs `657` lines to reach `27,150`.
