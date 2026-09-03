@@ -7,10 +7,11 @@ use crate::action::RuntimeRevision;
 use crate::management::RuntimeActorState;
 use crate::management::SettingsRuntimeEvent;
 pub(super) use crate::runtime_command::{RuntimeCommand, RuntimeRequest};
+use crate::thread_manager::ThreadHandle;
+use crate::thread_manager::ThreadManager;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::McpLoadResult;
 use mini_agent_capabilities::load_mcp;
-use mini_agent_core::Thread;
 use mini_agent_core::ThreadCheckpoint;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
@@ -19,9 +20,6 @@ use mini_agent_protocol::TurnId;
 use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnStart;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use tokio::sync::oneshot;
@@ -31,35 +29,26 @@ pub(super) fn handle_request<M>(
     receipt: ActionReceipt,
     base_revision: RuntimeRevision,
     runtime: &mut Option<RuntimeActorState>,
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
+    threads: &mut ThreadManager<M>,
     runtime_revision: &AtomicU64,
 ) where
-    M: Model,
+    M: Model + 'static,
 {
     if let Err(error) = check_revision(&request, runtime, base_revision) {
         reject_runtime(request.command, receipt, error);
         return;
     }
-    handle(
-        request.command,
-        receipt,
-        runtime,
-        threads,
-        thread_ids,
-        runtime_revision,
-    );
+    handle(request.command, receipt, runtime, threads, runtime_revision);
 }
 
 pub(super) fn handle<M>(
     command: RuntimeCommand,
     receipt: ActionReceipt,
     runtime: &mut Option<RuntimeActorState>,
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
+    threads: &mut ThreadManager<M>,
     runtime_revision: &AtomicU64,
 ) where
-    M: Model,
+    M: Model + 'static,
 {
     match command {
         RuntimeCommand::SessionInfo { reply } => respond(
@@ -162,7 +151,7 @@ pub(super) fn handle<M>(
         }
         RuntimeCommand::StartNewThread { reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
-                start_new_thread(threads, thread_ids, state).map(|()| ((), true))
+                start_new_thread(threads, state).map(|()| ((), true))
             });
             respond(reply, receipt, result);
         }
@@ -306,11 +295,10 @@ pub(super) fn handle_running<M>(
     receipt: ActionReceipt,
     base_revision: RuntimeRevision,
     runtime: &mut Option<RuntimeActorState>,
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
+    threads: &mut ThreadManager<M>,
     runtime_revision: &AtomicU64,
 ) where
-    M: Model,
+    M: Model + 'static,
 {
     if let Err(error) = check_revision(&request, runtime, base_revision) {
         reject_runtime(request.command, receipt, error);
@@ -320,14 +308,7 @@ pub(super) fn handle_running<M>(
     if command.is_mutation() && !is_safe_goal_mutation_while_running(&command) {
         reject_runtime(command, receipt, AppServerError::Busy);
     } else {
-        handle(
-            command,
-            receipt,
-            runtime,
-            threads,
-            thread_ids,
-            runtime_revision,
-        );
+        handle(command, receipt, runtime, threads, runtime_revision);
     }
 }
 
@@ -368,13 +349,13 @@ fn check_revision(
 }
 
 pub(super) fn set_collaboration_mode<M>(
-    threads: &mut HashMap<String, Thread<M>>,
+    threads: &mut ThreadManager<M>,
     state: &mut RuntimeActorState,
     active: bool,
     builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
 ) -> Result<Vec<String>, AppServerError>
 where
-    M: Model,
+    M: Model + 'static,
 {
     let thread_id = state.management.thread_id();
     let thread = threads
@@ -417,12 +398,12 @@ where
 }
 
 fn update_world<M>(
-    threads: &mut HashMap<String, Thread<M>>,
+    threads: &mut ThreadManager<M>,
     state: &mut RuntimeActorState,
     updated: mini_agent_host::WorldState,
 ) -> Result<bool, AppServerError>
 where
-    M: Model,
+    M: Model + 'static,
 {
     if updated == state.management.world() {
         return Ok(false);
@@ -575,12 +556,12 @@ pub(super) fn goal_turn_usage(
 
 pub(super) fn prepare_goal_verification<M>(
     runtime: &mut Option<RuntimeActorState>,
-    thread: &Thread<M>,
+    thread: &ThreadHandle<M>,
     goal_id: &str,
     turn_id: &mini_agent_protocol::TurnId,
 ) -> Result<Option<crate::goal_runtime::GoalVerificationRequest>, AppServerError>
 where
-    M: Model,
+    M: Model + 'static,
 {
     let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
     let checkpoint = thread
@@ -606,12 +587,12 @@ where
 
 pub(super) fn prepare_goal_verification_or_fail<M>(
     runtime: &mut Option<RuntimeActorState>,
-    thread: &Thread<M>,
+    thread: &ThreadHandle<M>,
     goal_id: &str,
     turn_id: &mini_agent_protocol::TurnId,
 ) -> Result<Option<crate::goal_runtime::GoalVerificationRequest>, AppServerError>
 where
-    M: Model,
+    M: Model + 'static,
 {
     match prepare_goal_verification(runtime, thread, goal_id, turn_id) {
         Ok(request) => Ok(request),
@@ -668,10 +649,10 @@ pub(super) fn complete_goal_verification(
 
 pub(super) fn resume_goal<M>(
     runtime: &mut Option<RuntimeActorState>,
-    threads: &mut HashMap<String, Thread<M>>,
+    threads: &mut ThreadManager<M>,
 ) -> Result<Option<crate::goal_runtime::GoalVerificationRequest>, AppServerError>
 where
-    M: Model,
+    M: Model + 'static,
 {
     let goal = runtime
         .as_ref()
@@ -711,12 +692,12 @@ where
 }
 
 fn append_context_and_persist<M>(
-    threads: &mut HashMap<String, Thread<M>>,
+    threads: &mut ThreadManager<M>,
     state: &mut RuntimeActorState,
     context: String,
 ) -> Result<(), AppServerError>
 where
-    M: Model,
+    M: Model + 'static,
 {
     let thread_id = state.management.thread_id();
     let thread = threads
@@ -741,12 +722,12 @@ where
 }
 
 fn update_thread<M>(
-    threads: &mut HashMap<String, Thread<M>>,
+    threads: &mut ThreadManager<M>,
     state: &mut RuntimeActorState,
     update: crate::ThreadUpdate,
 ) -> Result<(), AppServerError>
 where
-    M: Model,
+    M: Model + 'static,
 {
     if let crate::ThreadUpdate::AppendContext(context) = update {
         return append_context_and_persist(threads, state, context);
@@ -760,12 +741,12 @@ where
 }
 
 fn retry_mcp<M>(
-    threads: &mut HashMap<String, Thread<M>>,
+    threads: &mut ThreadManager<M>,
     state: &mut RuntimeActorState,
     approval: ApprovalController,
 ) -> Result<(crate::McpRetryResult, bool), AppServerError>
 where
-    M: Model,
+    M: Model + 'static,
 {
     let servers = state.management.retry_mcp_servers();
     if servers.is_empty() {
@@ -814,41 +795,26 @@ where
 }
 
 fn start_new_thread<M>(
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
+    threads: &mut ThreadManager<M>,
     state: &mut RuntimeActorState,
 ) -> Result<(), AppServerError>
 where
-    M: Model,
+    M: Model + 'static,
 {
     let old_thread_id = state.management.thread_id();
-    let old_key = old_thread_id.as_str().to_string();
-    let mut thread = threads
-        .remove(&old_key)
-        .ok_or_else(|| AppServerError::ThreadNotFound(old_thread_id.clone()))?;
+    if !threads.contains(old_thread_id.as_str()) {
+        return Err(AppServerError::ThreadNotFound(old_thread_id));
+    }
     let Some(session) = state.management.session_mut() else {
-        threads.insert(old_key, thread);
         return Err(AppServerError::Checkpoint(
             "session persistence is disabled".to_string(),
         ));
     };
     if let Err(error) = session.store.start_thread() {
-        threads.insert(old_key, thread);
         return Err(AppServerError::Checkpoint(error));
     }
     let new_thread_id = ThreadId::new(session.store.thread_id().to_string());
-    thread.set_id(new_thread_id.clone());
-    thread.set_next_turn_number(1);
-    threads.insert(new_thread_id.as_str().to_string(), thread);
-    if let Some(known) = thread_ids
-        .lock()
-        .unwrap()
-        .iter_mut()
-        .find(|known| **known == old_thread_id)
-    {
-        *known = new_thread_id;
-    }
-    Ok(())
+    threads.rename(&old_thread_id, new_thread_id, 1)
 }
 
 fn workflow_error(error: std::io::Error) -> AppServerError {

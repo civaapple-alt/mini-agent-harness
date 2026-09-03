@@ -8,6 +8,8 @@ use crate::action::ActionSequencer;
 use crate::management::RuntimeActorState;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeRequest;
+use crate::thread_manager::ThreadHandle;
+use crate::thread_manager::ThreadManager;
 use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_core::SteeringMode;
 use mini_agent_core::TurnResult;
@@ -88,14 +90,15 @@ pub(super) enum Command {
     },
 }
 
-struct BroadcastSink {
+/// Orders Thread events and runtime notifications around a settled Turn.
+struct ThreadListener {
     events: broadcast::Sender<EventEnvelope>,
     notifications: broadcast::Sender<RuntimeNotification>,
     pending_finish: Option<EventEnvelope>,
     tokens_used: u64,
 }
 
-impl BroadcastSink {
+impl ThreadListener {
     fn take_pending_finish(&mut self) -> Option<EventEnvelope> {
         self.pending_finish.take()
     }
@@ -117,12 +120,11 @@ impl BroadcastSink {
 
 struct RunningCommandContext<'a, M> {
     runtime: &'a mut Option<RuntimeActorState>,
-    threads: &'a mut HashMap<String, Thread<M>>,
-    thread_ids: &'a Arc<Mutex<Vec<ThreadId>>>,
+    threads: &'a mut ThreadManager<M>,
     runtime_revision: &'a Arc<AtomicU64>,
 }
 
-impl EventSink for BroadcastSink {
+impl EventSink for ThreadListener {
     fn emit(&mut self, event: EventEnvelope) {
         match &event.event {
             Event::ModelResponded { usage, .. }
@@ -152,10 +154,7 @@ pub(super) async fn worker_loop<M>(
 {
     let mut action_sequencer = ActionSequencer::new();
     let mut runtime = None;
-    let mut threads = threads
-        .into_iter()
-        .map(|thread| (thread.id().as_str().to_string(), thread))
-        .collect::<HashMap<_, _>>();
+    let mut threads = ThreadManager::new(threads, thread_ids.clone(), factory.clone());
     let mut settled_turns = HashMap::new();
     let mut deferred_goal_verifications = VecDeque::new();
     while let Some(command) = commands.recv().await {
@@ -197,7 +196,6 @@ pub(super) async fn worker_loop<M>(
                     action_base_revision,
                     &mut runtime,
                     &mut threads,
-                    &thread_ids,
                     &runtime_revision,
                 );
             }
@@ -230,17 +228,17 @@ pub(super) async fn worker_loop<M>(
                         receipt,
                         Err(AppServerError::InvalidInputMode(request.input.mode)),
                     );
-                    threads.insert(key, thread);
+                    threads.insert(thread);
                     continue;
                 }
                 if thread.status() == mini_agent_protocol::ThreadStatus::Closed {
                     respond(reply, receipt, Err(AppServerError::Closed));
-                    threads.insert(key, thread);
+                    threads.insert(thread);
                     continue;
                 }
                 if thread.status() == mini_agent_protocol::ThreadStatus::Running {
                     respond(reply, receipt, Err(AppServerError::Busy));
-                    threads.insert(key, thread);
+                    threads.insert(thread);
                     continue;
                 }
 
@@ -308,7 +306,7 @@ pub(super) async fn worker_loop<M>(
                         );
                     }
                     let input = TurnInput::new(TurnInputMode::Start, input.text);
-                    let mut sink = BroadcastSink {
+                    let mut sink = ThreadListener {
                         events: events.clone(),
                         notifications: notifications.clone(),
                         pending_finish: None,
@@ -358,7 +356,6 @@ pub(super) async fn worker_loop<M>(
                                     RunningCommandContext {
                                         runtime: &mut runtime,
                                         threads: &mut threads,
-                                        thread_ids: &thread_ids,
                                         runtime_revision: &runtime_revision,
                                     },
                                 );
@@ -366,7 +363,7 @@ pub(super) async fn worker_loop<M>(
                             else => {
                                 drop(turn);
                                 thread.harness_mut().replace_config(original_config);
-                                threads.insert(key.clone(), thread);
+                                threads.insert(thread);
                                 return;
                             },
                         }
@@ -542,7 +539,7 @@ pub(super) async fn worker_loop<M>(
                         break;
                     }
                 }
-                threads.insert(key, thread);
+                threads.insert(thread);
             }
             Command::GoalVerificationCompleted {
                 thread_id,
@@ -595,25 +592,9 @@ pub(super) async fn worker_loop<M>(
                 next_turn_number,
                 reply,
             } => {
-                let old_key = thread_id.as_str().to_string();
-                let result = if threads.contains_key(new_thread_id.as_str()) {
-                    Err(AppServerError::ThreadAlreadyExists(new_thread_id))
-                } else if let Some(mut thread) = threads.remove(&old_key) {
-                    thread.set_id(new_thread_id.clone());
-                    thread.set_next_turn_number(next_turn_number);
-                    threads.insert(new_thread_id.as_str().to_string(), thread);
-                    if let Some(known) = thread_ids
-                        .lock()
-                        .unwrap()
-                        .iter_mut()
-                        .find(|known| **known == thread_id)
-                    {
-                        *known = new_thread_id.clone();
-                    }
-                    Ok(new_thread_id)
-                } else {
-                    Err(AppServerError::ThreadNotFound(thread_id))
-                };
+                let result = threads
+                    .rename(&thread_id, new_thread_id.clone(), next_turn_number)
+                    .map(|()| new_thread_id);
                 if result.is_ok() {
                     runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                 }
@@ -641,7 +622,7 @@ pub(super) async fn worker_loop<M>(
                 );
             }
             Command::CreateThread { thread_id, reply } => {
-                let result = create_thread(&mut threads, &thread_ids, factory.as_ref(), thread_id);
+                let result = threads.create(thread_id);
                 if result.is_ok() {
                     runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                 }
@@ -652,13 +633,7 @@ pub(super) async fn worker_loop<M>(
                 new_thread_id,
                 reply,
             } => {
-                let result = fork_thread(
-                    &mut threads,
-                    &thread_ids,
-                    factory.as_ref(),
-                    source_thread_id,
-                    new_thread_id,
-                );
+                let result = threads.fork(source_thread_id, new_thread_id);
                 if result.is_ok() {
                     runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                 }
@@ -669,13 +644,7 @@ pub(super) async fn worker_loop<M>(
                 checkpoint,
                 reply,
             } => {
-                let result = resume_thread(
-                    &mut threads,
-                    &thread_ids,
-                    factory.as_ref(),
-                    thread_id,
-                    checkpoint,
-                );
+                let result = threads.resume(thread_id, checkpoint);
                 if result.is_ok() {
                     runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                     match runtime_actor::resume_goal(&mut runtime, &mut threads) {
@@ -746,7 +715,7 @@ fn complete_goal_verification(
     }
 }
 pub(super) fn apply_thread_update<M>(
-    thread: &mut Thread<M>,
+    thread: &mut ThreadHandle<M>,
     update: ThreadUpdate,
 ) -> Result<(), AppServerError>
 where
@@ -765,85 +734,6 @@ where
         ThreadUpdate::ExtendTools(tools) => thread.harness_mut().extend_tools(tools),
     }
     Ok(())
-}
-
-fn create_thread<M>(
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
-    factory: Option<&Arc<dyn ThreadFactory<M>>>,
-    thread_id: ThreadId,
-) -> Result<ThreadId, AppServerError>
-where
-    M: Model + 'static,
-{
-    let key = thread_id.as_str().to_string();
-    if threads.contains_key(&key) {
-        return Err(AppServerError::ThreadAlreadyExists(thread_id));
-    }
-    let factory = factory.ok_or(AppServerError::ThreadFactoryUnavailable)?;
-    let mut thread = factory.create(thread_id.clone())?;
-    thread.set_id(thread_id.clone());
-    threads.insert(key, thread);
-    thread_ids.lock().unwrap().push(thread_id.clone());
-    Ok(thread_id)
-}
-
-fn fork_thread<M>(
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
-    factory: Option<&Arc<dyn ThreadFactory<M>>>,
-    source_thread_id: ThreadId,
-    new_thread_id: ThreadId,
-) -> Result<ThreadId, AppServerError>
-where
-    M: Model + 'static,
-{
-    let new_key = new_thread_id.as_str().to_string();
-    if threads.contains_key(&new_key) {
-        return Err(AppServerError::ThreadAlreadyExists(new_thread_id));
-    }
-    let checkpoint = threads
-        .get(source_thread_id.as_str())
-        .ok_or_else(|| AppServerError::ThreadNotFound(source_thread_id.clone()))?
-        .checkpoint()
-        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-    let factory = factory.ok_or(AppServerError::ThreadFactoryUnavailable)?;
-    let mut fork = factory.create(new_thread_id.clone())?;
-    let mut checkpoint = checkpoint;
-    checkpoint.thread_id = new_thread_id.clone();
-    fork.restore_checkpoint(checkpoint)
-        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-    threads.insert(new_key, fork);
-    thread_ids.lock().unwrap().push(new_thread_id.clone());
-    Ok(new_thread_id)
-}
-
-fn resume_thread<M>(
-    threads: &mut HashMap<String, Thread<M>>,
-    thread_ids: &Arc<Mutex<Vec<ThreadId>>>,
-    factory: Option<&Arc<dyn ThreadFactory<M>>>,
-    thread_id: ThreadId,
-    mut checkpoint: ThreadCheckpoint,
-) -> Result<ThreadId, AppServerError>
-where
-    M: Model + 'static,
-{
-    checkpoint.thread_id = thread_id.clone();
-    let key = thread_id.as_str().to_string();
-    if let Some(thread) = threads.get_mut(&key) {
-        thread
-            .restore_checkpoint(checkpoint)
-            .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-        return Ok(thread_id);
-    }
-    let factory = factory.ok_or(AppServerError::ThreadFactoryUnavailable)?;
-    let mut thread = factory.create(thread_id.clone())?;
-    thread
-        .restore_checkpoint(checkpoint)
-        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-    threads.insert(key, thread);
-    thread_ids.lock().unwrap().push(thread_id.clone());
-    Ok(thread_id)
 }
 
 fn respond<T>(
@@ -895,7 +785,7 @@ fn handle_running_command<M>(
     deferred_goal_verifications: &mut VecDeque<Command>,
     context: RunningCommandContext<'_, M>,
 ) where
-    M: Model,
+    M: Model + 'static,
 {
     let action_base_revision = action.base_revision;
     let receipt = action.receipt();
@@ -989,7 +879,6 @@ fn handle_running_command<M>(
             action_base_revision,
             context.runtime,
             context.threads,
-            context.thread_ids,
             context.runtime_revision,
         ),
     }

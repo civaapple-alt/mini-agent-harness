@@ -202,6 +202,7 @@ pub mod runtime;
 mod runtime_actor;
 mod runtime_command;
 mod runtime_state;
+mod thread_manager;
 mod thread_settings;
 pub mod trace;
 pub mod verifier;
