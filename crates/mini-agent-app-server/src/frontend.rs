@@ -1,9 +1,8 @@
-//! Stable frontend-facing adapters for the CLI and other local clients.
+//! Stable frontend-facing adapters for local clients.
 //!
 //! Concrete providers remain implemented by Host and Capabilities, but
-//! frontends import their launch, approval, observation, and presentation
-//! contracts from this module. This keeps those implementation crates out of
-//! the frontend's direct dependency graph.
+//! frontends import launch, approval, and protocol contracts from this module.
+//! Terminal presentation remains an edge concern of the experimental CLI.
 
 pub use mini_agent_app_server_protocol::CapabilityManifest;
 pub use mini_agent_app_server_protocol::CollaborationMode;
@@ -18,9 +17,7 @@ pub use mini_agent_capabilities::SecurityPreset;
 pub use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
 pub use mini_agent_core::InputQueueError;
 pub use mini_agent_core::RunControl;
-pub use mini_agent_host::WorkflowScope;
 pub use mini_agent_host::harness_config_auto;
-pub use mini_agent_host::print_auto_warning;
 pub use mini_agent_protocol::EventEnvelope;
 pub use mini_agent_protocol::EventSink;
 pub use mini_agent_protocol::Message;
@@ -125,67 +122,6 @@ impl ApprovalController {
 
     pub fn set_goal_dir(&self, path: Option<std::path::PathBuf>) {
         self.0.set_goal_dir(path);
-    }
-}
-
-pub mod observer {
-    use super::EventEnvelope;
-    use super::EventSink;
-    use serde_json::Value;
-
-    /// App Server owned output observer used by local frontends.
-    pub struct RunObserver(mini_agent_host::observer::RunObserver);
-
-    #[derive(Clone, Copy)]
-    pub enum ScriptFormat {
-        Text,
-        Json,
-    }
-
-    impl RunObserver {
-        pub fn new() -> Self {
-            Self(mini_agent_host::observer::RunObserver::new())
-        }
-
-        pub fn for_script(format: ScriptFormat) -> Self {
-            let format = match format {
-                ScriptFormat::Text => mini_agent_host::observer::ScriptFormat::Text,
-                ScriptFormat::Json => mini_agent_host::observer::ScriptFormat::Json,
-            };
-            Self(mini_agent_host::observer::RunObserver::for_script(format))
-        }
-
-        pub fn finish(&mut self) {
-            self.0.finish();
-        }
-
-        pub fn stats_json(&self) -> Value {
-            self.0.stats_json()
-        }
-
-        pub fn tool_calls_json(&self) -> &[Value] {
-            self.0.tool_calls_json()
-        }
-
-        pub fn assistant_displayed(&self) -> bool {
-            self.0.assistant_displayed()
-        }
-    }
-
-    impl Default for RunObserver {
-        fn default() -> Self {
-            Self::new()
-        }
-    }
-
-    impl EventSink for RunObserver {
-        fn emit(&mut self, event: EventEnvelope) {
-            self.0.emit(event);
-        }
-    }
-
-    pub fn print_final_answer(text: &str) {
-        mini_agent_host::observer::print_final_answer(text);
     }
 }
 

@@ -1,5 +1,6 @@
 mod args;
 mod ask;
+mod observer;
 mod repl;
 
 use std::process::ExitCode;

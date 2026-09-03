@@ -1,7 +1,6 @@
 use mini_agent_protocol::Event;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::EventSink;
-use mini_agent_protocol::Observer;
 use mini_agent_protocol::ToolCall;
 use serde_json::Value;
 use serde_json::json;
@@ -139,27 +138,21 @@ pub fn print_final_answer(text: &str) {
         format_final_answer(
             text,
             terminal,
-            terminal && OutputTarget::Stdout.color_enabled()
+            terminal && OutputTarget::Stdout.color_enabled(),
         )
     );
 }
 
-impl Observer for RunObserver {
-    fn observe(&mut self, event: &Event) {
-        self.observe_event(event);
-    }
+pub fn print_auto_warning() {
+    eprintln!(
+        "warning: auto mode runs workspace writes, MCP servers, and unsandboxed shell commands without approval"
+    );
 }
 
 impl EventSink for RunObserver {
     fn emit(&mut self, event: EventEnvelope) {
-        self.observe_event(&event.event);
-    }
-}
-
-impl RunObserver {
-    fn observe_event(&mut self, event: &Event) {
-        self.terminal.observe(event);
-        match event {
+        self.terminal.observe(&event.event);
+        match event.event {
             Event::ModelResponded { usage, .. } => {
                 self.stats.requests = self.stats.requests.saturating_add(1);
                 if let Some(usage) = usage {
@@ -176,7 +169,7 @@ impl RunObserver {
             Event::ToolFinished { name, is_error, .. } => {
                 self.stats.tool_calls.push(json!({
                     "name": name,
-                    "status": if *is_error { "error" } else { "success" }
+                    "status": if is_error { "error" } else { "success" }
                 }));
             }
             Event::TurnStarted { .. }
@@ -220,6 +213,81 @@ impl TerminalObserver {
         }
         target.write(delta);
         target.flush();
+    }
+
+    fn observe(&mut self, event: &Event) {
+        match event {
+            Event::ModelStarted { .. } => {
+                self.end_stream();
+                self.assistant_displayed = false;
+            }
+            Event::AssistantReasoningDelta { delta } => self.write_delta(
+                StreamLane::Reasoning,
+                self.target,
+                "thinking>",
+                TagColor::Magenta,
+                self.color,
+                delta,
+            ),
+            Event::AssistantTextDelta { delta } => {
+                if let AssistantDisplay::Stream { target, color } = self.assistant {
+                    self.assistant_displayed = true;
+                    self.write_delta(
+                        StreamLane::Text,
+                        target,
+                        "assistant>",
+                        TagColor::Blue,
+                        color,
+                        delta,
+                    );
+                }
+            }
+            Event::ModelResponded { text, .. } if !text.is_empty() && !self.assistant_displayed => {
+                if let AssistantDisplay::Stream { target, color } = self.assistant {
+                    self.end_stream();
+                    target.line(&format!(
+                        "{} {text}",
+                        styled_tag("assistant>", TagColor::Blue, color)
+                    ));
+                    self.assistant_displayed = true;
+                }
+            }
+            Event::ToolStarted { call } => {
+                self.end_stream();
+                self.target.line(&format_tool_started(call, self.color));
+            }
+            Event::ToolFinished {
+                name,
+                content,
+                is_error,
+                ..
+            } => {
+                self.end_stream();
+                self.target
+                    .line(&format_tool_finished(name, content, *is_error, self.color));
+            }
+            Event::ContextCompactionStarted { before_bytes } => {
+                self.end_stream();
+                self.target.line(&format!(
+                    "{} compacting {before_bytes} bytes",
+                    styled_tag("context>", TagColor::Cyan, self.color)
+                ));
+            }
+            Event::ContextCompactionFinished {
+                before_bytes,
+                after_bytes,
+                ..
+            } => self.target.line(&format!(
+                "{} compacted {before_bytes} -> {after_bytes} bytes",
+                styled_tag("context>", TagColor::Cyan, self.color)
+            )),
+            Event::RunFinished { .. } => self.end_stream(),
+            Event::TurnStarted { .. }
+            | Event::TurnFinished { .. }
+            | Event::RunStarted { .. }
+            | Event::ModelResponded { .. }
+            | Event::RunFailed { .. } => {}
+        }
     }
 }
 
@@ -307,7 +375,7 @@ fn format_tool_finished(name: &str, content: &str, is_error: bool, color: bool) 
     if content.is_empty() {
         return tag;
     }
-    if shows_full_tool_output(name) {
+    if name == "shell" {
         format!("{tag} {content}")
     } else {
         format!(
@@ -317,30 +385,17 @@ fn format_tool_finished(name: &str, content: &str, is_error: bool, color: bool) 
     }
 }
 
-fn shows_full_tool_output(name: &str) -> bool {
-    name == "shell"
-}
-
-fn arg_str<'a>(arguments: &'a Value, name: &str) -> Option<&'a str> {
-    arguments.get(name).and_then(Value::as_str)
-}
-
 fn tool_detail(call: &ToolCall) -> Option<String> {
-    match call.name.as_str() {
-        "shell" => Some(bounded_single_line(
-            arg_str(&call.arguments, "command")?,
-            MAX_TOOL_DETAIL_BYTES,
-        )),
-        "read_file" | "edit_file" | "write_file" | "read_image" => Some(bounded_single_line(
-            arg_str(&call.arguments, "path")?,
-            MAX_TOOL_DETAIL_BYTES,
-        )),
-        "web_fetch" => Some(bounded_single_line(
-            arg_str(&call.arguments, "url")?,
-            MAX_TOOL_DETAIL_BYTES,
-        )),
-        _ => None,
-    }
+    let argument = match call.name.as_str() {
+        "shell" => "command",
+        "read_file" | "edit_file" | "write_file" | "read_image" => "path",
+        "web_fetch" => "url",
+        _ => return None,
+    };
+    Some(bounded_single_line(
+        call.arguments.get(argument)?.as_str()?,
+        MAX_TOOL_DETAIL_BYTES,
+    ))
 }
 
 fn bounded_single_line(value: &str, max_bytes: usize) -> String {
@@ -360,87 +415,6 @@ fn bounded_single_line(value: &str, max_bytes: usize) -> String {
         output.push_str(&escaped);
     }
     output
-}
-
-impl Observer for TerminalObserver {
-    fn observe(&mut self, event: &Event) {
-        match event {
-            Event::ModelStarted { .. } => {
-                self.end_stream();
-                self.assistant_displayed = false;
-            }
-            Event::AssistantReasoningDelta { delta } => {
-                self.write_delta(
-                    StreamLane::Reasoning,
-                    self.target,
-                    "thinking>",
-                    TagColor::Magenta,
-                    self.color,
-                    delta,
-                );
-            }
-            Event::AssistantTextDelta { delta } => {
-                if let AssistantDisplay::Stream { target, color } = self.assistant {
-                    self.assistant_displayed = true;
-                    self.write_delta(
-                        StreamLane::Text,
-                        target,
-                        "assistant>",
-                        TagColor::Blue,
-                        color,
-                        delta,
-                    );
-                }
-            }
-            Event::ModelResponded { text, .. } if !text.is_empty() && !self.assistant_displayed => {
-                if let AssistantDisplay::Stream { target, color } = self.assistant {
-                    self.end_stream();
-                    target.line(&format!(
-                        "{} {text}",
-                        styled_tag("assistant>", TagColor::Blue, color)
-                    ));
-                    self.assistant_displayed = true;
-                }
-            }
-            Event::ToolStarted { call } => {
-                self.end_stream();
-                self.target.line(&format_tool_started(call, self.color));
-            }
-            Event::ToolFinished {
-                name,
-                content,
-                is_error,
-                ..
-            } => {
-                self.end_stream();
-                self.target
-                    .line(&format_tool_finished(name, content, *is_error, self.color));
-            }
-            Event::ContextCompactionStarted { before_bytes } => {
-                self.end_stream();
-                self.target.line(&format!(
-                    "{} compacting {before_bytes} bytes",
-                    styled_tag("context>", TagColor::Cyan, self.color)
-                ));
-            }
-            Event::ContextCompactionFinished {
-                before_bytes,
-                after_bytes,
-                ..
-            } => {
-                self.target.line(&format!(
-                    "{} compacted {before_bytes} -> {after_bytes} bytes",
-                    styled_tag("context>", TagColor::Cyan, self.color)
-                ));
-            }
-            Event::RunFinished { .. } => self.end_stream(),
-            Event::TurnStarted { .. }
-            | Event::TurnFinished { .. }
-            | Event::RunStarted { .. }
-            | Event::ModelResponded { .. }
-            | Event::RunFailed { .. } => {}
-        }
-    }
 }
 
 #[cfg(test)]

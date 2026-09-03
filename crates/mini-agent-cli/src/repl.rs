@@ -1,3 +1,5 @@
+use crate::observer::RunObserver;
+use crate::observer::print_auto_warning;
 use mini_agent_app_server::AppServerRuntime;
 use mini_agent_app_server::SessionRequest;
 use mini_agent_app_server::ThreadUpdate;
@@ -16,8 +18,6 @@ use mini_agent_app_server::frontend::ToolError;
 use mini_agent_app_server::frontend::TurnInput;
 use mini_agent_app_server::frontend::TurnInputMode;
 use mini_agent_app_server::frontend::TurnStatus;
-use mini_agent_app_server::frontend::observer::RunObserver;
-use mini_agent_app_server::frontend::print_auto_warning;
 use mini_agent_app_server::local::LocalRuntimeRequest;
 use std::collections::VecDeque;
 use std::io;

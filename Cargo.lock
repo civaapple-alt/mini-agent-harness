@@ -830,6 +830,7 @@ name = "mini-agent-cli"
 version = "0.7.0"
 dependencies = [
  "mini-agent-app-server",
+ "mini-agent-protocol",
  "serde_json",
  "tokio",
 ]

@@ -29,6 +29,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   resume, fork lineage, and cleanup semantics.
 - **App Server test maintenance:** remove the standalone approval-broker smoke
   test; the public Shell approval scenario remains the correlation boundary.
+- **CLI boundary:** move terminal observation, final-answer formatting, and the
+  auto-mode warning out of Host/App Server frontend adapters into the
+  experimental CLI edge. CLI behavior and its tests are unchanged, while the
+  runtime budget no longer carries terminal presentation code.
 
 ## [0.7.0] - 2026-09-02
 

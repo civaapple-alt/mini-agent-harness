@@ -307,9 +307,3 @@ pub fn harness_config_auto(copilot: bool, auto_max_steps: usize) -> HarnessConfi
         HarnessConfig::default()
     }
 }
-
-pub fn print_auto_warning() {
-    eprintln!(
-        "warning: auto mode runs workspace writes, MCP servers, and unsandboxed shell commands without approval"
-    );
-}

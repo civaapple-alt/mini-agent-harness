@@ -84,9 +84,9 @@ limits, failures, and observation events.
   `local` bootstrap adapter resolves
   runtime profiles and launch
   settings for embedded frontends, keeping that setup out of the REPL and
-  headless command paths. The CLI imports launch, approval, observation, and
-  event contracts from `mini-agent-app-server::frontend` and has no direct
-  Host or Capabilities dependency.
+  headless command paths. The CLI imports launch, approval, and event
+  contracts from `mini-agent-app-server::frontend`; its terminal observer is
+  an experimental CLI-owned edge and is outside the runtime line gate.
 
 The mainline is the CLI over the App Server boundary. Other frontends should
 exercise the same App Server management and event contracts rather than add
@@ -377,8 +377,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `19,643 / 20,000` lines and release
-Rust source `28,912 / 30,000` lines, excluding the experimental CLI/REPL. The
+The current hard-budget snapshot is runtime `18,941 / 20,000` lines and release
+Rust source `28,210 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.
