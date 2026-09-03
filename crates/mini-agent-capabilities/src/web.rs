@@ -624,19 +624,6 @@ mod tests {
     }
 
     #[test]
-    fn admit_url_allows_loopback_dev_servers() {
-        for url in [
-            "http://localhost:3000/",
-            "http://127.0.0.1:5173/",
-            "http://[::1]:8080/",
-            "http://app.localhost:3000/",
-        ] {
-            let (_, class) = classify_url(url).unwrap_or_else(|error| panic!("{url}: {error}"));
-            assert_eq!(class, TargetClass::Loopback, "{url}");
-        }
-    }
-
-    #[test]
     fn admit_url_rejects_private_and_non_http_targets() {
         for url in [
             "ftp://example.com/file",

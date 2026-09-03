@@ -2022,3 +2022,33 @@ bounded capture 细节和 Docker 不可用分支的重复测试。保留工作�
 
 Decision: **accept this bounded cleanup batch**. Runtime remains `184` lines below the
 `18,799` target; release-source cleanup still needs `569` lines to reach `27,150`.
+
+#### 2026-09-03：App Server 公共测试 fixture 与低层重复断言清理
+
+本批仅收敛测试重复：App Server 的 approval-denial 与 MCP-timeout 公共场景共享
+同一个“启动并排空至 TurnFinished”的 fixture；Capabilities 删除已由真实 loopback
+fetch 覆盖的 URL 分类断言，以及已由 Host/公共设置路径覆盖的静态六工具目录断言。
+没有删除 App Server 公共 approval、MCP timeout、Thread/Turn/Goal、Session 或安全
+边界证据。
+
+本批六项准入记录：
+
+```text
+1. Layer: App Server and Capabilities test-only fixtures; production Core, Host,
+   protocol, approval, persistence, and public lifecycle code are unchanged.
+2. Duplicate responsibility: two public turn tests repeated identical start/drain
+   plumbing; loopback fetch already exercises classification; Builtin selection is
+   covered by the Host catalog and public settings path.
+3. Replace vs add: one shared settlement fixture replaces repeated setup; remove
+   low-level duplicate assertions; add no execution path, compatibility API, or tool.
+4. Net line delta: runtime `18,615 -> 18,602` (`-13`); release Rust source
+   `27,719 -> 27,662` (`-57`).
+5. Visible surface: no model-visible input, event, persistence, or public protocol
+   behavior changes; only test setup and redundant lower-level evidence changed.
+6. Boundary evidence: App Server tests (43 passed), Capabilities tests (60 passed),
+   `cargo fmt --all`, `git diff --check`, and `python scripts/line_budget.py all`
+   passed.
+```
+
+Decision: **accept this bounded cleanup batch**. Runtime is `197` lines below the
+`18,799` target; release-source cleanup still needs `512` lines to reach `27,150`.

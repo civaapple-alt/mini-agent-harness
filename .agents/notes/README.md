@@ -5,12 +5,12 @@ This directory records architectural decision records (ADRs), technology selecti
 
 ---
 
-## Current Maintenance Gate (2026-09-02)
+## Current Maintenance Gate (2026-09-03)
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `19,799 / 20,000` lines (99.0%; 201 remaining)
-- release Rust source (excluding experimental CLI/REPL): `28,965 / 30,000` lines (96.6%; 1,035 remaining)
+- runtime (`core + protocol + host + app-server`): `18,602 / 20,000` lines (93.0%; 1,398 remaining)
+- release Rust source (excluding experimental CLI/REPL): `27,662 / 30,000` lines (92.2%; 2,338 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -87,7 +87,8 @@ continuation, verifier retry/terminal transitions, resume/clear stale-result
 guards, and the removal of manual workflow Goal controls are implemented through
 the serialized GoalRuntime owner. Goal step/timeout/token-budget execution is
 now wired through the same turn boundary; the current release-source margin is
-`1,479` lines.
+`2,338` lines, with `512` lines still needed for the current `27,150` optimization
+target.
 
 The first Skill dependency/activation slice is implemented in Capabilities.
 Skill frontmatter may declare up to 16 bounded `builtin` or `mcp` references;
@@ -95,7 +96,7 @@ the metadata catalog exposes non-empty declarations, and
 `Discovery::activate_skill` returns a typed metadata-only activation. It does
 not read Skill bodies, start MCP, enable providers, or grant approval. App Server
 Turn activation and Host allowlist resolution remain the next Skill batch; the
-  current release-source margin is `1,479` lines. The experimental CLI/REPL is
+  current release-source margin is `2,338` lines. The experimental CLI/REPL is
 still reported separately at `2,707` lines and does not consume this gate.
 
 The first Plugin provider slice is implemented in Capabilities: selecting a

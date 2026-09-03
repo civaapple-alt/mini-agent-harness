@@ -47,6 +47,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   helper and remove lower-level duplicate path-policy, Shell admission,
   bounded-capture, and Docker availability tests; public approval, bounded
   output, security, and Docker mount evidence remain in place.
+- **App Server test fixtures:** share the common public turn-settlement drain
+  used by approval-denial and MCP-timeout scenarios. Remove only the duplicate
+  Builtin catalog and loopback classification checks; stronger public and
+  security-path coverage remains.
 
 ## [0.7.0] - 2026-09-02
 

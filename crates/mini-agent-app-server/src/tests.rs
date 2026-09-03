@@ -220,6 +220,33 @@ pub(crate) fn server<M: Model + Send + 'static>(model: M) -> AppServer<M> {
     server_with_config(model, HarnessConfig::default())
 }
 
+async fn run_turn_to_finished<M: Model + Send + 'static>(
+    server: &AppServer<M>,
+    prompt: &str,
+) -> Vec<Event> {
+    let mut events = server.subscribe();
+    assert_eq!(
+        server
+            .turn_start_for(
+                ThreadId::new("thread-1"),
+                TurnStart::new(TurnInput::new(TurnInputMode::Start, prompt)),
+            )
+            .await
+            .unwrap(),
+        TurnSubmission::Started {
+            turn_id: mini_agent_protocol::TurnId::new("turn-1")
+        }
+    );
+    let mut received = Vec::new();
+    while !received
+        .iter()
+        .any(|event| matches!(event, Event::TurnFinished { .. }))
+    {
+        received.push(events.recv().await.unwrap().event);
+    }
+    received
+}
+
 #[tokio::test]
 async fn concurrent_commands_receive_unique_server_admission_metadata() {
     let server = server(DoneModel);
@@ -321,27 +348,7 @@ async fn projects_structured_approval_denial_through_public_app_server() {
         ThreadStart::new(ThreadId::new("thread-1")),
         Thread::new(ThreadId::new("initial"), harness),
     );
-    let mut events = server.subscribe();
-    assert_eq!(
-        server
-            .turn_start_for(
-                ThreadId::new("thread-1"),
-                TurnStart::new(TurnInput::new(TurnInputMode::Start, "run the fixture")),
-            )
-            .await
-            .unwrap(),
-        TurnSubmission::Started {
-            turn_id: mini_agent_protocol::TurnId::new("turn-1")
-        }
-    );
-
-    let mut received = Vec::new();
-    while !received
-        .iter()
-        .any(|event| matches!(event, Event::TurnFinished { .. }))
-    {
-        received.push(events.recv().await.unwrap().event);
-    }
+    let received = run_turn_to_finished(&server, "run the fixture").await;
 
     assert!(received.iter().any(|event| matches!(
         event,
@@ -396,27 +403,7 @@ async fn projects_mcp_timeout_through_public_app_server() {
         ThreadStart::new(ThreadId::new("thread-1")),
         Thread::new(ThreadId::new("initial"), harness),
     );
-    let mut events = server.subscribe();
-    assert_eq!(
-        server
-            .turn_start_for(
-                ThreadId::new("thread-1"),
-                TurnStart::new(TurnInput::new(TurnInputMode::Start, "call the MCP tool")),
-            )
-            .await
-            .unwrap(),
-        TurnSubmission::Started {
-            turn_id: mini_agent_protocol::TurnId::new("turn-1")
-        }
-    );
-
-    let mut received = Vec::new();
-    while !received
-        .iter()
-        .any(|event| matches!(event, Event::TurnFinished { .. }))
-    {
-        received.push(events.recv().await.unwrap().event);
-    }
+    let received = run_turn_to_finished(&server, "call the MCP tool").await;
 
     assert!(received.iter().any(|event| matches!(
         event,
