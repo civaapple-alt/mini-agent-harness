@@ -689,8 +689,15 @@ Docker/Sandbox 挂载必须包含声明的 Project 根目录和有界的 scratch
 | --- | --- | --- |
 | Runtime | `running`、`idle`、`closed` | App Server Actor/Turn 状态 |
 | Session UI 投影 | `running`、`paused`、`historical`、`locked` | Web 对 Runtime、锁和 summary 的投影 |
+| 连接投影 | `connected`、`reconnecting`、`unknown` | App Server/传输协调 |
 | Plan | `none`、`exploring`、`settling`、`cleanup_pending` | 所选 Thread 的 Plan Runtime |
 | Goal | `none`、`active`、`paused`、`completed`、`failed` | Thread Goal 生命周期 |
+
+Goal 生命周期和停止原因是两个独立的协议字段。有界的 `stopReason` 词汇为 `none`、
+`user_paused`、`goal_completed`、`cancelled`、`awaiting_approval`、`blocked`、
+`usage_limited`、`budget_limited`、`runtime_guard` 或 `failed`。线协议使用这些 snake_case
+名称；Studio 可以渲染友好的本地化标签，但不能把等待、运行保护、资源受限或客户端断线
+压缩成 `paused` 或 `completed`。
 
 “暂停 Session”表示一个可恢复的 Session，其活动 Turn 已被中断或明确挂起；它不能与
 `Goal.status=paused` 混淆。没有明确暂停原因的 idle Session 可以显示为 historical/idle；
@@ -800,8 +807,9 @@ Workflow 记录；在刷新和 Session 切换后仍应保留。
 
 顶部栏必须提供：
 
-- 有界目标和当前状态（`active`、`paused`、`blocked`、`usage-limited`、
-  `budget-limited` 或 `complete`）；
+- 有界目标、Goal 生命周期（`active`、`paused`、`completed` 或 `failed`）以及可选的停止原因
+  （`blocked`、`usage_limited`、`budget_limited`、`runtime_guard`、`cancelled` 或
+  `awaiting_approval`）；
 - Goal 未运行时的开始/恢复操作；
 - Goal 运行时的暂停操作；
 - Update/Edit，通过明确的 Thread Goal 更新提交；

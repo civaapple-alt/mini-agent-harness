@@ -877,8 +877,17 @@ The product must distinguish live runtime state from Goal state:
 | --- | --- | --- |
 | Runtime | `running`, `idle`, `closed` | App Server Actor/turn state |
 | Session UI projection | `running`, `paused`, `historical`, `locked` | Web projection of runtime + lock + summary |
+| Connection projection | `connected`, `reconnecting`, `unknown` | App Server/transport reconciliation |
 | Plan | `none`, `exploring`, `settling`, `cleanup_pending` | Selected Thread's Plan runtime |
 | Goal | `none`, `active`, `paused`, `completed`, `failed` | Thread Goal lifecycle |
+
+Goal lifecycle and stop reason are separate protocol fields. The bounded
+`stopReason` vocabulary is `none`, `user_paused`, `goal_completed`,
+`cancelled`, `awaiting_approval`, `blocked`, `usage_limited`,
+`budget_limited`, `runtime_guard`, or `failed`. Wire values use these
+snake_case names; Studio may render friendly localized labels, but must not
+collapse a wait, a protection stop, or a client disconnect into `paused` or
+`completed`.
 
 “Paused Session” means a resumable Session whose active turn has been
 interrupted or deliberately suspended. It must not be confused with
@@ -1015,8 +1024,9 @@ workflow record, and remains visible across reloads and Session switching.
 
 The header must expose:
 
-- the bounded objective and current status (`active`, `paused`, `blocked`,
-  `usage-limited`, `budget-limited`, or `complete`);
+- the bounded objective, Goal lifecycle (`active`, `paused`, `completed`, or
+  `failed`), and optional stop reason (`blocked`, `usage_limited`,
+  `budget_limited`, `runtime_guard`, `cancelled`, or `awaiting_approval`);
 - Start/Resume when the Goal is not running;
 - Pause when it is active;
 - Update/Edit, which sends an explicit Thread Goal update;
