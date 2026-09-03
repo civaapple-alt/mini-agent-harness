@@ -1,14 +1,14 @@
 # Codex-Aligned Thread and Goal Runtime Architecture
 
-Status: proposed
+Status: implemented
 Date: 2026-09-03
 Scope: App Server、Host 和 Thread 运行时边界
 
-## Proposal
+## Decision
 
-mini-codex 将不再以 `WorkflowService` 作为 Plan、Goal 和 Runtime 的统一领域入口。公共请求按 Codex 的 Thread 边界拆分，Goal 行为按每个 Thread 拆分，Runtime Actor 只负责串行执行和状态提交。
+mini-codex 不以 `WorkflowService` 作为 Plan、Goal 和 Runtime 的统一领域入口。公共请求按 Codex 的 Thread 边界拆分，Goal 行为按每个 Thread 拆分，Runtime Actor 只负责串行执行和状态提交。
 
-目标结构：
+实际结构：
 
 ```text
 App Server
@@ -229,9 +229,9 @@ fail_goal
 continue_if_idle
 ```
 
-## 实施顺序
+## 实施结果
 
-### 第一阶段：替换 WorkflowService 边界
+### 第一阶段：替换 WorkflowService 边界 — 已完成
 
 - 移除 `WorkflowService` 的 App Server 领域定位；
 - 将 JSON-RPC 入口拆成 Thread Settings 和 Thread Goal 两个处理器；
@@ -239,7 +239,7 @@ continue_if_idle
 - 保持现有 Thread、Session、Approval 和 Tool 边界不变；
 - 不增加新的公共方法。
 
-### 第二阶段：提取 GoalService 和 GoalRuntimeHandle
+### 第二阶段：提取 GoalService 和 GoalRuntimeHandle — 已完成
 
 - 从当前 GoalRuntime 提取 GoalService 的外部 Goal 操作；
 - 将 verifier、continuation、accounting 和 active turn 留在 per-thread handle；
@@ -247,14 +247,15 @@ continue_if_idle
 - 完成 pause/resume 的真实状态迁移；
 - 所有 Goal 更新返回明确 outcome。
 
-### 第三阶段：收敛 Thread 执行边界
+### 第三阶段：收敛 Thread 执行边界 — 第一批已完成
 
-- 将当前 Thread worker 的启动、steer、recover 操作收敛到 ThreadHandle；
-- 引入最小 ThreadManager 查找 Thread；
-- 统一 ThreadListener 的事件排序；
-- GoalRuntimeHandle 只能通过 ThreadHandle 调度普通 Turn。
+- Thread worker 的普通 Turn 执行、checkpoint 和生命周期操作已收敛到 `ThreadHandle`；
+- Thread 创建、查找、fork、resume 和 identity rename 已收敛到 `ThreadManager`；
+- `ThreadListener` 负责 Turn 完成事件和 Runtime notification 的有序投影；
+- GoalRuntimeHandle 通过 Runtime Actor 的 Thread worker 调度普通 Turn；steer/cancel
+  仍由同一 `RunControl` 在活动 Turn 内安全处理。
 
-### 第四阶段：删除 Workflow 领域概念
+### 第四阶段：删除 Workflow 领域概念 — 已完成
 
 - Runtime Actor 中不再保留 workflow-specific 聚合分支；
 - Plan 归入 Thread settings；
@@ -262,7 +263,7 @@ continue_if_idle
 - verifier 和 continuation 归入 GoalRuntimeHandle；
 - 删除 `workflow/state`，不保留 Workflow 聚合状态投影。
 
-## 不在本提案中的内容
+## 边界
 
 - 不修改 Core Harness 的 turn loop；
 - 不在 Core 引入 Goal、Plan、Store 或 Runtime Actor；

@@ -247,7 +247,6 @@ If a proposed approach is rejected during review:
 
 | Date | Title | Focus |
 |---|---|---|
-| 2026-09-03 | [Codex-Aligned Thread and Goal Runtime Architecture](proposed/architecture/2026-09-03-codex-aligned-thread-goal-runtime.md) | 按 Thread settings、Thread Goal、GoalService、per-thread GoalRuntimeHandle、ThreadManager 和 ThreadListener 重划 App Server/Host 运行时所有权 |
 | 2026-09-01 | [Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems](proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md) | 完整对齐 Skill、Plugin、Builtin/Host/MCP/Dynamic Tool、Thread/Turn/ThreadItem、审批和 Artifact 侧车结果的提案；六工具删除与 Host Tool Catalog 首批已落地 |
 | 2026-09-01 | [Goal Runtime and `thread/goal/*` implementation appendix](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) | Codex-shaped Goal control is landed; serialized owner, automatic continuation, notifications, migration and retirement gates |
 | 2026-08-31 | [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md) | Threat model, candidate strict profile, compatibility, cross-platform evidence, and fail-closed behavior before Docker flags |
@@ -272,6 +271,7 @@ If a proposed approach is rejected during review:
 #### Architecture (`implemented/architecture/`)
 | Date | Title | Focus |
 |---|---|---|
+| 2026-09-03 | [Codex-Aligned Thread and Goal Runtime Architecture](implemented/architecture/2026-09-03-codex-aligned-thread-goal-runtime.md) | 已落地 Thread settings、Thread Goal、GoalService、per-thread GoalRuntimeHandle、ThreadManager 和 ThreadListener 的 App Server/Host 运行时边界 |
 | 2026-08-28 | [In-Process Agent Protocol](../../crates/mini-agent-protocol) | Portable model, tool, message, event, stop, and limit contracts shared by hosts |
 | 2026-08-28 | [Codex-Style Core and Protocol Reorganization](implemented/architecture/2026-08-28-codex-style-core-and-protocol-reorganization.md) | Core-owned runtime semantics, structured tool outcomes, storage-neutral checkpoints, and a thin app-server control plane |
 | 2026-08-28 | [Current Harness Execution Flow](implemented/architecture/2026-08-28-harness-execution-flow.md) | Actual one-shot, interactive, and app-server paths through Thread, Harness, model/tool steps, events, control, and persistence |
