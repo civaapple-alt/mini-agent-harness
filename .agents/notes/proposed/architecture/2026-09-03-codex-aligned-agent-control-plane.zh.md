@@ -392,6 +392,21 @@ Web `state.json` 只能展示或引用该设置，不能保存或执行批准。
 访问范围、操作类别和有界路径范围都匹配时，Project 批准才可被其 Session 共享。该批准必须
 可撤销，不能成为进程全局的 allow 规则。
 
+### Project 批准生命周期
+
+`current_project` 表示“批准决定由 Project 共享”，不表示 Project 自动获得某个访问范围。
+每个新建或恢复的 Session 仍必须带有匹配的访问设置；例如，只有当前 Runtime/Session
+明确启用了 `Full access`，且批准条目的访问范围也是 `machine` 时，Project 共享批准才可
+用于整机范围操作。`Project access` Session 不能借此升级为 machine-wide。
+
+- Project 设置必须能查看当前有效的共享批准并执行撤销；撤销立即阻止后续准入，正在执行的
+  操作只允许按协作式边界结束，不能假装回滚已经发生的副作用；
+- Project 关联目录发生变化时生成新的 WorkspaceSpec revision，旧 revision 的批准不自动
+  扩展到新增目录；需要新的明确 Project 批准；
+- Session fork、新建 Project 或复制 Project 配置时不继承批准条目；批准所有权始终以明确的
+  `projectId` 为边界；
+- Web 只提交查看/撤销请求，不能通过本地状态文件直接修改共享批准。
+
 ### 显式压缩
 
 通过诸如 `thread/compact` 的显式 Thread 控制方法暴露已有的、有界的 Core/App Server
@@ -602,6 +617,7 @@ Web UI 应为每个活动 Thread 保持一个状态对象，并按 `requestId` �
 Deny/确认保护；“项目访问”必须标出当前 Project 工作区以及 reference/editable 目录。两个
 访问范围和三个批准模式不能合并成模糊的“允许全部”标签。Auto Copilot 的组合应明确显示为
 `Goal + Full access + 当前 Project 批准`。
+Project 设置还必须提供当前 Project 共享批准的查看和撤销；撤销后不再自动批准后续请求。
 
 加号菜单和 slash 命令应调用类型化 API：
 
@@ -676,6 +692,7 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
 
 - 让 `per_action` 在请求边界真正只生效一次；
 - 让 `current_session` 和 `current_project` 的批准所有权成为明确的有界决策条目；
+- 提供 Project 范围批准的查看/撤销，并在 WorkspaceSpec revision 变化时使批准失效；
 - 保持 Deny 和 Plan 锁的优先级；
 - 将访问范围和批准模式从 App Server → SDK → FastAPI → Studio 传递完整；
 - 删除 Web 的重复批准权威；
@@ -719,7 +736,8 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
 
 1. `per_action` 使第二次相同操作再次请求批准。
 2. `current_session` 批准只影响目标 Thread/Session；`current_project` 批准
-   由同一 Project 下的所有 Session 共享，但不会影响其他 Project。
+   只有在访问范围、WorkspaceSpec revision、操作类别和路径范围匹配时，才由同一 Project
+   下的所有 Session 共享；不会影响其他 Project，且撤销后不再允许后续准入。
 3. `project` 访问/批准不影响其他 Project 或无关的操作类别。
 4. 任何 UI 范围都不能覆盖安全 Deny。
 5. Plan Mode 允许读取声明的根目录、执行有界探索命令、在 `planScratchRoot` 下创建临时
@@ -762,6 +780,8 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
     请检查或重试”；只有真正的取消才展示为“中断/已取消”。
 22. 新建 Goal 默认使用建议的 `100 / 200 / 1800` Runtime limits，除非操作方为了 Fixture
     明确调低；调用方明确提供的 `tokenBudget` 仍是独立资源上限，达到后报告 `budget_limited`。
+23. 修改 Project 目录、fork Session 或复制 Project 都不会继承批准条目；新的 WorkspaceSpec
+    revision 必须重新取得明确的 Project 批准，Project 撤销会使后续匹配请求失效。
 
 Provider 支持的验证保持为可选，默认不能使用付费调用。正常证据路径使用 Mock Provider、
 Protocol Fixture 和 Harness Scenario。

@@ -520,6 +520,28 @@ Sessions only when the bounded WorkspaceSpec revision, access scope, action
 class, and path scope match. It is revocable and never becomes a process-global
 allow rule.
 
+### Project approval lifecycle
+
+`current_project` means that an approval decision is shared by a Project; it
+does not grant the Project an access scope by itself. Every new or resumed
+Session must still carry a matching access setting. For example, a Project
+approval can authorize a machine-wide action only when the current
+Runtime/Session explicitly has `Full access` and the approval entry also has
+`access=machine`. A `Project access` Session cannot be upgraded to machine-wide
+access by sharing an approval.
+
+- Project settings must expose the active shared approvals and a revoke action.
+  Revocation blocks later admission immediately; an in-flight action may only
+  finish at its cooperative boundary, and its side effect is not presented as
+  rolled back;
+- changing associated Project roots creates a new WorkspaceSpec revision. An
+  approval from the old revision does not expand to new roots and requires a
+  new explicit Project approval;
+- a Session fork, new Project, or copied Project configuration does not inherit
+  approval entries. Approval ownership always ends at the explicit `projectId`;
+- Web may submit inspect/revoke requests but cannot mutate shared approvals
+  through a local state file.
+
 ### Explicit compaction
 
 Expose the already bounded Core/App Server compaction path through an explicit
@@ -779,6 +801,8 @@ Project workspace and its reference/editable roots. The two access scopes and
 the three approval modes must not be collapsed into a vague “allow everything”
 label. The Auto Copilot combination is visibly `Goal + Full access + Current
 Project approval`.
+Project settings must also expose inspection and revocation of the current
+Project's shared approvals; revocation must not auto-approve later requests.
 
 The plus menu and slash commands should call typed APIs:
 
@@ -872,6 +896,8 @@ state.
 - make `per_action` genuinely one-shot at the request boundary;
 - make `current_session` and `current_project` approval ownership explicit
   bounded decision entries;
+- expose Project-scoped approval inspection/revocation and invalidate grants
+  when the WorkspaceSpec revision changes;
 - carry `project` versus `machine` access scope separately from approval
   mode;
 - preserve Deny and Plan lock precedence;
@@ -932,8 +958,10 @@ The following scenarios are required before the proposal can move to
 
 1. `per_action` causes a second identical action to request approval again.
 2. `current_session` approval affects only the intended Thread/Session, while
-   `current_project` approval is shared by all Sessions in the same Project and
-   never affects another Project.
+   `current_project` approval is shared by all Sessions in the same Project
+   only when access scope, WorkspaceSpec revision, action class, and path scope
+   match; it never affects another Project, and revocation blocks later
+   admission.
 3. `project` access/approval does not affect another Project or unrelated
    action class.
 4. Security Deny cannot be overridden by any UI scope.
@@ -999,6 +1027,10 @@ The following scenarios are required before the proposal can move to
     an operator deliberately lowers them for a fixture; an explicitly supplied
     `tokenBudget` remains an independent resource limit and reports
     `budget_limited` when reached.
+23. Editing Project roots, forking a Session, or copying a Project creates no
+    inherited approval entry; a new WorkspaceSpec revision requires explicit
+    Project approval, and Project revocation invalidates later matching
+    requests.
 
 Provider-backed verification remains opt-in and must not use paid calls by
 default. The normal evidence path uses mock providers, protocol fixtures, and
