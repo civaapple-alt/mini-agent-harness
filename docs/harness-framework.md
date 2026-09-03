@@ -1,7 +1,6 @@
 # Harness 框架比较与分层结论
 
-Date: 2026-08-31
-Status: implemented, frozen topic note
+Status: current architecture guide
 Source: [The Coding Harness Behind GitHub Copilot in VS Code](https://code.visualstudio.com/blogs/2026/05/15/agent-harnesses-github-copilot-vscode)
 
 ## 结论
@@ -113,6 +112,5 @@ Turn 内继续下一次 sampling。两者不是正确性高低差异，而是边
 
 ## 维护规则
 
-本主题的原始合并记录见
-[`2026-08-31-harness-lessons-archive.md`](2026-08-31-harness-lessons-archive.md)。
-新的框架比较应创建新日期 note，不能修改本文件的历史结论。
+本文件只描述当前的 Harness 分层、Turn/Step 和成熟度边界。实现批次写入
+`.agents/notes/` 的日期变更记录；当当前行为变化时，直接更新本文件的相关段落。

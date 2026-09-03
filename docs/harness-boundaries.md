@@ -1,7 +1,6 @@
 # Harness 边界与变更准入
 
-Date: 2026-08-31
-Status: implemented policy, frozen topic note
+Status: current boundary policy
 
 ## 责任分工
 
@@ -102,6 +101,5 @@ hard limits、approval、Session 单一权威或公共协议兼容。
 
 ## 维护规则
 
-本文件冻结准入和边界政策。新的边界实验必须新建 dated note，并在其中回答六项
-问题和给出 scenario/eval 证据；完整历史见
-[`2026-08-31-harness-lessons-archive.md`](2026-08-31-harness-lessons-archive.md)。
+本文件维护当前准入和边界政策。新的边界实验先作为 `.agents/notes/` 下的日期
+变更记录，确认落地后直接更新本文件；不再建立专题索引或 archive 链接。

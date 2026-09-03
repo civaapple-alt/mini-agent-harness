@@ -1,7 +1,6 @@
 # Builtin Tool Surface Upgrade
 
-Date: 2026-09-03
-Status: implemented
+Status: current tool surface
 
 ## Decision
 
@@ -65,9 +64,10 @@ Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk �
   pass using the freshly built local App Server binary.
 - No paid provider call was used.
 
-## Follow-up
+## Maintenance
 
 Compatibility tools remain available only when a Host explicitly selects them. New
 tools should first prove that one of the four defaults cannot express the required
 workflow, then add bounded extension/profile capability rather than growing the
-default catalog. Future changes belong in new dated notes.
+default catalog. Implementation changes are recorded in dated notes, while this file
+is updated when the current tool contract changes.

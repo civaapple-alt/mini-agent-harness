@@ -7,9 +7,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
-- **Harness notes:** reorganize the former monolithic lessons note into a frozen
-  index, focused framework/scenario/boundary notes, a maintenance-history index,
-  and an immutable archive so future project changes use new dated notes.
+- **Harness documentation:** move current framework, evidence, boundary, and tool
+  surface guidance into self-contained `docs/` files; keep `.agents/notes/` for
+  dated change records and retain the 2026-08-31 review as frozen history.
 
 - **Builtin tool surface:** reduce the default model-visible set to four focused
   tools: `read_file`, `apply_patch`, `shell`, and `read_image`. Keep

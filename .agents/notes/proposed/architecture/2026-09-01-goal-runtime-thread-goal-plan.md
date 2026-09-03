@@ -4,7 +4,7 @@ Status: implemented — canonical execution appendix
 Date: 2026-09-01
 Scope: mini-agent App Server / Host workflow control plane
 
-本附录承接 [Codex-aligned capabilities and ThreadItems](2026-09-01-codex-aligned-capabilities-thread-items.md) 与 [Harness framework and next-iteration note](../../implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md)，只记录 Goal Runtime 的落地边界、自动续跑和通知。前者是总架构记录；本文件不是第二套 workflow 设计。每个阶段仍须经过六项变更准入和独立提交；本轮 Batch 1–5 已在同一 breaking checkpoint 收敛完成。
+本附录承接 [Codex-aligned capabilities and ThreadItems](2026-09-01-codex-aligned-capabilities-thread-items.md)，并遵循仓库 `docs/` 下的当前 Harness 分层和边界规范，只记录 Goal Runtime 的落地边界、自动续跑和通知。前者是总架构记录；本文件不是第二套 workflow 设计。每个阶段仍须经过六项变更准入和独立提交；本轮 Batch 1–5 已在同一 breaking checkpoint 收敛完成。
 
 ## 1. 当前结论
 

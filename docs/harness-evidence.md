@@ -1,7 +1,6 @@
 # Harness Scenario 与 Evidence 基线
 
-Date: 2026-08-31
-Status: implemented baseline, frozen topic note
+Status: current evidence guide
 
 ## 目的与范围
 
@@ -72,6 +71,6 @@ provider 对比倒填为基线；后续补充结果应以新的 dated note 记�
 
 ## 维护规则
 
-本文件只冻结 baseline 与矩阵。后续场景补充、评审复审或新的 failure class
-应创建新的 scenario/eval note；原始完整记录保存在
-[`2026-08-31-harness-lessons-archive.md`](2026-08-31-harness-lessons-archive.md)。
+本文件维护当前 baseline、矩阵和证据门槛。新的实验结果先写入
+`.agents/notes/` 的日期变更记录；确认改变当前基线后，再直接更新本文件，避免
+用另一个索引文档串联历史。

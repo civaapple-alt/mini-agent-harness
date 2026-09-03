@@ -1,7 +1,10 @@
 # mini-agent-harness Architecture and Design Decisions (Agent Notes)
 
 
-This directory records architectural decision records (ADRs), technology selections, and trade-off analyses for the **mini-agent-harness** project.
+This directory records dated architectural decisions (ADRs), technology selections,
+and trade-off analyses for the **mini-agent-harness** project. It is a forward-moving
+change record, not the source of truth for current behavior. Current specifications
+belong in `docs/`; do not build a current-state index by chaining notes together.
 
 ---
 
@@ -117,8 +120,6 @@ bounds; text and output remain bounded to 16 KiB. This is still a projection
 only: no second Session log, Item listing method, Artifact API, or specialized
 source classification is introduced. Core, Goal, and settings notifications
 now share one ordered runtime bus at the App Server boundary.
-
-The first bounded scenario baseline is now implemented and recorded in the [Harness Scenario Evidence note](implemented/architecture/2026-08-31-harness-scenario-evidence.md): 8 representative historical CLI scenarios pass, with current App Server boundary evidence and CLI interactive 12/12 regression evidence. The failure/timeout/retry matrix now distinguishes covered Core/Capabilities/App Server/CLI paths from unit-only or deferred evidence. HTTP 429 now has an accepted bounded fail-fast default without implicit retry; its provider-specific retry/backoff policy and model/provider comparison remain explicitly open gaps. CLI `ask --trace-jsonl PATH` now has public-path evidence for redaction, per-record/total bounds, and overwrite refusal; implicit baseline export remains off. Docker CLI/server 29.6.1 and the `alpine` image are available on this host; Docker preflight now queries the daemon with `docker info`, and ordinary plus candidate-strict probes verify the `/workspace` mount and container-only temporary files, while the strict probe also observes network, capability, read-only-root, and bounded-cgroup behavior. These are current-host evidence only, not a complete cross-platform security claim. The built-in model registry currently exposes one OpenAI-compatible provider; the Host model factory is a composition seam, not cross-provider quality evidence. The Core/Capabilities fault paths (including bounded HTTP 429 classification, MCP connection/call refusal/timeout, and pre-sandbox shell refusal), CLI unknown-tool recovery, bounded cross-file refactor, and App Server `NeedsApproval` plus MCP timeout projection are covered separately; CLI public MCP timeout transport is explicitly deferred until a justified bounded injection seam exists. The REPL now omits duplicate World/MCP/extension management; these remain available through App Server clients. The former monolithic harness note is now a frozen index with focused framework, scenario, boundary, and maintenance notes.
 
 Goal Runtime is converged on the Codex Thread/Turn/ThreadItem model. The
 canonical `thread/goal/set|get|clear` contract, settled-checkpoint verifier and
@@ -282,13 +283,6 @@ If a proposed approach is rejected during review:
 | 2026-08-30 | [Capabilities API Boundaries](implemented/architecture/2026-08-30-capabilities-api-boundaries.md) | Capabilities root facade split into stable contracts, composition seams, and crate-internal implementation |
 | 2026-08-30 | [Goal Verifier Naming Boundary](implemented/architecture/2026-08-30-goal-verifier-naming.md) | Replaced current Mentor implementation names with Goal verifier terminology without retaining legacy environment aliases |
 | 2026-08-31 | [Python SDK Architecture & App Server Integration](implemented/architecture/2026-08-31-python-sdk-architecture-and-app-server-integration.md) | Official Python SDK packaging, async context manager, strongly typed event stream models, and Codex-aligned layered architecture |
-| 2026-08-31 | [Harness Lessons Split Index](implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) | 拆分索引；原始长文已冻结为 archive，主题内容分别进入 framework、scenario 和 boundary note |
-| 2026-08-31 | [Harness Framework Comparison](implemented/architecture/2026-08-31-harness-framework-comparison.md) | mini-agent-harness/Codex 分层、Turn/Step、steer/cancel 和成熟度结论 |
-| 2026-08-31 | [Harness Scenario Evidence](implemented/architecture/2026-08-31-harness-scenario-evidence.md) | bounded scenario baseline、failure/timeout/retry 矩阵和 evidence 门槛 |
-| 2026-08-31 | [Harness Boundary Admission](implemented/architecture/2026-08-31-harness-boundary-admission.md) | Core/Host/Capabilities/App Server 分工、六项准入和 Docker/provider 政策门 |
-| 2026-08-31 | [Harness Lessons Archive](implemented/architecture/2026-08-31-harness-lessons-archive.md) | 拆分前的完整历史原文，仅供考古和核对，不再追加 |
-| 2026-09-03 | [Harness Maintenance History](implemented/architecture/2026-09-03-harness-maintenance-history.md) | 已实现维护批次、当前 line budget 和后续 evidence 缺口 |
-| 2026-09-03 | [Builtin Tool Surface Upgrade](implemented/architecture/2026-09-03-harness-tool-surface-upgrade.md) | 少量默认 Builtin、分页 `read_file`、预校验 `apply_patch`，以及 App Server/Web 的状态一致性 |
 | 2026-08-30 | [Runtime Authority and Action Ordering](implemented/architecture/2026-08-30-runtime-authority-and-action-ordering.md) | Core/App Server/Host authority boundaries, internal action envelopes, and separate action/event ordering |
 | 2026-08-30 | [Runtime State Actor Queue](implemented/architecture/2026-08-30-runtime-state-actor-queue.md) | Session, World, MCP, and Workflow state ownership through one App Server actor queue |
 | 2026-08-30 | [Runtime Revision, CAS, and Transaction Boundary](implemented/architecture/2026-08-30-runtime-revision-cas-and-transaction.md) | Unified runtime revisions, stale-write rejection, and the Thread/Session persistence boundary |

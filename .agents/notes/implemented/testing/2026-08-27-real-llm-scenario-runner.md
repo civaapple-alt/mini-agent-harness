@@ -8,7 +8,8 @@ The manual runner described below was removed when non-mainline experiments were
 retired. The current workspace has no `crates/mini-agent-cli/examples/real_llm.rs`
 entry point, so this note preserves the former bounded real-provider contract and
 its evidence expectations only. No paid-provider run is implied by this historical
-record; the current next-iteration note tracks real-provider evidence as open.
+record; the current `docs/harness-evidence.md` guide tracks real-provider evidence
+as open.
 
 ## Decision
 

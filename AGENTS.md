@@ -70,39 +70,7 @@ growth is informational until it is promoted into the supported surface.
 
 If a change affects prompt, tool schema, loop-control, context, events, or
 persistence, public unit tests alone are not sufficient: add bounded Harness
-Scenario/Eval evidence as described in the next-iteration note.
-
-Additional harness-evidence rules:
-
-- Approval or sandbox changes must assert an explicit, non-empty structured
-  rejection result visible to the next model step; an absent tool or empty
-  string is not sufficient. If a dedicated `PermissionDenied` protocol status
-  does not exist, record the chosen bounded mapping and its compatibility impact.
-- Timeout, cancel, and steer changes must record the deterministic ordering when
-  controls race. Preserve safe-checkpoint settlement and durable checkpoint
-  ordering; do not infer priority from a flaky wall-clock observation.
-- Scenarios slower than five seconds are not automatically ignored. Only a
-  deterministic slow scenario may use an explicit `#[ignore]`, with a separate
-  scheduled or manual command documented beside it.
-- The retired external `--trace` path must not be restored as a shortcut. New
-  trace evidence must reuse existing observation events and Session records,
-  remain bounded and redacted, and state whether it is an internal artifact or
-  public protocol surface.
-- Docker evidence must distinguish daemon availability, workspace mounting, and
-  container temporary-file behavior from complete security isolation. Network,
-  capability, privilege, read-only, or resource restrictions require an explicit
-  policy, supported-platform evidence, and a boundary test before implementation;
-  do not add those flags speculatively.
-
-`.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md`
-is the frozen index for the framework comparison and next-iteration Harness evidence;
-its former long-form content is preserved in the adjacent `*-archive.md` note and
-split by topic into focused notes. For each new project-level feature, refactor, or
-architecture decision, create a new dated note under
-`.agents/notes/implemented/architecture/` (or the appropriate `.agents/notes/`
-category) rather than appending to an older implemented note.
-Update `.agents/notes/README.md`, `README.md`, and `CHANGELOG.md` only as indexes or
-current summaries when the new note changes their status or evidence.
+Scenario/Eval evidence and update the current project documentation as needed.
 
 ## Change test
 
@@ -113,7 +81,8 @@ Before adding a core concept, identify:
 3. why the feature cannot live in a host adapter;
 4. the permanent complexity it adds.
 
-If these are unclear, do not add it. Consult `.agents/notes/README.md` for architecture decisions and guardrails, and `docs/` for current specifications.
+If these are unclear, do not add it. Use `docs/` for current specifications and
+`.agents/notes/` for dated decisions and experiment records.
 
 ## Verification
 
