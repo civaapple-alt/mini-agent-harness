@@ -95,8 +95,8 @@ fn trace_records_bounded_output_without_copying_tool_arguments() {
         Event::ToolStarted {
             call: mini_agent_protocol::ToolCall {
                 id: "call-1".to_string(),
-                name: "write_file".to_string(),
-                arguments: serde_json::json!({"content": "secret".repeat(8 * 1024)}),
+                name: "apply_patch".to_string(),
+                arguments: serde_json::json!({"patch": "secret".repeat(8 * 1024)}),
             },
         },
     ));

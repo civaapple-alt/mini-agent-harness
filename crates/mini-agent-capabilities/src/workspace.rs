@@ -12,7 +12,7 @@ use crate::security::SecurityPolicy;
 use crate::security::SecurityPreset;
 pub use approval::{ApprovalController, ApprovalMode};
 #[cfg(test)]
-use files::{EditFile, ReadFile, ReadImage, WriteFile};
+use files::{ReadFile, ReadImage};
 use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolAdmission;
 use mini_agent_protocol::ToolError;
@@ -78,8 +78,6 @@ pub fn workspace_tools_with_read_roots_and_results(
     let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(files::ReadFile(Arc::clone(&workspace))),
         Box::new(patch::ApplyPatch(Arc::clone(&workspace))),
-        Box::new(files::EditFile(Arc::clone(&workspace))),
-        Box::new(files::WriteFile(Arc::clone(&workspace))),
         Box::new(shell::Shell(Arc::clone(&workspace), results.clone())),
     ];
     tools.extend(crate::web::web_tools(results.clone()));
@@ -184,7 +182,7 @@ impl Workspace {
         let session_artifact = self.is_session_artifact(&candidate);
         if candidate.exists() && !session_artifact {
             return Err(ToolError(
-                "file already exists; use edit_file for existing files".to_string(),
+                "file already exists; use apply_patch for existing files".to_string(),
             ));
         }
         if !session_artifact {
@@ -306,25 +304,6 @@ fn has_git_component(path: &Path) -> bool {
             Component::Normal(name) if name.to_string_lossy().eq_ignore_ascii_case(".git")
         )
     })
-}
-
-fn file_tool_spec(name: &str, description: &str, content: bool) -> ToolSpec {
-    let mut properties = json!({"path": {"type": "string"}});
-    let mut required = vec!["path"];
-    if content {
-        properties["content"] = json!({"type": "string"});
-        required.push("content");
-    }
-    ToolSpec {
-        name: name.to_string(),
-        description: description.to_string(),
-        parameters: json!({
-            "type": "object",
-            "properties": properties,
-            "required": required,
-            "additionalProperties": false
-        }),
-    }
 }
 
 pub(crate) fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, ToolError> {

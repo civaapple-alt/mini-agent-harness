@@ -16,8 +16,7 @@ the [MIT License](LICENSE).
 - Interactive agent sessions and one-shot `ask` commands.
 - An autonomous `auto` mode with bounded context compaction.
 - Four bounded default Builtin tools: `read_file`, `apply_patch`, `shell`, and
-  `read_image`; `write_file`, `edit_file`, and `web_fetch` remain opt-in
-  compatibility tools, while MCP remains an explicit extension.
+  `read_image`; MCP and `web_fetch` remain explicit extensions.
 - Active Threads can select a bounded Builtin subset through
   `thread/settings/update` `builtinTools`; omission preserves the current
   selection and external/MCP tools remain separate.
@@ -99,7 +98,7 @@ by name and dispatches through the protocol-level `ToolExecutionDelegate`;
 description; Host `ToolOrchestrator` owns approval and lifecycle order; and
 `ToolRuntime` owns the concrete side effect. The `Tool` trait composes Handler and
 Runtime for the existing registry/provider/delegate boundary. Typed admission
-covers Shell, EditFile, WriteFile, MCP calls, and outside-workspace ReadImage
+covers Shell, ApplyPatch, MCP calls, and outside-workspace ReadImage
 paths, while read-only tools remain on the Legacy path. Sandbox policy
 is selected by the Host profile/Capabilities assembly and applied by the concrete
 runtime; it is not duplicated in the orchestrator. MCP server startup approval

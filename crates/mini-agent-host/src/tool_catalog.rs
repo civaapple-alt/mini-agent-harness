@@ -9,13 +9,11 @@ pub struct BuiltinToolSelection {
 
 const DEFAULT_BUILTIN_TOOLS: [&str; 4] = ["read_file", "apply_patch", "shell", "read_image"];
 
-const AVAILABLE_BUILTIN_TOOLS: [&str; 7] = [
+const AVAILABLE_BUILTIN_TOOLS: [&str; 5] = [
     "read_file",
     "apply_patch",
     "shell",
     "read_image",
-    "edit_file",
-    "write_file",
     "web_fetch",
 ];
 
@@ -80,16 +78,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_selection_is_small_but_all_keeps_compatibility_tools_available() {
+    fn default_selection_is_small_and_all_contains_only_supported_builtins() {
         assert_eq!(
             BuiltinToolSelection::default().names().to_vec(),
             vec!["read_file", "apply_patch", "shell", "read_image"]
         );
         assert_eq!(
             BuiltinToolSelection::default().hidden_names(),
-            vec!["edit_file", "write_file", "web_fetch"]
+            vec!["web_fetch"]
         );
-        assert_eq!(BuiltinToolSelection::all().names().len(), 7);
+        assert_eq!(BuiltinToolSelection::all().names().len(), 5);
         assert!(BuiltinToolSelection::all().hidden_names().is_empty());
     }
 
@@ -97,6 +95,6 @@ mod tests {
     fn explicit_empty_selection_is_valid_and_hides_every_builtin() {
         let selection = BuiltinToolSelection::from_names(Vec::new()).unwrap();
         assert!(selection.names().is_empty());
-        assert_eq!(selection.hidden_names().len(), 7);
+        assert_eq!(selection.hidden_names().len(), 5);
     }
 }

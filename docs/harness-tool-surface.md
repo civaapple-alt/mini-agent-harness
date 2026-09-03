@@ -10,9 +10,10 @@ Status: current tool surface
 read_file | apply_patch | shell | read_image
 ```
 
-`edit_file`、`write_file`、`web_fetch` 仍作为 compatibility capabilities 保留，
-但不再默认暴露给模型。这样保留已有宿主能力和兼容性，同时让默认 harness 更
-接近 Pi 的极简内核：少量稳定内置工具，扩展能力由 Host/extension 显式加入。
+文件修改统一由 `apply_patch` 承担；`write_file`、`edit_file` 不再保留实现、
+catalog entry 或兼容路径。`web_fetch` 是独立的显式扩展，不属于默认工具集。
+这样默认 harness 更接近 Pi 的极简内核：少量稳定内置工具，扩展能力由
+Host/extension 显式加入。
 
 ## Boundary
 
@@ -43,12 +44,11 @@ Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk �
 2. Duplicate responsibility: reuse existing Workspace policy, ToolRouter,
    ToolOrchestrator and Thread settings; no second file-edit loop or workflow
    aggregate.
-3. Replace vs add: replace default seven-tool catalog with a four-tool default;
-   add one bounded patch protocol because read-modify-write cannot safely express
-   multi-file atomic validation.
+3. Replace vs add: replace the old file mutation pair with one bounded patch
+   protocol; keep the four-tool default and do not retain compatibility entries.
 4. Net line delta: runtime/release budget measured after implementation by
-   scripts/line_budget.py; compatibility tools remain opt-in instead of duplicating
-   production paths.
+   scripts/line_budget.py; removed file tools do not have a second or compatibility
+   path.
 5. Visible surface: default tool manifest, read_file pagination and apply_patch
    schema changed; all payloads remain bounded; Thread settings expose the
    allowlisted selection, not arbitrary prompt replacement.
@@ -67,8 +67,7 @@ Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk �
 
 ## Maintenance
 
-Compatibility tools remain available only when a Host explicitly selects them. New
-tools should first prove that one of the four defaults cannot express the required
-workflow, then add bounded extension/profile capability rather than growing the
-default catalog. Implementation changes are recorded in dated notes, while this file
-is updated when the current tool contract changes.
+New tools should first prove that one of the four defaults cannot express the
+required workflow, then add bounded extension/profile capability rather than
+growing the default catalog. Implementation changes are recorded in dated notes,
+while this file is updated when the current tool contract changes.

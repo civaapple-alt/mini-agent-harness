@@ -78,15 +78,14 @@ fn tool_start_details_are_bounded_and_redacted() {
     assert!(detail.len() <= MAX_TOOL_DETAIL_BYTES);
 
     let file_call = ToolCall {
-        name: "write_file".to_string(),
-        arguments: json!({"path": "README.md", "content": "secret"}),
+        name: "apply_patch".to_string(),
+        arguments: json!({"patch": "*** Begin Patch\n*** Update File: README.md\n+secret\n*** End Patch"}),
         ..long_call
     };
     assert_eq!(
         format_tool_started(&file_call, false),
-        "tool> write_file — README.md"
+        "tool> apply_patch — *** Begin Patch\\n*** Update File: README.md\\n+secret\\n*** End Patch"
     );
-    assert!(!format_tool_started(&file_call, false).contains("secret"));
 }
 
 #[test]

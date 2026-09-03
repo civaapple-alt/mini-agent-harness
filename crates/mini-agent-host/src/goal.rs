@@ -314,7 +314,7 @@ fn one_line(text: &str) -> String {
 const LIVING_PLAN_RIDER: &str = "\
 === LIVING PLAN MODE ===
 This session is Plan Mode. Keep the software-architect planning discipline.
-Write the living plan to plan.md with apply_patch (it may update the existing session plan.md; enable write_file explicitly only when needed). Relative path plan.md maps to the session file.
+Write the living plan to plan.md with apply_patch. Relative path plan.md maps to the session file.
 Do not produce the final deliverable in reasoning or the assistant message: no complete HTML/CSS/JS pages, full source files, or finished documents.
 Research only to inform the plan. Cite sources; do not copy full page content.
 Reply with a short summary, risks, and open questions.";

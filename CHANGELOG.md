@@ -11,10 +11,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   surface guidance into self-contained `docs/` files; keep `.agents/notes/` for
   dated change records and retain the 2026-08-31 review as frozen history.
 
-- **Builtin tool surface:** reduce the default model-visible set to four focused
-  tools: `read_file`, `apply_patch`, `shell`, and `read_image`. Keep
-  `edit_file`, `write_file`, and `web_fetch` available as explicit compatibility
-  selections instead of sending them to every new Thread.
+- **Builtin tool surface:** keep the default model-visible set focused on four
+  tools: `read_file`, `apply_patch`, `shell`, and `read_image`. File mutation is
+  only exposed through the bounded `apply_patch` contract; `write_file` and
+  `edit_file` are removed rather than retained as compatibility paths.
 - **ReadFile:** replace the whole-file 128 KiB failure mode with bounded UTF-8
   source loading (8 MiB), line-numbered pages, explicit `offset`/`limit`, and a
   `next_offset` continuation hint capped below the core tool-result limit.

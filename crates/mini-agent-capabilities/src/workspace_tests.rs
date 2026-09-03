@@ -31,7 +31,7 @@ fn policy_can_be_replaced_after_frontend_callback_creation() {
 }
 
 #[test]
-fn reads_and_edits_inside_workspace() {
+fn reads_and_patches_inside_workspace() {
     let root = test_root();
     fs::write(root.join("note.txt"), "hello world").unwrap();
     let workspace = workspace(
@@ -41,7 +41,7 @@ fn reads_and_edits_inside_workspace() {
         SandboxKind::Native,
     );
     let read = ReadFile(Arc::clone(&workspace));
-    let edit = EditFile(workspace);
+    let patch = ApplyPatch(workspace);
 
     let first = read.execute(&json!({"path": "note.txt"})).unwrap();
     assert!(first.contains("total_lines=1 | offset=0 | limit=200"));
@@ -50,12 +50,11 @@ fn reads_and_edits_inside_workspace() {
     let absolute = read.execute(&json!({"path": abs_path})).unwrap();
     assert!(absolute.contains("total_lines=1 | offset=0 | limit=200"));
     assert!(absolute.contains("1: hello world"));
-    edit.execute(&json!({
-        "path": abs_path,
-        "old_text": "world",
-        "new_text": "agent"
-    }))
-    .unwrap();
+    patch
+        .execute(&json!({
+            "patch": "*** Begin Patch\n*** Update File: note.txt\n@@\n-hello world\n+hello agent\n*** End Patch"
+        }))
+        .unwrap();
     assert_eq!(
         fs::read_to_string(root.join("note.txt")).unwrap(),
         "hello agent"
@@ -389,20 +388,11 @@ fn read_file_accepts_configured_extension_roots() {
     );
     let location = skill.to_string_lossy().replace('\\', "/");
     let read = ReadFile(Arc::clone(&workspace));
-    let edit = EditFile(Arc::clone(&workspace));
 
     assert!(
         read.execute(&json!({"path": location}))
             .unwrap()
             .contains("1: extension body")
-    );
-    assert!(
-        edit.execute(&json!({
-            "path": location,
-            "old_text": "extension",
-            "new_text": "changed"
-        }))
-        .is_err()
     );
     assert_eq!(
         fs::read_to_string(extra.join("SKILL.md")).unwrap(),
@@ -424,21 +414,18 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
     approval.set_living_plan(Some(plan.clone()));
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let read = ReadFile(Arc::clone(&workspace));
-    let edit = EditFile(Arc::clone(&workspace));
-    let write = WriteFile(Arc::clone(&workspace));
+    let patch = ApplyPatch(Arc::clone(&workspace));
 
-    let locked = write
-        .execute(&json!({"path": "src.rs", "content": "fn main() {}"}))
+    let locked = patch
+        .execute(&json!({"patch": "*** Begin Patch\n*** Add File: src.rs\n+fn main() {}\n*** End Patch"}))
         .unwrap_err();
     assert!(
         locked.0.contains("workspace mutations locked in Plan Mode"),
         "{locked:?}"
     );
-    let locked_edit = edit
+    let locked_edit = patch
         .execute(&json!({
-            "path": "note.txt",
-            "old_text": "workspace",
-            "new_text": "changed"
+            "patch": "*** Begin Patch\n*** Update File: note.txt\n@@\n-workspace note\n+changed note\n*** End Patch"
         }))
         .unwrap_err();
     assert!(
@@ -447,10 +434,9 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
             .contains("workspace mutations locked in Plan Mode")
     );
 
-    write
+    patch
         .execute(&json!({
-            "path": "plan.md",
-            "content": "# Implementation Plan\n\n- Goals:\n  - implement auth\n"
+            "patch": "*** Begin Patch\n*** Update File: plan.md\n@@\n # Implementation Plan\n+- Goals:\n+  - implement auth\n*** End Patch"
         }))
         .unwrap();
     let living = fs::read_to_string(&plan).unwrap();
@@ -462,12 +448,11 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
             .contains("1: # Implementation Plan")
     );
 
-    edit.execute(&json!({
-        "path": "plan.md",
-        "old_text": "- implement auth",
-        "new_text": "- implement auth\n  - add restore"
-    }))
-    .unwrap();
+    patch
+        .execute(&json!({
+            "patch": "*** Begin Patch\n*** Update File: plan.md\n@@\n - Goals:\n   - implement auth\n+  - add restore\n*** End Patch"
+        }))
+        .unwrap();
     assert!(fs::read_to_string(&plan).unwrap().contains("- add restore"));
 
     let shell = Shell(Arc::clone(&workspace), ResultStore::default());
@@ -547,10 +532,12 @@ fn read_only_agent_rule_locks_workspace_mutations() {
     let approval = ApprovalController::new(ApprovalMode::Automatic);
     approval.set_read_only_agent(true);
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
-    let write = WriteFile(Arc::clone(&workspace));
+    let patch = ApplyPatch(Arc::clone(&workspace));
 
-    let error = write
-        .execute(&json!({"path": "note.txt", "content": "blocked"}))
+    let error = patch
+        .execute(
+            &json!({"patch": "*** Begin Patch\n*** Add File: note.txt\n+blocked\n*** End Patch"}),
+        )
         .unwrap_err();
 
     assert_eq!(
@@ -575,7 +562,7 @@ fn goal_mode_allows_session_goal_plan_reads_and_workspace_writes() {
     approval.set_goal_dir(Some(goal_dir.clone()));
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let read = ReadFile(Arc::clone(&workspace));
-    let write = WriteFile(Arc::clone(&workspace));
+    let patch = ApplyPatch(Arc::clone(&workspace));
 
     let plan = read.execute(&json!({"path": "goal/plan.md"})).unwrap();
     assert!(plan.contains("Autonomous Goal Plan: Ship HTML intro"));
@@ -586,10 +573,9 @@ fn goal_mode_allows_session_goal_plan_reads_and_workspace_writes() {
             .contains("Milestone 1")
     );
 
-    write
+    patch
         .execute(&json!({
-            "path": "goal/plan.md",
-            "content": "# Autonomous Goal Plan\n- [x] Milestone 1\n"
+            "patch": "*** Begin Patch\n*** Update File: goal/plan.md\n@@\n # Autonomous Goal Plan: Ship HTML intro\n+- [x] Milestone 1\n*** End Patch"
         }))
         .unwrap();
     assert!(
@@ -599,47 +585,15 @@ fn goal_mode_allows_session_goal_plan_reads_and_workspace_writes() {
     );
     assert!(!root.join("goal").exists());
 
-    write
-        .execute(&json!({"path": "intro.html", "content": "<html></html>"}))
+    patch
+        .execute(&json!({"patch": "*** Begin Patch\n*** Add File: intro.html\n+<html></html>\n*** End Patch"}))
         .unwrap();
     assert_eq!(
         fs::read_to_string(root.join("intro.html")).unwrap(),
-        "<html></html>"
+        "<html></html>\n"
     );
 
     remove_test_root(&session);
-    remove_test_root(&root);
-}
-
-#[test]
-fn write_file_creates_but_does_not_replace() {
-    let root = test_root();
-    fs::write(root.join("existing.txt"), "keep me").unwrap();
-    let workspace = workspace(
-        root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
-        Vec::new(),
-        SandboxKind::Native,
-    );
-    let write = WriteFile(workspace);
-
-    write
-        .execute(&json!({"path": "new.txt", "content": "new file"}))
-        .unwrap();
-    assert_eq!(
-        fs::read_to_string(root.join("new.txt")).unwrap(),
-        "new file"
-    );
-    assert!(
-        write
-            .execute(&json!({"path": "existing.txt", "content": "replaced"}))
-            .is_err()
-    );
-    assert_eq!(
-        fs::read_to_string(root.join("existing.txt")).unwrap(),
-        "keep me"
-    );
-
     remove_test_root(&root);
 }
 
