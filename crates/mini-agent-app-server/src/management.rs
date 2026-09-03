@@ -18,9 +18,10 @@ use crate::runtime_command::RuntimeCommandClient;
 use crate::thread_settings::ThreadSettingsService;
 use crate::worker::Command;
 use mini_agent_capabilities::ApprovalController;
-use mini_agent_capabilities::ApprovalMode;
+use mini_agent_capabilities::ApprovalScope;
 use mini_agent_capabilities::McpServerConfig;
 use mini_agent_capabilities::OpenedSession;
+use mini_agent_capabilities::SecurityPreset;
 use mini_agent_capabilities::SessionItem;
 use mini_agent_capabilities::TurnCommit;
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
@@ -236,12 +237,12 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
 
     pub(crate) async fn set_execution_action(
         &self,
-        approval: ApprovalMode,
-        copilot: bool,
+        access: SecurityPreset,
+        approval: ApprovalScope,
     ) -> Result<ActionResponse<bool>, ActionFailure> {
         self.request_action(|reply| RuntimeCommand::SetExecution {
+            access,
             approval,
-            copilot,
             reply,
         })
         .await

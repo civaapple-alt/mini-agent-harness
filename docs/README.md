@@ -10,7 +10,7 @@ index of other Markdown files.
 | --- | --- |
 | [Harness framework](harness-framework.md) | Harness responsibilities, Core/Host/Capabilities/App Server layers, and the mini/Codex comparison. |
 | [Harness boundaries](harness-boundaries.md) | Ownership boundaries, change admission, loop control, approval, sandbox, and deferred policy decisions. |
-| [Harness tool surface](harness-tool-surface.md) | The four default Builtin tools, paged `read_file`, `apply_patch`, and extension/profile rules. |
+| [Harness tool surface](harness-tool-surface.md) | The four default Builtin tools, paged `read_file`, `apply_patch`, and extension rules. |
 | [App Server](app-server.md) | JSON-RPC transport, Thread/Turn/ThreadItem operations, settings, Goal control, events, approval, and runtime ordering. |
 | [World state](world-state.md) | Bounded environment snapshots, durable items, checkpoints, and resume authority. |
 | [Harness evidence](harness-evidence.md) | Bounded scenarios, failure/timeout/retry coverage, and evidence gates for harness changes. |
@@ -20,8 +20,8 @@ index of other Markdown files.
 | Document | Covers |
 | --- | --- |
 | [CLI](cli.md) | Installation, provider setup, commands, arguments, sessions, trace, and CLI safety boundaries. |
-| [Configuration](configuration.md) | Provider settings, runtime profiles, prompt/rule sources, extensions, and environment variables. |
-| [Harness limits](limits.md) | Byte, count, step, timeout, context, and Goal budget limits. |
+| [Configuration](configuration.md) | Provider settings, runtime composition, prompt/rule sources, extensions, and environment variables. |
+| [Harness limits](limits.md) | Byte, count, runtime-guard, timeout, context, and Goal budget limits. |
 | [Troubleshooting](troubleshooting.md) | Common setup, provider, shell, tool, session, and runtime issues. |
 | [Privacy](privacy.md) | Provider requests, local session data, credentials, MCP, and Goal verification data. |
 | [Release process](releasing.md) | Versioning, validation, archives, checksums, and publishing a release. |

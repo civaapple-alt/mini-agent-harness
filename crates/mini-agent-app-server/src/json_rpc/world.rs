@@ -72,26 +72,34 @@ where
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
-        let approval = match params.approval.as_str() {
-            "interactive" => ApprovalMode::Interactive,
-            "automatic" => ApprovalMode::Automatic,
-            _ => {
-                return response_error(
-                    request.id,
-                    JsonRpcError::invalid_params("approval must be interactive or automatic"),
-                );
+        let access = match params.access {
+            mini_agent_app_server_protocol::AccessScope::Project => {
+                mini_agent_capabilities::SecurityPreset::Default
+            }
+            mini_agent_app_server_protocol::AccessScope::FullMachine => {
+                mini_agent_capabilities::SecurityPreset::FullMachine
+            }
+        };
+        let approval = match params.approval {
+            mini_agent_app_server_protocol::ApprovalMode::PerAction => {
+                mini_agent_capabilities::ApprovalScope::PerAction
+            }
+            mini_agent_app_server_protocol::ApprovalMode::CurrentSession => {
+                mini_agent_capabilities::ApprovalScope::CurrentSession
+            }
+            mini_agent_app_server_protocol::ApprovalMode::CurrentProject => {
+                mini_agent_capabilities::ApprovalScope::CurrentProject
             }
         };
         let management = match self.management_service() {
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
-        match management
-            .set_execution_action(approval, params.copilot)
-            .await
-        {
+        match management.set_execution_action(access, approval).await {
             Ok(response) => {
                 let changed = response.value;
+                self.approval
+                    .set_execution_scope(params.access, params.approval);
                 match world_state_value(management).await {
                     Ok(state) => response_action_with(
                         request.id,

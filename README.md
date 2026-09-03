@@ -37,7 +37,7 @@ Windows 需要 PowerShell 7 (`pwsh`)。
 ### 运行
 
 Provider-backed 命令需要配置 `OPENAI_API_KEY`、`OPENAI_MODEL`，以及可选的
-`OPENAI_BASE_URL`。凭证优先级、Goal verifier 和 Profile 配置见
+`OPENAI_BASE_URL`。凭证优先级、Goal verifier 和运行时组合见
 [`docs/configuration.md`](docs/configuration.md)。
 
 ```sh
@@ -57,7 +57,7 @@ CLI / external client
           ↓
 App Server (Thread, Actor, control, events)
           ↓
-Host (profile, workflow, runtime composition)
+Host (workflow and runtime composition)
           ↓
 Capabilities (provider, workspace, sandbox, MCP, approval)
           ↓
@@ -69,7 +69,7 @@ Core + Protocol (bounded turn loop and portable contracts)
 | Protocol | Model、Tool、Message、Event、Stop 和 Limit 契约 |
 | Core | 有界上下文、Model/Tool step、Compaction、控制和历史写回 |
 | Capabilities | Provider、Workspace、Process、Sandbox、MCP、Skill/Plugin |
-| Host | Profile、Prompt/Rule、ToolOrchestrator 和 Runtime 组合 |
+| Host | Prompt/Rule、ToolOrchestrator 和 Runtime 组合 |
 | App Server | Thread/Turn/Goal、Actor/CAS、事件、审批和 JSON-RPC |
 | CLI | 终端输入、输出、批准交互和本地客户端入口 |
 
@@ -85,7 +85,7 @@ App Server 的 Thread/Turn/Item 契约，不另建执行循环。
 | 主题 | 文档 |
 | --- | --- |
 | CLI 安装、命令和参数 | [`docs/cli.md`](docs/cli.md) |
-| Provider、Profile、Session、Skill、Plugin、MCP | [`docs/configuration.md`](docs/configuration.md) |
+| Provider、Session、Skill、Plugin、MCP | [`docs/configuration.md`](docs/configuration.md) |
 | App Server JSON-RPC、Thread、Turn、Goal、Item | [`docs/app-server.md`](docs/app-server.md) |
 | Harness 分层与 Codex 对照 | [`docs/harness-framework.md`](docs/harness-framework.md) |
 | 责任边界与变更准入 | [`docs/harness-boundaries.md`](docs/harness-boundaries.md) |

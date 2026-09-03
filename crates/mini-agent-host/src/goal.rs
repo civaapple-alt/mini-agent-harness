@@ -7,9 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const GOAL_SCHEMA_VERSION: u32 = 3;
 pub const MAX_GOAL_OBJECTIVE_BYTES: usize = 8 * 1024;
 pub const MAX_GOAL_PLAN_BYTES: usize = 32 * 1024;
-pub const DEFAULT_GOAL_MAX_LOOPS: usize = 20;
-pub const DEFAULT_GOAL_MILESTONE_STEPS: usize = 50;
-pub const DEFAULT_GOAL_MILESTONE_TIMEOUT_SECS: u64 = 600;
+pub const DEFAULT_GOAL_MAX_LOOPS: usize = 100;
+pub const DEFAULT_GOAL_MILESTONE_STEPS: usize = 200;
+pub const DEFAULT_GOAL_MILESTONE_TIMEOUT_SECS: u64 = 1_800;
 const MAX_GOAL_ERROR_CHARS: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

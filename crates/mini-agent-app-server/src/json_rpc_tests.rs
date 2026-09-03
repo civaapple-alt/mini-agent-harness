@@ -4,6 +4,7 @@ use mini_agent_app_server_protocol::CapabilityProviderSelection;
 use mini_agent_app_server_protocol::ClientCapabilities;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ApprovalMode;
+use mini_agent_capabilities::ApprovalScope;
 use mini_agent_capabilities::ImageStore;
 use mini_agent_capabilities::ResultStore;
 use mini_agent_capabilities::SandboxKind;
@@ -47,7 +48,6 @@ fn initialize_request(id: u64, client_name: &str) -> JsonRpcRequest {
             client_name: client_name.to_string(),
             client_version: "0".to_string(),
             capabilities: ClientCapabilities::default(),
-            profile: None,
             providers: None,
         }),
     )
@@ -224,8 +224,8 @@ fn managed_connection_at<M: Model + Send + 'static>(
         None,
         mini_agent_host::WorldState::detect(
             &root,
-            ApprovalMode::Automatic,
-            false,
+            SecurityPreset::Default,
+            ApprovalScope::CurrentSession,
             SandboxKind::Native,
         ),
         Vec::new(),
@@ -319,8 +319,8 @@ async fn runtime_mutations_reject_stale_revision_tokens() {
             crate::runtime_actor::RuntimeRequest {
                 expected_revision: crate::action::RuntimeRevision::default(),
                 command: crate::runtime_actor::RuntimeCommand::SetExecution {
-                    approval: ApprovalMode::Interactive,
-                    copilot: true,
+                    access: SecurityPreset::Default,
+                    approval: ApprovalScope::PerAction,
                     reply: first_reply,
                 },
             },
@@ -333,8 +333,8 @@ async fn runtime_mutations_reject_stale_revision_tokens() {
             crate::runtime_actor::RuntimeRequest {
                 expected_revision: crate::action::RuntimeRevision::default(),
                 command: crate::runtime_actor::RuntimeCommand::SetExecution {
-                    approval: ApprovalMode::Automatic,
-                    copilot: true,
+                    access: SecurityPreset::FullMachine,
+                    approval: ApprovalScope::CurrentProject,
                     reply: second_reply,
                 },
             },
@@ -368,11 +368,6 @@ async fn requires_initialize_and_handles_turn_start() {
         .await
         .unwrap();
     assert!(response.error.is_none());
-    assert_eq!(response.result.as_ref().unwrap()["profile"], "unknown");
-    assert_eq!(
-        response.result.as_ref().unwrap()["capabilityManifest"]["profile"],
-        "unknown"
-    );
     assert_eq!(
         response.result.as_ref().unwrap()["capabilityManifest"]["rulePolicy"]["workspaceWrite"],
         false
@@ -957,8 +952,8 @@ async fn binds_active_goal_workspace_to_approval_controller() {
         None,
         mini_agent_host::WorldState::detect(
             &root,
-            ApprovalMode::Automatic,
-            false,
+            SecurityPreset::Default,
+            ApprovalScope::CurrentSession,
             SandboxKind::Native,
         ),
         Vec::new(),
@@ -990,7 +985,6 @@ async fn rejects_an_unavailable_requested_provider() {
                 client_name: "test".to_string(),
                 client_version: "0".to_string(),
                 capabilities: ClientCapabilities::default(),
-                profile: None,
                 providers: Some(CapabilityProviderSelection {
                     tools: Some("builtin".to_string()),
                     ..CapabilityProviderSelection::default()
@@ -1051,6 +1045,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
     let tools = workspace_tools_with_read_roots_and_results(
         root.clone(),
         approval.clone(),
+        Vec::new(),
         Vec::new(),
         SandboxKind::Native,
         ImageStore::memory_only(),
@@ -1114,8 +1109,10 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
             METHOD_APPROVAL_RESPOND,
             serde_json::to_value(ApprovalRespondParams {
                 request_id: pending.request_id.clone(),
-                approved: true,
-                remember: false,
+                decision: mini_agent_app_server_protocol::ApprovalDecision::Approve,
+                access: mini_agent_app_server_protocol::AccessScope::Project,
+                approval: mini_agent_app_server_protocol::ApprovalMode::PerAction,
+                reason: String::new(),
             })
             .unwrap(),
         ))
@@ -1137,7 +1134,10 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         resolution.turn_id,
         Some(mini_agent_protocol::TurnId::new("turn-1"))
     );
-    assert!(resolution.approved);
+    assert_eq!(
+        resolution.outcome,
+        mini_agent_app_server_protocol::ApprovalOutcome::Approved
+    );
 
     let mut tool_finished_seen = false;
     loop {

@@ -21,7 +21,7 @@ Host/extension 显式加入。
 - Protocol 的 `ToolHandler` 负责参数解析和 admission 描述；
 - Host 的 `ToolOrchestrator` 负责 admission、approval 和 execution ordering；
 - `ToolRuntime` 继续拥有具体副作用与 sandbox；
-- App Server 只选择 allowlisted tool profile，并通过 Thread settings 返回当前
+- App Server 只选择 allowlisted tool/runtime 组合，并通过 Thread settings 返回当前
   selection；不再维护 workflow 聚合状态快照；
 - Web Gateway、SDK 和 SidePanel 保持相同的 tool selection 语义，显式空选择不
   被默认值覆盖。
@@ -68,6 +68,6 @@ Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk �
 ## Maintenance
 
 New tools should first prove that one of the four defaults cannot express the
-required workflow, then add bounded extension/profile capability rather than
+required workflow, then add bounded extension capability rather than
 growing the default catalog. Implementation changes are recorded in dated notes,
 while this file is updated when the current tool contract changes.

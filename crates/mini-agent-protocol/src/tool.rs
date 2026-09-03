@@ -55,6 +55,14 @@ impl From<crate::ToolCall> for ToolExecutionRequest {
 pub struct ToolExecutionContext {
     pub thread_id: ThreadId,
     pub turn_id: TurnId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// The bounded identity and action sent to an approval provider.
@@ -69,6 +77,11 @@ pub struct ToolApprovalRequest {
     pub call_id: Option<String>,
     pub thread_id: Option<ThreadId>,
     pub turn_id: Option<TurnId>,
+    pub project_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub workspace_revision: Option<u64>,
+    pub session_id: Option<String>,
+    pub action_class: Option<String>,
 }
 
 impl ToolApprovalRequest {
@@ -79,6 +92,11 @@ impl ToolApprovalRequest {
             call_id: None,
             thread_id: None,
             turn_id: None,
+            project_id: None,
+            workspace_id: None,
+            workspace_revision: None,
+            session_id: None,
+            action_class: None,
         }
     }
 
@@ -95,6 +113,23 @@ impl ToolApprovalRequest {
                 .context
                 .as_ref()
                 .map(|context| context.turn_id.clone()),
+            project_id: request
+                .context
+                .as_ref()
+                .and_then(|context| context.project_id.clone()),
+            workspace_id: request
+                .context
+                .as_ref()
+                .and_then(|context| context.workspace_id.clone()),
+            workspace_revision: request
+                .context
+                .as_ref()
+                .and_then(|context| context.workspace_revision),
+            session_id: request
+                .context
+                .as_ref()
+                .and_then(|context| context.session_id.clone()),
+            action_class: Some(request.name.clone()),
         }
     }
 }

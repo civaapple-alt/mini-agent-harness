@@ -153,25 +153,54 @@ where
                         mini_agent_app_server_protocol::METHOD_APPROVAL_REQUEST,
                         serde_json::to_value(ApprovalRequestNotification {
                             request_id: request.request_id,
-                            action: request.action,
-                            thread_id: request
-                                .thread_id
-                                .unwrap_or_else(|| connection.server.thread_id().clone()),
+                            project_id: request.project_id,
+                            workspace_id: request.workspace_id,
+                            workspace_revision: request.workspace_revision,
+                            session_id: request.session_id,
+                            thread_id: request.thread_id,
                             turn_id: request.turn_id,
                             call_id: request.call_id,
+                            tool_name: request.tool_name,
+                            action_class: request.action_class,
+                            action_summary: request.action,
+                            path_scope: mini_agent_app_server_protocol::ApprovalPathScope {
+                                kind: if request.access == mini_agent_app_server_protocol::AccessScope::FullMachine {
+                                    mini_agent_app_server_protocol::ApprovalPathKind::Machine
+                                } else {
+                                    mini_agent_app_server_protocol::ApprovalPathKind::Project
+                                },
+                                paths: Vec::new(),
+                            },
+                            access: request.access,
+                            allowed_approval_modes: request.allowed_approval_modes,
+                            high_risk: request.high_risk,
                         }).expect("approval notification is serializable"),
                     ),
                     ApprovalEvent::Resolved(resolution) => (
                         mini_agent_app_server_protocol::METHOD_APPROVAL_RESOLVED,
                         serde_json::to_value(ApprovalResolvedNotification {
                             request_id: resolution.request_id,
-                            action: resolution.action,
-                            approved: resolution.approved,
-                            thread_id: resolution
-                                .thread_id
-                                .unwrap_or_else(|| connection.server.thread_id().clone()),
+                            outcome: resolution.outcome,
+                            approval: resolution.approval,
+                            project_id: resolution.project_id,
+                            workspace_id: resolution.workspace_id,
+                            workspace_revision: resolution.workspace_revision,
+                            session_id: resolution.session_id,
+                            thread_id: resolution.thread_id,
                             turn_id: resolution.turn_id,
                             call_id: resolution.call_id,
+                            tool_name: resolution.tool_name,
+                            action_class: resolution.action_class,
+                            action_summary: resolution.action,
+                            path_scope: mini_agent_app_server_protocol::ApprovalPathScope {
+                                kind: if resolution.access == mini_agent_app_server_protocol::AccessScope::FullMachine {
+                                    mini_agent_app_server_protocol::ApprovalPathKind::Machine
+                                } else {
+                                    mini_agent_app_server_protocol::ApprovalPathKind::Project
+                                },
+                                paths: Vec::new(),
+                            },
+                            access: resolution.access,
                         }).expect("approval resolution is serializable"),
                     ),
                 };

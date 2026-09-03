@@ -42,7 +42,7 @@ CLI / 客户端
     ↓
 App Server（Actor、CAS/revision、事件与控制面）
     ↓
-Host（runtime/profile/workflow 组合）
+Host（runtime/workflow 组合）
     ↓
 Capabilities（provider、workspace、process、sandbox、MCP、approval）
     ↓

@@ -15,10 +15,6 @@ impl SecurityPreset {
         match text.to_ascii_lowercase().as_str() {
             "default" => Ok(Self::Default),
             "full-machine" | "full_machine" | "fullmachine" => Ok(Self::FullMachine),
-            // The old spelling is accepted only at this input boundary. It
-            // immediately becomes the canonical FullMachine value and can
-            // never survive as a runtime identity.
-            "turbomode" => Ok(Self::FullMachine),
             "custom" => Ok(Self::Custom),
             other => Err(format!("unknown security preset: {other}")),
         }
@@ -48,8 +44,23 @@ pub enum SecurityDecision {
 
 const MAX_CACHED_APPROVALS: usize = 1024;
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ApprovalScope {
+    PerAction,
+    CurrentSession,
+    CurrentProject,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ApprovalGrant {
+    scope: ApprovalScope,
+    owner: String,
+    workspace_revision: u64,
+    action: String,
+}
+
 #[derive(Clone, Default)]
-pub struct ApprovalStore(Arc<Mutex<HashSet<String>>>);
+pub struct ApprovalStore(Arc<Mutex<HashSet<ApprovalGrant>>>);
 
 impl ApprovalStore {
     pub fn new() -> Self {
@@ -57,16 +68,46 @@ impl ApprovalStore {
     }
 
     pub fn is_approved(&self, key: &str) -> bool {
-        let store = self.0.lock().unwrap();
-        store.contains(key)
+        self.is_approved_for(ApprovalScope::CurrentSession, "legacy", 0, key)
     }
 
     pub fn remember_approval(&self, key: &str) {
+        self.remember_approval_for(ApprovalScope::CurrentSession, "legacy", 0, key);
+    }
+
+    pub fn is_approved_for(
+        &self,
+        scope: ApprovalScope,
+        owner: &str,
+        workspace_revision: u64,
+        action: &str,
+    ) -> bool {
+        let store = self.0.lock().unwrap();
+        store.contains(&ApprovalGrant {
+            scope,
+            owner: owner.to_string(),
+            workspace_revision,
+            action: action.to_string(),
+        })
+    }
+
+    pub fn remember_approval_for(
+        &self,
+        scope: ApprovalScope,
+        owner: &str,
+        workspace_revision: u64,
+        action: &str,
+    ) {
         let mut store = self.0.lock().unwrap();
         if store.len() >= MAX_CACHED_APPROVALS {
-            store.clear();
+            return;
         }
-        store.insert(key.to_string());
+        store.insert(ApprovalGrant {
+            scope,
+            owner: owner.to_string(),
+            workspace_revision,
+            action: action.to_string(),
+        });
     }
 }
 
@@ -262,14 +303,8 @@ mod tests {
             SecurityPreset::parse("full-machine").unwrap(),
             SecurityPreset::FullMachine
         );
-        assert_eq!(
-            SecurityPreset::parse("turbomode").unwrap(),
-            SecurityPreset::FullMachine
-        );
-        assert_eq!(
-            SecurityPreset::parse("Turbomode").unwrap().name(),
-            "full-machine"
-        );
+        assert!(SecurityPreset::parse("turbomode").is_err());
+        assert!(SecurityPreset::parse("Turbomode").is_err());
         assert_eq!(
             SecurityPreset::parse("custom").unwrap(),
             SecurityPreset::Custom
@@ -305,6 +340,35 @@ mod tests {
 
         store.remember_approval(key);
         assert!(store.is_approved(key));
+    }
+
+    #[test]
+    fn scoped_approvals_require_an_exact_owner_and_workspace_revision() {
+        let store = ApprovalStore::new();
+        store.remember_approval_for(
+            ApprovalScope::CurrentProject,
+            "project-1/workspace-1",
+            3,
+            "shell command `cargo test`",
+        );
+        assert!(store.is_approved_for(
+            ApprovalScope::CurrentProject,
+            "project-1/workspace-1",
+            3,
+            "shell command `cargo test`"
+        ));
+        assert!(!store.is_approved_for(
+            ApprovalScope::CurrentProject,
+            "project-2/workspace-1",
+            3,
+            "shell command `cargo test`"
+        ));
+        assert!(!store.is_approved_for(
+            ApprovalScope::CurrentProject,
+            "project-1/workspace-1",
+            4,
+            "shell command `cargo test`"
+        ));
     }
 
     #[test]

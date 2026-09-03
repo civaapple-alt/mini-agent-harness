@@ -6,7 +6,7 @@ impl ToolHandler for Shell {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "shell".to_string(),
-            description: shell_description(self.0.approval.mode()),
+            description: shell_description(self.0.approval.approval_scope()),
             parameters: json!({
                 "type": "object",
                 "properties": { "command": {"type": "string"} },
@@ -194,10 +194,11 @@ fn is_read_only_shell_segment(segment: &str) -> bool {
     }
 }
 
-pub(super) fn shell_description(approval: ApprovalMode) -> String {
+pub(super) fn shell_description(approval: ApprovalScope) -> String {
     let approval = match approval {
-        ApprovalMode::Interactive => "after user approval",
-        ApprovalMode::Automatic => "without per-command approval",
+        ApprovalScope::PerAction => "after per-action user approval",
+        ApprovalScope::CurrentSession => "after the first user approval in this Session",
+        ApprovalScope::CurrentProject => "after the first user approval in this Project",
     };
     if cfg!(windows) {
         format!(

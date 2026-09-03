@@ -206,8 +206,6 @@ pub struct InitializeParams {
     #[serde(default)]
     pub capabilities: ClientCapabilities,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub profile: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub providers: Option<CapabilityProviderSelection>,
 }
 
@@ -269,7 +267,6 @@ pub struct InitializeResult {
     pub server_name: String,
     pub server_version: String,
     pub capabilities: ServerCapabilities,
-    pub profile: String,
     pub capability_manifest: CapabilityManifest,
 }
 
@@ -449,8 +446,27 @@ pub struct WorldSetExecutionResult {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorldSetExecutionParams {
-    pub approval: String,
-    pub copilot: bool,
+    pub access: AccessScope,
+    pub approval: ApprovalMode,
+}
+
+/// Filesystem reach that the Host may consider for a tool call. This is an
+/// access boundary, not an approval decision: FullMachine never turns a
+/// denied or otherwise unsafe action into an allowed action.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessScope {
+    Project,
+    FullMachine,
+}
+
+/// Who may reuse a successful approval for a later askable action.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalMode {
+    PerAction,
+    CurrentSession,
+    CurrentProject,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -475,7 +491,6 @@ pub struct McpRetryResult {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityManifest {
-    pub profile: String,
     pub model_provider: String,
     pub tool_provider: String,
     pub extension_provider: String,
@@ -723,34 +738,93 @@ pub struct TurnInterruptParams {
     pub turn_id: TurnId,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalPathKind {
+    Project,
+    Machine,
+    Explicit,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalPathScope {
+    pub kind: ApprovalPathKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDecision {
+    Approve,
+    Deny,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalOutcome {
+    Approved,
+    Denied,
+    Expired,
+    Revoked,
+    Unavailable,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalRequestNotification {
     pub request_id: String,
-    pub action: String,
-    pub thread_id: ThreadId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
     pub turn_id: Option<TurnId>,
     pub call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub action_class: String,
+    pub action_summary: String,
+    pub path_scope: ApprovalPathScope,
+    pub access: AccessScope,
+    pub allowed_approval_modes: Vec<ApprovalMode>,
+    pub high_risk: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalResolvedNotification {
     pub request_id: String,
-    pub action: String,
-    pub approved: bool,
-    pub thread_id: ThreadId,
+    pub outcome: ApprovalOutcome,
+    pub approval: Option<ApprovalMode>,
+    pub project_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub workspace_revision: Option<u64>,
+    pub session_id: Option<String>,
+    pub thread_id: Option<ThreadId>,
     pub turn_id: Option<TurnId>,
     pub call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub action_class: String,
+    pub action_summary: String,
+    pub path_scope: ApprovalPathScope,
+    pub access: AccessScope,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalRespondParams {
     pub request_id: String,
-    pub approved: bool,
+    pub decision: ApprovalDecision,
+    pub access: AccessScope,
+    pub approval: ApprovalMode,
     #[serde(default)]
-    pub remember: bool,
+    pub reason: String,
 }
 
 /// A server-to-client notification carrying an ordered core event.
@@ -811,26 +885,56 @@ mod tests {
     fn approval_notifications_preserve_turn_and_call_correlation() {
         let request = serde_json::to_value(ApprovalRequestNotification {
             request_id: "approval-1".to_string(),
-            action: "shell command `pwd`".to_string(),
-            thread_id: ThreadId::new("thread-1"),
+            project_id: Some("project-1".to_string()),
+            workspace_id: Some("workspace-1".to_string()),
+            workspace_revision: Some(3),
+            session_id: Some("session-1".to_string()),
+            thread_id: Some(ThreadId::new("thread-1")),
             turn_id: Some(TurnId::new("turn-1")),
             call_id: Some("shell-call-1".to_string()),
+            tool_name: Some("shell".to_string()),
+            action_class: "shell_execute".to_string(),
+            action_summary: "shell command `pwd`".to_string(),
+            path_scope: ApprovalPathScope {
+                kind: ApprovalPathKind::Machine,
+                paths: Vec::new(),
+            },
+            access: AccessScope::FullMachine,
+            allowed_approval_modes: vec![ApprovalMode::PerAction, ApprovalMode::CurrentProject],
+            high_risk: true,
         })
         .unwrap();
         assert_eq!(request["requestId"], "approval-1");
+        assert_eq!(request["workspaceRevision"], 3);
+        assert_eq!(request["access"], "full_machine");
+        assert_eq!(request["allowedApprovalModes"][0], "per_action");
         assert_eq!(request["turnId"], "turn-1");
         assert_eq!(request["callId"], "shell-call-1");
 
         let resolved = serde_json::to_value(ApprovalResolvedNotification {
             request_id: "approval-1".to_string(),
-            action: "shell command `pwd`".to_string(),
-            approved: true,
-            thread_id: ThreadId::new("thread-1"),
+            outcome: ApprovalOutcome::Approved,
+            approval: Some(ApprovalMode::CurrentProject),
+            project_id: Some("project-1".to_string()),
+            workspace_id: Some("workspace-1".to_string()),
+            workspace_revision: Some(3),
+            session_id: Some("session-1".to_string()),
+            thread_id: Some(ThreadId::new("thread-1")),
             turn_id: Some(TurnId::new("turn-1")),
             call_id: Some("shell-call-1".to_string()),
+            tool_name: Some("shell".to_string()),
+            action_class: "shell_execute".to_string(),
+            action_summary: "shell command `pwd`".to_string(),
+            path_scope: ApprovalPathScope {
+                kind: ApprovalPathKind::Machine,
+                paths: Vec::new(),
+            },
+            access: AccessScope::FullMachine,
         })
         .unwrap();
         assert_eq!(resolved["requestId"], "approval-1");
+        assert_eq!(resolved["outcome"], "approved");
+        assert_eq!(resolved["approval"], "current_project");
         assert_eq!(resolved["turnId"], "turn-1");
         assert_eq!(resolved["callId"], "shell-call-1");
     }
@@ -865,7 +969,6 @@ mod tests {
             client_name: "test".to_string(),
             client_version: "0".to_string(),
             capabilities: ClientCapabilities::default(),
-            profile: None,
             providers: Some(CapabilityProviderSelection {
                 model: Some("openai".to_string()),
                 tools: Some("builtin".to_string()),

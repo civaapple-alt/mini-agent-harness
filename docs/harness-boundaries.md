@@ -22,7 +22,7 @@ persistence 和 terminal output 留在 Core 外。被动 observer 不改变执�
 稳定内置 prompt body 属于 crate-owned `builtin/prompts` Markdown asset 并在
 编译期嵌入；Host 的 project、extension、world、workflow instruction 只能在
 有界 runtime composition 中加入。App Server 只能选择 allowlisted startup
-profile，不能通过公共协议暴露任意 raw system-prompt replacement。
+runtime 组合，不能通过公共协议暴露任意 raw system-prompt replacement。
 
 ## 六项变更准入
 

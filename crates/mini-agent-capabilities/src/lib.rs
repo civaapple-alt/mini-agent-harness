@@ -38,6 +38,8 @@ pub use registry::ToolProvider;
 pub use result_store::ResultStore;
 pub use result_store::StoredResult;
 pub use sandbox::SandboxKind;
+pub use security::ApprovalScope;
+pub use security::ApprovalStore;
 pub use security::SecurityDecision;
 pub use security::SecurityPolicy;
 pub use security::SecurityPreset;

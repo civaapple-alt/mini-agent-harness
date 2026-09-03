@@ -21,7 +21,7 @@ cargo run --release -p mini-agent-app-server --bin mini-agent-app-server
 The first request must negotiate protocol version 1:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientName":"example","clientVersion":"0","capabilities":{},"profile":"interactive","providers":{"model":"openai","tools":"builtin","extensions":"builtin","policy":"builtin"}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientName":"example","clientVersion":"0","capabilities":{},"providers":{"model":"openai","tools":"builtin","extensions":"builtin","policy":"builtin"}}}
 ```
 
 Then start the configured thread and submit a turn:
@@ -56,11 +56,14 @@ validates the supplied active `turnId`;
 settled result and messages. When the host runtime is wired with
 an `ApprovalBroker`, sensitive tool calls emit an `approval/request`
 notification, then emit `approval/resolved` after the client replies with
-`approval/respond`. The resolution carries the request ID, action, and final
-approved boolean, as well as the optional `turnId` and `callId` for the built-in
-Shell path. Clients can correlate `requestId`/`turnId`/`callId` from
-`approval/request` through `approval/respond`, `approval/resolved`, and the
-matching `turn/event`, without inferring approval from `tool/finished` content.
+`approval/respond`. The request and resolution carry typed access and approval
+scope, bounded workspace identity, an action class, and the optional `turnId`
+and `callId` for the built-in Shell path. Clients can correlate
+`requestId`/`turnId`/`callId` from `approval/request` through
+`approval/respond`, `approval/resolved`, and the matching `turn/event`, without
+inferring approval from `tool/finished` content. `full_machine` means
+machine-wide path scope, not allow-all; security Deny, Plan locks, tool
+availability, and high-risk confirmation remain independent gates.
 The App Server worker runs on a dedicated runtime thread, so a synchronous host
 approval callback does not block the connection's async transport. The worker
 still serializes one Thread at a time while that approval is pending.
@@ -105,32 +108,14 @@ The Rust `LocalAppServerClient` uses the same DTOs and dispatch without stdio,
 which lets an embedded frontend migrate to the service boundary before it
 spawns a child process.
 
-Host construction is kept outside the service worker: callers use
-`HostRuntimeFactory` with an explicit `RuntimeProfile`, then hand the resulting
-runtime to the App Server or an edge adapter. The App Server does not discover
-extensions or infer capabilities from transport method names.
-
-`initialize.params.profile` is optional for the stdio server. The standalone
-server reads the first initialize request before constructing its first Thread,
-resolves the requested allowlisted profile plus the bounded workspace profile,
-and freezes that selection for the service lifetime. Unavailable profile names
-are rejected before Thread construction. For an already constructed embedded
-runtime, the request must match the active profile. The initialize result includes the
-selected `profile` and structured `capabilityManifest` with enabled,
-disabled, extension depth, selected extension names, prompt, and rule source
-metadata, precedence, typed rule policy, per-source rule status, resolver
-state, bounded source fingerprints, conflicts, and context limits. The
-manifest reports the selected bounded extension names and load depth.
-For the regular `general` agent, this manifest describes the selected base
-prompt fingerprint, independent prompt/rule source admission, and bounded
-context limits. A typed base-prompt/output/context preset is a follow-up wire
-addition; the current protocol never accepts arbitrary prompt or rule bodies.
-The standalone server resolves its workspace profile before creating the
-thread factory and reuses that frozen selection for new threads, keeping the
-advertised manifest consistent for the lifetime of the process.
-Set `MINI_AGENT_PROFILE` before starting the standalone binary to select one
-of the three builtin profiles (`interactive`, `ask`, or `auto`); unknown names fail closed before a provider or
-thread is created.
+Host construction is kept outside the service worker: callers use the Host's
+bounded internal runtime composition and hand the resulting runtime to the App
+Server or an edge adapter. The App Server does not discover extensions or infer
+capabilities from transport method names. The initialize result includes a
+structured, non-secret `capabilityManifest` with enabled/disabled capability,
+provider, prompt/rule source, typed policy, source status, bounded fingerprints,
+and context-limit metadata. It does not expose a selectable Profile identity or
+accept a Profile-shaped startup input.
 
 `initialize.params.providers` is an optional selector for the four local
 provider categories (`model`, `tools`, `extensions`, and `policy`). The

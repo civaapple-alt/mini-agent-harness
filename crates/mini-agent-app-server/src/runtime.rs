@@ -157,6 +157,17 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
                 Some(opened)
             }
         };
+        // The runtime derives its trusted project/workspace identity from the
+        // canonical Host workspace. Web clients may select access and
+        // approval scope, but cannot provide or widen this binding.
+        approval.bind_approval_context(
+            Some(runtime_config.project_id()),
+            Some(workspace.display().to_string()),
+            Some(runtime_config.workspace_revision()),
+            session
+                .as_ref()
+                .map(|opened| opened.store.session_id().to_string()),
+        );
         let results = session
             .as_ref()
             .map(|opened| opened.store.result_store())
@@ -229,12 +240,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         .with_runtime_services(services);
         let mut client = LocalAppServerClient::with_control(connection, control.clone());
         client
-            .initialize_with_profile_and_providers(
-                "mini-agent-cli",
-                env!("CARGO_PKG_VERSION"),
-                Some(capability_manifest.profile.clone()),
-                None,
-            )
+            .initialize_with_providers("mini-agent-cli", env!("CARGO_PKG_VERSION"), None)
             .await
             .map_err(|error| format!("cannot initialize app server: {}", error.message))?;
         Ok(AppServerRuntime {
@@ -272,7 +278,6 @@ pub fn capability_manifest_to_protocol(
     manifest: &mini_agent_host::CapabilityManifest,
 ) -> ProtocolCapabilityManifest {
     ProtocolCapabilityManifest {
-        profile: manifest.profile.clone(),
         model_provider: manifest.model_provider.clone(),
         tool_provider: manifest.tool_provider.clone(),
         extension_provider: manifest.extension_provider.clone(),

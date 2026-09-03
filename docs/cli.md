@@ -38,7 +38,7 @@ OPENAI_BASE_URL=https://api.deepseek.com
 ```
 
 配置优先级为：进程环境、启动工作区 `.env`、用户级 `.env`、内置默认值。
-完整变量和 Profile 说明见 [`configuration.md`](configuration.md)。
+完整变量和运行时组合说明见 [`configuration.md`](configuration.md)。
 
 ## 常用命令
 

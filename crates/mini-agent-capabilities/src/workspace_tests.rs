@@ -16,7 +16,9 @@ fn workspace(
     extra_read_roots: Vec<PathBuf>,
     sandbox: SandboxKind,
 ) -> Arc<Workspace> {
-    Arc::new(Workspace::with_read_roots(root, approval, extra_read_roots, sandbox).unwrap())
+    Arc::new(
+        Workspace::with_read_roots(root, approval, extra_read_roots, Vec::new(), sandbox).unwrap(),
+    )
 }
 
 #[test]

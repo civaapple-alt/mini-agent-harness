@@ -79,10 +79,10 @@ preserved.
 
 ## File tools and workspace paths
 
-`read_file` and `read_image` accept paths located inside the active workspace,
-whether given as relative paths (e.g. `src/main.rs`) or absolute paths
-(e.g. `D:\workspace\src\main.rs`). Paths that escape the workspace (such as
-`../secret` or external directories) or point to `.git` are strictly rejected.
+`read_file` and `read_image` accept paths located inside the active Project
+workspace, including configured associated reference roots. `Full access`
+explicitly expands the current Runtime/Session path scope to the machine, but
+paths still cannot point to `.git` and all hard Deny rules remain active.
 `apply_patch` is the only Builtin file mutation path. Its Codex-style patch paths
 must be relative to the workspace, and it validates every affected file before
 writing. The removed `write_file` and `edit_file` names are not accepted.
@@ -108,8 +108,9 @@ or headless-browser tool.
 
 `read_image` is for existing PNG/JPEG/GIF/WebP files (screenshots, diagrams, UI captures). Pass a
 workspace-relative path, or an absolute path on this machine such as a file under Pictures. Outside
-the workspace, `auto` and other automatic-approval sessions proceed after the same approval gate as
-shell; interactive ask/N sessions prompt. Do not copy those files into the project.
+the Project workspace, `Full access` may admit a path only under its remaining
+security and approval rules. Do not copy files into the Project just to make an
+out-of-scope path appear allowed.
 
 It uploads the file once through DeepSeek Files API (`POST /files`, `purpose=user_data`) and later
 turns reuse the returned `file_id`. Inline base64 is only a fallback if that upload fails.

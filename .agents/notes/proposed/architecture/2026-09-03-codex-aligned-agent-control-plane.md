@@ -72,10 +72,9 @@ layout. It does not read, import, translate, write, or delete legacy Web
 `~/.mini-agent/state.json`, legacy Web checkpoint files, `profile`,
 `profile=auto`, `interactive`, `ask`, `auto`, legacy `remember`, or
 boolean/string approval shapes. Those artifacts and inputs are outside the new
-runtime's scope. The only narrow migration exception is an inbound old
-`turbomode`/`Turbomode` token: it may map once to `Full access` /
-`SecurityPreset::FullMachine`, then must be discarded. It is never persisted,
-exposed as a Runtime/Profile identity, or accepted by the new public protocol.
+runtime's scope. No migration alias is accepted: `turbomode`/`Turbomode` is
+removed rather than translated. It is never persisted or exposed as a
+Runtime/Profile identity.
 The new implementation starts from its canonical Session Store and new
 `~/.mini-agent/web/state.json`; no general migration parser, importer,
 fallback, or compatibility layer is admitted.
@@ -168,12 +167,11 @@ Therefore Web Studio and the REPL should remove the profile selector and the
 `profile=auto` runtime option. The new public contract rejects profile-shaped
 inputs instead of translating them. No runtime or Session retains a Profile
 identity. The only machine-wide access name is user-facing `Full access`,
-internally backed by `SecurityPreset::FullMachine`. The old
-`turbomode`/`Turbomode` token is permitted only at a migration input boundary
-as a one-way alias to that access preset; it must not survive as a Runtime or
-Profile identity. Expose the actual user decisions independently:
+internally backed by `SecurityPreset::FullMachine`. The removed
+`turbomode`/`Turbomode` name is not accepted as a compatibility alias. Expose
+the actual user decisions independently:
 
-- access: `project` or `machine`;
+- access: `project` or `full_machine` (user-facing label: `Full access`);
 - approval mode: `per_action`, `current_session`, or `current_project`;
 - mode: Chat/Plan through `/plan`;
 - the selected Thread's Plan runtime state and Goal lifecycle through `/goal`
@@ -218,7 +216,7 @@ The public decision vocabulary is:
 
 ```text
 approval: per_action | current_session | current_project
-access:   project | machine
+access:   project | full_machine
 ```
 
 Rules:
@@ -231,7 +229,7 @@ Rules:
   the current Web Studio Project;
 - `project` limits file/process admission to the immutable Project
   WorkspaceSpec;
-- `machine` means machine-wide access scope for the current Runtime/Session;
+- `full_machine` means machine-wide access scope for the current Runtime/Session;
 - explicit security Deny always wins over a UI approval;
 - Plan Mode's formal Project-mutation gate cannot be bypassed by approval;
   bounded writes under the Session-owned Plan scratch root and the explicit
@@ -556,7 +554,7 @@ The first offline Harness Fixture must cover at least:
 1. `project-1/session-a` makes its first machine-wide shell/file request and
    receives one high-risk confirmation;
 2. after the user approves `current_project`, `project-1/session-b` may reuse it
-   only with the same `workspaceRevision`, `access=machine`, `actionClass`, and
+   only with the same `workspaceRevision`, `access=full_machine`, `actionClass`, and
    `pathScope`;
 3. `project-2`, a `Project access` Session, a different action class, or a new
    root revision must request approval again;
@@ -644,7 +642,7 @@ fields in the new public contract:
   "actionClass": "shell_execute",
   "actionSummary": "shell command: cargo test",
   "pathScope": {"kind": "machine"},
-  "access": "machine",
+  "access": "full_machine",
   "allowedApprovalModes": ["per_action", "current_session", "current_project"],
   "highRisk": true
 }
@@ -660,7 +658,7 @@ display and is not the sole admission identity.
 {
   "requestId": "approval-1",
   "decision": "approve",
-  "access": "machine",
+  "access": "full_machine",
   "approval": "current_project",
   "reason": ""
 }
@@ -785,7 +783,7 @@ does not grant the Project an access scope by itself. Every new or resumed
 Session must still carry a matching access setting. For example, a Project
 approval can authorize a machine-wide action only when the current
 Runtime/Session explicitly has `Full access` and the approval entry also has
-`access=machine`. A `Project access` Session cannot be upgraded to machine-wide
+`access=full_machine`. A `Project access` Session cannot be upgraded to machine-wide
 access by sharing an approval.
 
 - Project settings must expose the active shared approvals and a revoke action.
@@ -1270,10 +1268,9 @@ The following scenarios are required before the proposal can move to
    same `threadId`, while an approved verdict completes the Goal.
 7. Two active Threads cannot display or resolve each other's approvals.
 8. Web Studio and the REPL have no Profile control or retained Profile identity.
-   Profile-shaped input, including `profile=auto`, is rejected. The sole
-   migration-only exception is `turbomode`/`Turbomode`, which maps once to
-   `Full access` / `SecurityPreset::FullMachine`, is discarded, and cannot
-   change mode or loop semantics.
+   Profile-shaped input, including `profile=auto`, is rejected. The removed
+   `turbomode`/`Turbomode` name is also rejected and cannot change mode or loop
+   semantics.
 9. `/status`, `/plan`, `/goal`, `/mcp`, and `/compact` use control APIs rather
    than accidental model prompts.
 10. `item/started`, approval events, `approval/resolved`, `item/completed`, and
@@ -1455,9 +1452,9 @@ Harness scenarios.
 - Do not make arbitrary raw system-prompt replacement public.
 - Do not make dynamic Skill/Plugin hot-loading part of the first approval batch.
 - Do not add a standalone `Profile` layer or retain `interactive`/`ask`/`auto`,
-  `profile=auto`, or `turbomode`/`Turbomode` as Runtime/Session identity. The
-  sole migration-only `turbomode` alias maps to `FullMachine` and is discarded;
-  no other migration parser or compatibility alias exists.
+  `profile=auto`, or `turbomode`/`Turbomode` as Runtime/Session identity. These
+  names are removed and rejected; no migration parser or compatibility alias
+  exists.
 - Do not expose `max_steps` or routine `step_limit` as a task control; the Core
   safety guard remains internal and continuation belongs to Plan/Goal runtime
   state.

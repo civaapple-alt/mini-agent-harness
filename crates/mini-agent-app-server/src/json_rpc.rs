@@ -89,7 +89,6 @@ use mini_agent_app_server_protocol::WorldRefreshResult;
 use mini_agent_app_server_protocol::WorldSetExecutionParams;
 use mini_agent_app_server_protocol::WorldSetExecutionResult;
 use mini_agent_app_server_protocol::WorldStateResult;
-use mini_agent_capabilities::ApprovalMode;
 use mini_agent_core::SessionState;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::Model;
@@ -231,8 +230,8 @@ where
         self.approval.next_request().await
     }
 
-    pub fn approval_response(&self, request_id: &str, approved: bool) -> Result<(), String> {
-        self.approval.respond(request_id, approved)
+    pub fn approval_response(&self, response: ApprovalRespondParams) -> Result<(), String> {
+        self.approval.respond(response)
     }
 
     /// Handles one JSON-RPC request. Notifications do not produce responses.
@@ -330,17 +329,6 @@ where
                 )),
             );
         }
-        if let Some(requested_profile) = params.profile.as_deref()
-            && requested_profile != self.capability_manifest.profile
-        {
-            return response_error(
-                request.id,
-                JsonRpcError::invalid_params(format!(
-                    "profile `{requested_profile}` is unavailable; active profile is `{}`",
-                    self.capability_manifest.profile
-                )),
-            );
-        }
         if let Some(providers) = params.providers.as_ref() {
             let provider_checks = [
                 (
@@ -398,7 +386,6 @@ where
                 workflows: self.runtime.is_some(),
                 runtime_management: self.runtime.is_some(),
             },
-            profile: self.capability_manifest.profile.clone(),
             capability_manifest: self.capability_manifest.clone(),
         };
         self.initialized = true;
@@ -410,7 +397,7 @@ where
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
-        match self.approval_response(&params.request_id, params.approved) {
+        match self.approval_response(params) {
             Ok(()) => response_value(request.id, serde_json::json!({ "accepted": true })),
             Err(error) => response_error(request.id, JsonRpcError::invalid_params(error)),
         }
@@ -490,14 +477,13 @@ impl<M> Default for StartupServices<M> {
 
 fn default_capability_manifest() -> CapabilityManifest {
     CapabilityManifest {
-        profile: "unknown".to_string(),
         model_provider: "unknown".to_string(),
         tool_provider: "unknown".to_string(),
         extension_provider: "unknown".to_string(),
         policy_provider: "unknown".to_string(),
         enabled: Vec::new(),
         disabled: vec![DisabledCapability {
-            name: "host-profile".to_string(),
+            name: "host-runtime".to_string(),
             reason: "no host runtime manifest was supplied".to_string(),
         }],
         extension_depth: "unknown".to_string(),

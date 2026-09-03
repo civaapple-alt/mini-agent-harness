@@ -11,9 +11,9 @@ defaults are part of the harness rather than terminal flags.
 | tool calls in one model step | 8 | reject the whole proposal before effects |
 | one tool result | 16 KiB | retain UTF-8-safe head and tail |
 | model request context | 1 MiB | reject before the provider request |
-| model steps in one run | 8, or `0` for no cap | return `step_limit` when a positive cap is reached |
-| Goal milestone model steps | 50 by default | Goal becomes `usageLimited` |
-| Goal milestone wall-clock time | 600 seconds by default | request cooperative cancellation, then `usageLimited` |
+| model steps in one run | internal safety guard | report a runtime-protection diagnostic; never treat it as a user task setting |
+| Goal milestone model steps | 200 by default | Goal becomes `usageLimited` after settling evidence |
+| Goal milestone wall-clock time | 1,800 seconds by default | request cooperative cancellation, then `usageLimited` |
 | Goal token budget | unset by default | accumulated provider input/output usage becomes `budgetLimited` |
 
 Context size is the byte length of the system prompt plus JSON-serialized
@@ -37,15 +37,12 @@ Every runtime limit failure emits `run_failed` with a structured
 history behind the user's back; in the interactive terminal, `/new` is the
 explicit way to clear a conversation that has reached its context ceiling.
 
-The default interactive session skips per-step approval and keeps the 8-step
-reject-at-ceiling loop. The explicit copilot `auto` mode changes two loop
-defaults: it uses `max_steps = 0` (no step cap, like fx `max_agent_steps`) and
-selects `ContextLimitBehavior::Compact`. Set `MINI_AGENT_MAX_STEPS` in the
-process environment, workspace `.env`, or `~/.mini-agent/.env` to impose a
-positive cap; `0` remains unlimited. It can be selected by starting `auto`
-with or without a prompt or by entering `/auto` in an interactive session;
-`/auto off` restores per-action approval and the 8-step defaults. Before a
-normal sampling request, settled history at or above half of the 1 MiB ceiling
+Core keeps an internal runaway-loop guard and may compact context when the
+runtime composition allows it. `max_steps` and `step_limit` are not Web Studio
+controls or Goal progress semantics. Goal's long-running behavior is owned by
+the Goal Runtime; its Auto Copilot composition is `Goal + Full access
+(machine-wide) + current-project approval`. Before a normal sampling request,
+settled history at or above half of the 1 MiB ceiling
 is compacted. The newest context item and a bounded recent tail stay verbatim:
 the last two model-step groups (each an assistant message plus its following
 tool results, or a final tool-less assistant), capped at 128 KiB serialized.
@@ -65,7 +62,7 @@ oversized request.
 Skill catalog text, root `AGENTS.md`, MCP tool schemas, and the latest
 world-state context item sit in the stable request prefix on normal turns.
 Compaction omits the tool catalog from its auxiliary request. Opening more MCP
-tools therefore makes long auto runs worse, not better.
+tools therefore makes long Goal runs worse, not better.
 
 The host currently uses context items for full world-state snapshots. The
 latest snapshot is retained across compaction and restored after `/new`.
@@ -100,7 +97,7 @@ Host tools add their own effect-side bounds before results reach core:
 | MCP connection / tool call | 20 seconds default (120 seconds max) / 120 seconds |
 | serialized MCP result | 64 KiB before the core 16 KiB projection |
 | HTTP MCP circuit breaker | 3 consecutive failures | 30s cooldown before probe |
-| cached session approvals (`ApprovalStore`) | 1024 entries | FIFO/clear on capacity limit |
+| cached scoped approvals (`ApprovalStore`) | 1024 entries | bounded by scope/owner/revision; overflow requires a new approval |
 | repetitive tool-call loop threshold | 2 consecutive identical batches | injects advisory guidance warning |
 
 Shell streams are drained concurrently with a hard capture limit, so a noisy
@@ -108,9 +105,10 @@ process cannot accumulate unbounded captured output or deadlock on a full pipe.
 Large completed results are retained in the process-local result store and
 projected to the model as a bounded preview. On foreground timeout the host
 terminates the shell process tree. Shell execution is still not an isolation
-boundary. Non-interactive `ask` requires
-explicit approval for sensitive tools; the explicitly selected `auto` mode does
-not.
+boundary. Sensitive tools require the typed approval path when policy returns
+`Ask`; a runtime access scope never becomes a global allow-all switch. `FullMachine`
+widens file path scope but does not override hard Deny, Plan locks, unavailable
+tools, or shell confirmation.
 
 Project extension discovery scans only immediate children at fixed locations
 and at most 128 directory entries per location. Installed skills, plugins, and
@@ -123,8 +121,8 @@ deadline to the complete streaming request. It enforces the harness response
 byte limit while accumulating text and tool calls, before returning them to
 core, and retains at most 4 KiB from an HTTP error body.
 
-Durable sessions are append-only. Interactive, one-shot `ask`, and `auto`
-sessions are stored per workspace under `~/.mini-agent/sessions/`, not in the
+Durable App Server sessions are append-only. Sessions are stored per workspace
+under `~/.mini-agent/sessions/`, not in the
 project tree. The session log contains turns, context items, and stored tool
 results. Resume validates strictly
 increasing sequence numbers and restores only the newest complete checkpoint.

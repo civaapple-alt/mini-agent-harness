@@ -1,5 +1,6 @@
-use mini_agent_capabilities::ApprovalMode;
+use mini_agent_capabilities::ApprovalScope;
 use mini_agent_capabilities::SandboxKind;
+use mini_agent_capabilities::SecurityPreset;
 use serde_json::Value;
 use serde_json::json;
 use std::env;
@@ -21,8 +22,8 @@ pub struct WorldState {
     os: &'static str,
     arch: &'static str,
     shell: &'static str,
-    approval: ApprovalMode,
-    copilot: bool,
+    access: SecurityPreset,
+    approval: ApprovalScope,
     sandbox: SandboxKind,
     available_commands: Vec<&'static str>,
     unavailable_commands: Vec<&'static str>,
@@ -33,8 +34,8 @@ pub struct WorldState {
 impl WorldState {
     pub fn detect(
         workspace: &Path,
-        approval: ApprovalMode,
-        copilot: bool,
+        access: SecurityPreset,
+        approval: ApprovalScope,
         sandbox: SandboxKind,
     ) -> Self {
         let search_paths = env::var_os("PATH")
@@ -54,8 +55,8 @@ impl WorldState {
             os: env::consts::OS,
             arch: env::consts::ARCH,
             shell: if cfg!(windows) { "pwsh" } else { "sh" },
+            access,
             approval,
-            copilot,
             sandbox,
             available_commands,
             unavailable_commands,
@@ -66,23 +67,23 @@ impl WorldState {
 
     pub fn with_execution(
         &self,
-        approval: ApprovalMode,
-        copilot: bool,
+        access: SecurityPreset,
+        approval: ApprovalScope,
         sandbox: SandboxKind,
     ) -> Self {
         let mut state = self.clone();
+        state.access = access;
         state.approval = approval;
-        state.copilot = copilot;
         state.sandbox = sandbox;
         state
     }
 
-    pub fn approval(&self) -> ApprovalMode {
-        self.approval
+    pub fn access(&self) -> SecurityPreset {
+        self.access
     }
 
-    pub fn copilot(&self) -> bool {
-        self.copilot
+    pub fn approval(&self) -> ApprovalScope {
+        self.approval
     }
 
     pub fn sandbox(&self) -> SandboxKind {
@@ -108,9 +109,11 @@ impl WorldState {
         );
         context.push_str("\" />");
         context.push_str("<execution mode=\"");
-        context.push_str(self.mode_name());
+        context.push_str("chat");
         context.push_str("\" approval=\"");
         context.push_str(self.approval_name());
+        context.push_str("\" access=\"");
+        context.push_str(self.access.name());
         context.push_str("\" command_sandbox=\"");
         context.push_str(self.sandbox.name());
         context.push_str("\" direct_file_scope=\"workspace\" />");
@@ -124,11 +127,14 @@ impl WorldState {
         push_list_element(&mut context, "workspace_commands", &self.workspace_commands);
         context.push_str("<execution_guidance>");
         context.push_str(match self.approval {
-            ApprovalMode::Interactive => {
+            ApprovalScope::PerAction => {
                 "Sensitive writes, shell commands, MCP connections, and MCP calls require per-action user approval."
             }
-            ApprovalMode::Automatic => {
-                "Work continuously toward the user's goal. Inspect the workspace before editing, use tools as needed, keep changes scoped, and run relevant checks. Do not stop at intermediate progress or ask for confirmation unless blocked by missing information or an unsafe action outside the workspace. Sensitive effects may run without per-action approval, and shell commands are not sandboxed."
+            ApprovalScope::CurrentSession => {
+                "An approved action may be reused within this Session; Project or machine scope still requires a new decision."
+            }
+            ApprovalScope::CurrentProject => {
+                "An approved action may be reused by matching Sessions in this Project and Workspace revision; denied actions and unsafe effects remain denied."
             }
         });
         context.push_str("</execution_guidance></world_state>");
@@ -146,7 +152,8 @@ impl WorldState {
             "os": self.os,
             "arch": self.arch,
             "shell": self.shell,
-            "mode": self.mode_name(),
+            "mode": "chat",
+            "access": self.access.name(),
             "approval": self.approval_name(),
             "command_sandbox": self.sandbox.name(),
             "direct_file_scope": "workspace",
@@ -161,7 +168,8 @@ impl WorldState {
         vec![
             format!("world_os: {} {}", self.os, self.arch),
             format!("world_shell: {}", self.shell),
-            format!("mode: {}", self.mode_name()),
+            "mode: chat".to_string(),
+            format!("access: {}", self.access.name()),
             format!("approval: {}", self.approval_name()),
             format!("project_kinds: {}", display_list(&self.project_kinds)),
             format!(
@@ -179,14 +187,11 @@ impl WorldState {
         ]
     }
 
-    fn mode_name(&self) -> &'static str {
-        if self.copilot { "auto" } else { "default" }
-    }
-
     fn approval_name(&self) -> &'static str {
         match self.approval {
-            ApprovalMode::Interactive => "per_action",
-            ApprovalMode::Automatic => "automatic",
+            ApprovalScope::PerAction => "per_action",
+            ApprovalScope::CurrentSession => "current_session",
+            ApprovalScope::CurrentProject => "current_project",
         }
     }
 }

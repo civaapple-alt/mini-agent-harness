@@ -71,7 +71,7 @@ fn goal_workspace_lifecycle_and_milestones() {
     assert_eq!(state.current_milestone, 1);
     assert_eq!(state.total_milestones, 3);
     assert_eq!(state.max_loops, 10);
-    assert_eq!(state.milestone_step_budget, 50);
+    assert_eq!(state.milestone_step_budget, DEFAULT_GOAL_MILESTONE_STEPS);
 
     let plan_file = dir.join("goal/plan.md");
     assert!(plan_file.is_file());

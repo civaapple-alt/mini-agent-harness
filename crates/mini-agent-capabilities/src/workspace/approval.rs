@@ -1,4 +1,6 @@
 use super::*;
+use crate::security::ApprovalScope;
+use crate::security::ApprovalStore;
 use mini_agent_protocol::ToolApprovalRequest;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11,6 +13,27 @@ type ApprovalCallback = dyn Fn(&str) -> Result<bool, ToolError> + Send + Sync;
 type ContextualApprovalCallback =
     dyn Fn(&ToolApprovalRequest) -> Result<bool, ToolError> + Send + Sync;
 
+#[derive(Clone, Debug, Default)]
+struct ApprovalBinding {
+    project_id: Option<String>,
+    workspace_id: Option<String>,
+    workspace_revision: Option<u64>,
+    session_id: Option<String>,
+}
+
+impl ApprovalBinding {
+    fn owner(&self, scope: ApprovalScope) -> Option<String> {
+        match scope {
+            ApprovalScope::PerAction => None,
+            ApprovalScope::CurrentSession => self.session_id.clone(),
+            ApprovalScope::CurrentProject => match (&self.project_id, &self.workspace_id) {
+                (Some(project), Some(workspace)) => Some(format!("{project}\0{workspace}")),
+                _ => None,
+            },
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ApprovalController {
     automatic: Arc<AtomicBool>,
@@ -22,6 +45,8 @@ pub struct ApprovalController {
     read_only_agent: Arc<AtomicBool>,
     goal_dir: Arc<Mutex<Option<PathBuf>>>,
     session_dir: Arc<Mutex<Option<PathBuf>>>,
+    approval_scope: Arc<RwLock<ApprovalScope>>,
+    approval_binding: Arc<RwLock<ApprovalBinding>>,
 }
 
 impl ApprovalController {
@@ -63,6 +88,8 @@ impl ApprovalController {
             read_only_agent: Arc::new(AtomicBool::new(false)),
             goal_dir: Arc::new(Mutex::new(None)),
             session_dir: Arc::new(Mutex::new(None)),
+            approval_scope: Arc::new(RwLock::new(ApprovalScope::PerAction)),
+            approval_binding: Arc::new(RwLock::new(ApprovalBinding::default())),
         }
     }
 
@@ -81,6 +108,8 @@ impl ApprovalController {
             read_only_agent: Arc::new(AtomicBool::new(false)),
             goal_dir: Arc::new(Mutex::new(None)),
             session_dir: Arc::new(Mutex::new(None)),
+            approval_scope: Arc::new(RwLock::new(ApprovalScope::PerAction)),
+            approval_binding: Arc::new(RwLock::new(ApprovalBinding::default())),
         }
     }
 
@@ -105,6 +134,35 @@ impl ApprovalController {
     pub fn set_mode(&self, mode: ApprovalMode) {
         self.automatic
             .store(matches!(mode, ApprovalMode::Automatic), Ordering::Relaxed);
+    }
+
+    pub fn approval_scope(&self) -> ApprovalScope {
+        *self.approval_scope.read().unwrap()
+    }
+
+    pub fn set_approval_scope(&self, scope: ApprovalScope) {
+        *self.approval_scope.write().unwrap() = scope;
+    }
+
+    /// Binds trusted Project/Workspace/Session identity used by scoped
+    /// approval reuse. The Web client never supplies this identity.
+    pub fn bind_approval_context(
+        &self,
+        project_id: Option<String>,
+        workspace_id: Option<String>,
+        workspace_revision: Option<u64>,
+        session_id: Option<String>,
+    ) {
+        *self.approval_binding.write().unwrap() = ApprovalBinding {
+            project_id,
+            workspace_id,
+            workspace_revision,
+            session_id,
+        };
+    }
+
+    pub fn with_approval_store(self, store: ApprovalStore) -> Self {
+        Self { store, ..self }
     }
 
     pub fn set_living_plan(&self, path: Option<PathBuf>) {
@@ -162,6 +220,20 @@ impl ApprovalController {
     }
 
     pub fn approve_request(&self, request: &ToolApprovalRequest) -> Result<(), ToolError> {
+        let mut request = request.clone();
+        let binding = self.approval_binding.read().unwrap().clone();
+        if binding.project_id.is_some() {
+            request.project_id = binding.project_id.clone();
+        }
+        if binding.workspace_id.is_some() {
+            request.workspace_id = binding.workspace_id.clone();
+        }
+        if binding.workspace_revision.is_some() {
+            request.workspace_revision = binding.workspace_revision;
+        }
+        if binding.session_id.is_some() {
+            request.session_id = binding.session_id.clone();
+        }
         match self.policy.read().unwrap().evaluate(&request.action) {
             SecurityDecision::Deny => {
                 return Err(ToolError(format!(
@@ -172,19 +244,45 @@ impl ApprovalController {
             SecurityDecision::Allow => return Ok(()),
             SecurityDecision::Ask => {}
         }
-        if self.store.is_approved(&request.action) {
-            return Ok(());
-        }
         match self.mode() {
             ApprovalMode::Automatic => return Ok(()),
             ApprovalMode::Interactive => {}
         }
+        let scope = self.approval_scope();
+        let owner = binding.owner(scope).or_else(|| {
+            (scope == ApprovalScope::CurrentSession)
+                .then(|| self.session_dir().map(|path| path.display().to_string()))
+                .flatten()
+        });
+        if scope != ApprovalScope::PerAction && owner.is_none() {
+            return Err(ToolError(
+                "scoped approval requires a trusted Project/Session identity".to_string(),
+            ));
+        }
+        let revision = request.workspace_revision.unwrap_or(0);
+        if scope != ApprovalScope::PerAction
+            && self.store.is_approved_for(
+                scope,
+                owner.as_deref().expect("scoped approval owner checked"),
+                revision,
+                &request.action,
+            )
+        {
+            return Ok(());
+        }
         let approved = match self.context_callback.as_ref() {
-            Some(callback) => callback(request)?,
+            Some(callback) => callback(&request)?,
             None => (self.callback)(&request.action)?,
         };
         if approved {
-            self.store.remember_approval(&request.action);
+            if scope != ApprovalScope::PerAction {
+                self.store.remember_approval_for(
+                    scope,
+                    owner.as_deref().expect("scoped approval owner checked"),
+                    revision,
+                    &request.action,
+                );
+            }
             Ok(())
         } else {
             Err(ToolError(format!("user denied: {}", request.action)))

@@ -249,7 +249,6 @@ impl RuntimeProfile {
             fingerprint: stable_fingerprint(&rule_policy_fingerprint),
         }];
         CapabilityManifest {
-            profile: self.name.clone(),
             model_provider: self.model_provider.clone(),
             tool_provider: self.tool_provider.clone(),
             extension_provider: self.extension_provider.clone(),
@@ -296,7 +295,6 @@ impl RuntimeProfile {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityManifest {
-    pub profile: String,
     pub model_provider: String,
     pub tool_provider: String,
     pub extension_provider: String,

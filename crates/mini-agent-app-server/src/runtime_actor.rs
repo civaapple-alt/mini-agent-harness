@@ -11,6 +11,7 @@ use crate::thread_manager::ThreadHandle;
 use crate::thread_manager::ThreadManager;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::McpLoadResult;
+use mini_agent_capabilities::SecurityPolicy;
 use mini_agent_capabilities::load_mcp;
 use mini_agent_core::ThreadCheckpoint;
 use mini_agent_protocol::Message;
@@ -88,8 +89,8 @@ pub(super) fn handle<M>(
                 let current = state.management.world();
                 let refreshed = mini_agent_host::WorldState::detect(
                     current.workspace(),
+                    current.access(),
                     current.approval(),
-                    current.copilot(),
                     current.sandbox(),
                 );
                 update_world(threads, state, refreshed).map(|changed| (changed, changed))
@@ -97,16 +98,20 @@ pub(super) fn handle<M>(
             respond(reply, receipt, result);
         }
         RuntimeCommand::SetExecution {
+            access,
             approval,
-            copilot,
             reply,
         } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 let current = state.management.world();
+                state
+                    .approval
+                    .set_policy(SecurityPolicy::for_preset(access));
+                state.approval.set_approval_scope(approval);
                 update_world(
                     threads,
                     state,
-                    current.with_execution(approval, copilot, current.sandbox()),
+                    current.with_execution(access, approval, current.sandbox()),
                 )
                 .map(|changed| (changed, changed))
             });

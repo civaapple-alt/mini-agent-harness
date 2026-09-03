@@ -220,6 +220,10 @@ impl<M: Model> Thread<M> {
                 Some(ToolExecutionContext {
                     thread_id: self.id.clone(),
                     turn_id: id.clone(),
+                    project_id: None,
+                    workspace_id: None,
+                    workspace_revision: None,
+                    session_id: None,
                 }),
             )
             .await;
@@ -260,6 +264,10 @@ impl<M: Model> Thread<M> {
                 Some(ToolExecutionContext {
                     thread_id: self.id.clone(),
                     turn_id: id.clone(),
+                    project_id: None,
+                    workspace_id: None,
+                    workspace_revision: None,
+                    session_id: None,
                 }),
             )
             .await;

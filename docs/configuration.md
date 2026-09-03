@@ -20,18 +20,20 @@ response reports the bounded non-secret capability manifest.
 | `VERIFIER_OPENAI_MODEL` | for Goal verification | Goal verifier model identifier |
 | `VERIFIER_OPENAI_API_KEY` | no | Goal verifier credential override; otherwise inherits `OPENAI_API_KEY` |
 | `VERIFIER_OPENAI_BASE_URL` | no | Goal verifier API root override; otherwise inherits `OPENAI_BASE_URL` |
-| `MINI_AGENT_MAX_STEPS` | no | Copilot/auto model-step cap; `0` means unlimited (the default) |
-| `MINI_AGENT_GOAL_MAX_LOOPS` | no | Maximum Goal milestone attempts; defaults to `20` |
-| `MINI_AGENT_GOAL_STEP_BUDGET` | no | Maximum model steps per Goal milestone; defaults to `50` |
-| `MINI_AGENT_GOAL_TIMEOUT_SECS` | no | Wall-clock timeout for one Goal milestone; defaults to `600` seconds |
-| `MINI_AGENT_PROFILE` | standalone App Server only | Startup profile name: `interactive`, `ask`, or `auto` |
+| `MINI_AGENT_MAX_STEPS` | internal only | Optional Core runaway-loop guard for local experiments; not a Web/Goal control |
+| `MINI_AGENT_GOAL_MAX_LOOPS` | no | Maximum Goal continuation loops; defaults to `100` |
+| `MINI_AGENT_GOAL_STEP_BUDGET` | no | Maximum Core model steps per Goal milestone; defaults to `200` |
+| `MINI_AGENT_GOAL_TIMEOUT_SECS` | no | Wall-clock timeout for one Goal milestone; defaults to `1800` seconds |
+| `MINI_AGENT_PROJECT_ID` | Web/Host binding | Trusted Project identity used for scoped approval ownership |
+| `MINI_AGENT_EXTRA_READ_ROOTS` | Web/Host binding | Path-separated associated roots exposed as read-only references |
+| `MINI_AGENT_EXTRA_WRITE_ROOTS` | Web/Host binding | Path-separated associated roots admitted for edits |
 
-## Runtime profiles and prompt/rule sources
+## Runtime composition and prompt/rule sources
 
-Each frontend selects a bounded host profile before the App Server starts:
-`interactive`, `ask`, or `auto`. The profile chooses the model/tool
-scope, extension load depth, foundational agent, persona, and Goal/Plan
-workflow policy, plus sandbox and security selections. The regular `general` agent still has explicit prompt and
+The Host assembles a bounded runtime composition before the App Server starts.
+The composition chooses the model/tool scope, extension load depth, foundational
+agent, persona, and workflow policy, plus sandbox and security selections. These
+are internal composition inputs, not a user-facing Profile or Session axis. The regular `general` agent still has explicit prompt and
 rule configuration. Its stable context is assembled from the built-in prompt,
 project `AGENTS.md`, selected extension instructions, and workflow riders in
 that order; safety and host policy rules retain higher precedence.
@@ -40,24 +42,22 @@ For `general`, the built-in prompt is the regular-agent base contract, while
 `promptSources` and `ruleSources` independently control the project,
 extension, and workflow inputs. Output behavior and context limits remain
 typed runtime policy, rather than arbitrary prompt text. Foundational
-`explore` and `plan` agents add their own bounded contract and read-only rule;
-personas add an overlay to either contract. Profile files and App Server
-requests currently select the bounded source switches; typed presets for the
-regular-agent base prompt, output contract, and context policy are reserved for
-the next profile stage. Neither interface can carry arbitrary prompt bodies,
+`explore` and `plan` agents add their own bounded contract and read-mostly rule;
+personas add an overlay to either contract. No public startup request or Web
+setting selects a Profile identity. Neither interface can carry arbitrary prompt bodies,
 commands, paths, or credentials.
 
-Use `--no-tools` with `interactive`, `ask`, or `auto` to resolve the
-same profile into a model-only runtime. Tool and extension construction is
+Local experiments may use `--no-tools` to resolve the
+same composition into a model-only runtime. Tool and extension construction is
 skipped, while sessions, App Server turns, events, and persistence remain the
 same. Startup output and the App Server initialize response expose the bounded capability
 manifest, including enabled/disabled groups and prompt/rule source names.
-The host keeps prompt admission and rule admission as separate profile
-settings. Their source names are visible independently in the manifest, along
+The host keeps prompt admission and rule admission as separate settings. Their
+source names are visible independently in the manifest, along
 with the effective typed policy for workspace writes, shell execution, and
 workflow scope. The manifest also lists each rule source in precedence
 order as active, shadowed, or disabled with a bounded reason. Explore and Plan
-profiles enforce read-only workspace rules at the host boundary. The built-in
+read-only workspace rules at the host boundary. The built-in
 prompt and core safety rules are always retained.
 Loaded prompt and rule sources may expose a deterministic 16-character
 fingerprint in structured status for comparison; the source text itself is
@@ -66,40 +66,12 @@ The manifest also reports the fixed prompt/rule precedence, the current rule
 resolver phase, and the effective bounded context limits; it never includes
 prompt bodies or secrets.
 
-An optional `.agents/profile.json` can override bounded profile selections for
-the local CLI and standalone App Server. It accepts `modelProvider`,
-`toolProvider`, `extensionProvider`, `policyProvider`, `tools`, `extensionDepth`,
-`selectedExtensions`, `agent`, `persona`, `workflows`, `promptSources`,
-`ruleSources`, `sandbox`, and `security`; unknown fields, oversized files,
-unsafe names, credentials, commands, paths, and arbitrary prompt text are
-rejected. Explicit command-line deny flags such as `--no-tools` are applied
-after the file.
-
-```json
-{
-  "name": "repo-review",
-  "modelProvider": "openai",
-  "toolProvider": "builtin",
-  "extensionProvider": "builtin",
-  "policyProvider": "builtin",
-  "tools": "all",
-  "extensionDepth": "enabled",
-  "selectedExtensions": ["review"],
-  "agent": "general",
-  "persona": "reviewer",
-  "workflows": "plan",
-  "promptSources": {"project": true, "extensions": true, "workflows": true},
-  "ruleSources": {"project": true, "extensions": true, "workflows": true},
-  "sandbox": "native",
-  "security": "default"
-}
-```
-
 ### Embedding an external capability provider
 
-Profiles contain provider IDs only. An embedding application registers the
-implementation in a local `CapabilityRegistry`, then passes that registry to
-`HostRuntimeFactory`; profile files cannot load arbitrary code. The repository
+The internal runtime composition contains provider IDs only. An embedding
+application registers the implementation in a local `CapabilityRegistry`, then
+passes that registry to `HostRuntimeFactory`; untrusted workspace files cannot
+load arbitrary code. The repository
 includes a complete, runnable tool-provider example at
 `crates/mini-agent-capabilities/examples/external_tool_provider.rs`:
 
@@ -109,12 +81,12 @@ let registry = CapabilityRegistry::builtin()
 
 let runtime = HostRuntimeFactory::new(&config, approval, harness_config)
     .with_registry(registry)
-    .build(profile, results)?;
+    .build(runtime_composition, results)?;
 ```
 
-An in-process App Server embedder can pass the same registry through
-`AppServerRuntime::start_with_control_and_profile_and_registry`; the regular
-`start*` methods continue to use the built-in registry.
+An in-process App Server embedder can pass the same registry through the
+`RuntimeStartOptions.registry` field; the regular `start*` methods continue to
+use the built-in registry.
 
 `ExampleToolProvider` publishes the stable ID `example-echo` and constructs an
 `external_echo` tool. The provider receives runtime-scoped workspace, sandbox,
@@ -127,13 +99,15 @@ registers a stable model ID and starts `AppServerRuntime<EchoModel>` with:
 
 ```rust
 AppServerRuntime::<EchoModel>::start_with_model_factory(
-    runtime_config,
-    approval,
-    harness_config,
-    SessionRequest::Disabled,
-    Arc::new(RunControl::new()),
-    profile,
-    registry,
+    RuntimeStartOptions {
+        runtime_config,
+        approval,
+        harness_config,
+        session_request: SessionRequest::Disabled,
+        control: Arc::new(RunControl::new()),
+        profile: runtime_composition,
+        registry,
+    },
     echo_factory,
 ).await?;
 ```
@@ -183,7 +157,7 @@ values or command output.
 
 ## Durable sessions
 
-Interactive, one-shot `ask`, and `auto` sessions always persist; there is no
+Interactive and one-shot `ask` sessions always persist; there is no
 persistence opt-out setting. Restore a known session with
 `mini-agent resume SESSION_ID`.
 Settled records live under `~/.mini-agent/sessions/<workspace>/<session-id>/`,
@@ -201,14 +175,12 @@ workflows are owned by the App Server and are intended for Studio/SDK clients;
 the core REPL remains focused on turn execution and run control:
 
 - **Plan Mode (`thread/settings/update`)**: Set `collaborationMode.mode` to
-  `"plan"` to lock codebase mutations to read-only while permitting edits
-  exclusively to the session living plan
-  (`~/.mini-agent/sessions/<workspace>/<id>/plan.md`). Relative path `plan.md`
-  maps to that file. The setting is applied by the App Server Runtime Actor to
-  the settled Thread, approval controller, and bounded Host-composed prompt;
-  arbitrary raw system-prompt replacement is not accepted. Planning state is
-  persisted in `plan_mode.json`. The former `workflow/plan/set` method is not
-  supported for compatibility.
+  `"plan"` to make exploration read-mostly. Bounded scratch scripts and outputs
+  may be created in the Session-owned plan area, and `plan.md` is retained;
+  formal Project mutations remain locked. The setting is applied by the App
+  Server Runtime Actor to the settled Thread, approval controller, and bounded
+  Host-composed prompt; arbitrary raw system-prompt replacement is not accepted.
+  Planning state is persisted in `plan_mode.json`.
 - **Autonomous Goal Mode (`thread/goal/set|get|clear`)**: Materializes a
   dedicated `goal/` workspace containing `state.json` (milestone progress, loop
   counts, verifier scores) and `plan.md` (acceptance criteria). Each ordinary
@@ -221,8 +193,8 @@ the core REPL remains focused on turn execution and run control:
   path is bound to this session-owned workspace rather than the project root.
 
 Goal limits can be shortened in a workspace `.env` for deterministic local
-fixtures. `MINI_AGENT_GOAL_STEP_BUDGET` is applied as the Core `max_steps` cap
-for each automatic Goal milestone turn. `MINI_AGENT_GOAL_TIMEOUT_SECS` starts
+fixtures. `MINI_AGENT_GOAL_STEP_BUDGET` and the Core loop guard are runtime
+safety limits, not user task controls. `MINI_AGENT_GOAL_TIMEOUT_SECS` starts
 at that turn's execution boundary and requests cooperative cancellation when it
 expires; Core then settles the turn at a safe boundary, so a synchronous tool
 effect is never killed halfway through. A step or timeout limit projects as

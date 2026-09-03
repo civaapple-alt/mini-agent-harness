@@ -114,15 +114,14 @@ where
         client_name: impl Into<String>,
         client_version: impl Into<String>,
     ) -> Result<InitializeResult, JsonRpcError> {
-        self.initialize_with_profile_and_providers(client_name, client_version, None, None)
+        self.initialize_with_providers(client_name, client_version, None)
             .await
     }
 
-    pub async fn initialize_with_profile_and_providers(
+    pub async fn initialize_with_providers(
         &mut self,
         client_name: impl Into<String>,
         client_version: impl Into<String>,
-        profile: Option<String>,
         providers: Option<CapabilityProviderSelection>,
     ) -> Result<InitializeResult, JsonRpcError> {
         self.call(
@@ -132,7 +131,6 @@ where
                 client_name: client_name.into(),
                 client_version: client_version.into(),
                 capabilities: ClientCapabilities::default(),
-                profile,
                 providers,
             },
         )
@@ -472,14 +470,29 @@ where
 
     pub async fn set_world_execution(
         &mut self,
+        access: impl Into<String>,
         approval: impl Into<String>,
-        copilot: bool,
     ) -> Result<WorldSetExecutionResult, JsonRpcError> {
         self.call(
             METHOD_WORLD_SET_EXECUTION,
             WorldSetExecutionParams {
-                approval: approval.into(),
-                copilot,
+                access: match access.into().as_str() {
+                    "project" => mini_agent_app_server_protocol::AccessScope::Project,
+                    "full_machine" | "full-machine" => {
+                        mini_agent_app_server_protocol::AccessScope::FullMachine
+                    }
+                    _ => return Err(JsonRpcError::invalid_params("unknown access scope")),
+                },
+                approval: match approval.into().as_str() {
+                    "per_action" => mini_agent_app_server_protocol::ApprovalMode::PerAction,
+                    "current_session" => {
+                        mini_agent_app_server_protocol::ApprovalMode::CurrentSession
+                    }
+                    "current_project" => {
+                        mini_agent_app_server_protocol::ApprovalMode::CurrentProject
+                    }
+                    _ => return Err(JsonRpcError::invalid_params("unknown approval mode")),
+                },
             },
         )
         .await

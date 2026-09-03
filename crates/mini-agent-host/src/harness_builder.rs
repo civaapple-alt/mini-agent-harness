@@ -122,7 +122,6 @@ where
         &profile.extension_provider,
     )?;
     let provider = runtime_config.provider_settings()?;
-    let copilot = config.context_limit_behavior == ContextLimitBehavior::Compact;
     let images = ImageStore::for_provider(provider.api_key.clone(), &provider.base_url);
     let model = model_factory.build(
         &profile.model_provider,
@@ -211,7 +210,8 @@ where
             provider_id: profile.tool_provider.clone(),
             workspace: workspace.clone(),
             approval: approval.clone(),
-            extra_read_roots: Vec::new(),
+            extra_read_roots: runtime_config.extra_read_roots(),
+            extra_write_roots: runtime_config.extra_write_roots(),
             sandbox: profile.sandbox,
             images: images.clone(),
             results,
@@ -230,7 +230,6 @@ where
         } else {
             Vec::new()
         };
-    let approval_mode = approval.mode();
     let McpLoadResult {
         tools: mcp_tools,
         loaded_servers,
@@ -263,7 +262,12 @@ where
         })
         .collect();
     let stable_system_prompt = config.system_prompt.clone();
-    let world = WorldState::detect(&workspace, approval_mode, copilot, profile.sandbox);
+    let world = WorldState::detect(
+        &workspace,
+        profile.security,
+        approval.approval_scope(),
+        profile.sandbox,
+    );
     let world_context = world.model_context()?;
     let tool_executor = Arc::new(ToolOrchestrator::new(approval.clone()));
     let tool_registry = ToolRegistry::with_executor(tools, tool_executor);

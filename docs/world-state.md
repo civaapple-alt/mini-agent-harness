@@ -11,8 +11,9 @@ discovered commands. It inspects only the current workspace and `PATH` and
 records:
 
 - operating system, architecture, workspace, and the actual host shell;
-- `default` (8 steps) or `auto` (unlimited steps unless `MINI_AGENT_MAX_STEPS`, compact) loop mode, per-action
-  or automatic approval, and the selected native or Docker process sandbox;
+- current access (`project` or `full_machine`), approval lifetime
+  (`per_action`, `current_session`, or `current_project`), and the selected
+  native or Docker process sandbox;
 - root project markers for Rust, Maven/Gradle Java, Go, Python, Node, and .NET;
 - availability of a fixed catalog of common navigation, VCS, build, runtime,
   and package-manager commands;
@@ -29,10 +30,11 @@ stable prefix while placing local facts immediately before conversation input.
 App Server clients can inspect it with `world/state` and refresh it with
 `world/refresh`; the core REPL does not duplicate this management dashboard.
 
-Mode changes are also append-only. `/auto` (copilot loop) and `/auto off`
-(restore prompts) keep `instructions` byte-stable, update execution limits and
-approval, and append an authoritative full world snapshot. `/new` restores the current snapshot after clearing conversation
-history. Compaction retains the newest context item next to its summary.
+Execution changes are also append-only. `world/set_execution` updates access and
+approval and appends an authoritative full world snapshot. `/plan` and `/goal`
+are Thread-owned App Server workflows; they do not create a second world-state
+loop. `/new` restores the current snapshot after clearing conversation history.
+Compaction retains the newest context item next to its summary.
 
 Full snapshots are deliberate at this scale. They avoid requiring old deltas
 to reconstruct current authority, and remain far below the item limit. If the
@@ -74,7 +76,7 @@ implemented.
 
 ## Goal verifier boundary
 
-A Goal verifier is a separately configured model profile, not a hidden second
+A Goal verifier is a separately configured model runtime, not a hidden second
 voice inside the primary turn. It reads the latest settled checkpoint. The
 Runtime Actor associates its result with the Goal, source Thread, verifier
 turn, and authoritative checkpoint sequence before applying it. The

@@ -1,3 +1,8 @@
+use mini_agent_app_server_protocol::AccessScope;
+use mini_agent_app_server_protocol::ApprovalDecision;
+use mini_agent_app_server_protocol::ApprovalMode;
+use mini_agent_app_server_protocol::ApprovalOutcome;
+use mini_agent_app_server_protocol::ApprovalRespondParams;
 use mini_agent_core::RunControl;
 use mini_agent_core::Thread;
 use mini_agent_core::ThreadCheckpoint;
@@ -16,6 +21,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::thread;
@@ -32,31 +38,56 @@ pub struct ApprovalBroker {
     state: Arc<Mutex<ApprovalState>>,
     notify: Arc<Notify>,
     next_id: Arc<AtomicU64>,
+    execution: Arc<RwLock<ApprovalExecution>>,
+}
+
+#[derive(Clone, Copy)]
+struct ApprovalExecution {
+    access: AccessScope,
+    approval: ApprovalMode,
 }
 
 struct ApprovalState {
     queued: std::collections::VecDeque<ApprovalRequest>,
     resolved: std::collections::VecDeque<ApprovalResolution>,
-    responders: HashMap<String, (ApprovalRequest, std::sync::mpsc::Sender<bool>)>,
+    responders: HashMap<String, (ApprovalRequest, std::sync::mpsc::Sender<ApprovalResolution>)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApprovalRequest {
     pub request_id: String,
     pub action: String,
+    pub project_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub workspace_revision: Option<u64>,
+    pub session_id: Option<String>,
     pub call_id: Option<String>,
     pub thread_id: Option<ThreadId>,
     pub turn_id: Option<TurnId>,
+    pub tool_name: Option<String>,
+    pub action_class: String,
+    pub access: AccessScope,
+    pub approval: ApprovalMode,
+    pub allowed_approval_modes: Vec<ApprovalMode>,
+    pub high_risk: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApprovalResolution {
     pub request_id: String,
     pub action: String,
+    pub project_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub workspace_revision: Option<u64>,
+    pub session_id: Option<String>,
     pub call_id: Option<String>,
     pub thread_id: Option<ThreadId>,
     pub turn_id: Option<TurnId>,
-    pub approved: bool,
+    pub tool_name: Option<String>,
+    pub action_class: String,
+    pub access: AccessScope,
+    pub approval: Option<ApprovalMode>,
+    pub outcome: ApprovalOutcome,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,7 +124,20 @@ impl ApprovalBroker {
             })),
             notify: Arc::new(Notify::new()),
             next_id: Arc::new(AtomicU64::new(1)),
+            execution: Arc::new(RwLock::new(ApprovalExecution {
+                access: AccessScope::Project,
+                approval: ApprovalMode::PerAction,
+            })),
         }
+    }
+
+    pub fn set_execution_scope(&self, access: AccessScope, approval: ApprovalMode) {
+        *self.execution.write().unwrap() = ApprovalExecution { access, approval };
+    }
+
+    pub fn execution_scope(&self) -> (AccessScope, ApprovalMode) {
+        let execution = *self.execution.read().unwrap();
+        (execution.access, execution.approval)
     }
 
     /// Called by a synchronous host approval callback. The callback waits
@@ -109,12 +153,33 @@ impl ApprovalBroker {
     pub fn request_with_context(&self, approval: &ToolApprovalRequest) -> Result<bool, String> {
         let request_id = format!("approval-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
         let (sender, receiver) = std::sync::mpsc::channel();
+        let execution = *self.execution.read().unwrap();
         let request = ApprovalRequest {
             request_id: request_id.clone(),
             action: approval.action.clone(),
+            project_id: approval.project_id.clone(),
+            workspace_id: approval.workspace_id.clone(),
+            workspace_revision: approval.workspace_revision,
+            session_id: approval.session_id.clone(),
             call_id: approval.call_id.clone(),
             thread_id: approval.thread_id.clone(),
             turn_id: approval.turn_id.clone(),
+            tool_name: approval.tool_name.clone(),
+            action_class: approval
+                .action_class
+                .clone()
+                .unwrap_or_else(|| "tool_action".to_string()),
+            access: execution.access,
+            approval: execution.approval,
+            allowed_approval_modes: vec![
+                ApprovalMode::PerAction,
+                ApprovalMode::CurrentSession,
+                ApprovalMode::CurrentProject,
+            ],
+            high_risk: approval
+                .tool_name
+                .as_deref()
+                .is_some_and(|name| matches!(name, "shell" | "apply_patch")),
         };
         {
             let mut state = self.state.lock().unwrap();
@@ -126,6 +191,7 @@ impl ApprovalBroker {
         self.notify.notify_one();
         receiver
             .recv()
+            .map(|resolution| resolution.outcome == ApprovalOutcome::Approved)
             .map_err(|_| "approval client disconnected".to_string())
     }
 
@@ -155,29 +221,49 @@ impl ApprovalBroker {
         }
     }
 
-    pub fn respond(&self, request_id: &str, approved: bool) -> Result<(), String> {
-        let (request, sender) = self
-            .state
-            .lock()
-            .unwrap()
-            .responders
-            .remove(request_id)
-            .ok_or_else(|| format!("unknown approval request: {request_id}"))?;
+    pub fn respond(&self, response: ApprovalRespondParams) -> Result<(), String> {
+        let request_id = response.request_id.as_str();
+        let (request, sender) = {
+            let mut state = self.state.lock().unwrap();
+            let request = state
+                .responders
+                .get(request_id)
+                .map(|(request, _)| request.clone())
+                .ok_or_else(|| format!("unknown approval request: {request_id}"))?;
+            if request.access != response.access
+                || !request.allowed_approval_modes.contains(&response.approval)
+            {
+                return Err("approval response exceeds the requested scope".to_string());
+            }
+            state
+                .responders
+                .remove(request_id)
+                .expect("approval responder was checked above")
+        };
+        let outcome = match response.decision {
+            ApprovalDecision::Approve => ApprovalOutcome::Approved,
+            ApprovalDecision::Deny => ApprovalOutcome::Denied,
+        };
+        let resolution = ApprovalResolution {
+            request_id: request.request_id.clone(),
+            action: request.action.clone(),
+            project_id: request.project_id.clone(),
+            workspace_id: request.workspace_id,
+            workspace_revision: request.workspace_revision,
+            session_id: request.session_id,
+            call_id: request.call_id,
+            thread_id: request.thread_id,
+            turn_id: request.turn_id,
+            tool_name: request.tool_name,
+            action_class: request.action_class,
+            access: response.access,
+            approval: (response.decision == ApprovalDecision::Approve).then_some(response.approval),
+            outcome,
+        };
         sender
-            .send(approved)
+            .send(resolution.clone())
             .map_err(|_| "approval callback is no longer waiting".to_string())?;
-        self.state
-            .lock()
-            .unwrap()
-            .resolved
-            .push_back(ApprovalResolution {
-                request_id: request_id.to_string(),
-                action: request.action,
-                call_id: request.call_id,
-                thread_id: request.thread_id,
-                turn_id: request.turn_id,
-                approved,
-            });
+        self.state.lock().unwrap().resolved.push_back(resolution);
         self.notify.notify_one();
         Ok(())
     }

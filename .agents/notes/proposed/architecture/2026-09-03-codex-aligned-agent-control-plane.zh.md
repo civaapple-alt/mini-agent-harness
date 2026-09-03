@@ -57,9 +57,8 @@ Service、第二个 Turn Loop，也不引入通用策略/插件框架。
 本提案只定义一套新的控制契约和一套规范存储布局。新 Runtime 不读取、导入、翻译、写入
 或删除旧的 Web `~/.mini-agent/state.json`、旧 Web checkpoint、`profile`、
 `profile=auto`、`interactive`、`ask`、`auto`、旧的 `remember` 或布尔/字符串批准格式。
-这些旧产物和输入不属于新 Runtime 的范围。唯一狭窄的迁移例外是输入边界收到旧的
-`turbomode`/`Turbomode`：可以一次性映射为“完全访问”/`SecurityPreset::FullMachine`，
-随后立即丢弃。它不能持久化，不能作为 Runtime/Profile 身份暴露，也不能被新的公开协议接受。
+这些旧产物和输入不属于新 Runtime 的范围。`turbomode`/`Turbomode` 也不再作为迁移别名接受，
+而是直接移除并拒绝。它不能持久化，也不能作为 Runtime/Profile 身份暴露。
 新实现只从规范 Session Store 和新的 `~/.mini-agent/web/state.json` 开始，不增加通用迁移解析器、
 导入器、回退路径或兼容层。
 
@@ -128,11 +127,11 @@ Studio 应显示当前 Mode 和 Goal 状态，但 Mode 的启动应遵循用户�
 
 因此，Web Studio 和 REPL 应移除 Profile 选择器以及 `profile=auto` Runtime 选项。新的公开
 契约直接拒绝 Profile 形态的输入，不做翻译；任何 Runtime 或 Session 都不保留 Profile 身份。
-面向用户的整机访问名称只有“完全访问”，内部由 `SecurityPreset::FullMachine` 支持。旧的
-`turbomode`/`Turbomode` 只允许在迁移输入边界作为指向该访问预设的一次性别名；它不能残留为
-Runtime 或 Profile 身份。面向用户只独立暴露真正的决定：
+面向用户的整机访问名称只有“完全访问”，内部由 `SecurityPreset::FullMachine` 支持。已移除的
+`turbomode`/`Turbomode` 不作为兼容别名接受，也不能残留为 Runtime 或 Profile 身份。面向用户只
+独立暴露真正的决定：
 
-- 访问：`project` 或 `machine`；
+- 访问：`project` 或 `full_machine`（用户界面显示为 `Full access`）；
 - 批准模式：`per_action`、`current_session` 或 `current_project`；
 - Mode：通过 `/plan` 控制 Chat/Plan；
 - 所选 Thread 的 Plan Runtime 状态和 Goal 生命周期：通过 `/goal` 和持久顶部栏控制。
@@ -167,7 +166,7 @@ Plan 探索的 shell/tool 工作目录默认应为 Session 所有的 scratch 根
 
 ```text
 approval: per_action | current_session | current_project
-access:   project | machine
+access:   project | full_machine
 ```
 
 规则：
@@ -176,7 +175,7 @@ access:   project | machine
 - `current_session` 只在当前 Thread/Session 内记住有界批准；
 - `current_project` 为当前 Web Studio Project 下的所有 Session 记住有界批准；
 - `project` 将文件/进程准入限制在不可变的 Project WorkspaceSpec 内；
-- `machine` 表示当前 Runtime/Session 的整机访问范围；
+- `full_machine` 表示当前 Runtime/Session 的整机访问范围；
 - 明确的安全 Deny 始终优先于 UI 批准；
 - Plan Mode 的修改锁不能被批准绕过；
 - Project 共享批准不能扩展 Session 的不可变 WorkspaceSpec，也不能把 reference 根目录变成 editable 根目录；
@@ -442,7 +441,7 @@ Core 不需要知道 Project 或 UI 批准词汇；它只接收 Host 已准入�
 
 1. `project-1/session-a` 首次 machine-wide shell/file 请求触发一次高风险确认；
 2. 用户批准 `current_project` 后，`project-1/session-b` 只有在相同
-   `workspaceRevision`、`access=machine`、`actionClass` 和 `pathScope` 下才能复用；
+   `workspaceRevision`、`access=full_machine`、`actionClass` 和 `pathScope` 下才能复用；
 3. `project-2`、`Project access` Session、不同操作类别或新增目录 revision 必须重新请求；
 4. 撤销后两个 Session 的后续请求都不能静默通过，硬性 Deny 仍然优先；
 5. App Server 重启后不得从 Web 状态恢复旧的 Project machine-wide 批准。
@@ -513,7 +512,7 @@ App Server 初始化和 Runtime 创建应直接接收类型化输入：Provider/
   "actionClass": "shell_execute",
   "actionSummary": "shell command: cargo test",
   "pathScope": {"kind": "machine"},
-  "access": "machine",
+  "access": "full_machine",
   "allowedApprovalModes": ["per_action", "current_session", "current_project"],
   "highRisk": true
 }
@@ -527,7 +526,7 @@ App Server 初始化和 Runtime 创建应直接接收类型化输入：Provider/
 {
   "requestId": "approval-1",
   "decision": "approve",
-  "access": "machine",
+  "access": "full_machine",
   "approval": "current_project",
   "reason": ""
 }
@@ -629,7 +628,7 @@ Project 下的 Session 复用。每个 Runtime/Session 仍然拥有自己的生�
 
 `current_project` 表示“批准决定由 Project 共享”，不表示 Project 自动获得某个访问范围。
 每个新建或恢复的 Session 仍必须带有匹配的访问设置；例如，只有当前 Runtime/Session
-明确启用了 `Full access`，且批准条目的访问范围也是 `machine` 时，Project 共享批准才可
+明确启用了 `Full access`，且批准条目的访问范围也是 `full_machine` 时，Project 共享批准才可
 用于整机范围操作。`Project access` Session 不能借此升级为 machine-wide。
 
 - Project 设置必须能查看当前有效的共享批准并执行撤销；撤销立即阻止后续准入，正在执行的
@@ -1013,8 +1012,7 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture，优�
    `threadId` 上调度新的 Turn，而 approved 结果结束 Goal。
 7. 两个活动 Thread 不能展示或解析彼此的批准请求。
 8. Web Studio 和 REPL 没有 Profile 控制，也不保留 Profile 身份。Profile 形态的输入，
-   包括 `profile=auto`，直接拒绝。唯一的迁移例外是 `turbomode`/`Turbomode`：一次性映射
-   为“完全访问”/`SecurityPreset::FullMachine` 后丢弃，不能改变 Mode 或循环语义。
+   包括 `profile=auto`，直接拒绝。`turbomode`/`Turbomode` 也直接拒绝，不能改变 Mode 或循环语义。
 9. `/status`、`/plan`、`/goal`、`/mcp` 和 `/compact` 使用控制 API，而不是意外变成模型 Prompt。
 10. `item/started`、批准事件、`approval/resolved`、`item/completed` 和 `turn/read` 保持相同的有界 call identity 和最终结果。
 11. 一个包含主目录和多个关联目录的 Project，可以从每个声明的目录读取文件；`reference`
@@ -1136,8 +1134,8 @@ Protocol Fixture 和 Harness Scenario。
 - 不公开任意原始系统 Prompt 替换。
 - 不在首个批准批次中加入 Skill/Plugin 的动态热加载。
 - 不增加独立的 `Profile` 层，也不保留 `interactive`/`ask`/`auto`、`profile=auto` 或
-  `turbomode`/`Turbomode` 作为 Runtime/Session 身份。唯一的迁移输入别名是将 `turbomode`
-  映射为 `FullMachine` 后立即丢弃；不提供其他迁移解析器或兼容别名。
+  `turbomode`/`Turbomode` 作为 Runtime/Session 身份。这些名称直接移除并拒绝；不提供迁移解析器
+  或兼容别名。
 - 不暴露 `max_steps` 或常规 `step_limit` 作为任务控制；Core 安全保护保持内部，继续行为归
   Plan/Goal Runtime 状态管理。
 

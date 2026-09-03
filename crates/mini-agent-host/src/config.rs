@@ -4,6 +4,8 @@ use crate::env_file::ValueSource;
 use crate::goal::GoalLimits;
 use reqwest::Url;
 use std::env;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::path::PathBuf;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
@@ -23,6 +25,9 @@ pub struct RuntimeConfig {
     max_agent_steps: Option<usize>,
     goal_limits: GoalLimits,
     web_search: bool,
+    project_id: Option<String>,
+    extra_read_roots: Vec<PathBuf>,
+    extra_write_roots: Vec<PathBuf>,
 }
 
 pub struct ProviderSettings {
@@ -85,6 +90,11 @@ impl RuntimeConfig {
             Some(value) => parse_bool_setting("MINI_AGENT_WEB_SEARCH", &value.value)?,
             None => is_official_search_endpoint(&base_url),
         };
+        let project_id = env::var("MINI_AGENT_PROJECT_ID")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let extra_read_roots = env_path_list("MINI_AGENT_EXTRA_READ_ROOTS");
+        let extra_write_roots = env_path_list("MINI_AGENT_EXTRA_WRITE_ROOTS");
         Ok(Self {
             workspace,
             api_key,
@@ -96,6 +106,9 @@ impl RuntimeConfig {
             max_agent_steps,
             goal_limits,
             web_search,
+            project_id,
+            extra_read_roots,
+            extra_write_roots,
         })
     }
 
@@ -127,6 +140,28 @@ impl RuntimeConfig {
 
     pub fn workspace(&self) -> PathBuf {
         self.workspace.clone()
+    }
+
+    pub fn project_id(&self) -> String {
+        self.project_id
+            .clone()
+            .unwrap_or_else(|| self.workspace.display().to_string())
+    }
+
+    pub fn extra_read_roots(&self) -> Vec<PathBuf> {
+        self.extra_read_roots.clone()
+    }
+
+    pub fn extra_write_roots(&self) -> Vec<PathBuf> {
+        self.extra_write_roots.clone()
+    }
+
+    pub fn workspace_revision(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.workspace.hash(&mut hasher);
+        self.extra_read_roots.hash(&mut hasher);
+        self.extra_write_roots.hash(&mut hasher);
+        hasher.finish()
     }
 
     pub fn copilot_max_steps(&self) -> usize {
@@ -182,6 +217,12 @@ impl RuntimeConfig {
 fn is_official_search_endpoint(base_url: &str) -> bool {
     let val = base_url.to_ascii_lowercase();
     val.contains("api.openai.com") || val.contains("api.deepseek.com")
+}
+
+fn env_path_list(name: &str) -> Vec<PathBuf> {
+    env::var_os(name)
+        .map(|value| env::split_paths(&value).collect())
+        .unwrap_or_default()
 }
 
 fn validate_base_url(base_url: &str) -> Result<(), String> {

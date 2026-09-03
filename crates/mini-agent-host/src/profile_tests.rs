@@ -7,7 +7,6 @@ fn default_profile_exposes_tools_and_prompt_rule_sources() {
     let profile = RuntimeProfile::interactive_default();
     let manifest = profile.manifest();
 
-    assert_eq!(manifest.profile, "interactive");
     assert_eq!(manifest.model_provider, "openai");
     assert_eq!(manifest.tool_provider, "builtin");
     assert_eq!(manifest.extension_provider, "builtin");
@@ -63,7 +62,6 @@ fn default_profile_exposes_tools_and_prompt_rule_sources() {
 fn no_tools_profile_is_explicit_and_does_not_admit_extensions() {
     let manifest = RuntimeProfile::ask_default().without_tools().manifest();
 
-    assert_eq!(manifest.profile, "ask-no-tools");
     assert!(!manifest.enabled.iter().any(|name| name == "workspace"));
     assert!(
         manifest

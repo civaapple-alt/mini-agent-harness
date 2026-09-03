@@ -6,7 +6,7 @@ mod shell;
 use crate::result_store::ResultStore;
 use crate::sandbox::ProcessSandbox;
 use crate::sandbox::SandboxKind;
-use crate::security::ApprovalStore;
+pub use crate::security::ApprovalScope;
 use crate::security::SecurityDecision;
 use crate::security::SecurityPolicy;
 use crate::security::SecurityPreset;
@@ -65,6 +65,7 @@ pub fn workspace_tools_with_read_roots_and_results(
     root: PathBuf,
     approval: ApprovalController,
     extra_read_roots: Vec<PathBuf>,
+    extra_write_roots: Vec<PathBuf>,
     sandbox: SandboxKind,
     images: crate::image::ImageStore,
     results: ResultStore,
@@ -73,6 +74,7 @@ pub fn workspace_tools_with_read_roots_and_results(
         root,
         approval,
         extra_read_roots,
+        extra_write_roots,
         sandbox,
     )?);
     let mut tools: Vec<Box<dyn Tool>> = vec![
@@ -91,6 +93,7 @@ pub fn workspace_tools_with_read_roots_and_results(
 struct Workspace {
     root: PathBuf,
     extra_read_roots: Vec<PathBuf>,
+    extra_write_roots: Vec<PathBuf>,
     approval: ApprovalController,
     sandbox: SandboxKind,
 }
@@ -100,6 +103,7 @@ impl Workspace {
         root: PathBuf,
         approval: ApprovalController,
         extra_read_roots: Vec<PathBuf>,
+        extra_write_roots: Vec<PathBuf>,
         sandbox: SandboxKind,
     ) -> Result<Self, ToolError> {
         let root = root
@@ -110,9 +114,15 @@ impl Workspace {
             .filter_map(|path| path.canonicalize().ok())
             .filter(|path| path.is_dir() && !path.starts_with(&root))
             .collect();
+        let extra_write_roots = extra_write_roots
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok())
+            .filter(|path| path.is_dir() && !path.starts_with(&root))
+            .collect();
         Ok(Self {
             root,
             extra_read_roots,
+            extra_write_roots,
             approval,
             sandbox,
         })
@@ -192,7 +202,7 @@ impl Workspace {
             .ok_or_else(|| ToolError("path has no parent".to_string()))?
             .canonicalize()
             .map_err(|error| ToolError(format!("parent directory must exist: {error}")))?;
-        if !session_artifact && !self.allows_outside_paths() && !parent.starts_with(&self.root) {
+        if !session_artifact && !self.allows_outside_paths() && !self.is_write_path(&parent) {
             return Err(ToolError("path escapes the workspace".to_string()));
         }
         let file_name = candidate
@@ -263,11 +273,19 @@ impl Workspace {
         if self.allows_outside_paths() {
             return Ok(path);
         }
-        if path.starts_with(&self.root) && path != self.root {
+        if self.is_write_path(&path) {
             Ok(path)
         } else {
             Err(ToolError("path escapes the workspace".to_string()))
         }
+    }
+
+    fn is_write_path(&self, path: &Path) -> bool {
+        path.starts_with(&self.root)
+            || self
+                .extra_write_roots
+                .iter()
+                .any(|root| path.starts_with(root))
     }
 
     fn ensure_readable(&self, path: PathBuf) -> Result<PathBuf, ToolError> {

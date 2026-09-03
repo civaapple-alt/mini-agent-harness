@@ -13,8 +13,10 @@ Provider credentials belong in the process environment, CI secrets, or
 `~/.mini-agent/.env`. This repository ignores `.env`, but mini-agent cannot
 guarantee another workspace's ignore rules. Never commit provider credentials.
 
-Interactive, one-shot `ask`, and `auto` conversation history is persisted in
-durable JSONL files under `~/.mini-agent/sessions/<workspace>/<session-id>/`.
+Interactive and one-shot conversation history is persisted in durable JSONL
+files under `~/.mini-agent/sessions/<workspace>/<session-id>/`. Web Studio's
+`~/.mini-agent/web/state.json` contains only Project/UI metadata; it is not a
+second history, checkpoint, or approval-grant store.
 These files contain prompts, world-state context, reasoning, assistant messages,
 tool calls and results,
 errors, and complete settled checkpoints. They can contain source code or
@@ -31,6 +33,9 @@ turn prompt.
 
 Result handles are appended to the same `session.jsonl` log and are restored when
 the session is resumed. The input queue and in-flight turns remain process-local.
+Project-scoped approval reuse is owned by the App Server and is invalidated by
+scope, workspace revision, revocation, or runtime restart; it is never restored
+from Web UI state.
 Persistence does not make an interrupted external effect replay-safe.
 
 Project skills and compatible plugin instructions contribute only bounded
