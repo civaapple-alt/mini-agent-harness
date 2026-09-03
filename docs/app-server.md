@@ -75,9 +75,10 @@ Thread settings and Goal control use the canonical Thread boundary:
   Goal lifecycle methods. A Goal turn is persisted as a settled checkpoint
   before its isolated tool-free verifier runs; continuation and retry are then
   scheduled by the Runtime Actor through the existing Thread worker.
-- `workflow/state` remains a read-only aggregate view. The former manual
-  `workflow/goal/*` methods are removed, so clients cannot submit an arbitrary
-  verifier verdict or advance a milestone behind GoalRuntime's lifecycle.
+- There is no aggregate `workflow/state` method. Clients read Thread settings
+  and Thread Goal independently; the former manual `workflow/goal/*` methods
+  are removed, so clients cannot submit an arbitrary verifier verdict or
+  advance a milestone behind GoalRuntime's lifecycle.
 
 On resume, an unsettled Goal schedules a new ordinary turn, while a settled
 checkpoint is re-verified without replaying that turn. Clearing an idle Goal

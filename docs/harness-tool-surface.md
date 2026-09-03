@@ -20,8 +20,8 @@ read_file | apply_patch | shell | read_image
 - Protocol 的 `ToolHandler` 负责参数解析和 admission 描述；
 - Host 的 `ToolOrchestrator` 负责 admission、approval 和 execution ordering；
 - `ToolRuntime` 继续拥有具体副作用与 sandbox；
-- App Server 只选择 allowlisted tool profile，并把当前 selection 放进有界的
-  `WorkflowState`/runtime snapshot；
+- App Server 只选择 allowlisted tool profile，并通过 Thread settings 返回当前
+  selection；不再维护 workflow 聚合状态快照；
 - Web Gateway、SDK 和 SidePanel 保持相同的 tool selection 语义，显式空选择不
   被默认值覆盖。
 
@@ -41,7 +41,8 @@ Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk �
 ```text
 1. Layer: Capabilities/Host/App Server + Web mirrors; Core contract unchanged.
 2. Duplicate responsibility: reuse existing Workspace policy, ToolRouter,
-   ToolOrchestrator and runtime snapshot; no second file-edit loop.
+   ToolOrchestrator and Thread settings; no second file-edit loop or workflow
+   aggregate.
 3. Replace vs add: replace default seven-tool catalog with a four-tool default;
    add one bounded patch protocol because read-modify-write cannot safely express
    multi-file atomic validation.
@@ -49,7 +50,7 @@ Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk �
    scripts/line_budget.py; compatibility tools remain opt-in instead of duplicating
    production paths.
 5. Visible surface: default tool manifest, read_file pagination and apply_patch
-   schema changed; all payloads remain bounded; workflow state exposes current
+   schema changed; all payloads remain bounded; Thread settings expose the
    allowlisted selection, not arbitrary prompt replacement.
 6. Boundary evidence: affected Rust package tests, CLI public scenarios, Web
    gateway/SDK tests, frontend tests/build, fmt, Clippy, line budget and diff check.

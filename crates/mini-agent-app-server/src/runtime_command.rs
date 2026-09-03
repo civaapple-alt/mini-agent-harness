@@ -55,9 +55,6 @@ pub(super) enum RuntimeCommand {
     StartNewThread {
         reply: oneshot::Sender<ActionResult<()>>,
     },
-    RuntimeState {
-        reply: oneshot::Sender<ActionResult<crate::runtime_state::RuntimeStateSnapshot>>,
-    },
     ThreadSettingsUpdate {
         active: bool,
         builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,

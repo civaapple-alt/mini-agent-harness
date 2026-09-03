@@ -62,8 +62,8 @@ limits, failures, and observation events.
   `HostWorkflowStore` persistence seam. The
   JSON-RPC surface exposes `thread/settings/update` and its
   `thread/settings/updated` notification with the typed `collaborationMode`
-  and bounded `builtinTools` settings, `workflow/state` as a read-only
-  aggregate, and the canonical typed Goal lifecycle methods. The former
+  and bounded `builtinTools` settings, and the canonical typed Goal lifecycle
+  methods. There is no workflow aggregate state endpoint. The former
   `workflow/plan/set` and manual `workflow/goal/*` controls are intentionally
   removed; clients must use the settings and `thread/goal/*` methods. Active
   Goals bind relative `goal/...` tool paths to the session Goal workspace, and
@@ -119,9 +119,9 @@ subexpressions, redirection, process/build commands, and side-effect flags such 
 `git branch -D`, `fd --exec`, and `rg --pre` remain blocked.
 
 Runtime state has one authority: the App Server Runtime Actor orders Thread,
-World, Workflow, MCP, Session, and revision changes. Host implements the
-capability and persistence seams, while CLI and JSON-RPC clients submit actions
-and consume results and events.
+World, MCP, Session, and revision changes. Per-thread Goal state is owned by
+the Goal service. Host implements the capability and persistence seams, while
+CLI and JSON-RPC clients submit actions and consume results and events.
 
 The conceptual runtime direction is:
 

@@ -13,8 +13,6 @@ use crate::action::ActionResponse;
 use crate::goal_runtime::GoalRuntimeEvent;
 use crate::management::SettingsRuntimeEvent;
 use crate::notification::RuntimeNotification;
-use crate::runtime_command::{RuntimeCommand, RuntimeCommandClient};
-use crate::runtime_state::RuntimeStateSnapshot;
 use mini_agent_app_server_protocol::ApprovalRequestNotification;
 use mini_agent_app_server_protocol::ApprovalResolvedNotification;
 use mini_agent_app_server_protocol::ApprovalRespondParams;
@@ -48,7 +46,6 @@ use mini_agent_app_server_protocol::METHOD_TURN_INTERRUPT;
 use mini_agent_app_server_protocol::METHOD_TURN_READ;
 use mini_agent_app_server_protocol::METHOD_TURN_START;
 use mini_agent_app_server_protocol::METHOD_TURN_STEER;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
 use mini_agent_app_server_protocol::METHOD_WORLD_REFRESH;
 use mini_agent_app_server_protocol::METHOD_WORLD_SET_EXECUTION;
 use mini_agent_app_server_protocol::METHOD_WORLD_STATE;
@@ -84,7 +81,6 @@ use mini_agent_app_server_protocol::TurnInterruptParams;
 use mini_agent_app_server_protocol::TurnReadParams;
 use mini_agent_app_server_protocol::TurnStartParams;
 use mini_agent_app_server_protocol::TurnSteerParams;
-use mini_agent_app_server_protocol::WorkflowState;
 use mini_agent_app_server_protocol::WorldRefreshResult;
 use mini_agent_app_server_protocol::WorldSetExecutionParams;
 use mini_agent_app_server_protocol::WorldSetExecutionResult;
@@ -103,7 +99,6 @@ use tokio::sync::broadcast;
 mod thread;
 mod transport;
 mod turn;
-mod workflow;
 mod world;
 
 pub use transport::{
@@ -135,7 +130,6 @@ pub struct RuntimeServices<M> {
     management: RuntimeManagementService<M>,
     thread_settings: ThreadSettingsService,
     goals: ThreadGoalRequestProcessor,
-    state: RuntimeCommandClient,
     notifications: broadcast::Sender<RuntimeNotification>,
 }
 
@@ -150,13 +144,11 @@ impl<M> RuntimeServices<M> {
     {
         let (management, thread_settings, goals) =
             management.bind_thread_services(thread_settings, goals)?;
-        let state = management.command_client();
         let notifications = management.notifications();
         Ok(Self {
             management,
             thread_settings,
             goals,
-            state,
             notifications,
         })
     }
@@ -171,14 +163,6 @@ impl<M> RuntimeServices<M> {
 
     fn thread_goal_processor(&self) -> &ThreadGoalRequestProcessor {
         &self.goals
-    }
-
-    pub(crate) async fn runtime_state_action(
-        &self,
-    ) -> Result<ActionResponse<RuntimeStateSnapshot>, ActionFailure> {
-        self.state
-            .request_action(|reply| RuntimeCommand::RuntimeState { reply })
-            .await
     }
 
     fn notifications(&self) -> broadcast::Sender<RuntimeNotification> {
@@ -300,7 +284,6 @@ where
             METHOD_TURN_READ => self.handle_turn_read(request).await,
             METHOD_TURN_STEER => self.handle_turn_steer(request).await,
             METHOD_TURN_INTERRUPT => self.handle_turn_interrupt(request).await,
-            METHOD_WORKFLOW_STATE => self.handle_workflow_state(request).await,
             METHOD_SESSION_INFO => self.handle_session_info(request).await,
             METHOD_WORLD_STATE => self.handle_world_state(request).await,
             METHOD_WORLD_REFRESH => self.handle_world_refresh(request).await,

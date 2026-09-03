@@ -399,54 +399,19 @@ async fn requires_initialize_and_handles_turn_start() {
 }
 
 #[tokio::test]
-async fn exposes_read_only_workflow_state_from_thread_goal() {
+async fn rejects_removed_workflow_state_method() {
     let (mut connection, root) = managed_connection("workflow-rpc");
     initialize_connection(&mut connection, "workflow-test").await;
 
-    let result = rpc_result(
-        &mut connection,
-        JsonRpcRequest::request(
+    let response = connection
+        .handle_request(JsonRpcRequest::request(
             2,
-            METHOD_THREAD_SETTINGS_UPDATE,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "collaborationMode": {"mode": "plan"},
-                "builtinTools": ["shell", "read_file"]
-            }),
-        ),
-    )
-    .await;
-    assert_eq!(result["stateRevision"], 1);
-
-    let result = rpc_result(
-        &mut connection,
-        JsonRpcRequest::request(
-            3,
-            METHOD_THREAD_GOAL_SET,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "objective": "rpc goal"
-            }),
-        ),
-    )
-    .await;
-    assert_eq!(result["value"]["goal"]["status"], "active");
-    wait_for_goal_status(&mut connection, "blocked").await;
-
-    let result = rpc_result(
-        &mut connection,
-        JsonRpcRequest::request(4, METHOD_WORKFLOW_STATE, serde_json::json!({})),
-    )
-    .await;
-    let state = result["value"].clone();
-    assert_eq!(state["collaborationMode"]["mode"], "plan");
-    assert_eq!(
-        state["builtinTools"],
-        serde_json::json!(["shell", "read_file"])
-    );
-    assert_eq!(state["goal"]["status"], "blocked");
-    assert_eq!(state["goal"]["objective"], "rpc goal");
-    assert!(state["goal"].get("path").is_none());
+            "workflow/state",
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.error.unwrap().code, -32601);
     std::fs::remove_dir_all(root).unwrap();
 }
 

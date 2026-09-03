@@ -22,9 +22,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   add, update, move, and delete operations. All paths and hunks are validated
   before any side effect, with rollback attempted if a later filesystem write
   fails; the existing approval/Plan Mode boundary remains active.
-- **Workflow projection:** include the active bounded `builtinTools` selection in
-  `workflow/state` so App Server clients preserve explicit empty selections and
-  do not reconstruct state from a hard-coded default.
+- **Workflow aggregate removal:** remove the compatibility `workflow/state`
+  endpoint and its aggregate DTO; clients read Thread settings and Thread Goal
+  independently.
 
 ### Fixed
 

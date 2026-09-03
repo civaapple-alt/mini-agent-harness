@@ -216,7 +216,8 @@ thread/goal/updated
 thread/goal/cleared
 ```
 
-`workflow/state` 如果仍需要，只作为只读聚合投影，不拥有任何状态，也不能触发 workflow 动作。
+不提供 `workflow/state` 聚合接口。需要渲染设置或 Goal 时，客户端分别读取
+Thread settings 和 Thread Goal，避免再次形成 Workflow 领域聚合入口。
 
 以下能力只能是内部方法：
 
@@ -259,7 +260,7 @@ continue_if_idle
 - Plan 归入 Thread settings；
 - Goal 归入 GoalService；
 - verifier 和 continuation 归入 GoalRuntimeHandle；
-- `workflow/state` 仅保留为只读状态投影。
+- 删除 `workflow/state`，不保留 Workflow 聚合状态投影。
 
 ## 不在本提案中的内容
 

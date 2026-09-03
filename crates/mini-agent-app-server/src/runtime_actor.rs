@@ -155,23 +155,6 @@ pub(super) fn handle<M>(
             });
             respond(reply, receipt, result);
         }
-        RuntimeCommand::RuntimeState { reply } => respond(
-            reply,
-            receipt,
-            runtime
-                .as_ref()
-                .ok_or(AppServerError::RuntimeUnavailable)
-                .and_then(|state| {
-                    Ok((
-                        state.goal_runtime_handle.plan_active(),
-                        state
-                            .goal_runtime_handle
-                            .load_goal_state()
-                            .map_err(workflow_error)?,
-                        state.builtin_tools.names().to_vec(),
-                    ))
-                }),
-        ),
         RuntimeCommand::ThreadSettingsUpdate {
             active,
             builtin_tools,
@@ -274,7 +257,6 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::RetryMcp { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ReadCheckpoint { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::StartNewThread { reply } => respond(reply, receipt, Err(error)),
-        RuntimeCommand::RuntimeState { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ThreadSettingsUpdate { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ThreadGoalSet { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ThreadGoalGet { reply } => respond(reply, receipt, Err(error)),

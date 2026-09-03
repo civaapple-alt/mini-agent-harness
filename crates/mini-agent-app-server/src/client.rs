@@ -30,7 +30,6 @@ use mini_agent_app_server_protocol::METHOD_TURN_INTERRUPT;
 use mini_agent_app_server_protocol::METHOD_TURN_READ;
 use mini_agent_app_server_protocol::METHOD_TURN_START;
 use mini_agent_app_server_protocol::METHOD_TURN_STEER;
-use mini_agent_app_server_protocol::METHOD_WORKFLOW_STATE;
 use mini_agent_app_server_protocol::METHOD_WORLD_REFRESH;
 use mini_agent_app_server_protocol::METHOD_WORLD_SET_EXECUTION;
 use mini_agent_app_server_protocol::METHOD_WORLD_STATE;
@@ -61,7 +60,6 @@ use mini_agent_app_server_protocol::TurnReadParams;
 use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_app_server_protocol::TurnStartParams;
 use mini_agent_app_server_protocol::TurnSteerParams;
-use mini_agent_app_server_protocol::WorkflowState;
 use mini_agent_app_server_protocol::WorldRefreshResult;
 use mini_agent_app_server_protocol::WorldSetExecutionParams;
 use mini_agent_app_server_protocol::WorldSetExecutionResult;
@@ -387,11 +385,6 @@ where
             .await
             .ok()
             .flatten()
-    }
-
-    pub async fn workflow_state(&mut self) -> Result<WorkflowState, JsonRpcError> {
-        self.call(METHOD_WORKFLOW_STATE, serde_json::json!({}))
-            .await
     }
 
     pub async fn set_collaboration_mode(

@@ -28,7 +28,7 @@ Scope: mini-agent App Server / Host workflow control plane
 | 4. `thread/goal/set/get/clear` | 第一批已完成 | 已补齐 Codex-shaped protocol、public JSON-RPC、local client、bounded Host state 和 set/get/clear 公共场景。 |
 | 5. `GoalRuntime` | 已完成 | `GoalRuntime` 已成为 Runtime Actor 内的串行状态 owner；settled checkpoint 才启动 tool-free verifier，approved/rejected/error 统一推进、重试或失败，续跑仍复用现有 Thread worker。 |
 | 6. Goal/settings notifications | 已完成 | Goal 与 settings 各自只有一个 App Server broadcast source；`thread/settings/updated` 与 mutation 使用同一 `stateRevision`，Goal turn 的 `goalId + turnId + checkpointSeq` 负责 stale-result 防护。 |
-| 7. 旧手工 Goal API 退役 | 已完成 | 旧 `workflow/goal/*` constants、DTO、handlers、Local client facade 和 frontend re-export 已删除；`workflow/state` 保留为只读 aggregate，Goal 写操作只有 `thread/goal/*`。 |
+| 7. 旧手工 Goal API 退役 | 已完成 | 旧 `workflow/goal/*` constants、DTO、handlers、Local client facade 和 frontend re-export 已删除；Goal 写操作只有 `thread/goal/*`，不保留 Workflow 聚合接口。 |
 
 ## 2. 目标边界
 
@@ -242,7 +242,7 @@ verifier、advance 和 continuation 由 GoalRuntime 统一编排，但 verifier 
 - 将 verifier、advance、retry 和 failure 统一收回 GoalRuntime，客户端不再提交 verdict/advance；
 - 旧方法现在收到 deterministic method-not-found，且不改变 `thread/goal/*` 的状态或通知语义。
 
-`workflow/state` 可暂时保留为聚合只读视图；是否最终退役另行记录，不与本计划混合。
+不保留 `workflow/state` 聚合只读视图；客户端分别读取 Thread settings 和 Thread Goal。
 
 ### Batch 6：接入 Goal step、timeout、token budget 执行 — 已完成
 

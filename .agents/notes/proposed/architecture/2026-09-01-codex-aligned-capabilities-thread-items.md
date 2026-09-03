@@ -919,8 +919,8 @@ Six-question admission:
 2. **Duplicate responsibility:** settled checkpoint handling, verifier result
    application, retry/advance, and continuation now have one GoalRuntime path.
    The old `workflow/goal/*` protocol, handlers, Local client facade, and
-   frontend re-exports were removed; `workflow/state` only projects the canonical
-   `ThreadGoal` read model.
+   frontend re-exports were removed; clients read Thread settings and the
+   canonical `ThreadGoal` independently, with no workflow aggregate endpoint.
 3. **Replace vs add:** replace manual client-submitted criteria/verdict/advance
    operations with an internal verifier completion command; add only the
    missing settings notification source and durable active-turn markers. No

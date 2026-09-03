@@ -198,13 +198,6 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         ))
     }
 
-    pub(crate) fn command_client(&self) -> RuntimeCommandClient {
-        RuntimeCommandClient::new(
-            self.server.command_sender(),
-            self.server.runtime_revision_handle(),
-        )
-    }
-
     pub(crate) async fn session_info_action(
         &self,
     ) -> Result<ActionResponse<Option<RuntimeSessionInfo>>, ActionFailure> {

@@ -47,7 +47,6 @@ pub const METHOD_THREAD_GOAL_GET: &str = "thread/goal/get";
 pub const METHOD_THREAD_GOAL_CLEAR: &str = "thread/goal/clear";
 pub const METHOD_THREAD_GOAL_UPDATED: &str = "thread/goal/updated";
 pub const METHOD_THREAD_GOAL_CLEARED: &str = "thread/goal/cleared";
-pub const METHOD_WORKFLOW_STATE: &str = "workflow/state";
 pub const METHOD_SESSION_INFO: &str = "session/info";
 pub const METHOD_WORLD_STATE: &str = "world/state";
 pub const METHOD_WORLD_REFRESH: &str = "world/refresh";
@@ -406,21 +405,6 @@ pub struct ThreadGoalUpdatedNotification {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadGoalClearedNotification {
     pub thread_id: ThreadId,
-}
-
-/// Secret-free workflow state projected by the App Server.
-///
-/// Filesystem paths and Host implementation types stay private to the
-/// workflow service. Clients only receive whether Plan mode is active, the
-/// active bounded Builtin selection, and the bounded Goal state needed to
-/// render progress or resume control.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowState {
-    pub collaboration_mode: CollaborationMode,
-    #[serde(default)]
-    pub builtin_tools: Vec<String>,
-    pub goal: Option<ThreadGoal>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
