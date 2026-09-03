@@ -94,12 +94,15 @@ Additional harness-evidence rules:
   policy, supported-platform evidence, and a boundary test before implementation;
   do not add those flags speculatively.
 
-The canonical architecture record for the framework comparison and next-iteration
-Harness evidence is
-`.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md`.
-Merge later updates into that record instead of creating another same-date maturity
-note, and keep `.agents/notes/README.md`, `README.md`, and `CHANGELOG.md` aligned
-when its status or evidence changes.
+`.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md`
+is the frozen index for the framework comparison and next-iteration Harness evidence;
+its former long-form content is preserved in the adjacent `*-archive.md` note and
+split by topic into focused notes. For each new project-level feature, refactor, or
+architecture decision, create a new dated note under
+`.agents/notes/implemented/architecture/` (or the appropriate `.agents/notes/`
+category) rather than appending to an older implemented note.
+Update `.agents/notes/README.md`, `README.md`, and `CHANGELOG.md` only as indexes or
+current summaries when the new note changes their status or evidence.
 
 ## Change test
 

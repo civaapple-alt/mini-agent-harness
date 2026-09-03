@@ -335,9 +335,16 @@ runtime connection share one ordered App Server notification stream.
   verification rules for repository work.
 - [Change admission checklist](.github/pull_request_template.md) — required
   architecture, line-budget, and boundary questions for every change.
-- [Harness framework and next-iteration note](.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) — mini/Codex
-  framework and Turn-flow comparison, VS Code harness lessons, bounded scenarios,
-  and six-question validation records.
+- [Harness lessons split index](.agents/notes/implemented/architecture/2026-08-31-vscode-harness-lessons-next-iteration.md) — frozen entry point for the
+  framework comparison, bounded scenarios, boundary admission, and maintenance history.
+- [Harness framework comparison](.agents/notes/implemented/architecture/2026-08-31-harness-framework-comparison.md) — mini/Codex
+  framework and Turn-flow comparison.
+- [Harness scenario evidence](.agents/notes/implemented/architecture/2026-08-31-harness-scenario-evidence.md) — bounded scenarios
+  and failure/timeout/retry evidence.
+- [Harness boundary admission](.agents/notes/implemented/architecture/2026-08-31-harness-boundary-admission.md) — layer ownership,
+  six-question admission, and deferred policy gates.
+- [Builtin tool surface upgrade](.agents/notes/implemented/architecture/2026-09-03-harness-tool-surface-upgrade.md) — small default tool surface,
+  paged `read_file`, prevalidated `apply_patch`, and App Server/Web state alignment.
 - [Goal Runtime implementation appendix](.agents/notes/proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) —
   Codex-shaped `thread/goal/*`, serialized GoalRuntime ownership,
   settled-checkpoint continuation, settings notifications, resume/clear race
