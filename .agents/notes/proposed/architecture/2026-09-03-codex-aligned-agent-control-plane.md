@@ -430,6 +430,29 @@ runtime-protection state. Resume continues from that settled state; it does not
 replay the user message or silently create a second Turn. The UI must never
 surface the raw limit as “Turn Settled (Status: step_limit; Steps: 8)”.
 
+### Limits by layer: enlarge autonomy, not every boundary
+
+The current implementation has several limits with different purposes; they
+must not all be treated as the Goal's step budget:
+
+| Category | Current evidence | Proposal treatment |
+| --- | --- | --- |
+| Goal continuation | `20 / 50 / 600s` | Raise defaults to `100 / 200 / 1800s`, owned by Host/App Server; Web does not configure progress semantics |
+| SDK waiting | Python `wait_for_turn` defaults to `60s` | Goal must not be truncated by this independent client timeout; use App Server settlement as authority, while an explicit caller deadline may produce visible cancellation/timeout semantics |
+| Web human-approval wait | `session_manager` currently uses `600s` | Add a Host/App Server-owned approval-wait guard, proposed default `1800s` for Auto Copilot; expiry produces `expired` and never leaves a dangling approval |
+| Core Turn safety guard | default `max_steps=8`, plus byte and call-count limits for input/context/model response/Tool output | Remove `max_steps` from the user control surface; retain other limits as non-user or Host-selected safety guards and do not auto-remove them for Goal |
+| Approval cache | `ApprovalStore` currently holds at most `1024` entries and clears all when full | Bound entries by Session/Project owner and approval key; overflow affects only that scope and requires approval again, never clearing another Project |
+| Pending/event queues | App Server has `32` command and `256` event buffers; Web pending approvals have no explicit cap | Add bounded pending-request count and lifetime; at capacity return `unavailable`/a protection diagnostic rather than silently dropping requests. Keep cursor/replay semantics for events instead of solving disconnects with an unbounded buffer |
+| Per-tool/MCP side effect | Shell/MCP are currently about `120s`, with command and result byte caps | Keep independent from Goal continuation; do not enlarge unconditionally for Auto Copilot without a separate Host safety experiment, and never let approval mode override it |
+| Goal text/evidence | objective `8KiB`, plan/verifier `32KiB`, verifier history `24` messages | Keep bounded; put longer material in canonical artifacts instead of expanding model-visible context without a bound |
+
+The common rule is that Core, Host, or App Server enforces each limit at its
+actual ownership boundary, while SDK/FastAPI/Web only project the state. A
+limit must settle recoverable state before reporting `usage_limited`, `expired`,
+`unavailable`, or a runtime-protection diagnostic. Increasing Goal loops, step
+budget, or timeout must not implicitly increase machine access, approval scope,
+concurrent Session count, message size, or tool-result size.
+
 Plan and Goal are deliberately different: Plan is a user-invoked,
 read-mostly exploration runtime that produces a plan artifact; Goal is the
 user-invoked autonomous runtime that can carry out approved Project changes,
@@ -1169,6 +1192,10 @@ The following scenarios are required before the proposal can move to
     scope and `current_project` only reuses exact approvals for askable actions;
     hard Deny, Plan lock, Sandbox, and tool availability cannot be overridden by
     either UI selection.
+28. A Goal milestone's `1800s` default is not misreported as interrupted because
+    of the SDK's `60s` wait or the Web approval wait; approval expiry produces
+    `expired`, Core/Host/transport capacity limits produce a clear protection
+    state, and ApprovalStore overflow never clears another Project's grants.
 
 Provider-backed verification remains opt-in and must not use paid calls by
 default. The normal evidence path uses mock providers, protocol fixtures, and

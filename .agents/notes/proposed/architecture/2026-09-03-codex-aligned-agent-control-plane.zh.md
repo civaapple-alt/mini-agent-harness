@@ -314,6 +314,26 @@ Goal 触达任一 limit 时，当前 Turn 必须先结算 checkpoint 和有界�
 也不能静默生成第二个 Turn。UI 绝不能把原始 limit 展示成“Turn Settled（Status: step_limit；
 Steps: 8）”。
 
+### Limits 分层：放大自主运行，不放大所有边界
+
+当前实现中有几类不同性质的 limit，不能把它们都当作 Goal 的步数预算：
+
+| 类别 | 当前证据 | 提案处理 |
+| --- | --- | --- |
+| Goal continuation | `20 / 50 / 600s` | 默认提高为 `100 / 200 / 1800s`，由 Host/App Server 持有，Web 不配置进度语义 |
+| SDK 等待 | Python `wait_for_turn` 默认 `60s` | Goal 不得被这个独立客户端超时截断；以 App Server settled 状态为准，显式调用方 deadline 只能产生可见的取消/超时语义 |
+| Web 人工批准等待 | `session_manager` 当前 `600s` | 增加 Host/App Server 所有的批准等待护栏，Auto Copilot 建议默认 `1800s`；超时产生 `expired`，不能遗留悬挂批准 |
+| Core Turn 安全保护 | 默认 `max_steps=8`，以及输入/上下文/模型响应/Tool 输出等字节和调用次数上限 | 从用户控制面移除 `max_steps`；其余仍是不可配置或 Host 选择的安全护栏，不因 Goal 自动取消 |
+| 批准缓存 | `ApprovalStore` 当前最多 `1024` 条，满后清空全部缓存 | 改为按 Session/Project 所有者和批准键有界；溢出只影响对应范围并要求重新批准，不能清空其他 Project 的批准 |
+| 待批准队列/事件队列 | App Server 有 `32` command buffer、`256` event buffer；Web 待批准映射没有明确上限 | 为待批准请求增加有界数量和生命周期；达到上限返回 `unavailable`/保护诊断，不静默丢请求。事件队列保持 cursor/replay 语义，不靠无限扩大 buffer 解决断线 |
+| Tool/MCP 单次副作用 | Shell/MCP 当前约 `120s`，命令和结果也有字节上限 | 与 Goal continuation 分开；除非另有明确的 Host 安全实验，不因 Auto Copilot 无条件放大，不得被批准模式覆盖 |
+| Goal 文本/验证证据 | objective `8KiB`、plan/verifier `32KiB`、verifier history `24` 条消息 | 保持有界；较长内容写入规范 artifact，不把它们扩展成无限模型上下文 |
+
+这些 limit 的共同规则是：由 Core、Host 或 App Server 的实际所有者执行，SDK/FastAPI/Web
+只投影状态；达到 limit 时必须先结算可恢复状态，再报告 `usage_limited`、`expired`、
+`unavailable` 或运行保护诊断。增加 Goal 的 loops/step budget/timeout 不能隐式增加
+machine access、批准范围、并发 Session 数、消息大小或工具结果大小。
+
 Plan 和 Goal 有意不同：Plan 是用户通过 slash 启动的、读多写少的探索 Runtime，产出计划文件；
 Goal 是用户通过 slash 启动的自主 Runtime，可以在获得批准后执行项目修改、验证结果，并跨 Turn
 持续推进，直到完成、暂停或触发终止保护。两者都不需要 Profile 选择器。
@@ -895,6 +915,9 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture，优�
     并拒绝 `approved` 布尔值、`remember` 以及迟到、重复、跨 Project 或扩大范围的响应。
 27. Host 准入顺序证明 `Full access` 只扩大访问范围，`current_project` 只复用可询问操作的
     精确批准；硬性 Deny、Plan 锁、Sandbox 和工具可用性不能被任一 UI 选择覆盖。
+28. Goal milestone 的 `1800s` 默认不会被 SDK 的 `60s` 等待或 Web 的批准等待提前伪装成
+    中断；批准超时产生 `expired`，Core/Host/传输队列达到上限产生清晰的保护状态，并且
+    ApprovalStore 溢出不会清空其他 Project 的批准。
 
 Provider 支持的验证保持为可选，默认不能使用付费调用。正常证据路径使用 Mock Provider、
 Protocol Fixture 和 Harness Scenario。
