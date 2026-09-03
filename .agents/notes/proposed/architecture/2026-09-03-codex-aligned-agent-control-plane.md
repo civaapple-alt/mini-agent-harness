@@ -578,6 +578,41 @@ Do not reintroduce an aggregate `workflow/state` wire authority. An SDK helper
 may combine settings and Goal for presentation, but the App Server remains
 authoritative through the independent canonical methods.
 
+### One typed control envelope across the chain
+
+Every Web Studio control request and every approval/event projection should
+carry the same bounded identity envelope:
+
+```json
+{
+  "projectId": "project-1",
+  "workspaceId": "workspace-1",
+  "workspaceRevision": 3,
+  "sessionId": "session-a",
+  "threadId": "thread-1",
+  "requestId": "request-1",
+  "payload": {"kind": "goal_start"}
+}
+```
+
+`projectId` and the immutable WorkspaceSpec binding refer to the selected Web
+Project, but App Server must resolve them against its trusted Project registry;
+a client-supplied path is not authoritative. `sessionId` and `threadId` come
+from the selected Session. A client control request may carry an opaque RPC
+correlation ID; App Server/Host create the authoritative `turnId`, `callId`,
+and approval `requestId` at the execution boundary. FastAPI and the Python SDK
+pass these fields as typed values and do not infer, rewrite, or drop them. App
+Server rejects a missing, stale, or cross-Project/Session/Thread binding before
+dispatch. In particular, no Web route may fall back to a global `default`
+Thread or manufacture an execution identity.
+
+The envelope is an association and routing contract, not model-visible prompt
+content. Host attaches the effective access, SecurityPolicy result, approval
+owner, and normalized `pathScope`; Core receives only the Host-admitted Tool
+request/result and its own bounded Turn identity. Core must not be made aware
+of Web Project state, and Web must not synthesize a successful Core/Host
+outcome from a disconnected transport.
+
 ### Runtime startup inputs without Profile
 
 App Server initialization and Runtime construction should receive direct typed
@@ -1297,6 +1332,9 @@ The following scenarios are required before the proposal can move to
     and `session/attach` bind an exact revision, existing `workspace.json` files
     remain unchanged, and `planScratchRoot` is Session-owned rather than a
     Project root.
+31. The server resolves Project and WorkspaceSpec identity from its trusted
+    registry, rejects stale/cross-scope envelopes, and creates authoritative
+    execution IDs; Web cannot fall back to `default` or manufacture a `callId`.
 
 Provider-backed verification remains opt-in and must not use paid calls by
 default. The normal evidence path uses mock providers, protocol fixtures, and

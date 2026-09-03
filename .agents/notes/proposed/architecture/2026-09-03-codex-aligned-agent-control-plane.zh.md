@@ -440,6 +440,35 @@ Core 不需要知道 Project 或 UI 批准词汇；它只接收 Host 已准入�
 不要重新引入聚合的 `workflow/state` 线协议权威。SDK 可以提供组合 Settings 和
 Goal 的展示辅助方法，但 App Server 仍通过各自独立的规范方法保持权威。
 
+### 链路统一使用一个类型化控制 Envelope
+
+每个 Web Studio 控制请求以及每个批准/事件投影，都应携带同一组有界的身份 Envelope：
+
+```json
+{
+  "projectId": "project-1",
+  "workspaceId": "workspace-1",
+  "workspaceRevision": 3,
+  "sessionId": "session-a",
+  "threadId": "thread-1",
+  "requestId": "request-1",
+  "payload": {"kind": "goal_start"}
+}
+```
+
+`projectId` 和不可变 WorkspaceSpec 绑定指向当前选中的 Web Project，但 App Server 必须根据
+可信的 Project 注册表解析它们；客户端提供的路径不是权威。`sessionId` 和 `threadId` 来自
+当前选中的 Session。客户端控制请求可以携带不透明的 RPC 关联 ID；App Server/Host 在执行
+边界创建权威的 `turnId`、`callId` 和批准 `requestId`。FastAPI 与 Python SDK 以类型化值传递
+这些字段，不能推断、改写或丢弃。App Server 必须在分发前拒绝缺失、过期或跨
+Project/Session/Thread 的绑定。尤其是任何 Web 路由都不能回退到全局 `default` Thread，
+也不能伪造执行身份。
+
+Envelope 是关联和路由契约，不是模型可见的 Prompt 内容。Host 附加生效的访问范围、
+SecurityPolicy 结果、批准所有者和规范化的 `pathScope`；Core 只接收 Host 已准入的 Tool
+请求/结果以及自己的有界 Turn 身份。Core 不应感知 Web Project 状态，Web 也不能从断开的
+传输连接自行合成成功的 Core/Host 结果。
+
 ### 不使用 Profile 的 Runtime 启动输入
 
 App Server 初始化和 Runtime 创建应直接接收类型化输入：Provider/Model 选择、有界的工具和
@@ -1002,6 +1031,8 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture，优�
 30. `project/workspace/update` 会创建新的 `workspaceRevision`；`session/create` 和
     `session/attach` 必须绑定精确版本，已有的 `workspace.json` 保持不变，且
     `planScratchRoot` 归 Session 所有，不属于 Project 根目录。
+31. Server 必须从可信注册表解析 Project 和 WorkspaceSpec 身份，拒绝过期/跨范围的
+    Envelope，并创建权威执行 ID；Web 不能回退到 `default`，也不能伪造 `callId`。
 
 Provider 支持的验证保持为可选，默认不能使用付费调用。正常证据路径使用 Mock Provider、
 Protocol Fixture 和 Harness Scenario。
