@@ -338,6 +338,68 @@ projectId → workspaceId → sessionId → threadId → turnId → callId/itemI
 
 所有批准通知和响应都必须依据这条链进行校验。
 
+### 第一条纵向切片：Auto Copilot 的批准闭环
+
+第一条实现切片只验证一个完整场景：同一个 Web Studio Project 下有两个 Session，用户
+在其中一个 Session 选择 `Goal + Full access + current_project`，批准一次后，另一个
+Session 对相同有界操作可以复用批准，但不能越过访问范围或安全保护。控制请求和工具批准
+必须经过同一条链：
+
+```text
+Studio 选择
+    → FastAPI 类型化请求
+    → Python SDK 类型化 JSON-RPC
+    → App Server 校验 Project/Workspace/Session/Thread 身份并路由
+    → Host/Capabilities 执行 access + approval + Plan/security 准入
+    → Core 执行已准入的 Tool Turn 并产生有界事件
+```
+
+待批准的回程保持相同的关联字段：
+
+```text
+Host admission request
+    → App Server approval broker
+    → SDK notification
+    → FastAPI route
+    → Studio decision
+    → SDK/App Server typed response
+    → Host resumes the same call
+```
+
+最小的可验证身份和决策字段是：
+
+```text
+projectId, workspaceId, workspaceRevision, sessionId, threadId,
+turnId, callId, requestId, access, approval, actionClass, pathScope
+```
+
+这组字段的职责必须分开：`Full access` 只提供当前 Runtime/Session 的 machine-wide
+访问范围；`current_project` 只提供有边界的批准复用生命周期；`Goal` 负责跨 Turn 的
+执行—验证—继续。任何一个字段都不能替代另一个字段，也不能由 Web 端用本地状态补齐。
+Core 不需要知道 Project 或 UI 批准词汇；它只接收 Host 已准入的工具执行结果和自己的
+有界事件。App Server 不能直接执行工具，也不能把布尔批准缓存成全局 allow。
+
+批准生命周期先定义为：
+
+| 模式 | 所有者 | Session 切换/新建 | 失效条件 |
+| --- | --- | --- | --- |
+| `per_action` | 当前请求 | 不共享 | 请求结算、拒绝或取消 |
+| `current_session` | 当前 Session | 不共享给其他 Session | Session 关闭、控制面重启或明确撤销 |
+| `current_project` | 当前 Project 控制面 | 同一 Project 下共享 | 明确撤销、WorkspaceSpec revision 变化、Project 关闭或 App Server 重启 |
+
+默认不跨 App Server 重启保存 `current_project` 批准。若未来需要跨重启保留，必须增加
+明确的、由 App Server/Host 所有的 Project Approval Store，并定义恢复时的重新确认规则；
+不能把批准写入 Web `state.json`，也不能因为 Web manifest 仍存在就恢复 machine-wide 授权。
+
+首个离线 Harness Fixture 至少覆盖：
+
+1. `project-1/session-a` 首次 machine-wide shell/file 请求触发一次高风险确认；
+2. 用户批准 `current_project` 后，`project-1/session-b` 只有在相同
+   `workspaceRevision`、`access=machine`、`actionClass` 和 `pathScope` 下才能复用；
+3. `project-2`、`Project access` Session、不同操作类别或新增目录 revision 必须重新请求；
+4. 撤销后两个 Session 的后续请求都不能静默通过，硬性 Deny 仍然优先；
+5. App Server 重启后不得从 Web 状态恢复旧的 Project machine-wide 批准。
+
 ## 建议的 Protocol 变更
 
 ### Thread 设置
@@ -665,7 +727,9 @@ Thread 时，顶部栏必须切换到所选 Thread 的 Goal，不能展示其他
 
 记录用户控制轴、访问/批准词汇、Thread 所属 Plan/Goal Runtime 生命周期、内部安全保护
 语义和关联规则。定义替代 Profile 的直接启动输入，以及替代常规 `max_steps` 的不可配置
-Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不需要 Provider 调用。
+Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture，优先验证
+`Full access + current_project + Goal` 的完整批准闭环和两 Session 的 Project 共享边界。
+不需要 Provider 调用。
 
 ### Batch 1 — 规范存储、WorkspaceSpec 与 Session 目录
 
@@ -782,6 +846,12 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
     明确调低；调用方明确提供的 `tokenBudget` 仍是独立资源上限，达到后报告 `budget_limited`。
 23. 修改 Project 目录、fork Session 或复制 Project 都不会继承批准条目；新的 WorkspaceSpec
     revision 必须重新取得明确的 Project 批准，Project 撤销会使后续匹配请求失效。
+24. 离线 Harness Fixture 能沿 `projectId → workspaceId → workspaceRevision → sessionId →
+    threadId → turnId → callId → requestId` 追踪一次 Auto Copilot 批准往返；同一 Project
+    的第二个 Session 只有在所有有界字段匹配时复用批准，其他 Project 或不匹配范围必须重新请求。
+25. `current_project` 在同一 App Server 控制面内跨 Session 切换和新建 Session 共享，撤销、
+    WorkspaceSpec revision 变化和 App Server 重启都会阻止后续复用；Web `state.json` 不会
+    恢复该批准。
 
 Provider 支持的验证保持为可选，默认不能使用付费调用。正常证据路径使用 Mock Provider、
 Protocol Fixture 和 Harness Scenario。

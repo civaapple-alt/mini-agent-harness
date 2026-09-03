@@ -456,6 +456,80 @@ projectId → workspaceId → sessionId → threadId → turnId → callId/itemI
 
 All approval notifications and responses must be validated against this chain.
 
+### First vertical slice: the Auto Copilot approval loop
+
+The first implementation slice should validate one complete scenario: two
+Sessions belong to the same Web Studio Project; the user selects
+`Goal + Full access + current_project` in one Session; after one approval, the
+other Session may reuse it for the same bounded action, but cannot cross an
+access or security boundary. Control and tool approval must travel through one
+chain:
+
+```text
+Studio selection
+    → typed FastAPI request
+    → typed JSON-RPC from the Python SDK
+    → App Server validates Project/Workspace/Session/Thread identity and routes
+    → Host/Capabilities applies access + approval + Plan/security admission
+    → Core executes the admitted Tool Turn and emits bounded events
+```
+
+The approval round trip keeps the same correlation fields:
+
+```text
+Host admission request
+    → App Server approval broker
+    → SDK notification
+    → FastAPI route
+    → Studio decision
+    → typed SDK/App Server response
+    → Host resumes the same call
+```
+
+The minimum verifiable identity and decision fields are:
+
+```text
+projectId, workspaceId, workspaceRevision, sessionId, threadId,
+turnId, callId, requestId, access, approval, actionClass, pathScope
+```
+
+These fields have separate responsibilities: `Full access` supplies the
+current Runtime/Session's machine-wide access scope; `current_project` supplies
+only a bounded approval-reuse lifetime; and `Goal` supplies cross-Turn
+execute–verify–continue behavior. None replaces another, and Web cannot fill in
+missing fields from local state. Core does not need Project or UI approval
+vocabulary; it receives only Host-admitted tool results and its bounded events.
+App Server cannot execute tools directly or turn a boolean approval into a
+process-global allow cache.
+
+The initial approval lifetimes are:
+
+| Mode | Owner | Session switch/new Session | Invalidated by |
+| --- | --- | --- | --- |
+| `per_action` | current request | not shared | request settlement, denial, or cancellation |
+| `current_session` | current Session | not shared with another Session | Session close, control-plane restart, or explicit revoke |
+| `current_project` | current Project control plane | shared within the same Project | explicit revoke, WorkspaceSpec revision change, Project close, or App Server restart |
+
+By default, `current_project` approval does not survive an App Server restart.
+If cross-restart retention is needed later, it requires an explicit
+App Server/Host-owned Project Approval Store and a defined re-confirmation rule;
+it must not be written to Web `state.json`, and the presence of a Web manifest
+must never restore machine-wide authorization.
+
+The first offline Harness Fixture must cover at least:
+
+1. `project-1/session-a` makes its first machine-wide shell/file request and
+   receives one high-risk confirmation;
+2. after the user approves `current_project`, `project-1/session-b` may reuse it
+   only with the same `workspaceRevision`, `access=machine`, `actionClass`, and
+   `pathScope`;
+3. `project-2`, a `Project access` Session, a different action class, or a new
+   root revision must request approval again;
+4. after revocation, later requests from both Sessions cannot silently pass,
+   and hard Deny still has precedence;
+5. an App Server restart cannot restore the old Project machine-wide approval
+   from Web state.
+
 ## Proposed protocol changes
 
 ### Thread settings
@@ -857,7 +931,9 @@ Document the user control axes, access/approval vocabulary, Thread-owned
 Plan/Goal runtime lifecycle, internal safety-guard semantics, and correlation
 rules. Define the direct startup inputs that replace Profile and the
 non-configurable Core guard that replaces routine `max_steps`. Add offline
-protocol fixtures before changing execution. No provider call is needed.
+protocol fixtures before changing execution, prioritizing the complete
+`Full access + current_project + Goal` approval loop and the two-Session Project
+sharing boundary. No provider call is needed.
 
 ### Batch 1 — Canonical storage, WorkspaceSpec, and Session catalog
 
@@ -1031,6 +1107,15 @@ The following scenarios are required before the proposal can move to
     inherited approval entry; a new WorkspaceSpec revision requires explicit
     Project approval, and Project revocation invalidates later matching
     requests.
+24. An offline Harness Fixture traces one Auto Copilot approval round trip across
+    `projectId → workspaceId → workspaceRevision → sessionId → threadId →
+    turnId → callId → requestId`; a second Session in the same Project reuses
+    approval only when every bounded field matches, while another Project or a
+    mismatched scope requests again.
+25. `current_project` approval is shared across Session switching and new
+    Sessions within the same App Server control plane; revocation, a
+    WorkspaceSpec revision change, and App Server restart prevent later reuse.
+    Web `state.json` never restores the approval.
 
 Provider-backed verification remains opt-in and must not use paid calls by
 default. The normal evidence path uses mock providers, protocol fixtures, and
