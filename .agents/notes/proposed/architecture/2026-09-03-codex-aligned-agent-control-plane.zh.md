@@ -545,6 +545,21 @@ Studio 应向用户展示下面这套产品契约，但不暴露内部 Host 对�
 入口，但必须持久化并传输这些类型化选择，不能新增 `copilot`、`profile` 或 `allow_all`
 标志。
 
+### SecurityPolicy 仍是内部准入门
+
+公开的 `access` 和 `approval` 两个轴不能选择或覆盖 Host 的安全策略。实际准入仍然是：
+
+| Host 结果 | 公开选择的作用 |
+| --- | --- |
+| `Deny` | 拒绝操作；`Full access` 和任一批准生命周期都不能覆盖它。 |
+| `Ask` | `Full access` 可以覆盖目标资源范围，但操作仍需要类型化决定或有效且精确匹配的批准条目。 |
+| `Allow` | 执行且不创建批准条目；这是 Host 的策略结果，不是 Web 或 `current_project` 可以制造的授权。 |
+
+因此，`Full access` 的含义是“整机范围可能具备准入资格”，不是“为每个工具把
+SecurityPolicy 设为 Allow”。`current_project` 只在有界生命周期内解析一个精确的可询问请求；
+不能把 `Deny` 变成 `Ask`/`Allow`，也不能扩大路径范围。UI 应展示最终状态为被策略阻止、等待批准、
+由 Project 批准通过或执行中，而不是一个单独的“已允许”布尔值。
+
 ### Project 批准生命周期
 
 `current_project` 表示“批准决定由 Project 共享”，不表示 Project 自动获得某个访问范围。

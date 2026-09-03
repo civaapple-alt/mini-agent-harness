@@ -701,6 +701,25 @@ as a convenience after separately showing the three underlying choices, but it
 must persist and transmit those typed choices rather than a new `copilot`,
 `profile`, or `allow_all` flag.
 
+### SecurityPolicy remains an internal admission gate
+
+The public `access` and `approval` axes do not select or override the Host's
+security policy. The effective admission remains:
+
+| Host result | Effect of the public choices |
+| --- | --- |
+| `Deny` | Reject the action. Neither `Full access` nor any approval lifetime can override it. |
+| `Ask` | `Full access` may cover the target resource, but the action still needs a typed decision or an exact, valid approval entry. |
+| `Allow` | Execute without creating an approval entry; this is a Host policy result, not a grant that Web or `current_project` can manufacture. |
+
+`Full access` therefore means “the machine-wide scope may be eligible for
+admission”; it does not mean “set SecurityPolicy to Allow for every tool”.
+`current_project` only resolves an exact askable request for its bounded
+lifetime; it must never turn `Deny` into `Ask`/`Allow` or widen a path scope.
+The UI should expose the resulting state as blocked, waiting for approval,
+approved by a Project grant, or executing, rather than showing a single
+“allowed” boolean.
+
 ### Project approval lifecycle
 
 `current_project` means that an approval decision is shared by a Project; it
