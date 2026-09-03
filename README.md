@@ -320,6 +320,7 @@ runtime connection share one ordered App Server notification stream.
 
 ## Documentation
 
+- [Documentation index](docs/README.md) — map of the current project documents.
 - [Configuration](docs/configuration.md) — providers, sessions, extensions,
   and environment variables.
 - [Harness limits](docs/limits.md) — default byte, count, and timeout bounds.
