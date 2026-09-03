@@ -9,8 +9,8 @@ This directory records architectural decision records (ADRs), technology selecti
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `18,602 / 20,000` lines (93.0%; 1,398 remaining)
-- release Rust source (excluding experimental CLI/REPL): `27,662 / 30,000` lines (92.2%; 2,338 remaining)
+- runtime (`core + protocol + host + app-server`): `18,566 / 20,000` lines (92.8%; 1,434 remaining)
+- release Rust source (excluding experimental CLI/REPL): `27,626 / 30,000` lines (92.1%; 2,374 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -39,10 +39,11 @@ The line-budget release work has completed its low-risk Stage 1 audit and the ta
   adds `99` runtime / `99` all-Rust lines, and the restart/resume public evidence
   batch adds `81` runtime / `81` all-Rust lines. The ordered notification,
   bounded ToolCall projection, and verifier-history batch adds `264` runtime /
-  `264` all-Rust lines. The current release-source total excludes the
+  `264` all-Rust lines, and the GoalRuntime fixture batch removes `36` runtime /
+  `36` all-Rust lines. The current release-source total excludes the
   experimental CLI/REPL and is now below the approximate `26,900` reference.
 
-The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, duplicate Python test fixture probing, dead Plan slash-command parsing and prompt facades, dead local WorldState summary accessors, and the REPL `/status`/`/info` management projection. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
+The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, duplicate Python test fixture probing, dead Plan slash-command parsing and prompt facades, dead local WorldState summary accessors, the REPL `/status`/`/info` management projection, and repeated GoalRuntime verifier fixtures. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
 
 The first Stage 1 release batches are now complete: the REPL keeps core turn execution, streaming events, approval, `/steer`, startup-selected manual/auto execution, and session persistence/resume entry points, while session metadata, Plan/Goal workflow orchestration, and interactive management are left to App Server clients such as Studio. Host still owns the world snapshot and capability loading; the REPL only consumes those facts for execution context. The Host Catalog now exposes a reversible active-Thread `builtinTools` selection through `thread/settings/update`; MCP and other external providers remain outside this Builtin filter. Stage 2 boundary protections remain in force while Stage 3 is the active admission mode and the budget gates stay active. The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
 

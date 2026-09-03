@@ -2052,3 +2052,32 @@ fetch 覆盖的 URL 分类断言，以及已由 Host/公共设置路径覆盖的
 
 Decision: **accept this bounded cleanup batch**. Runtime is `197` lines below the
 `18,799` target; release-source cleanup still needs `512` lines to reach `27,150`.
+
+#### 2026-09-03：GoalRuntime settled-checkpoint fixture 收敛
+
+本批仅收敛 GoalRuntime 测试夹具：五个 verifier 生命周期测试共享 session 目录、
+Goal store、已 settled checkpoint 和 notification runtime 的初始化；pending verifier
+仍显式传入 `goalId`、`turnId` 和 `checkpointSeq`，因此第二个 checkpoint 的失败路径
+不会被夹具隐藏。保留 clear、approved、rejected、failed、stale checkpoint 和
+preparation failure 全部行为证据。
+
+本批六项准入记录：
+
+```text
+1. Layer: App Server GoalRuntime test-only setup; Goal persistence, verifier state
+   machine, Core turn boundary, and public JSON-RPC evidence are unchanged.
+2. Duplicate responsibility: each test repeated the same temporary session, Goal store,
+   settled checkpoint, event channel, and runtime construction.
+3. Replace vs add: one test helper replaces repeated setup; checkpoint-specific values
+   remain explicit, and no production path, test scenario, or compatibility API is added.
+4. Net line delta: runtime `18,602 -> 18,566` (`-36`); release Rust source
+   `27,662 -> 27,626` (`-36`).
+5. Visible surface: no model-visible input, event, persistence, or public protocol
+   behavior changes; only test fixture composition changed.
+6. Boundary evidence: `cargo test -p mini-agent-app-server` (43 passed),
+   `cargo fmt --all`, `git diff --check`, and `python scripts/line_budget.py all`
+   passed.
+```
+
+Decision: **accept this bounded cleanup batch**. Runtime is `233` lines below the
+`18,799` target; release-source cleanup still needs `476` lines to reach `27,150`.

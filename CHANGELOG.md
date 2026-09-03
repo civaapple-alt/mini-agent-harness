@@ -43,6 +43,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **Capabilities test fixtures:** share workspace, image-uploader, Responses
   request, and web-fetch setup helpers while retaining the same 66 provider and
   security tests.
+- **Goal Runtime test fixtures:** share settled-checkpoint setup and pending
+  verifier construction while retaining clear, approved, rejected, failed, stale,
+  and preparation-error coverage.
 - **Capabilities runtime/test cleanup:** share the identical blocking-runtime
   helper and remove lower-level duplicate path-policy, Shell admission,
   bounded-capture, and Docker availability tests; public approval, bounded

@@ -1,4 +1,3 @@
-use super::GoalRuntime;
 use super::PendingVerification;
 use mini_agent_host::GoalLimits;
 use mini_agent_host::HostWorkflowStore;
@@ -19,11 +18,17 @@ fn temporary_session_dir() -> std::path::PathBuf {
     path
 }
 
-#[test]
-fn ignores_verifier_result_after_goal_clear() {
+fn prepared_runtime(
+    objective: &str,
+) -> (
+    std::path::PathBuf,
+    HostWorkflowStore,
+    mini_agent_host::GoalState,
+    super::GoalRuntime,
+) {
     let session_dir = temporary_session_dir();
     let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());
-    let state = store.set_goal("test stale verifier", None).unwrap();
+    let state = store.set_goal(objective, None).unwrap();
     store
         .mark_goal_turn_started(&state.goal_id, "turn-1")
         .unwrap();
@@ -31,12 +36,27 @@ fn ignores_verifier_result_after_goal_clear() {
         .mark_goal_turn_settled(&state.goal_id, "turn-1")
         .unwrap();
     let (events, _) = broadcast::channel(4);
-    let mut runtime = GoalRuntime::with_notifications(store.clone(), events, None, None);
+    let runtime = super::GoalRuntime::with_notifications(store.clone(), events, None, None);
+    (session_dir, store, state, runtime)
+}
+
+fn set_pending_verification(
+    runtime: &mut super::GoalRuntime,
+    goal_id: &str,
+    turn_id: &str,
+    checkpoint_seq: u64,
+) {
     runtime.pending_verification = Some(PendingVerification {
-        goal_id: state.goal_id.clone(),
-        turn_id: TurnId::new("turn-1"),
-        checkpoint_seq: 1,
+        goal_id: goal_id.to_string(),
+        turn_id: TurnId::new(turn_id),
+        checkpoint_seq,
     });
+}
+
+#[test]
+fn ignores_verifier_result_after_goal_clear() {
+    let (session_dir, store, state, mut runtime) = prepared_runtime("test stale verifier");
+    set_pending_verification(&mut runtime, &state.goal_id, "turn-1", 1);
 
     assert!(store.clear_goal().unwrap());
     let result = runtime
@@ -63,22 +83,8 @@ fn ignores_verifier_result_after_goal_clear() {
 
 #[test]
 fn applies_approved_verdict_after_settled_checkpoint() {
-    let session_dir = temporary_session_dir();
-    let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());
-    let state = store.set_goal("advance a milestone", None).unwrap();
-    store
-        .mark_goal_turn_started(&state.goal_id, "turn-1")
-        .unwrap();
-    store
-        .mark_goal_turn_settled(&state.goal_id, "turn-1")
-        .unwrap();
-    let (events, _) = broadcast::channel(4);
-    let mut runtime = GoalRuntime::with_notifications(store, events, None, None);
-    runtime.pending_verification = Some(PendingVerification {
-        goal_id: state.goal_id.clone(),
-        turn_id: TurnId::new("turn-1"),
-        checkpoint_seq: 1,
-    });
+    let (session_dir, _store, state, mut runtime) = prepared_runtime("advance a milestone");
+    set_pending_verification(&mut runtime, &state.goal_id, "turn-1", 1);
 
     let next = runtime
         .complete_verification(
@@ -107,22 +113,8 @@ fn applies_approved_verdict_after_settled_checkpoint() {
 
 #[test]
 fn handles_rejected_and_failed_verifier_results() {
-    let session_dir = temporary_session_dir();
-    let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());
-    let state = store.set_goal("retain rejected milestone", None).unwrap();
-    store
-        .mark_goal_turn_started(&state.goal_id, "turn-1")
-        .unwrap();
-    store
-        .mark_goal_turn_settled(&state.goal_id, "turn-1")
-        .unwrap();
-    let (events, _) = broadcast::channel(4);
-    let mut runtime = GoalRuntime::with_notifications(store.clone(), events, None, None);
-    runtime.pending_verification = Some(PendingVerification {
-        goal_id: state.goal_id.clone(),
-        turn_id: TurnId::new("turn-1"),
-        checkpoint_seq: 1,
-    });
+    let (session_dir, store, state, mut runtime) = prepared_runtime("retain rejected milestone");
+    set_pending_verification(&mut runtime, &state.goal_id, "turn-1", 1);
 
     let rejected = runtime
         .complete_verification(
@@ -151,11 +143,7 @@ fn handles_rejected_and_failed_verifier_results() {
     store
         .mark_goal_turn_settled(&state.goal_id, "turn-2")
         .unwrap();
-    runtime.pending_verification = Some(PendingVerification {
-        goal_id: state.goal_id.clone(),
-        turn_id: TurnId::new("turn-2"),
-        checkpoint_seq: 2,
-    });
+    set_pending_verification(&mut runtime, &state.goal_id, "turn-2", 2);
     let failed = runtime
         .complete_verification(
             &state.goal_id,
@@ -188,22 +176,8 @@ fn handles_rejected_and_failed_verifier_results() {
 
 #[test]
 fn ignores_verifier_result_for_changed_checkpoint() {
-    let session_dir = temporary_session_dir();
-    let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());
-    let state = store.set_goal("reject stale checkpoint", None).unwrap();
-    store
-        .mark_goal_turn_started(&state.goal_id, "turn-1")
-        .unwrap();
-    store
-        .mark_goal_turn_settled(&state.goal_id, "turn-1")
-        .unwrap();
-    let (events, _) = broadcast::channel(4);
-    let mut runtime = GoalRuntime::with_notifications(store, events, None, None);
-    runtime.pending_verification = Some(PendingVerification {
-        goal_id: state.goal_id.clone(),
-        turn_id: TurnId::new("turn-1"),
-        checkpoint_seq: 1,
-    });
+    let (session_dir, _store, state, mut runtime) = prepared_runtime("reject stale checkpoint");
+    set_pending_verification(&mut runtime, &state.goal_id, "turn-1", 1);
 
     let next = runtime
         .complete_verification(
@@ -233,17 +207,7 @@ fn ignores_verifier_result_for_changed_checkpoint() {
 
 #[test]
 fn missing_verifier_configuration_is_a_preparation_error() {
-    let session_dir = temporary_session_dir();
-    let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());
-    let state = store.set_goal("prepare a verifier", None).unwrap();
-    store
-        .mark_goal_turn_started(&state.goal_id, "turn-1")
-        .unwrap();
-    store
-        .mark_goal_turn_settled(&state.goal_id, "turn-1")
-        .unwrap();
-    let (events, _) = broadcast::channel(4);
-    let mut runtime = GoalRuntime::with_notifications(store, events, None, None);
+    let (session_dir, _store, state, mut runtime) = prepared_runtime("prepare a verifier");
 
     assert!(
         runtime
