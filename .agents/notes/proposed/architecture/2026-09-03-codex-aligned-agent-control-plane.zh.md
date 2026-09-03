@@ -49,6 +49,17 @@ Workspace Binding（Session）：primaryRoot + associatedRoots + 每个目录的
 Plan 和 Goal 继续沿用现有的 Thread 边界。本提案不创建第二个 Workflow
 Service、第二个 Turn Loop，也不引入通用策略/插件框架。
 
+### 直接切换：不提供迁移兼容层
+
+本提案只定义一套新的控制契约和一套规范存储布局。新 Runtime 不读取、导入、翻译、写入
+或删除旧的 Web `~/.mini-agent/state.json`、旧 Web checkpoint、`profile`、
+`profile=auto`、`interactive`、`ask`、`auto`、旧的 `remember` 或布尔/字符串批准格式。
+这些旧产物和输入不属于新 Runtime 的范围。唯一狭窄的迁移例外是输入边界收到旧的
+`turbomode`/`Turbomode`：可以一次性映射为“完全访问”/`SecurityPreset::FullMachine`，
+随后立即丢弃。它不能持久化，不能作为 Runtime/Profile 身份暴露，也不能被新的公开协议接受。
+新实现只从规范 Session Store 和新的 `~/.mini-agent/web/state.json` 开始，不增加通用迁移解析器、
+导入器、回退路径或兼容层。
+
 ## 当前证据与问题
 
 当前实现已经具备所需组件，但它们的权威边界和语义分散在三个仓库中：
@@ -112,9 +123,11 @@ Studio 应显示当前 Mode 和 Goal 状态，但 Mode 的启动应遵循用户�
 选择 `auto` 也不会移除 `HarnessConfig` 默认的 8 步限制。旧的内嵌/本地
 `automatic` 路径改变的是循环预算和上下文压缩，这属于执行实现细节，不是用户人格。
 
-因此，Web Studio 和 REPL 应移除 Profile 选择器以及 `profile=auto` Runtime 选项。迁移期间
-可以接受旧字段，但必须在 Runtime 创建前翻译成明确的 Runtime 输入；任何 Runtime 或 Session
-都不保留 Profile 身份。面向用户只独立暴露真正的决定：
+因此，Web Studio 和 REPL 应移除 Profile 选择器以及 `profile=auto` Runtime 选项。新的公开
+契约直接拒绝 Profile 形态的输入，不做翻译；任何 Runtime 或 Session 都不保留 Profile 身份。
+面向用户的整机访问名称只有“完全访问”，内部由 `SecurityPreset::FullMachine` 支持。旧的
+`turbomode`/`Turbomode` 只允许在迁移输入边界作为指向该访问预设的一次性别名；它不能残留为
+Runtime 或 Profile 身份。面向用户只独立暴露真正的决定：
 
 - 访问：`project` 或 `machine`；
 - 批准策略：`per_action`、`auto_approve` 或 `strict`；
@@ -196,9 +209,8 @@ Project 编辑是持久扩展工作区的正式方式，应提供两种明确的
 的普通控制契约中移除；不要把“提高步数预算”作为常规恢复操作。
 
 Core 仍然需要不可由用户配置的安全保护，以防 Provider/Tool 无限循环。该保护属于
-Core 的 limits；迁移期间可以暂时保留原始 `StepLimit` 分类，但应将它视为异常的
-`runtime_guard` 诊断，而不是正常进度。UI 不能把它展示成“8 步”“Turn 被中断”或
-“任务失败”，却不说明是安全保护触发。
+Core 的 limits，并且必须通过新的类型化 `runtime_guard` 诊断暴露，而不是保留旧的兼容
+分类。UI 不能把它展示成“8 步”“Turn 被中断”或“任务失败”，却不说明是安全保护触发。
 
 Plan 和 Goal 各自管理自己的 Runtime 生命周期：
 
@@ -210,9 +222,9 @@ Plan 和 Goal 各自管理自己的 Runtime 生命周期：
 - App Server 只负责路由和串行化这些 Thread 所属的 Runtime，不增加全局 Profile 或步数预算层。
 
 “settled”仍然只是内部持久化/生命周期术语，不等于“completed”。App Server 和 SDK
-应保留最终语义状态以及用于调试的原始诊断字段。Web Studio 只在确实发生时显示“已完成”、
-“已取消”、“等待批准”，或“运行保护已触发，请检查或重试”。如果为兼容性保留，原始
-`step_limit` 和 `steps` 只能放在高级诊断中。
+应保留最终语义状态以及用于调试的诊断字段。Web Studio 只在确实发生时显示“已完成”、
+“已取消”、“等待批准”，或“运行保护已触发，请检查或重试”。原始实现计数不属于公开
+状态契约，内部诊断可以为调试记录它们。
 
 `turn_finished` 通知或其 SDK 投影必须携带最终的语义状态，并在可用时携带原始诊断，
 这样 Web Studio 就不会从一个普通的流关闭事件推断“中断”。继续必须是明确的下一次
@@ -294,7 +306,7 @@ Goal 的展示辅助方法，但 App Server 仍通过各自独立的规范方法
 App Server 初始化和 Runtime 创建应直接接收类型化输入：Provider/Model 选择、有界的工具和
 扩展选择、Prompt/规则来源、Sandbox/安全、访问范围和 WorkspaceSpec。新的公开启动契约中
 不再有 `profile` 字段。Runtime/Session 创建后，这些启动输入对该身份不可变；变更必须明确
-重建 Runtime 或新建 Session。迁移期间可以解析旧的 `profile` 字段，但只能将其转换为这些输入。
+重建 Runtime 或新建 Session。Profile 形态的启动输入直接拒绝，不解析也不翻译。
 
 ### Approval 生命周期
 
@@ -323,9 +335,9 @@ App Server 初始化和 Runtime 创建应直接接收类型化输入：Provider/
 }
 ```
 
-`approval/resolved` 必须回显最终访问范围、生命周期和关联字段。为保持线协议兼容，接受旧的
-`remember`：`false` 映射为 `lifetime=once`，`true` 映射为 `lifetime=session`；新客户端使用
-类型化的 `access` 和 `lifetime` 字段。App Server 不得再静默地记住每次成功的布尔批准。
+`approval/resolved` 必须回显最终访问范围、生命周期和关联字段。新的线协议只接受类型化的
+`access` 和 `lifetime` 字段；旧的 `remember` 和只有布尔值的批准响应直接拒绝。App Server
+不得再静默地记住每次成功的布尔批准。
 
 ### 显式压缩
 
@@ -372,22 +384,21 @@ resume 和锁状态必须通过 App Server/SDK 适配器从规范 Session Store 
     └── <workspaceId>/<sessionId>/   # 诊断日志，不是对话状态
 ```
 
-这是语义上的统一，不要求在一次变更中移动所有诊断文件。迁移期间必须继续读取已有的
-单根目录 Session。Web checkpoint 目录转为兼容读取/导入来源，之后停止写入；它不能覆盖
-更新的规范 checkpoint。迁移必须幂等，不能覆盖规范 Session；如果发现无法关联到正确项目
-的旧 checkpoint，应报告为孤立数据，而不是静默绑定。
+这是面向新实现的直接切换。目标 `sessions/` 布局下的规范 Session Store 记录是唯一的
+持久化对话和恢复权威。旧的根目录 Web `state.json` 和旧 Web checkpoint 目录不会被读取、
+导入、翻译、写入或删除；它们不属于新 Runtime 的范围，也不参与 Project 或 Session 发现。
 
-首轮迁移期间，`state.json` 可以作为有版本的 Web manifest 保留，但应位于
-`~/.mini-agent/web/` 下，并且只保存项目注册表、UI 偏好和 `projectId`、`workspaceId`、
-`sessionId`、`threadId` 等引用。不能保存 transcript 或重复的 Thread checkpoint。
+新的 `~/.mini-agent/web/state.json` 是有版本的 Web manifest，只保存项目注册表、UI 偏好和
+`projectId`、`workspaceId`、`sessionId`、`threadId` 等引用。它不是旧的根目录 `state.json`，
+也不能保存 transcript 或重复的 Thread checkpoint。
 
 Plan scratch 必须放在规范 Session 目录下，而不是 Project 根目录或 Web 自有状态中。
 它的路径由 Session/Plan Runtime 生成并保持有界。`plan.md` 是保留的 Plan 产物；scratch
 内容按照 `cleanup.json` 清单清理。
 
-不需要 `~/.mini-agent/profile/` 目录，也不需要每个 Session 的 Profile 文件。迁移期间如果
-继续接受现有项目级 `.agents/profile.json`，它只能作为有界的 Runtime 启动输入来源；必须
-翻译成明确的 Runtime 输入，不能创建 Profile 身份，也绝不能复制进规范 Session 历史或 Web 状态。
+新契约不包含 `~/.mini-agent/profile/` 目录、每个 Session 的 Profile 文件或项目级
+`.agents/profile.json` 输入。Profile 文件不会被读取或翻译，Profile 身份也不会写入规范
+Session 历史或 Web 状态。
 
 ### Project、WorkspaceSpec 与 Session 绑定
 
@@ -593,8 +604,8 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
 - 实现相互独立的“项目访问”和整机范围“完全访问”预设；保留
   `SecurityPreset::FullMachine` 的保护，并区分已配置根目录与用户消息中临时提到的路径；
 - 增加基于规范 `SessionStore` summary 和锁的有界 App Server/SDK/Web Session list/inspect 路径；
-- 将 Web 状态移动到 Web 自有子目录，停止写入重复的 Web checkpoint，并增加幂等的旧 checkpoint
-  迁移或兼容读取路径；
+- 将新的 Web 状态放到 Web 自有子目录，停止写入重复的 Web checkpoint，并确保旧 Web 状态/
+  checkpoint 路径永远不会被读取、导入或写入；
 - 暴露按 Session 的 Runtime/Goal 状态、活动 Turn、锁和可恢复字段；移除一个全局 Web client
   或一份全局 active state 表示所有 Project 的假设；
 - 在启用并发运行/暂停 Session 切换前，实现按 Project 的历史选择和 attach/只读行为。
@@ -625,7 +636,7 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
 ### Batch 4 — SDK 与 FastAPI 收敛
 
 - 增加类型化的批准请求/决定模型；
-- 仅将布尔/字符串批准回调保留为兼容适配器；
+- 只使用类型化的批准回调和决定；删除布尔/字符串批准回调路径；
 - 确保重连、超时、取消和延迟响应行为是确定性的；
 - 删除过时的 Web 侧 remembered approval 状态和宽泛广播。
 
@@ -658,9 +669,9 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
    一个 settled Goal Turn 之后必须有 verifier 证据；不完整/拒绝的结果在相同
    `threadId` 上调度新的 Turn，而 approved 结果结束 Goal。
 7. 两个活动 Thread 不能展示或解析彼此的批准请求。
-8. Web Studio 和 REPL 没有 Profile 控制，也不保留 Profile 身份；迁移期间即使接受旧的
-   `profile=auto` 输入，也必须在 Runtime 创建前翻译成明确的 Runtime 输入，不能单独改变
-   批准、Mode 或循环语义。
+8. Web Studio 和 REPL 没有 Profile 控制，也不保留 Profile 身份。Profile 形态的输入，
+   包括 `profile=auto`，直接拒绝。唯一的迁移例外是 `turbomode`/`Turbomode`：一次性映射
+   为“完全访问”/`SecurityPreset::FullMachine` 后丢弃，不能改变 Mode 或循环语义。
 9. `/status`、`/plan`、`/goal`、`/mcp` 和 `/compact` 使用控制 API，而不是意外变成模型 Prompt。
 10. `item/started`、批准事件、`approval/resolved`、`item/completed` 和 `turn/read` 保持相同的有界 call identity 和最终结果。
 11. 一个包含主目录和多个关联目录的 Project，可以从每个声明的目录读取文件；`reference`
@@ -674,8 +685,8 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
 14. 只在消息中提到的路径可以作为有界参考上下文使用；要求同步/更新时必须形成明确的
     路径范围意图；已启用的整机“完全访问”可以在其保护下准入，否则必须明确请求批准或
     将它加入 Project 根目录。
-15. 旧 Web checkpoint 可以被幂等地发现并迁移/报告；规范 `SessionStore` 历史始终优先，且迁移
-    后不再写入第二份 checkpoint。
+15. 旧 Web `state.json` 和 checkpoint 路径永远不会被读取、导入、翻译、写入或删除。Project
+    历史和恢复只使用规范 `SessionStore` 以及新的派生 Web manifest/index。
 16. Project 历史可以列出有界的 historical、running、paused 和 locked Session，并保持稳定的
     `sessionId`/`threadId`/`workspaceId` 关联。
 17. 切换到运行中的 Session 会连接其事件流而不取消另一个运行中的 Session；切换到暂停 Session
@@ -704,8 +715,9 @@ Protocol Fixture 和 Harness Scenario。
    `ApprovalBroker`、Thread Settings、Goal Runtime、`ThreadListener`、SDK 通知处理和已有
    WebSocket 路由。不允许第二个 transcript/checkpoint 存储、第二个 Router、Workflow Service、
    Turn Loop 或策略框架。
-3. **替换还是增加：** 将 Web checkpoint 权威替换为引用/缓存索引和幂等迁移路径；用每个
-   Runtime/Session 的不可变 WorkspaceSpec 替换可变进程 cwd 假设；扩展已有 Session、Thread
+3. **替换还是增加：** 删除旧的 Web checkpoint 权威，使用从规范 SessionStore 派生的引用/缓存
+   索引，不增加迁移/导入路径；用每个 Runtime/Session 的不可变 WorkspaceSpec 替换可变进程 cwd
+   假设；扩展已有 Session、Thread
    和工具构建接缝，增加有界根目录/状态元数据，然后再加入有范围的批准；不引入通用存储框架。
 4. **净行数变化：** 2026-09-03 基线为 Runtime `19,554/20,000`、Release Rust `29,328/30,000`，
    剩余空间分别为 446 和 672 行。提案不构成一个无限制实现批次。每个 Rust 批次都必须记录
@@ -717,7 +729,7 @@ Protocol Fixture 和 Harness Scenario。
    并继续受批准/Plan 约束。Plan scratch、`plan.md` 和清理状态是有界的 Thread 所属产物。
    不要增加独立的 Profile 层，也不要把 Profile 名称作为用户控制。
 6. **边界证据：** 现有 Session、Workspace、Protocol、Host、App Server、SDK 和 Web 测试只覆盖
-   部分路径。新的多根路径准入、存储迁移、Session 列表/锁、历史/运行中/暂停切换、批准范围、
+   部分路径。新的多根路径准入、规范存储、Session 列表/锁、历史/运行中/暂停切换、批准范围、
    Thread 路由、Plan/Goal、压缩和 slash 场景都是必需的，因为单元测试不足以证明端到端控制链。
 
 ## 变更测试
@@ -744,15 +756,16 @@ Protocol Fixture 和 Harness Scenario。
 - 不把整机范围的“完全访问”等同于无限制的“允许全部”；硬性安全 Deny 以及文档化的
   Shell/确认保护仍然有效。
 - 不增加第二个 Core 执行循环、Goal verifier 历史或 Web 侧持久化权威。
-- 不让 Web `state.json` 或 checkpoint 目录成为第二个 Session 数据库；迁移只是兼容工作，
-  不是长期并行存储。
+- 不读取、导入、翻译、写入或删除旧 Web `state.json` 或 checkpoint 目录。它们不属于新
+  Runtime；新的 Web manifest/index 只是派生的展示状态，不是第二个 Session 数据库。
 - 不让关联 Project 目录隐式可写，也不声称仅靠 Native Shell cwd 就能实现多根文件系统隔离。
 - 不支持同一 Session 的两个并发写入者，也不静默地将已有 Session 重新绑定到修改后的 Project 工作区清单。
 - 不把 Plan 做成严格只读，也不允许它的 scratch 根目录变成未声明的持久 Project 写入区。
 - 不公开任意原始系统 Prompt 替换。
 - 不在首个批准批次中加入 Skill/Plugin 的动态热加载。
-- 不增加独立的 `Profile` 层，也不保留 `interactive`/`ask`/`auto` 作为 Runtime/Session 身份；
-  迁移期间只允许兼容解析器翻译旧输入。
+- 不增加独立的 `Profile` 层，也不保留 `interactive`/`ask`/`auto`、`profile=auto` 或
+  `turbomode`/`Turbomode` 作为 Runtime/Session 身份。唯一的迁移输入别名是将 `turbomode`
+  映射为 `FullMachine` 后立即丢弃；不提供其他迁移解析器或兼容别名。
 - 不暴露 `max_steps` 或常规 `step_limit` 作为任务控制；Core 安全保护保持内部，继续行为归
   Plan/Goal Runtime 状态管理。
 

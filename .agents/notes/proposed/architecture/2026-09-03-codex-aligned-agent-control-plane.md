@@ -62,6 +62,21 @@ Plan and Goal remain the existing canonical Thread boundaries. This proposal
 does not create a second Workflow service, a second turn loop, or a generic
 policy/plugin framework.
 
+### Direct cutover; no migration compatibility layer
+
+This proposal defines one new control contract and one canonical storage
+layout. It does not read, import, translate, write, or delete legacy Web
+`~/.mini-agent/state.json`, legacy Web checkpoint files, `profile`,
+`profile=auto`, `interactive`, `ask`, `auto`, legacy `remember`, or
+boolean/string approval shapes. Those artifacts and inputs are outside the new
+runtime's scope. The only narrow migration exception is an inbound old
+`turbomode`/`Turbomode` token: it may map once to `Full access` /
+`SecurityPreset::FullMachine`, then must be discarded. It is never persisted,
+exposed as a Runtime/Profile identity, or accepted by the new public protocol.
+The new implementation starts from its canonical Session Store and new
+`~/.mini-agent/web/state.json`; no general migration parser, importer,
+fallback, or compatibility layer is admitted.
+
 ## Current evidence and problem statement
 
 The current implementation has the required pieces, but their authority and
@@ -147,10 +162,13 @@ legacy embedded/local `automatic` path changes loop budgeting and context
 compaction; that is an execution implementation detail, not a user persona.
 
 Therefore Web Studio and the REPL should remove the profile selector and the
-`profile=auto` runtime option. A compatibility parser may accept the old field
-only during migration and must translate it to explicit runtime inputs before
-construction; no runtime or Session should retain a Profile identity. Expose
-the actual user decisions independently:
+`profile=auto` runtime option. The new public contract rejects profile-shaped
+inputs instead of translating them. No runtime or Session retains a Profile
+identity. The only machine-wide access name is user-facing `Full access`,
+internally backed by `SecurityPreset::FullMachine`. The old
+`turbomode`/`Turbomode` token is permitted only at a migration input boundary
+as a one-way alias to that access preset; it must not survive as a Runtime or
+Profile identity. Expose the actual user decisions independently:
 
 - access: `project` or `machine`;
 - approval policy: `per_action`, `auto_approve`, or `strict`;
@@ -281,11 +299,10 @@ implementation loop guard, not a useful user task setting. Remove
 contract; do not offer “increase the step budget” as a routine recovery path.
 
 Core still needs a non-user-configurable safety guard against a runaway
-provider/tool loop. That guard belongs to Core's limits and may retain a raw
-legacy `StepLimit` classification during migration, but it must be treated as
-an exceptional `runtime_guard` diagnostic rather than normal progress. It must
-not be rendered as “8 steps”, “Turn interrupted”, or “task failed” without
-explaining the safety-guard cause.
+provider/tool loop. That guard belongs to Core's limits and must be exposed
+through the new typed `runtime_guard` diagnostic, not a legacy compatibility
+classification. It must not be rendered as “8 steps”, “Turn interrupted”, or
+“task failed” without explaining the safety-guard cause.
 
 Plan and Goal own their own runtime lifecycle:
 
@@ -303,8 +320,9 @@ Plan and Goal own their own runtime lifecycle:
 “completed”. App Server and SDK should preserve the final semantic status and
 the raw diagnostic fields for debugging. Web Studio should show Completed,
 Cancelled, Waiting for approval, or “Runtime protection triggered; inspect or
-retry” only when those outcomes actually occur. Raw `step_limit` and `steps`
-belong in advanced diagnostics, if retained for compatibility.
+retry” only when those outcomes actually occur. Raw implementation counters are
+not part of the public status contract; internal diagnostics may record them
+for debugging.
 
 The `turn_finished` notification or its SDK projection must carry the final
 semantic status (and raw diagnostics when available), so Web Studio never
@@ -399,8 +417,8 @@ inputs: provider/model selection, bounded tool and extension selection,
 prompt/rule sources, sandbox/security, access scope, and WorkspaceSpec. There
 is no `profile` field in the new public startup contract. Once a Runtime/Session
 is created, these startup inputs are immutable for that identity; changing them
-requires an explicit Runtime recreation or a new Session. A legacy `profile`
-field may be parsed only to produce these inputs during migration.
+requires an explicit Runtime recreation or a new Session. Profile-shaped startup
+input is rejected; it is not parsed or translated.
 
 ### Approval lifecycle
 
@@ -431,10 +449,10 @@ approval transport:
 ```
 
 `approval/resolved` must echo the final access, lifetime, and correlation
-fields. For wire-compatibility, accept legacy `remember`: `false` maps to
-`lifetime=once`, `true` maps to `lifetime=session`; new clients use the typed
-`access` and `lifetime` fields. The App Server must no longer silently remember
-every successful boolean approval.
+fields. The new wire contract accepts only the typed `access` and `lifetime`
+fields; legacy `remember` and boolean-only approval responses are rejected.
+The App Server must no longer silently remember every successful boolean
+approval.
 
 ### Explicit compaction
 
@@ -485,30 +503,28 @@ The target layout is:
     └── <workspaceId>/<sessionId>/   # diagnostic logs, not conversation state
 ```
 
-This is a semantic unification rather than a requirement to move every
-diagnostic file in one change. Existing single-root session directories remain
-readable during migration. The Web checkpoint directory becomes a
-compatibility reader/import source and then stops receiving writes; it must
-never win over a newer canonical checkpoint. A migration must be idempotent,
-must not overwrite a canonical session, and must report an orphaned legacy
-checkpoint instead of silently attaching it to the wrong project.
+This is a direct cutover for the new implementation. Canonical Session Store
+records under the target `sessions/` layout are the only durable conversation
+and resume authority. The old single-root Web `state.json` and old Web
+checkpoint directory are not read, imported, translated, written, or deleted.
+They are outside the new runtime's scope and do not participate in Project or
+Session discovery.
 
-`state.json` can remain a versioned Web manifest during the first migration,
-but it should live under `~/.mini-agent/web/` and contain only project
-registry, UI preferences, and references such as `projectId`, `workspaceId`,
-`sessionId`, and `threadId`. It must not contain a transcript or a duplicate
-Thread checkpoint.
+The new `~/.mini-agent/web/state.json` is a versioned Web manifest containing
+only project registry, UI preferences, and references such as `projectId`,
+`workspaceId`, `sessionId`, and `threadId`. It is not the old root-level
+`state.json`, and it must not contain a transcript or a duplicate Thread
+checkpoint.
 
 Plan scratch belongs under the canonical Session directory, not under the
 Project root and not under Web-only state. Its path is generated and bounded by
 the Session/Plan Runtime. `plan.md` is the retained Plan artifact; scratch
 contents are disposable and are removed according to `cleanup.json`.
 
-There is no need for a `~/.mini-agent/profile/` directory or per-Session
-Profile files. The existing project-local `.agents/profile.json`, if accepted
-during migration, is only a bounded startup-input source. It must be translated
-to explicit runtime inputs, must not create a Profile identity, and must never
-be copied into canonical Session history or Web state.
+There is no `~/.mini-agent/profile/` directory, per-Session Profile file, or
+project-local `.agents/profile.json` input in the new contract. Profile files
+are not read or translated, and no Profile identity is copied into canonical
+Session history or Web state.
 
 ### Project, WorkspaceSpec, and Session binding
 
@@ -763,9 +779,9 @@ protocol fixtures before changing execution. No provider call is needed.
   manifest, and cleanup-pending recovery path;
 - add the bounded App Server/SDK/Web session list and inspect path backed by
   canonical `SessionStore` summaries and locks;
-- move Web state under the Web-owned subdirectory, remove ongoing writes to
-  duplicate Web checkpoints, and add an idempotent legacy checkpoint migration
-  or compatibility read path;
+- move new Web state under the Web-owned subdirectory, remove ongoing writes to
+  duplicate Web checkpoints, and ensure old Web state/checkpoint paths are
+  never read, imported, or written;
 - expose per-Session runtime/Goal status, active turn, lock, and resumable
   fields; remove the assumption that one global Web client or one global
   active state represents all Projects;
@@ -800,14 +816,15 @@ This is the first implementation batch and is a security correctness gate.
 - hydrate settings and Goal independently after Thread selection;
 - emit and consume authoritative settings/Goal notifications;
 - bind Plan runtime state and Goal lifecycle to the selected Thread; remove
-  legacy profile updates from the live control path entirely;
+  profile updates from the live control path entirely;
 - make Plan exploration, settlement, cleanup, and `plan.md` retention ordered
   Thread events rather than Web-local state;
 
 ### Batch 4 — SDK and FastAPI convergence
 
 - add typed approval request/decision models;
-- keep bool/string approval callbacks only as compatibility adapters;
+- use typed approval callbacks and decisions only; remove bool/string approval
+  callback paths;
 - ensure reconnect, timeout, cancellation, and late resolution behavior is
   deterministic;
 - remove obsolete Web-side remembered approval state and broad broadcasts.
@@ -853,10 +870,11 @@ The following scenarios are required before the proposal can move to
    evidence; an incomplete/rejected verdict schedules a new Turn with the
    same `threadId`, while an approved verdict completes the Goal.
 7. Two active Threads cannot display or resolve each other's approvals.
-8. Web Studio and the REPL have no Profile control or retained Profile identity;
-   a legacy `profile=auto` input, if accepted during migration, is translated
-   to explicit runtime inputs before construction and cannot change approval,
-   mode, or loop semantics by itself.
+8. Web Studio and the REPL have no Profile control or retained Profile identity.
+   Profile-shaped input, including `profile=auto`, is rejected. The sole
+   migration-only exception is `turbomode`/`Turbomode`, which maps once to
+   `Full access` / `SecurityPreset::FullMachine`, is discarded, and cannot
+   change mode or loop semantics.
 9. `/status`, `/plan`, `/goal`, `/mcp`, and `/compact` use control APIs rather
    than accidental model prompts.
 10. `item/started`, approval events, `approval/resolved`, `item/completed`, and
@@ -877,9 +895,9 @@ The following scenarios are required before the proposal can move to
     intent; active machine-wide `Full access` may admit it under its guardrails,
     otherwise it requires explicit approval or an explicit Project-root
     addition.
-15. Legacy Web checkpoints can be discovered and migrated/reported
-    idempotently, while canonical `SessionStore` history always wins and no
-    second checkpoint is written afterward.
+15. Legacy Web `state.json` and checkpoint paths are never read, imported,
+    translated, written, or deleted. Project history and resume use only the
+    canonical `SessionStore` and the new derived Web manifest/index.
 16. Project history lists bounded historical, running, paused, and locked
     Sessions with stable `sessionId`/`threadId`/`workspaceId` correlations.
 17. Switching to a running Session attaches to its event stream without
@@ -919,8 +937,9 @@ Harness scenarios.
    Goal Runtime, `ThreadListener`, SDK notification handling, and existing
    WebSocket routes. No second transcript/checkpoint store, router, workflow
    service, turn loop, or policy framework is admitted.
-3. **Replace vs. add:** Replace Web checkpoint authority with a reference/cache
-   index and an idempotent migration path. Replace mutable process-cwd
+3. **Replace vs. add:** Remove the old Web checkpoint authority and use a
+   reference/cache index derived from canonical SessionStore records; no
+   migration/import path is added. Replace mutable process-cwd
    assumptions with an immutable WorkspaceSpec per runtime/Session. Extend
    existing Session, Thread, and tool-build seams with bounded root/status
    metadata, then add scope-aware approval; do not introduce a generic storage
@@ -941,7 +960,7 @@ Harness scenarios.
    a standalone Profile layer or make Profile names a user-facing control.
 6. **Boundary evidence:** Existing Session, Workspace, Protocol, Host, App
    Server, SDK, and Web tests cover portions of the path. New multi-root path
-   admission, storage migration, Session list/lock, historical/running/paused
+   admission, canonical storage, Session list/lock, historical/running/paused
    switching, approval-scope, Thread-routing, Plan/Goal, compaction, and slash
    scenarios are mandatory because unit tests alone cannot prove the
    end-to-end control-plane trace.
@@ -980,8 +999,9 @@ Harness scenarios.
   hard security Deny and documented shell/confirmation guardrails remain.
 - Do not add a second Core execution loop, Goal verifier history, or Web-side
   persistence authority.
-- Do not make the Web `state.json` or checkpoint directory a second Session
-  database; migration is compatibility work, not a parallel long-term store.
+- Do not read, import, translate, write, or delete the old Web `state.json` or
+  checkpoint directory. They are outside the new runtime; the new Web
+  manifest/index is derived presentation state, not a second Session database.
 - Do not make associated Project directories implicitly writable, and do not
   claim that native shell cwd alone enforces multi-root filesystem isolation.
 - Do not support two concurrent writers for one Session or silently rebind an
@@ -990,9 +1010,10 @@ Harness scenarios.
   an undeclared durable Project write area.
 - Do not make arbitrary raw system-prompt replacement public.
 - Do not make dynamic Skill/Plugin hot-loading part of the first approval batch.
-- Do not add a standalone `Profile` layer or retain `interactive`/`ask`/`auto`
-  as Runtime/Session identity. A legacy parser may translate old input during
-  migration only.
+- Do not add a standalone `Profile` layer or retain `interactive`/`ask`/`auto`,
+  `profile=auto`, or `turbomode`/`Turbomode` as Runtime/Session identity. The
+  sole migration-only `turbomode` alias maps to `FullMachine` and is discarded;
+  no other migration parser or compatibility alias exists.
 - Do not expose `max_steps` or routine `step_limit` as a task control; the Core
   safety guard remains internal and continuation belongs to Plan/Goal runtime
   state.
