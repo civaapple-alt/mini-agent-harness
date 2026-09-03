@@ -1,8 +1,14 @@
-use crate::action::ActionResult;
+use crate::AppServerError;
 use crate::action::RuntimeRevision;
+use crate::action::{ActionFailure, ActionResponse, ActionResult};
+use crate::worker::Command;
 use mini_agent_capabilities::{ApprovalController, ApprovalMode};
 use mini_agent_core::ThreadCheckpoint;
 use mini_agent_protocol::ThreadId;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 pub(super) struct RuntimeRequest {
@@ -10,7 +16,7 @@ pub(super) struct RuntimeRequest {
     pub(super) command: RuntimeCommand,
 }
 
-/// Runtime management and workflow commands handled by the App Server actor.
+/// Runtime management and Thread commands handled by the App Server actor.
 pub(super) enum RuntimeCommand {
     SessionInfo {
         reply: oneshot::Sender<ActionResult<Option<crate::RuntimeSessionInfo>>>,
@@ -49,24 +55,24 @@ pub(super) enum RuntimeCommand {
     StartNewThread {
         reply: oneshot::Sender<ActionResult<()>>,
     },
-    WorkflowState {
-        reply: oneshot::Sender<ActionResult<crate::workflows::WorkflowStateSnapshot>>,
+    RuntimeState {
+        reply: oneshot::Sender<ActionResult<crate::runtime_state::RuntimeStateSnapshot>>,
     },
-    SetCollaborationMode {
+    ThreadSettingsUpdate {
         active: bool,
         builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
         reply: oneshot::Sender<ActionResult<Vec<String>>>,
     },
-    GoalSet {
+    ThreadGoalSet {
         objective: Option<String>,
         status: Option<mini_agent_app_server_protocol::ThreadGoalStatus>,
         token_budget: Option<Option<i64>>,
-        reply: oneshot::Sender<ActionResult<crate::workflows::GoalState>>,
+        reply: oneshot::Sender<ActionResult<crate::goal_service::GoalState>>,
     },
-    GoalGet {
-        reply: oneshot::Sender<ActionResult<Option<crate::workflows::GoalState>>>,
+    ThreadGoalGet {
+        reply: oneshot::Sender<ActionResult<Option<crate::goal_service::GoalState>>>,
     },
-    GoalClear {
+    ThreadGoalClear {
         reply: oneshot::Sender<ActionResult<bool>>,
     },
 }
@@ -80,9 +86,44 @@ impl RuntimeCommand {
                 | Self::UpdateThread { .. }
                 | Self::RetryMcp { .. }
                 | Self::StartNewThread { .. }
-                | Self::SetCollaborationMode { .. }
-                | Self::GoalSet { .. }
-                | Self::GoalClear { .. }
+                | Self::ThreadSettingsUpdate { .. }
+                | Self::ThreadGoalSet { .. }
+                | Self::ThreadGoalClear { .. }
         )
+    }
+}
+
+/// Internal command client shared by the Thread settings and Goal request
+/// processors. It carries no domain state; all state remains owned by the
+/// App Server runtime actor.
+#[derive(Clone)]
+pub(crate) struct RuntimeCommandClient {
+    commands: mpsc::Sender<Command>,
+    revision: Arc<AtomicU64>,
+}
+
+impl RuntimeCommandClient {
+    pub(crate) fn new(commands: mpsc::Sender<Command>, revision: Arc<AtomicU64>) -> Self {
+        Self { commands, revision }
+    }
+
+    pub(crate) async fn request_action<T, F>(
+        &self,
+        build: F,
+    ) -> Result<ActionResponse<T>, ActionFailure>
+    where
+        F: FnOnce(oneshot::Sender<ActionResult<T>>) -> RuntimeCommand,
+    {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(Command::Runtime(RuntimeRequest {
+                expected_revision: self.revision.load(Ordering::SeqCst).into(),
+                command: build(reply),
+            }))
+            .await
+            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
+        response
+            .await
+            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
     }
 }

@@ -8,13 +8,15 @@ use crate::RuntimeTurnResult;
 use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
-use crate::goal_runtime::GoalRuntime;
 use crate::goal_runtime::GoalRuntimeEvent;
+use crate::goal_runtime::GoalRuntimeHandle;
+use crate::goal_service::GoalService;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeCommand;
 use crate::runtime_actor::RuntimeRequest;
+use crate::runtime_command::RuntimeCommandClient;
+use crate::thread_settings::ThreadSettingsService;
 use crate::worker::Command;
-use crate::workflows::WorkflowService;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ApprovalMode;
 use mini_agent_capabilities::McpServerConfig;
@@ -33,7 +35,7 @@ use tokio::sync::oneshot;
 
 pub(crate) struct RuntimeActorState {
     pub(crate) management: RuntimeManagementState,
-    pub(crate) goal_runtime: GoalRuntime,
+    pub(crate) goal_runtime_handle: GoalRuntimeHandle,
     pub(crate) commands: mpsc::Sender<Command>,
     pub(crate) approval: ApprovalController,
     pub(crate) builtin_tools: mini_agent_host::BuiltinToolSelection,
@@ -136,10 +138,11 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         }
     }
 
-    pub(crate) fn bind_workflow(
+    pub(crate) fn bind_thread_services(
         self,
-        workflows: WorkflowService,
-    ) -> Result<(Self, WorkflowService), String> {
+        settings: ThreadSettingsService,
+        goals: GoalService,
+    ) -> Result<(Self, ThreadSettingsService, GoalService), String> {
         let Self {
             server,
             state,
@@ -149,15 +152,15 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             notifications,
         } = self;
         let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
-        let stable_system_prompt = workflows.stable_system_prompt().map(str::to_string);
-        let verifier_config = workflows.verifier_config();
-        let store = workflows.into_store().map_err(|error| error.to_string())?;
+        let stable_system_prompt = settings.stable_system_prompt().map(str::to_string);
+        let verifier_config = goals.verifier_config();
+        let store = goals.into_store().map_err(|error| error.to_string())?;
         let goal_dir = store
             .load_goal_state()
             .map_err(|error| error.to_string())?
             .map(|_| store.goal_dir());
         approval.set_goal_dir(goal_dir);
-        let goal_runtime = GoalRuntime::with_notifications(
+        let goal_runtime_handle = GoalRuntimeHandle::with_notifications(
             store,
             goal_notifications.clone(),
             verifier_config.clone(),
@@ -167,7 +170,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         server
             .install_runtime_state(RuntimeActorState {
                 management,
-                goal_runtime,
+                goal_runtime_handle,
                 commands,
                 approval: approval.clone(),
                 builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
@@ -177,12 +180,10 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 revision: crate::action::RuntimeRevision::default(),
             })
             .map_err(|error| error.to_string())?;
-        let workflows = WorkflowService::bound(
-            server.command_sender(),
-            server.runtime_revision_handle(),
-            stable_system_prompt,
-            verifier_config,
-        );
+        let client =
+            RuntimeCommandClient::new(server.command_sender(), server.runtime_revision_handle());
+        let settings = ThreadSettingsService::bound(client.clone(), stable_system_prompt);
+        let goals = GoalService::bound(client, verifier_config);
         Ok((
             Self {
                 server,
@@ -192,8 +193,16 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 settings_notifications,
                 notifications,
             },
-            workflows,
+            settings,
+            goals,
         ))
+    }
+
+    pub(crate) fn command_client(&self) -> RuntimeCommandClient {
+        RuntimeCommandClient::new(
+            self.server.command_sender(),
+            self.server.runtime_revision_handle(),
+        )
     }
 
     pub(crate) async fn session_info_action(

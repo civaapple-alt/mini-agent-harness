@@ -50,7 +50,7 @@ pub async fn verify_goal_checkpoint(
     runtime_config: &RuntimeConfig,
     messages: &[Message],
     criteria: &str,
-) -> Result<(String, crate::workflows::VerifierVerdict), String> {
+) -> Result<(String, crate::goal_service::VerifierVerdict), String> {
     let provider = runtime_config.verifier_provider_settings()?;
     let model = OpenAiModel::new(
         provider.api_key,
@@ -90,7 +90,7 @@ pub async fn verify_goal_checkpoint(
         ));
     }
     let final_text = outcome.final_text.unwrap_or_default();
-    let verdict = crate::workflows::parse_verifier_verdict(&final_text);
+    let verdict = crate::goal_service::parse_verifier_verdict(&final_text);
     Ok((final_text, verdict))
 }
 

@@ -86,17 +86,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
             retry_mcp_servers,
             management_approval,
         );
-        let workflows = mini_agent_app_server::WorkflowService::new(
+        let thread_settings = mini_agent_app_server::ThreadSettingsService::new()
+            .with_stable_system_prompt(stable_system_prompt);
+        let goals = mini_agent_app_server::GoalService::new(
             startup_config.workspace(),
             startup_config.goal_limits(),
         )
-        .with_stable_system_prompt(stable_system_prompt)
         .with_verifier_config(startup_config.clone());
         Ok((
             server,
             capability_manifest,
             StartupServices {
-                runtime: Some(RuntimeServices::new(management, workflows)?),
+                runtime: Some(RuntimeServices::new(management, thread_settings, goals)?),
             },
         ))
     })

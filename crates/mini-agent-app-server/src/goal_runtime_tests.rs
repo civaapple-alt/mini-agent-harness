@@ -24,7 +24,7 @@ fn prepared_runtime(
     std::path::PathBuf,
     HostWorkflowStore,
     mini_agent_host::GoalState,
-    super::GoalRuntime,
+    super::GoalRuntimeHandle,
 ) {
     let session_dir = temporary_session_dir();
     let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());
@@ -36,12 +36,12 @@ fn prepared_runtime(
         .mark_goal_turn_settled(&state.goal_id, "turn-1")
         .unwrap();
     let (events, _) = broadcast::channel(4);
-    let runtime = super::GoalRuntime::with_notifications(store.clone(), events, None, None);
+    let runtime = super::GoalRuntimeHandle::with_notifications(store.clone(), events, None, None);
     (session_dir, store, state, runtime)
 }
 
 fn set_pending_verification(
-    runtime: &mut super::GoalRuntime,
+    runtime: &mut super::GoalRuntimeHandle,
     goal_id: &str,
     turn_id: &str,
     checkpoint_seq: u64,

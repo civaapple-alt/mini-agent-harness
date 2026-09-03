@@ -94,11 +94,10 @@ pub struct VerifierVerdict {
     pub summary: String,
 }
 
-/// Host-owned workflow persistence used by the App Server workflow facade.
+/// Host-owned Goal persistence used by the App Server Goal service.
 ///
 /// This type binds the low-level Goal and Plan files to one session directory.
-/// Frontends should use `mini-agent-app-server::WorkflowService`, which keeps
-/// this storage seam behind the App Server command boundary.
+/// The App Server keeps this storage seam behind the Goal command boundary.
 #[derive(Clone, Debug)]
 pub struct HostWorkflowStore {
     session_dir: PathBuf,

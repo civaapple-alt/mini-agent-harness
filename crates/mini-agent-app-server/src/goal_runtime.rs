@@ -1,6 +1,6 @@
+use crate::goal_service::GoalState;
+use crate::goal_service::VerifierVerdict;
 use crate::notification::RuntimeNotification;
-use crate::workflows::GoalState;
-use crate::workflows::VerifierVerdict;
 use mini_agent_app_server_protocol::ThreadGoal;
 use mini_agent_app_server_protocol::ThreadGoalStatus;
 use mini_agent_host::HostWorkflowStore;
@@ -46,7 +46,7 @@ struct PendingVerification {
 /// verifier and continuation decisions; Host remains the persistence
 /// primitive.
 #[derive(Clone)]
-pub(crate) struct GoalRuntime {
+pub(crate) struct GoalRuntimeHandle {
     store: HostWorkflowStore,
     events: broadcast::Sender<GoalRuntimeEvent>,
     notifications: Option<broadcast::Sender<RuntimeNotification>>,
@@ -55,7 +55,7 @@ pub(crate) struct GoalRuntime {
     scheduled_goal: Option<String>,
 }
 
-impl GoalRuntime {
+impl GoalRuntimeHandle {
     pub(crate) fn with_notifications(
         store: HostWorkflowStore,
         events: broadcast::Sender<GoalRuntimeEvent>,

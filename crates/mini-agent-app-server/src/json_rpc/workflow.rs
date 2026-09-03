@@ -8,12 +8,17 @@ where
         &self,
         request: JsonRpcRequest,
     ) -> Option<JsonRpcResponse> {
-        let workflows = match self.workflow_service() {
-            Ok(workflows) => workflows,
-            Err(error) => return response_error(request.id, error),
+        let runtime = match self.runtime.as_ref() {
+            Some(runtime) => runtime,
+            None => {
+                return response_error(
+                    request.id,
+                    JsonRpcError::server_error("runtime state service is unavailable"),
+                );
+            }
         };
         let thread_id = self.thread_id().await;
-        match workflows.state_action().await {
+        match runtime.runtime_state_action().await {
             Ok(response) => {
                 let (plan_active, goal, builtin_tools) = response.value.clone();
                 response_action_with(
@@ -28,13 +33,6 @@ where
             }
             Err(error) => response_error(request.id, map_action_error(error)),
         }
-    }
-
-    pub(super) fn workflow_service(&self) -> Result<&WorkflowService, JsonRpcError> {
-        self.runtime
-            .as_ref()
-            .map(RuntimeServices::workflows)
-            .ok_or_else(|| JsonRpcError::server_error("workflow service is unavailable"))
     }
 }
 

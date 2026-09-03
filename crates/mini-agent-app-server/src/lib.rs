@@ -193,6 +193,7 @@ mod action;
 pub mod client;
 pub mod frontend;
 mod goal_runtime;
+mod goal_service;
 pub mod json_rpc;
 pub mod local;
 pub mod management;
@@ -200,11 +201,13 @@ mod notification;
 pub mod runtime;
 mod runtime_actor;
 mod runtime_command;
+mod runtime_state;
+mod thread_settings;
 pub mod trace;
 pub mod verifier;
-mod workflows;
 
 pub use client::LocalAppServerClient;
+pub use goal_service::GoalService;
 pub use json_rpc::AppServerConnection;
 pub use json_rpc::RuntimeServices;
 pub use json_rpc::StartupServices;
@@ -221,8 +224,8 @@ pub use runtime::{
     AppServerRuntime, McpRetryResult, RuntimeSessionInfo, RuntimeStartOptions, RuntimeTurnBatch,
     RuntimeTurnResult, SessionRequest,
 };
+pub use thread_settings::ThreadSettingsService;
 pub use trace::{JsonlTrace, TraceRecord};
-pub use workflows::WorkflowService;
 
 mod worker;
 use action::ActionFailure;

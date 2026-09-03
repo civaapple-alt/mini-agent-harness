@@ -10,7 +10,8 @@ use crate::AppServerConnection;
 use crate::LocalAppServerClient;
 use crate::RuntimeManagementService;
 use crate::RuntimeServices;
-use crate::workflows::WorkflowService;
+use crate::goal_service::GoalService;
+use crate::thread_settings::ThreadSettingsService;
 use mini_agent_app_server_protocol::CapabilityManifest as ProtocolCapabilityManifest;
 use mini_agent_app_server_protocol::ContextLimits as ProtocolContextLimits;
 use mini_agent_app_server_protocol::DisabledCapability;
@@ -200,14 +201,15 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             thread,
             control.clone(),
         );
-        let workflow_service = WorkflowService::new(
+        let thread_settings =
+            ThreadSettingsService::new().with_stable_system_prompt(stable_system_prompt.clone());
+        let goals = GoalService::new(
             session
                 .as_ref()
                 .and_then(|opened| opened.store.path().parent().map(PathBuf::from))
                 .unwrap_or_else(|| world.workspace().to_path_buf()),
             goal_limits,
         )
-        .with_stable_system_prompt(stable_system_prompt.clone())
         .with_verifier_config(runtime_config.clone());
         let management = RuntimeManagementService::new(
             server.clone(),
@@ -218,7 +220,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             retry_mcp_servers,
             approval.clone(),
         );
-        let services = RuntimeServices::new(management, workflow_service)
+        let services = RuntimeServices::new(management, thread_settings, goals)
             .map_err(|error| format!("cannot bind runtime services: {error}"))?;
         let connection = AppServerConnection::with_capability_manifest(
             server.clone(),

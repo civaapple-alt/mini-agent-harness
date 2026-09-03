@@ -5,13 +5,16 @@ use super::AppServerError;
 use super::ApprovalBroker;
 use super::ApprovalEvent;
 use super::ApprovalRequest;
+use super::GoalService;
 use super::RuntimeManagementService;
-use super::WorkflowService;
+use super::ThreadSettingsService;
 use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::goal_runtime::GoalRuntimeEvent;
 use crate::management::SettingsRuntimeEvent;
 use crate::notification::RuntimeNotification;
+use crate::runtime_command::{RuntimeCommand, RuntimeCommandClient};
+use crate::runtime_state::RuntimeStateSnapshot;
 use mini_agent_app_server_protocol::ApprovalRequestNotification;
 use mini_agent_app_server_protocol::ApprovalResolvedNotification;
 use mini_agent_app_server_protocol::ApprovalRespondParams;
@@ -130,23 +133,30 @@ pub struct AppServerConnection<M> {
 #[derive(Clone)]
 pub struct RuntimeServices<M> {
     management: RuntimeManagementService<M>,
-    workflows: WorkflowService,
+    thread_settings: ThreadSettingsService,
+    goals: GoalService,
+    state: RuntimeCommandClient,
     notifications: broadcast::Sender<RuntimeNotification>,
 }
 
 impl<M> RuntimeServices<M> {
     pub fn new(
         management: RuntimeManagementService<M>,
-        workflows: WorkflowService,
+        thread_settings: ThreadSettingsService,
+        goals: GoalService,
     ) -> Result<Self, String>
     where
         M: Model + Send + 'static,
     {
-        let (management, workflows) = management.bind_workflow(workflows)?;
+        let (management, thread_settings, goals) =
+            management.bind_thread_services(thread_settings, goals)?;
+        let state = management.command_client();
         let notifications = management.notifications();
         Ok(Self {
             management,
-            workflows,
+            thread_settings,
+            goals,
+            state,
             notifications,
         })
     }
@@ -155,8 +165,20 @@ impl<M> RuntimeServices<M> {
         &self.management
     }
 
-    fn workflows(&self) -> &WorkflowService {
-        &self.workflows
+    fn thread_settings(&self) -> &ThreadSettingsService {
+        &self.thread_settings
+    }
+
+    fn goals(&self) -> &GoalService {
+        &self.goals
+    }
+
+    pub(crate) async fn runtime_state_action(
+        &self,
+    ) -> Result<ActionResponse<RuntimeStateSnapshot>, ActionFailure> {
+        self.state
+            .request_action(|reply| RuntimeCommand::RuntimeState { reply })
+            .await
     }
 
     fn notifications(&self) -> broadcast::Sender<RuntimeNotification> {
@@ -438,6 +460,20 @@ where
 
     pub(crate) fn runtime_management(&self) -> Result<&RuntimeManagementService<M>, String> {
         self.management_service().map_err(|error| error.message)
+    }
+
+    pub(crate) fn thread_settings_service(&self) -> Result<&ThreadSettingsService, JsonRpcError> {
+        self.runtime
+            .as_ref()
+            .map(RuntimeServices::thread_settings)
+            .ok_or_else(|| JsonRpcError::server_error("thread settings service is unavailable"))
+    }
+
+    pub(crate) fn goal_service(&self) -> Result<&GoalService, JsonRpcError> {
+        self.runtime
+            .as_ref()
+            .map(RuntimeServices::goals)
+            .ok_or_else(|| JsonRpcError::server_error("thread goal service is unavailable"))
     }
 
     pub(crate) fn subscribe_notifications(

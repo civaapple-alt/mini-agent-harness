@@ -16,12 +16,12 @@ where
         if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
             return response_error(request.id, error);
         }
-        let workflows = match self.workflow_service() {
-            Ok(workflows) => workflows,
+        let goals = match self.goal_service() {
+            Ok(goals) => goals,
             Err(error) => return response_error(request.id, error),
         };
-        match workflows
-            .set_goal_action(params.objective, params.status, params.token_budget)
+        match goals
+            .set_thread_goal_action(params.objective, params.status, params.token_budget)
             .await
         {
             Ok(response) => {
@@ -44,11 +44,11 @@ where
         if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
             return response_error(request.id, error);
         }
-        let workflows = match self.workflow_service() {
-            Ok(workflows) => workflows,
+        let goals = match self.goal_service() {
+            Ok(goals) => goals,
             Err(error) => return response_error(request.id, error),
         };
-        match workflows.get_goal_action().await {
+        match goals.get_thread_goal_action().await {
             Ok(response) => {
                 let goal = response.value.clone().map(|state| {
                     crate::goal_runtime::project_goal(params.thread_id.clone(), state)
@@ -70,11 +70,11 @@ where
         if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
             return response_error(request.id, error);
         }
-        let workflows = match self.workflow_service() {
-            Ok(workflows) => workflows,
+        let goals = match self.goal_service() {
+            Ok(goals) => goals,
             Err(error) => return response_error(request.id, error),
         };
-        match workflows.clear_goal_action().await {
+        match goals.clear_thread_goal_action().await {
             Ok(response) => {
                 let cleared = response.value;
                 response_action_with(request.id, response, ThreadGoalClearResponse { cleared })
@@ -94,8 +94,8 @@ where
         if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
             return response_error(request.id, error);
         }
-        let workflows = match self.workflow_service() {
-            Ok(workflows) => workflows,
+        let settings = match self.thread_settings_service() {
+            Ok(settings) => settings,
             Err(error) => return response_error(request.id, error),
         };
         let builtin_tools = match params.builtin_tools {
@@ -108,10 +108,7 @@ where
             None => None,
         };
         let active = matches!(params.collaboration_mode.mode, CollaborationModeKind::Plan);
-        match workflows
-            .set_collaboration_mode_action(active, builtin_tools)
-            .await
-        {
+        match settings.update_action(active, builtin_tools).await {
             Ok(response) => {
                 let builtin_tools = response.value.clone();
                 response_action_with(

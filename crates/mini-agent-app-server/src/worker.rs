@@ -42,7 +42,7 @@ pub(super) enum Command {
         goal_id: String,
         turn_id: TurnId,
         checkpoint_seq: u64,
-        result: Result<(String, crate::workflows::VerifierVerdict), String>,
+        result: Result<(String, crate::goal_service::VerifierVerdict), String>,
     },
     Cancel {
         thread_id: ThreadId,
@@ -163,7 +163,7 @@ pub(super) async fn worker_loop<M>(
             runtime = Some(*state);
             if runtime
                 .as_ref()
-                .is_some_and(|state| state.goal_runtime.plan_active())
+                .is_some_and(|state| state.goal_runtime_handle.plan_active())
                 && let Some(state) = runtime.as_mut()
                 && let Err(error) =
                     runtime_actor::set_collaboration_mode(&mut threads, state, true, None)
@@ -266,7 +266,7 @@ pub(super) async fn worker_loop<M>(
                     }
                     let goal_state = match (goal_id.as_deref(), runtime.as_ref()) {
                         (Some(goal_id), Some(runtime_state)) => {
-                            match runtime_state.goal_runtime.load_goal_state() {
+                            match runtime_state.goal_runtime_handle.load_goal_state() {
                                 Ok(Some(goal)) if goal.goal_id == goal_id => Some(goal),
                                 Ok(_) => None,
                                 Err(error) => {
@@ -731,7 +731,7 @@ fn complete_goal_verification(
     goal_id: String,
     turn_id: TurnId,
     checkpoint_seq: u64,
-    result: Result<(String, crate::workflows::VerifierVerdict), String>,
+    result: Result<(String, crate::goal_service::VerifierVerdict), String>,
 ) {
     if let Err(error) = runtime_actor::complete_goal_verification(
         runtime,

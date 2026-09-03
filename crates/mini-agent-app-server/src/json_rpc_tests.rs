@@ -199,13 +199,13 @@ fn shell_approval_command() -> &'static str {
 }
 
 fn managed_connection(name: &str) -> (AppServerConnection<DoneModel>, std::path::PathBuf) {
-    managed_connection_with(DoneModel, name, crate::workflows::GoalLimits::default())
+    managed_connection_with(DoneModel, name, crate::goal_service::GoalLimits::default())
 }
 
 fn managed_connection_with<M: Model + Send + 'static>(
     model: M,
     name: &str,
-    goal_limits: crate::workflows::GoalLimits,
+    goal_limits: crate::goal_service::GoalLimits,
 ) -> (AppServerConnection<M>, std::path::PathBuf) {
     let root = rpc_root(name);
     managed_connection_at(model, root, goal_limits)
@@ -214,9 +214,10 @@ fn managed_connection_with<M: Model + Send + 'static>(
 fn managed_connection_at<M: Model + Send + 'static>(
     model: M,
     root: std::path::PathBuf,
-    goal_limits: crate::workflows::GoalLimits,
+    goal_limits: crate::goal_service::GoalLimits,
 ) -> (AppServerConnection<M>, std::path::PathBuf) {
-    let workflows = WorkflowService::new(root.clone(), goal_limits);
+    let thread_settings = ThreadSettingsService::new();
+    let goals = GoalService::new(root.clone(), goal_limits);
     let server = crate::tests::server(model);
     let management = RuntimeManagementService::new(
         server.clone(),
@@ -233,8 +234,9 @@ fn managed_connection_at<M: Model + Send + 'static>(
         ApprovalController::with_preset(ApprovalMode::Automatic, Default::default()),
     );
     (
-        AppServerConnection::new(server)
-            .with_runtime_services(RuntimeServices::new(management, workflows).unwrap()),
+        AppServerConnection::new(server).with_runtime_services(
+            RuntimeServices::new(management, thread_settings, goals).unwrap(),
+        ),
         root,
     )
 }
@@ -633,7 +635,7 @@ async fn resumes_settled_goal_without_replaying_turn() {
     let root = rpc_root("goal-resume-settled");
     let store = mini_agent_host::HostWorkflowStore::new(
         root.clone(),
-        crate::workflows::GoalLimits::default(),
+        crate::goal_service::GoalLimits::default(),
     );
     let state = store.set_goal("resume settled goal", None).unwrap();
     store
@@ -646,7 +648,7 @@ async fn resumes_settled_goal_without_replaying_turn() {
     let (mut connection, root) = managed_connection_at(
         ScenarioModel::Counting(calls.clone()),
         root,
-        crate::workflows::GoalLimits::default(),
+        crate::goal_service::GoalLimits::default(),
     );
     initialize_connection(&mut connection, "goal-resume-test").await;
 
@@ -677,9 +679,9 @@ async fn enforces_goal_step_budget_at_the_core_boundary() {
     let (mut connection, root) = managed_connection_with(
         ScenarioModel::StepLimit,
         "goal-step-budget",
-        crate::workflows::GoalLimits {
+        crate::goal_service::GoalLimits {
             milestone_step_budget: 1,
-            ..crate::workflows::GoalLimits::default()
+            ..crate::goal_service::GoalLimits::default()
         },
     );
     initialize_connection(&mut connection, "goal-step-budget-test").await;
@@ -705,7 +707,7 @@ async fn records_goal_usage_and_enforces_token_budget() {
     let (mut connection, root) = managed_connection_with(
         ScenarioModel::Budget,
         "goal-token-budget",
-        crate::workflows::GoalLimits::default(),
+        crate::goal_service::GoalLimits::default(),
     );
     initialize_connection(&mut connection, "goal-token-budget-test").await;
     connection
@@ -732,9 +734,9 @@ async fn enforces_goal_timeout_with_cooperative_cancellation() {
     let (mut connection, root) = managed_connection_with(
         ScenarioModel::Timeout(release.clone()),
         "goal-timeout",
-        crate::workflows::GoalLimits {
+        crate::goal_service::GoalLimits {
             milestone_timeout_secs: 1,
-            ..crate::workflows::GoalLimits::default()
+            ..crate::goal_service::GoalLimits::default()
         },
     );
     initialize_connection(&mut connection, "goal-timeout-test").await;
@@ -775,12 +777,18 @@ async fn enforces_goal_timeout_with_cooperative_cancellation() {
 #[tokio::test]
 async fn binds_active_goal_workspace_to_approval_controller() {
     let root = rpc_root("goal-approval-path");
-    mini_agent_host::HostWorkflowStore::new(root.clone(), crate::workflows::GoalLimits::default())
-        .set_goal("bind the goal workspace", None)
-        .unwrap();
-    mini_agent_host::HostWorkflowStore::new(root.clone(), crate::workflows::GoalLimits::default())
-        .pause_goal()
-        .unwrap();
+    mini_agent_host::HostWorkflowStore::new(
+        root.clone(),
+        crate::goal_service::GoalLimits::default(),
+    )
+    .set_goal("bind the goal workspace", None)
+    .unwrap();
+    mini_agent_host::HostWorkflowStore::new(
+        root.clone(),
+        crate::goal_service::GoalLimits::default(),
+    )
+    .pause_goal()
+    .unwrap();
     let approval = ApprovalController::with_preset(ApprovalMode::Automatic, Default::default());
     let observed_approval = approval.clone();
     let server = crate::tests::server(DoneModel);
@@ -798,9 +806,10 @@ async fn binds_active_goal_workspace_to_approval_controller() {
         Vec::new(),
         approval,
     );
-    let workflows = WorkflowService::new(root.clone(), crate::workflows::GoalLimits::default());
+    let thread_settings = ThreadSettingsService::new();
+    let goals = GoalService::new(root.clone(), crate::goal_service::GoalLimits::default());
     let _connection = AppServerConnection::new(server)
-        .with_runtime_services(RuntimeServices::new(management, workflows).unwrap());
+        .with_runtime_services(RuntimeServices::new(management, thread_settings, goals).unwrap());
     assert_eq!(
         observed_approval.goal_dir(),
         Some(mini_agent_capabilities::normalize_path(&root.join("goal")))
