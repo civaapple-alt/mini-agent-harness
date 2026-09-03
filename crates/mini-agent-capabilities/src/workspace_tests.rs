@@ -20,14 +20,14 @@ fn workspace(
 }
 
 #[test]
-fn policy_can_be_replaced_after_frontend_callback_creation() {
+fn policy_replacement_uses_full_machine_file_allowance() {
     let approval = ApprovalController::with_callback(ApprovalMode::Interactive, |_| {
-        panic!("profile-selected allow should not ask the frontend")
+        panic!("FullMachine file access should not ask the frontend")
     });
-    approval.set_policy(SecurityPolicy::for_preset(SecurityPreset::Turbomode));
+    approval.set_policy(SecurityPolicy::for_preset(SecurityPreset::FullMachine));
 
-    assert_eq!(approval.preset(), SecurityPreset::Turbomode);
-    approval.approve("shell:echo profile").unwrap();
+    assert_eq!(approval.preset(), SecurityPreset::FullMachine);
+    approval.approve("read C:/some/file.txt").unwrap();
 }
 
 #[test]

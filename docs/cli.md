@@ -66,7 +66,7 @@ mini-agent fork SESSION_ID
 | `--auto-approve` / `-y` / `--yes` / `--auto` | `ask` | 显式放行敏感工具 |
 | `--max-steps N` | `ask` | 限制模型步骤；默认 8，`0` 表示不限制 |
 | `--no-tools` | interactive、`ask`、`auto` | 禁用 Builtin 和扩展工具 |
-| `--security-preset PRESET` | interactive、`ask`、`auto` | `default`、`turbomode` 或 `full-machine` |
+| `--security-preset PRESET` | interactive、`ask`、`auto` | `default` 或 `full-machine` |
 | `--sandbox KIND` | interactive、`ask`、`auto` | `native` 或 `docker` |
 | `--web-search` / `--search` | interactive、`ask`、`auto` | 启用内置 Responses `web_search` |
 | `--no-web-search` / `--no-search` | interactive、`ask`、`auto` | 禁用内置 Responses `web_search` |

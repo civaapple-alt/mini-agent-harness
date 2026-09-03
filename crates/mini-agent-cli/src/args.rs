@@ -17,7 +17,7 @@ COMMANDS:
     resume, fork                        Durable session management
 
 COMMON OPTIONS:
-    --security-preset PRESET            default | turbomode | full-machine
+    --security-preset PRESET            default | full-machine
     --sandbox KIND                      native | docker
     --web-search / --no-web-search      Built-in web search toggle
     --no-tools                          Model-only runtime; disable all tools and extensions
@@ -48,7 +48,7 @@ Plan and Goal workflows, session inspection, and interactive management are expo
 
 OPTIONS:
     --session-id SESSION_ID     Resume this durable session instead of opening a new one
-    --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]
+    --security-preset PRESET     Security policy preset: default, full-machine [default: default]
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
@@ -82,7 +82,7 @@ OPTIONS:
     --session-id SESSION_ID      Resume this durable session instead of opening a new one
     --auto-approve, -y           Permit sensitive tools non-interactively (aliases: --yes, --auto)
     --max-steps N                Cap model steps for this turn (default: 8; 0 means unlimited)
-    --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]
+    --security-preset PRESET     Security policy preset: default, full-machine [default: default]
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
@@ -102,7 +102,7 @@ Without a prompt, starts the interactive REPL in copilot mode.
 
 OPTIONS:
     --session-id SESSION_ID      Resume this durable session instead of opening a new one
-    --security-preset PRESET     Security policy preset: default, turbomode, full-machine [default: default]
+    --security-preset PRESET     Security policy preset: default, full-machine [default: default]
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
@@ -638,7 +638,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(ask_inv.command, Command::Ask);
-        assert_eq!(ask_inv.security_preset, SecurityPreset::Turbomode);
+        assert_eq!(ask_inv.security_preset, SecurityPreset::FullMachine);
         assert!(ask_inv.security_preset_explicit);
         assert_eq!(ask_inv.sandbox_kind, SandboxKind::Native);
         assert!(ask_inv.sandbox_kind_explicit);
@@ -653,7 +653,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(interactive_inv.command, Command::Interactive);
-        assert_eq!(interactive_inv.security_preset, SecurityPreset::Turbomode);
+        assert_eq!(interactive_inv.security_preset, SecurityPreset::FullMachine);
         assert!(interactive_inv.security_preset_explicit);
         assert_eq!(interactive_inv.sandbox_kind, SandboxKind::Native);
         assert!(interactive_inv.sandbox_kind_explicit);

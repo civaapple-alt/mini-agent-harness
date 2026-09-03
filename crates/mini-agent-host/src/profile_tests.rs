@@ -112,7 +112,7 @@ fn rule_policy_reports_shadowed_sources_and_read_only_security() {
     let profile = RuntimeProfile {
         agent: AgentKind::Plan,
         extensions: ExtensionLoadDepth::None,
-        security: SecurityPreset::Turbomode,
+        security: SecurityPreset::FullMachine,
         ..RuntimeProfile::default()
     };
     let manifest = profile.manifest();
@@ -132,7 +132,7 @@ fn rule_policy_reports_shadowed_sources_and_read_only_security() {
         manifest
             .rule_conflicts
             .iter()
-            .any(|conflict| conflict.contains("turbomode"))
+            .any(|conflict| conflict.contains("full-machine"))
     );
     assert_eq!(
         manifest.rule_source_status[6].state,

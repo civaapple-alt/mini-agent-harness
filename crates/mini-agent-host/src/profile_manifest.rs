@@ -135,9 +135,9 @@ impl RuntimeProfile {
         if self.regular_agent.rules.workflows && self.workflows == WorkflowScope::Disabled {
             rule_conflicts.push("workflow rules shadowed by disabled workflow scope".to_string());
         }
-        if self.agent.is_read_only() && self.security == SecurityPreset::Turbomode {
+        if self.agent.is_read_only() && self.security == SecurityPreset::FullMachine {
             rule_conflicts
-                .push("turbomode write allowance shadowed by read-only agent scope".to_string());
+                .push("full-machine write allowance shadowed by read-only agent scope".to_string());
         }
         let mut rule_source_status = vec![
             RuleSourceStatus {

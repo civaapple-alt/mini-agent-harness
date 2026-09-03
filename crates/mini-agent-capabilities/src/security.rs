@@ -7,7 +7,6 @@ pub enum SecurityPreset {
     #[default]
     Default,
     FullMachine,
-    Turbomode,
     Custom,
 }
 
@@ -16,7 +15,10 @@ impl SecurityPreset {
         match text.to_ascii_lowercase().as_str() {
             "default" => Ok(Self::Default),
             "full-machine" | "full_machine" | "fullmachine" => Ok(Self::FullMachine),
-            "turbomode" | "turbo" => Ok(Self::Turbomode),
+            // The old spelling is accepted only at this input boundary. It
+            // immediately becomes the canonical FullMachine value and can
+            // never survive as a runtime identity.
+            "turbomode" => Ok(Self::FullMachine),
             "custom" => Ok(Self::Custom),
             other => Err(format!("unknown security preset: {other}")),
         }
@@ -26,7 +28,6 @@ impl SecurityPreset {
         match self {
             Self::Default => "default",
             Self::FullMachine => "full-machine",
-            Self::Turbomode => "turbomode",
             Self::Custom => "custom",
         }
     }
@@ -99,12 +100,6 @@ impl SecurityPolicy {
                 ask_patterns: vec!["shell:*".to_string()],
                 allow_patterns: vec!["file:*".to_string()],
             },
-            SecurityPreset::Turbomode => Self {
-                preset,
-                deny_patterns: Vec::new(),
-                ask_patterns: Vec::new(),
-                allow_patterns: vec!["*".to_string()],
-            },
             SecurityPreset::Custom => Self {
                 preset,
                 deny_patterns: Vec::new(),
@@ -132,7 +127,6 @@ impl SecurityPolicy {
             }
         }
         match self.preset {
-            SecurityPreset::Turbomode => SecurityDecision::Allow,
             SecurityPreset::FullMachine => {
                 if action.starts_with("file:") {
                     SecurityDecision::Allow
@@ -270,7 +264,11 @@ mod tests {
         );
         assert_eq!(
             SecurityPreset::parse("turbomode").unwrap(),
-            SecurityPreset::Turbomode
+            SecurityPreset::FullMachine
+        );
+        assert_eq!(
+            SecurityPreset::parse("Turbomode").unwrap().name(),
+            "full-machine"
         );
         assert_eq!(
             SecurityPreset::parse("custom").unwrap(),
@@ -289,12 +287,6 @@ mod tests {
         assert_eq!(
             default_policy.evaluate("shell command `gh auth login`"),
             SecurityDecision::Deny
-        );
-
-        let turbo = SecurityPolicy::for_preset(SecurityPreset::Turbomode);
-        assert_eq!(
-            turbo.evaluate("shell command `cargo build`"),
-            SecurityDecision::Allow
         );
 
         let full = SecurityPolicy::for_preset(SecurityPreset::FullMachine);

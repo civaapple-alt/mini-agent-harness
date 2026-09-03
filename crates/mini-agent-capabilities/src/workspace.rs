@@ -174,7 +174,6 @@ impl Workspace {
 
     fn allows_outside_paths(&self) -> bool {
         self.approval.preset() == SecurityPreset::FullMachine
-            || self.approval.preset() == SecurityPreset::Turbomode
     }
 
     fn create_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
