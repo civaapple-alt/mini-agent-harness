@@ -292,6 +292,28 @@ Goal 可以使用 milestone 作为内部进度/证据 checkpoint，但 milestone
 `blocked`、`usage_limited` 或清晰的运行保护诊断，并且可以恢复或检查；不能无解释地显示为
 “Turn 被中断”。
 
+### Goal 长时间自主运行的 Runtime Limits
+
+Goal 的默认 limits 应优先保证有意义的自主推进，而不是尽快结束一次短 Turn。建议的初始
+默认基线如下：
+
+| 变量 | 当前默认值 | 建议 Goal 默认值 | 边界含义 |
+| --- | ---: | ---: | --- |
+| `MINI_AGENT_GOAL_MAX_LOOPS` | 20 | 100 | Goal continuation 循环的最大次数 |
+| `MINI_AGENT_GOAL_STEP_BUDGET` | 50 | 200 | 每个 Goal milestone Turn 的 Core 模型步数上限 |
+| `MINI_AGENT_GOAL_TIMEOUT_SECS` | 600 | 1800 | 每个 milestone Turn 的协作式墙钟时间上限 |
+
+这些值属于 Host/App Server Runtime 的安全保护，不是 Web Studio 的任务配置，也不是向用户
+展示的进度语义。Goal/Auto Copilot 应使用更大的默认值；为确定性 Fixture 运行，操作方可以
+主动调低。`MINI_AGENT_MAX_STEPS` 不属于 Web Goal 控制面；如果独立 CLI 路径暂时保留它，
+也只能作为实现层保护。可选的 Goal `tokenBudget` 仍然是调用方明确指定的资源上限，不设置
+过小的隐式默认值；调用方明确设置的预算达到后，状态应为 `budget_limited`。
+
+Goal 触达任一 limit 时，当前 Turn 必须先结算 checkpoint 和有界证据，再由 Goal Runtime
+报告 `usage_limited` 或清晰的运行保护状态。Resume 从已结算状态继续，不能重复用户消息，
+也不能静默生成第二个 Turn。UI 绝不能把原始 limit 展示成“Turn Settled（Status: step_limit；
+Steps: 8）”。
+
 Plan 和 Goal 有意不同：Plan 是用户通过 slash 启动的、读多写少的探索 Runtime，产出计划文件；
 Goal 是用户通过 slash 启动的自主 Runtime，可以在获得批准后执行项目修改、验证结果，并跨 Turn
 持续推进，直到完成、暂停或触发终止保护。两者都不需要 Profile 选择器。
@@ -733,6 +755,8 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
 21. 不存在面向用户的 `max_steps` 或常规 `step_limit` 控制。Plan 和 Goal Runtime 状态
     负责继续与完成；Core 异常的安全保护结果作为内部诊断保留，并展示为“运行保护已触发，
     请检查或重试”；只有真正的取消才展示为“中断/已取消”。
+22. 新建 Goal 默认使用建议的 `100 / 200 / 1800` Runtime limits，除非操作方为了 Fixture
+    明确调低；调用方明确提供的 `tokenBudget` 仍是独立资源上限，达到后报告 `budget_limited`。
 
 Provider 支持的验证保持为可选，默认不能使用付费调用。正常证据路径使用 Mock Provider、
 Protocol Fixture 和 Harness Scenario。

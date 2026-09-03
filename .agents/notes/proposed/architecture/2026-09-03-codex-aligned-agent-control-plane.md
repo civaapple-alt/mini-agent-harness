@@ -404,6 +404,32 @@ resource/usage stop. These stops must produce `blocked`, `usage_limited`, or a
 clear runtime-protection diagnostic and must be resumable or inspectable; they
 must not be rendered as an unexplained “Turn interrupted”.
 
+### Goal runtime limits for long-lived autonomy
+
+The default Goal limits should favor meaningful autonomous progress instead of
+short single-Turn runs. The proposed initial baseline is:
+
+| Variable | Current default | Proposed Goal default | Boundary |
+| --- | ---: | ---: | --- |
+| `MINI_AGENT_GOAL_MAX_LOOPS` | 20 | 100 | maximum Goal continuation cycles |
+| `MINI_AGENT_GOAL_STEP_BUDGET` | 50 | 200 | Core model-step cap per Goal milestone Turn |
+| `MINI_AGENT_GOAL_TIMEOUT_SECS` | 600 | 1800 | cooperative wall-clock limit per milestone Turn |
+
+These values are Host/App Server runtime safeguards, not Web Studio task
+settings and not progress semantics shown to the user. They are intentionally
+larger for Goal/Auto Copilot and may be lowered by operators for deterministic
+fixtures. `MINI_AGENT_MAX_STEPS` is not part of the Web Goal control surface;
+if a standalone CLI path retains it, it remains an implementation-only guard.
+The optional Goal `tokenBudget` remains an explicit caller-selected resource
+limit; it has no small implicit default, and an explicitly reached budget
+settles as `budget_limited`.
+
+When a Goal limit is reached, the active Turn must settle its checkpoint and
+bounded evidence before the Goal Runtime reports `usage_limited` or a clear
+runtime-protection state. Resume continues from that settled state; it does not
+replay the user message or silently create a second Turn. The UI must never
+surface the raw limit as “Turn Settled (Status: step_limit; Steps: 8)”.
+
 Plan and Goal are deliberately different: Plan is a user-invoked,
 read-mostly exploration runtime that produces a plan artifact; Goal is the
 user-invoked autonomous runtime that can carry out approved Project changes,
@@ -962,6 +988,10 @@ The following scenarios are required before the proposal can move to
     safety-guard outcome is preserved as an internal diagnostic and rendered
     as protection-triggered/inspect-or-retry, while only an actual cancellation
     is rendered as “interrupted/cancelled”.
+22. A fresh Goal uses the proposed `100 / 200 / 1800` runtime defaults unless
+    an operator deliberately lowers them for a fixture; an explicitly supplied
+    `tokenBudget` remains an independent resource limit and reports
+    `budget_limited` when reached.
 
 Provider-backed verification remains opt-in and must not use paid calls by
 default. The normal evidence path uses mock providers, protocol fixtures, and
