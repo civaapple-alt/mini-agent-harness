@@ -11,7 +11,7 @@ index of other Markdown files.
 | [Harness framework](harness-framework.md) | Harness responsibilities, Core/Host/Capabilities/App Server layers, and the mini/Codex comparison. |
 | [Harness boundaries](harness-boundaries.md) | Ownership boundaries, change admission, loop control, approval, sandbox, and deferred policy decisions. |
 | [Harness tool surface](harness-tool-surface.md) | The four default Builtin tools, paged `read_file`, `apply_patch`, and extension/profile rules. |
-| [App Server](app-server.md) | JSON-RPC transport, Thread/Turn operations, settings, Goal control, events, approval, and runtime ordering. |
+| [App Server](app-server.md) | JSON-RPC transport, Thread/Turn/ThreadItem operations, settings, Goal control, events, approval, and runtime ordering. |
 | [World state](world-state.md) | Bounded environment snapshots, durable items, checkpoints, and resume authority. |
 | [Harness evidence](harness-evidence.md) | Bounded scenarios, failure/timeout/retry coverage, and evidence gates for harness changes. |
 

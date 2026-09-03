@@ -22,6 +22,8 @@ use mini_agent_app_server_protocol::CollaborationModeKind;
 use mini_agent_app_server_protocol::DisabledCapability;
 use mini_agent_app_server_protocol::InitializeParams;
 use mini_agent_app_server_protocol::InitializeResult;
+use mini_agent_app_server_protocol::ItemCompletedNotification;
+use mini_agent_app_server_protocol::ItemStartedNotification;
 use mini_agent_app_server_protocol::JsonRpcError;
 use mini_agent_app_server_protocol::JsonRpcRequest;
 use mini_agent_app_server_protocol::JsonRpcResponse;
@@ -36,6 +38,7 @@ use mini_agent_app_server_protocol::METHOD_THREAD_FORK;
 use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_CLEAR;
 use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_GET;
 use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_SET;
+use mini_agent_app_server_protocol::METHOD_THREAD_ITEMS_LIST;
 use mini_agent_app_server_protocol::METHOD_THREAD_LIST;
 use mini_agent_app_server_protocol::METHOD_THREAD_READ;
 use mini_agent_app_server_protocol::METHOD_THREAD_RESUME;
@@ -65,6 +68,7 @@ use mini_agent_app_server_protocol::ThreadGoalGetResponse;
 use mini_agent_app_server_protocol::ThreadGoalSetParams;
 use mini_agent_app_server_protocol::ThreadGoalSetResponse;
 use mini_agent_app_server_protocol::ThreadGoalUpdatedNotification;
+use mini_agent_app_server_protocol::ThreadItemsListParams;
 use mini_agent_app_server_protocol::ThreadListParams;
 use mini_agent_app_server_protocol::ThreadListResult;
 use mini_agent_app_server_protocol::ThreadReadParams;
@@ -272,6 +276,7 @@ where
         match request.method.as_str() {
             METHOD_THREAD_START => self.handle_thread_start(request).await,
             METHOD_THREAD_LIST => self.handle_thread_list(request).await,
+            METHOD_THREAD_ITEMS_LIST => self.handle_thread_items_list(request).await,
             METHOD_THREAD_FORK => self.handle_thread_fork(request).await,
             METHOD_THREAD_RESUME => self.handle_thread_resume(request).await,
             METHOD_THREAD_READ => self.handle_thread_read(request).await,
@@ -387,6 +392,8 @@ where
                 thread_settings_update: self.runtime.is_some(),
                 turn_read: true,
                 thread_list: true,
+                thread_items_list: true,
+                item_lifecycle_notifications: self.runtime.is_some(),
                 approval_requests: self.approval_enabled,
                 workflows: self.runtime.is_some(),
                 runtime_management: self.runtime.is_some(),
@@ -569,6 +576,30 @@ pub(super) fn runtime_notification_request(event: RuntimeNotification) -> JsonRp
                 .expect("event notification is serializable");
             JsonRpcRequest::notification(METHOD_TURN_EVENT, Some(params))
         }
+        RuntimeNotification::ItemStarted(event) => JsonRpcRequest::notification(
+            mini_agent_app_server_protocol::METHOD_ITEM_STARTED,
+            Some(
+                serde_json::to_value(ItemStartedNotification {
+                    thread_id: event.thread_id,
+                    turn_id: event.turn_id,
+                    item: event.item,
+                    started_at_ms: event.started_at_ms,
+                })
+                .expect("item started notification is serializable"),
+            ),
+        ),
+        RuntimeNotification::ItemCompleted(event) => JsonRpcRequest::notification(
+            mini_agent_app_server_protocol::METHOD_ITEM_COMPLETED,
+            Some(
+                serde_json::to_value(ItemCompletedNotification {
+                    thread_id: event.thread_id,
+                    turn_id: event.turn_id,
+                    item: event.item,
+                    completed_at_ms: event.completed_at_ms,
+                })
+                .expect("item completed notification is serializable"),
+            ),
+        ),
         RuntimeNotification::Goal(event) => goal_notification_request(event),
         RuntimeNotification::Settings(event) => settings_notification_request(event),
     }

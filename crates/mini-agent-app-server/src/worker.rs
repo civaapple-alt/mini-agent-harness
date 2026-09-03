@@ -10,6 +10,13 @@ use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeRequest;
 use crate::thread_manager::ThreadHandle;
 use crate::thread_manager::ThreadManager;
+use mini_agent_app_server_protocol::ItemCompletedNotification;
+use mini_agent_app_server_protocol::ItemSortDirection;
+use mini_agent_app_server_protocol::ItemStartedNotification;
+use mini_agent_app_server_protocol::ThreadItem;
+use mini_agent_app_server_protocol::ThreadItemEntry;
+use mini_agent_app_server_protocol::ThreadItemsListParams;
+use mini_agent_app_server_protocol::ThreadItemsListResult;
 use mini_agent_app_server_protocol::TurnReadResult;
 use mini_agent_core::SteeringMode;
 use mini_agent_core::TurnResult;
@@ -74,6 +81,10 @@ pub(super) enum Command {
         turn_id: TurnId,
         reply: oneshot::Sender<ActionResult<Option<SettledTurn>>>,
     },
+    ReadItems {
+        params: ThreadItemsListParams,
+        reply: oneshot::Sender<ActionResult<ThreadItemsListResult>>,
+    },
     CreateThread {
         thread_id: ThreadId,
         reply: oneshot::Sender<ActionResult<ThreadId>>,
@@ -104,8 +115,35 @@ impl ThreadListener {
     }
 
     fn send_event(&self, event: EventEnvelope) {
+        let turn_id = event.turn_id.clone();
+        if let Some(turn_id) = turn_id.clone() {
+            for item in ThreadItem::started_from_event(&event) {
+                let _ = self.notifications.send(RuntimeNotification::ItemStarted(
+                    ItemStartedNotification {
+                        thread_id: event.thread_id.clone(),
+                        turn_id: turn_id.clone(),
+                        item,
+                        started_at_ms: timestamp_ms(),
+                    },
+                ));
+            }
+        }
         let _ = self.events.send(event.clone());
-        let _ = self.notifications.send(RuntimeNotification::Event(event));
+        let _ = self
+            .notifications
+            .send(RuntimeNotification::Event(event.clone()));
+        if let Some(turn_id) = turn_id {
+            for item in ThreadItem::completed_from_event(&event) {
+                let _ = self.notifications.send(RuntimeNotification::ItemCompleted(
+                    ItemCompletedNotification {
+                        thread_id: event.thread_id.clone(),
+                        turn_id: turn_id.clone(),
+                        item,
+                        completed_at_ms: timestamp_ms(),
+                    },
+                ));
+            }
+        }
     }
 
     fn record_usage(&mut self, usage: Option<ModelUsage>) {
@@ -621,6 +659,10 @@ pub(super) async fn worker_loop<M>(
                     Ok(settled_turns.get(turn_id.as_str()).cloned()),
                 );
             }
+            Command::ReadItems { params, reply } => {
+                let result = project_thread_items(&threads, runtime.as_ref(), &params);
+                respond(reply, receipt, result);
+            }
             Command::CreateThread { thread_id, reply } => {
                 let result = threads.create(thread_id);
                 if result.is_ok() {
@@ -860,6 +902,9 @@ fn handle_running_command<M>(
         Command::ReadTurn { reply, .. } => {
             respond(reply, receipt, Err(AppServerError::Busy));
         }
+        Command::ReadItems { reply, .. } => {
+            respond(reply, receipt, Err(AppServerError::Busy));
+        }
         Command::CreateThread { reply, .. } => {
             respond(reply, receipt, Err(AppServerError::Busy));
         }
@@ -882,4 +927,99 @@ fn handle_running_command<M>(
             context.runtime_revision,
         ),
     }
+}
+
+const MAX_ITEM_LIST_LIMIT: usize = 128;
+
+fn project_thread_items<M>(
+    threads: &ThreadManager<M>,
+    runtime: Option<&RuntimeActorState>,
+    params: &ThreadItemsListParams,
+) -> Result<ThreadItemsListResult, AppServerError>
+where
+    M: Model + 'static,
+{
+    let mut entries = runtime
+        .and_then(|state| state.management.session_items())
+        .map(|items| {
+            items
+                .iter()
+                .filter(|record| record.thread_id == params.thread_id.as_str())
+                .filter(|record| {
+                    params
+                        .turn_id
+                        .as_ref()
+                        .is_none_or(|turn_id| record.turn_id.as_deref() == Some(turn_id.as_str()))
+                })
+                .filter_map(|record| {
+                    let turn_id = record.turn_id.as_ref()?.clone();
+                    let turn_id = TurnId::new(turn_id);
+                    Some(
+                        ThreadItem::from_message_with_id(&record.message, record.item_id.clone())
+                            .into_iter()
+                            .map(move |item| ThreadItemEntry {
+                                turn_id: turn_id.clone(),
+                                item,
+                            }),
+                    )
+                })
+                .flatten()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if entries.is_empty()
+        && runtime
+            .and_then(|state| state.management.session_items())
+            .is_none()
+    {
+        let thread = threads
+            .get(params.thread_id.as_str())
+            .ok_or_else(|| AppServerError::ThreadNotFound(params.thread_id.clone()))?;
+        let checkpoint = thread
+            .checkpoint()
+            .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
+        if let Some(turn_id) = checkpoint.last_turn_id {
+            entries = ThreadItem::from_messages(checkpoint.session.messages())
+                .into_iter()
+                .map(|item| ThreadItemEntry {
+                    turn_id: turn_id.clone(),
+                    item,
+                })
+                .collect();
+        }
+    }
+
+    let descending = params.sort_direction == Some(ItemSortDirection::Desc);
+    if descending {
+        entries.reverse();
+    }
+    let start = params
+        .cursor
+        .as_deref()
+        .map(|cursor| {
+            cursor
+                .parse::<usize>()
+                .map_err(|_| AppServerError::InvalidItemCursor(cursor.to_string()))
+        })
+        .transpose()?
+        .unwrap_or(0);
+    let limit = params
+        .limit
+        .unwrap_or(MAX_ITEM_LIST_LIMIT as u32)
+        .min(MAX_ITEM_LIST_LIMIT as u32) as usize;
+    let data = entries
+        .iter()
+        .skip(start)
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
+    let next_cursor =
+        (start + data.len() < entries.len()).then(|| (start + data.len()).to_string());
+    let backwards_cursor = (!data.is_empty()).then(|| start.saturating_sub(limit).to_string());
+    Ok(ThreadItemsListResult {
+        data,
+        next_cursor,
+        backwards_cursor,
+    })
 }

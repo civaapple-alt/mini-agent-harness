@@ -39,6 +39,7 @@ pub(super) fn write_prompt_context(session_dir: &Path, workspace: &Path, session
 pub(super) struct LoadedRecords {
     pub(super) thread_id: String,
     pub(super) messages: Vec<Message>,
+    pub(super) items: Vec<SessionItem>,
     pub(super) next_seq: u64,
     pub(super) checkpoint_seq: u64,
     pub(super) turn_count: usize,
@@ -53,6 +54,7 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
     let mut expected_seq = 1u64;
     let mut header_seen = false;
     let mut latest_checkpoint = None;
+    let mut items = Vec::new();
     let mut turn_count = 0usize;
     let mut thread_turn_counts: HashMap<String, usize> = HashMap::new();
     let mut created_at_ms = 0u64;
@@ -106,6 +108,35 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                 let count = thread_turn_counts.entry(thread_id.to_string()).or_insert(0);
                 *count = (*count).saturating_add(1);
             }
+            Some("item") if header_seen => {
+                let thread_id = record
+                    .get("thread_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "item is missing thread_id".to_string())?
+                    .to_string();
+                let item_id = record
+                    .get("item_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "item is missing item_id".to_string())?
+                    .to_string();
+                let turn_id = record
+                    .get("turn_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let message = serde_json::from_value(
+                    record
+                        .get("message")
+                        .cloned()
+                        .ok_or_else(|| "item is missing message".to_string())?,
+                )
+                .map_err(|error| format!("invalid item message: {error}"))?;
+                items.push(SessionItem {
+                    item_id,
+                    thread_id,
+                    turn_id,
+                    message,
+                });
+            }
             Some("checkpoint") if header_seen => {
                 let thread_id = record
                     .get("thread_id")
@@ -140,6 +171,7 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
     Ok(LoadedRecords {
         thread_id,
         messages,
+        items,
         next_seq: expected_seq,
         checkpoint_seq,
         turn_count,

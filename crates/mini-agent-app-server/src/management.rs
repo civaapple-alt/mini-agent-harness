@@ -21,6 +21,7 @@ use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ApprovalMode;
 use mini_agent_capabilities::McpServerConfig;
 use mini_agent_capabilities::OpenedSession;
+use mini_agent_capabilities::SessionItem;
 use mini_agent_capabilities::TurnCommit;
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
 use mini_agent_core::ThreadCheckpoint;
@@ -388,6 +389,10 @@ impl RuntimeManagementState {
 
     pub(crate) fn session_mut(&mut self) -> Option<&mut OpenedSession> {
         self.session.as_mut()
+    }
+
+    pub(crate) fn session_items(&self) -> Option<&[SessionItem]> {
+        self.session.as_ref().map(|opened| opened.store.items())
     }
 
     pub(crate) fn record_context(

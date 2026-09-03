@@ -20,6 +20,7 @@ use mini_agent_app_server_protocol::METHOD_THREAD_FORK;
 use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_CLEAR;
 use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_GET;
 use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_SET;
+use mini_agent_app_server_protocol::METHOD_THREAD_ITEMS_LIST;
 use mini_agent_app_server_protocol::METHOD_THREAD_LIST;
 use mini_agent_app_server_protocol::METHOD_THREAD_READ;
 use mini_agent_app_server_protocol::METHOD_THREAD_RESUME;
@@ -44,6 +45,8 @@ use mini_agent_app_server_protocol::ThreadGoalGetResponse;
 use mini_agent_app_server_protocol::ThreadGoalSetParams;
 use mini_agent_app_server_protocol::ThreadGoalSetResponse;
 use mini_agent_app_server_protocol::ThreadGoalStatus;
+use mini_agent_app_server_protocol::ThreadItemsListParams;
+use mini_agent_app_server_protocol::ThreadItemsListResult;
 use mini_agent_app_server_protocol::ThreadListParams;
 use mini_agent_app_server_protocol::ThreadListResult;
 use mini_agent_app_server_protocol::ThreadReadParams;
@@ -450,6 +453,13 @@ where
 
     pub async fn session_info(&mut self) -> Result<Option<SessionInfoResult>, JsonRpcError> {
         self.call(METHOD_SESSION_INFO, serde_json::json!({})).await
+    }
+
+    pub async fn list_thread_items(
+        &mut self,
+        params: ThreadItemsListParams,
+    ) -> Result<ThreadItemsListResult, JsonRpcError> {
+        self.call(METHOD_THREAD_ITEMS_LIST, params).await
     }
 
     pub async fn world_state(&mut self) -> Result<WorldStateResult, JsonRpcError> {

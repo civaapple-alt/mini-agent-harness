@@ -103,3 +103,60 @@ fn completed_tool_item_keeps_the_call_projection() {
         }]
     );
 }
+
+#[test]
+fn lifecycle_projection_does_not_duplicate_model_tool_calls() {
+    let event = EventEnvelope::new(
+        ThreadId::new("thread-1"),
+        Some(TurnId::new("turn-1")),
+        7,
+        Event::ModelResponded {
+            reasoning: "thinking".to_string(),
+            text: "answer".to_string(),
+            tool_calls: vec![ToolCall {
+                id: "call-1".to_string(),
+                name: "shell".to_string(),
+                arguments: serde_json::json!({"command": "pwd"}),
+            }],
+            usage: None,
+        },
+    );
+
+    let started = ThreadItem::started_from_event(&event);
+    let completed = ThreadItem::completed_from_event(&event);
+    assert_eq!(started.len(), 2);
+    assert_eq!(completed.len(), 2);
+    assert!(
+        started
+            .iter()
+            .all(|item| !matches!(item, ThreadItem::ToolCall { .. }))
+    );
+    assert!(
+        completed
+            .iter()
+            .all(|item| !matches!(item, ThreadItem::ToolCall { .. }))
+    );
+}
+
+#[test]
+fn persisted_projection_preserves_supplied_identity() {
+    let message = mini_agent_protocol::Message::Assistant {
+        reasoning: "thinking".to_string(),
+        text: "answer".to_string(),
+        tool_calls: Vec::new(),
+    };
+    let items = ThreadItem::from_message_with_id(&message, "message-1");
+    assert_eq!(
+        items,
+        vec![
+            ThreadItem::Reasoning {
+                id: "message-1:reasoning".to_string(),
+                text: "thinking".to_string(),
+            },
+            ThreadItem::AgentMessage {
+                id: "message-1:agent".to_string(),
+                text: "answer".to_string(),
+            },
+        ]
+    );
+}

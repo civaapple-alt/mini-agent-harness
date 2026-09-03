@@ -497,10 +497,11 @@ Candidate additions or extensions for v2 are:
 
 - `Thread` settings containing selected Skill, Plugin, and provider IDs;
 - `Turn` containing `items` and an explicit `itemsView`;
-- `item/started` notification;
-- `item/completed` notification;
+- `item/started` and `item/completed` notifications (landed in the bounded
+  first public lifecycle slice);
 - item-specific bounded delta notifications;
-- experimental `thread/items/list` with cursor, limit, and optional `turnId`;
+- bounded `thread/items/list` with cursor, limit, and optional `turnId` (landed
+  in the bounded first public lifecycle slice);
 - an eventual bounded Artifact read/list method only after storage semantics are
   proven.
 
@@ -600,10 +601,11 @@ and after; no estimate authorizes a budget breach.
   `callId` appears in started and completed ToolCall items, with completion
   status/output and the original bounded argument projection. No second event
   stream is introduced.
-- Dedicated v2 Item lifecycle notifications and persisted Item listing remain
-  deferred until a separate public identity/resume decision is justified.
-- Add cursor-based `thread/items/list` only when persisted projection and resume
-  semantics are stable.
+- **Landed:** dedicated v2 Item lifecycle notifications use the ordered App
+  Server runtime stream, and `thread/items/list` returns cursor-bounded replay
+  from the Session JSONL projection with stable persisted item identity.
+- Specialized source variants and generic Artifact APIs remain deferred until
+  their source metadata, retention, and redaction contracts are justified.
 - Update App Server README, generated schemas, Python SDK, TypeScript output,
   Studio, TUI, and cookbook examples in the same public-protocol batch.
 - Add public approval correlation tests for Item and request IDs.
@@ -738,12 +740,12 @@ settings notifications are implemented.
 The default Builtin catalog, its direct deletion, the first Host-owned Tool
 Catalog slice, Thread-level Builtin selection, bounded Skill dependency
 metadata/activation, bounded Plugin-to-provider-input selection, the bounded
-ThreadItem lifecycle projection, and ordered App Server runtime notifications
-are now landed. App Server Turn activation, Host dependency allowlist
-resolution, Plugin MCP tool loading, dedicated Item lifecycle
-notifications/listing, and Artifact APIs remain deferred; Goal
-settled-checkpoint continuation, settings notifications, resume/clear race
-handling, and manual Goal control retirement are implemented.
+ThreadItem lifecycle projection, dedicated Item lifecycle notifications,
+cursor-bounded Item listing, and ordered App Server runtime notifications are
+now landed. App Server Turn activation, Host dependency allowlist resolution,
+Plugin MCP tool loading, specialized Item variants, and Artifact APIs remain
+deferred; Goal settled-checkpoint continuation, settings notifications,
+resume/clear race handling, and manual Goal control retirement are implemented.
 
 ## Implementation record — 2026-09-01 Goal Runtime canonical contract
 

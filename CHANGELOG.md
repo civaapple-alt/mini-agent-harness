@@ -25,6 +25,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **Workflow aggregate removal:** remove the compatibility `workflow/state`
   endpoint and its aggregate DTO; clients read Thread settings and Thread Goal
   independently.
+- **ThreadItem lifecycle:** add ordered `item/started` and `item/completed`
+  notifications plus bounded `thread/items/list` replay backed by the existing
+  Session JSONL projection. No second history authority or specialized Item
+  variant is introduced.
 
 ### Fixed
 

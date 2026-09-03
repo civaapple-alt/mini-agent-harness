@@ -64,6 +64,7 @@ pub struct SessionStore {
     checkpoint_seq: u64,
     turn_count: usize,
     thread_turn_count: usize,
+    items: Vec<SessionItem>,
     created_at_ms: u64,
     pub(crate) append_lock: Arc<Mutex<()>>,
     _lock: SessionLock,
@@ -86,6 +87,17 @@ pub struct TurnCommit<'a> {
     pub error: Option<&'a str>,
     pub messages: &'a [Message],
     pub checkpoint: &'a [Message],
+}
+
+/// One durable message record that can be projected into a public ThreadItem.
+/// The session JSONL remains authoritative; this value is only the bounded
+/// in-process index used by the App Server item listing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionItem {
+    pub item_id: String,
+    pub thread_id: String,
+    pub turn_id: Option<String>,
+    pub message: Message,
 }
 
 struct SessionLock(PathBuf);
@@ -117,6 +129,10 @@ impl SessionStore {
 
     pub fn thread_turn_count(&self) -> usize {
         self.thread_turn_count
+    }
+
+    pub fn items(&self) -> &[SessionItem] {
+        &self.items
     }
 
     pub fn checkpoint_seq(&self) -> u64 {
@@ -171,11 +187,20 @@ impl SessionStore {
             "timestamp_ms": turn.started_at_ms,
             "prompt": turn.prompt,
         })];
-        records.extend(
-            turn.messages
-                .iter()
-                .map(|message| self.item_record(Some(turn_id), message)),
-        );
+        let items = turn
+            .messages
+            .iter()
+            .map(|message| {
+                let item_id = item_id_for_message(message);
+                records.push(self.item_record_with_id(Some(turn_id), message, &item_id));
+                SessionItem {
+                    item_id,
+                    thread_id: self.thread_id.clone(),
+                    turn_id: Some(turn_id.to_string()),
+                    message: message.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
         records.push(json!({
             "kind": "turn_settled",
             "thread_id": self.thread_id,
@@ -187,6 +212,7 @@ impl SessionStore {
         }));
         records.push(self.checkpoint_record(turn.checkpoint));
         self.append_records(records)?;
+        self.items.extend(items);
         self.checkpoint_seq = self.next_seq.saturating_sub(1);
         self.turn_count = self.turn_count.saturating_add(1);
         self.thread_turn_count = self.thread_turn_count.saturating_add(1);
@@ -363,6 +389,7 @@ impl SessionStore {
             checkpoint_seq: loaded.checkpoint_seq,
             turn_count: loaded.turn_count,
             thread_turn_count: loaded.thread_turn_count,
+            items: loaded.items,
             created_at_ms: loaded.created_at_ms,
             append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
@@ -426,6 +453,7 @@ impl SessionStore {
         Err("cannot allocate a unique session id".to_string())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn initialize_new(
         workspace: &Path,
         session_id: &str,
@@ -449,6 +477,7 @@ impl SessionStore {
             checkpoint_seq: 0,
             turn_count: 0,
             thread_turn_count: 0,
+            items: Vec::new(),
             created_at_ms: now,
             append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
@@ -482,9 +511,19 @@ impl SessionStore {
     }
 
     fn item_record(&self, turn_id: Option<&str>, message: &Message) -> Value {
+        let item_id = item_id_for_message(message);
+        self.item_record_with_id(turn_id, message, &item_id)
+    }
+
+    fn item_record_with_id(
+        &self,
+        turn_id: Option<&str>,
+        message: &Message,
+        item_id: &str,
+    ) -> Value {
         json!({
             "kind": "item",
-            "item_id": new_id("i"),
+            "item_id": item_id,
             "thread_id": self.thread_id,
             "turn_id": turn_id,
             "item_kind": message_kind(message),
@@ -592,6 +631,13 @@ fn message_kind(message: &Message) -> &'static str {
     }
 }
 
+fn item_id_for_message(message: &Message) -> String {
+    match message {
+        Message::Tool { call_id, .. } if !call_id.is_empty() => call_id.clone(),
+        _ => new_id("i"),
+    }
+}
+
 fn new_id(prefix: &str) -> String {
     let counter = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     format!(
@@ -609,4 +655,54 @@ pub(crate) fn timestamp_ms() -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn item_index_survives_session_resume() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-agent-session-items-{}-{}",
+            std::process::id(),
+            timestamp_ms()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let messages = vec![
+            Message::User {
+                text: "hello".to_string(),
+            },
+            Message::Assistant {
+                reasoning: String::new(),
+                text: "done".to_string(),
+                tool_calls: Vec::new(),
+            },
+        ];
+        opened
+            .store
+            .record_turn_with_id(
+                "turn-1",
+                TurnCommit {
+                    started_at_ms: timestamp_ms(),
+                    prompt: "hello",
+                    status: TurnStatus::Completed,
+                    steps: 1,
+                    error: None,
+                    messages: &messages,
+                    checkpoint: &messages,
+                },
+            )
+            .unwrap();
+        assert_eq!(opened.store.items().len(), 2);
+        drop(opened);
+
+        let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        assert_eq!(resumed.store.items().len(), 2);
+        assert_eq!(resumed.store.items()[0].turn_id.as_deref(), Some("turn-1"));
+        drop(resumed);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

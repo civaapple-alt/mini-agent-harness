@@ -246,6 +246,7 @@ pub enum AppServerError {
     InputQueue(String),
     Disconnected,
     TurnNotFound(TurnId),
+    InvalidItemCursor(String),
     Checkpoint(String),
     RevisionConflict { expected: u64, actual: u64 },
     ThreadNotFound(ThreadId),
@@ -293,6 +294,9 @@ impl fmt::Display for AppServerError {
             Self::Disconnected => formatter.write_str("app-server worker is unavailable"),
             Self::TurnNotFound(turn_id) => {
                 write!(formatter, "turn {} is not available", turn_id.as_str())
+            }
+            Self::InvalidItemCursor(cursor) => {
+                write!(formatter, "invalid ThreadItem cursor: {cursor}")
             }
             Self::Checkpoint(error) => write!(formatter, "checkpoint unavailable: {error}"),
             Self::RevisionConflict { expected, actual } => write!(
@@ -553,6 +557,25 @@ where
         thread_id: ThreadId,
     ) -> Result<ActionResponse<ThreadCheckpoint>, ActionFailure> {
         self.request_action(|reply| Command::ReadThread { thread_id, reply })
+            .await
+    }
+
+    pub async fn thread_items(
+        &self,
+        params: mini_agent_app_server_protocol::ThreadItemsListParams,
+    ) -> Result<mini_agent_app_server_protocol::ThreadItemsListResult, AppServerError> {
+        self.thread_items_action(params)
+            .await
+            .map(ActionResponse::into_value)
+            .map_err(ActionFailure::into_error)
+    }
+
+    pub(crate) async fn thread_items_action(
+        &self,
+        params: mini_agent_app_server_protocol::ThreadItemsListParams,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::ThreadItemsListResult>, ActionFailure>
+    {
+        self.request_action(|reply| Command::ReadItems { params, reply })
             .await
     }
 

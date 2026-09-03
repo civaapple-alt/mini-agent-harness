@@ -134,6 +134,94 @@ impl ThreadItem {
         }
     }
 
+    /// Projects the lifecycle items that become visible when a Core event
+    /// starts. Tool calls are started by `ToolStarted`, not by the preceding
+    /// model response, so they are not duplicated here.
+    pub fn started_from_event(event: &EventEnvelope) -> Vec<Self> {
+        match &event.event {
+            Event::TurnStarted { .. }
+            | Event::ToolStarted { .. }
+            | Event::ContextCompactionStarted { .. } => Self::from_event(event),
+            Event::ModelResponded { .. } => Self::from_event(event)
+                .into_iter()
+                .filter(|item| !matches!(item, Self::ToolCall { .. }))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Projects the lifecycle items that become authoritative when a Core
+    /// event completes. The completed projection reuses the same tool call id
+    /// as its started projection.
+    pub fn completed_from_event(event: &EventEnvelope) -> Vec<Self> {
+        match &event.event {
+            Event::TurnStarted { .. }
+            | Event::ToolFinished { .. }
+            | Event::ContextCompactionFinished { .. } => Self::from_event(event),
+            Event::ModelResponded { .. } => Self::from_event(event)
+                .into_iter()
+                .filter(|item| !matches!(item, Self::ToolCall { .. }))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Projects one persisted message with a caller-supplied stable item id.
+    /// Tool item ids still come from their model `callId`, matching the live
+    /// lifecycle projection.
+    pub fn from_message_with_id(message: &Message, id: impl Into<String>) -> Vec<Self> {
+        let id = id.into();
+        match message {
+            Message::User { text } => vec![Self::UserMessage {
+                id,
+                text: bound_text(text),
+            }],
+            Message::Assistant {
+                reasoning,
+                text,
+                tool_calls,
+            } => {
+                let mut items = Vec::with_capacity(tool_calls.len() + 2);
+                if !reasoning.is_empty() {
+                    items.push(Self::Reasoning {
+                        id: format!("{id}:reasoning"),
+                        text: bound_text(reasoning),
+                    });
+                }
+                if !text.is_empty() {
+                    items.push(Self::AgentMessage {
+                        id: format!("{id}:agent"),
+                        text: bound_text(text),
+                    });
+                }
+                items.extend(
+                    tool_calls
+                        .iter()
+                        .map(|call| tool_item(call, ItemStatus::Completed, None)),
+                );
+                items
+            }
+            Message::Tool {
+                call_id,
+                name,
+                content,
+                is_error,
+                ..
+            } => vec![Self::ToolCall {
+                id: call_id.clone(),
+                name: name.clone(),
+                arguments: Value::Null,
+                status: if *is_error {
+                    ItemStatus::Failed
+                } else {
+                    ItemStatus::Completed
+                },
+                output: Some(bound_text(content)),
+            }],
+            Message::Context { .. } => Vec::new(),
+        }
+    }
+
     /// Projects bounded settled messages for turn/read without adding a
     /// separate persistence source.
     pub fn from_messages(messages: &[Message]) -> Vec<Self> {
@@ -141,56 +229,9 @@ impl ThreadItem {
             .iter()
             .take(MAX_PROJECTED_ITEMS)
             .enumerate()
-            .filter_map(|(index, message)| match message {
-                Message::User { text } => Some(vec![Self::UserMessage {
-                    id: format!("message-{index}"),
-                    text: bound_text(text),
-                }]),
-                Message::Assistant {
-                    reasoning,
-                    text,
-                    tool_calls,
-                } => {
-                    let mut items = Vec::with_capacity(tool_calls.len() + 2);
-                    if !reasoning.is_empty() {
-                        items.push(Self::Reasoning {
-                            id: format!("message-{index}:reasoning"),
-                            text: bound_text(reasoning),
-                        });
-                    }
-                    if !text.is_empty() {
-                        items.push(Self::AgentMessage {
-                            id: format!("message-{index}:agent"),
-                            text: bound_text(text),
-                        });
-                    }
-                    items.extend(
-                        tool_calls
-                            .iter()
-                            .map(|call| tool_item(call, ItemStatus::Completed, None)),
-                    );
-                    Some(items)
-                }
-                Message::Tool {
-                    call_id,
-                    name,
-                    content,
-                    is_error,
-                    ..
-                } => Some(vec![Self::ToolCall {
-                    id: call_id.clone(),
-                    name: name.clone(),
-                    arguments: Value::Null,
-                    status: if *is_error {
-                        ItemStatus::Failed
-                    } else {
-                        ItemStatus::Completed
-                    },
-                    output: Some(bound_text(content)),
-                }]),
-                Message::Context { .. } => None,
+            .flat_map(|(index, message)| {
+                Self::from_message_with_id(message, format!("message-{index}"))
             })
-            .flatten()
             .take(MAX_PROJECTED_ITEMS)
             .collect()
     }

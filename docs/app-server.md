@@ -8,7 +8,7 @@ on the same output stream as `turn/event` notifications.
 The default binary owns one configured thread per process. Embedded callers can
 construct a service with several preconfigured thread identities and address
 them through the same methods. The service also exposes bounded thread
-list/read/close, fork and resume, turn result reads, cooperative steering and
+list/read/items/list/close, fork and resume, turn result reads, cooperative steering and
 interruption, and approval request/response routing. External adapters should
 use the same App Server boundary.
 
@@ -45,7 +45,7 @@ JSON-RPC error's `data`; requests rejected before admission do not claim an
 action. The protocol negotiation and thread index responses remain structural
 responses rather than action results.
 
-The service emits `turn/event`, Goal, and settings notifications from one
+The service emits `turn/event`, Item, Goal, and settings notifications from one
 ordered runtime stream. Core `turn/event` notifications contain the event type,
 thread/turn identity, and `sequence` number; that sequence belongs to the Core
 Thread event stream and is intentionally distinct from `actionSequence`. The
@@ -64,6 +64,12 @@ matching `turn/event`, without inferring approval from `tool/finished` content.
 The App Server worker runs on a dedicated runtime thread, so a synchronous host
 approval callback does not block the connection's async transport. The worker
 still serializes one Thread at a time while that approval is pending.
+
+`item/started` and `item/completed` carry one bounded `ThreadItem` with
+`threadId`, `turnId`, and its lifecycle timestamp. The completed notification
+is the authoritative final projection for that item; the same tool `callId` is
+used across model, tool-start, tool-completion, and replay projections. These
+notifications use the same ordered runtime stream as `turn/event`.
 
 Thread settings and Goal control use the canonical Thread boundary:
 
@@ -90,8 +96,10 @@ uses the model `callId` as its stable item identity; its in-progress and
 completed events can therefore be merged by clients. Arguments are recursively
 bounded and sensitive keys are redacted, while completed items preserve the
 same argument projection and add bounded output. The verifier keeps only the
-newest bounded settled-message window. There is still no separate Item history,
-item-list method, or generic Artifact API.
+newest bounded settled-message window. `thread/items/list` returns cursor-bounded
+`ThreadItemEntry` values, optionally filtered by `turnId`, from the Session JSONL
+projection (or the current in-memory checkpoint when Session is disabled).
+Specialized Item variants and generic Artifact APIs remain deferred.
 
 The Rust `LocalAppServerClient` uses the same DTOs and dispatch without stdio,
 which lets an embedded frontend migrate to the service boundary before it

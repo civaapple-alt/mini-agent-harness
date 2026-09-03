@@ -42,6 +42,7 @@ pub use security::SecurityDecision;
 pub use security::SecurityPolicy;
 pub use security::SecurityPreset;
 pub use session::OpenedSession;
+pub use session::SessionItem;
 pub use session::SessionRequest;
 pub use session::SessionStore;
 pub use session::TurnCommit;

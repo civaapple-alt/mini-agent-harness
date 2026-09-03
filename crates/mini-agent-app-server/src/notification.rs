@@ -1,5 +1,7 @@
 use crate::goal_runtime::GoalRuntimeEvent;
 use crate::management::SettingsRuntimeEvent;
+use mini_agent_app_server_protocol::ItemCompletedNotification;
+use mini_agent_app_server_protocol::ItemStartedNotification;
 use mini_agent_protocol::EventEnvelope;
 
 /// One ordered runtime notification stream for the App Server wire adapter.
@@ -10,6 +12,8 @@ use mini_agent_protocol::EventEnvelope;
 #[derive(Clone, Debug)]
 pub(crate) enum RuntimeNotification {
     Event(EventEnvelope),
+    ItemStarted(ItemStartedNotification),
+    ItemCompleted(ItemCompletedNotification),
     Goal(GoalRuntimeEvent),
     Settings(SettingsRuntimeEvent),
 }

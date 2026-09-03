@@ -39,6 +39,9 @@ pub const METHOD_TURN_READ: &str = "turn/read";
 pub const METHOD_TURN_STEER: &str = "turn/steer";
 pub const METHOD_TURN_INTERRUPT: &str = "turn/interrupt";
 pub const METHOD_TURN_EVENT: &str = "turn/event";
+pub const METHOD_ITEM_STARTED: &str = "item/started";
+pub const METHOD_ITEM_COMPLETED: &str = "item/completed";
+pub const METHOD_THREAD_ITEMS_LIST: &str = "thread/items/list";
 pub const METHOD_APPROVAL_REQUEST: &str = "approval/request";
 pub const METHOD_APPROVAL_RESOLVED: &str = "approval/resolved";
 pub const METHOD_APPROVAL_RESPOND: &str = "approval/respond";
@@ -247,6 +250,10 @@ pub struct ServerCapabilities {
     pub turn_read: bool,
     #[serde(default)]
     pub thread_list: bool,
+    #[serde(default)]
+    pub thread_items_list: bool,
+    #[serde(default)]
+    pub item_lifecycle_notifications: bool,
     #[serde(default)]
     pub approval_requests: bool,
     #[serde(default)]
@@ -644,6 +651,63 @@ pub struct TurnReadResult {
     pub error: Option<String>,
 }
 
+/// A lifecycle notification for one ThreadItem becoming visible.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemStartedNotification {
+    pub thread_id: ThreadId,
+    pub turn_id: TurnId,
+    pub item: ThreadItem,
+    pub started_at_ms: u64,
+}
+
+/// A lifecycle notification carrying the authoritative completed ThreadItem.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemCompletedNotification {
+    pub thread_id: ThreadId,
+    pub turn_id: TurnId,
+    pub item: ThreadItem,
+    pub completed_at_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ItemSortDirection {
+    #[default]
+    Asc,
+    Desc,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadItemsListParams {
+    pub thread_id: ThreadId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<TurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_direction: Option<ItemSortDirection>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadItemEntry {
+    pub turn_id: TurnId,
+    pub item: ThreadItem,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadItemsListResult {
+    pub data: Vec<ThreadItemEntry>,
+    pub next_cursor: Option<String>,
+    pub backwards_cursor: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnSteerParams {
@@ -847,5 +911,35 @@ mod tests {
         assert_eq!(notification.turn_id, Some(TurnId::new("turn-1")));
         assert_eq!(notification.sequence, 4);
         assert!(notification.items.is_empty());
+    }
+
+    #[test]
+    fn thread_items_contract_uses_bounded_camel_case_fields() {
+        let params = serde_json::to_value(ThreadItemsListParams {
+            thread_id: ThreadId::new("thread-1"),
+            turn_id: Some(TurnId::new("turn-1")),
+            cursor: Some("2".to_string()),
+            limit: Some(8),
+            sort_direction: Some(ItemSortDirection::Desc),
+        })
+        .unwrap();
+        assert_eq!(params["threadId"], "thread-1");
+        assert_eq!(params["turnId"], "turn-1");
+        assert_eq!(params["sortDirection"], "desc");
+        assert!(params.get("thread_id").is_none());
+
+        let notification = serde_json::to_value(ItemCompletedNotification {
+            thread_id: ThreadId::new("thread-1"),
+            turn_id: TurnId::new("turn-1"),
+            item: ThreadItem::AgentMessage {
+                id: "item-1".to_string(),
+                text: "done".to_string(),
+            },
+            completed_at_ms: 10,
+        })
+        .unwrap();
+        assert_eq!(notification["turnId"], "turn-1");
+        assert_eq!(notification["completedAtMs"], 10);
+        assert_eq!(notification["item"]["type"], "agentMessage");
     }
 }

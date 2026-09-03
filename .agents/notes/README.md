@@ -12,8 +12,8 @@ belong in `docs/`; do not build a current-state index by chaining notes together
 
 The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
 
-- runtime (`core + protocol + host + app-server`): `18,614 / 20,000` lines (93.1%; 1,386 remaining)
-- release Rust source (excluding experimental CLI/REPL): `28,470 / 30,000` lines (94.9%; 1,530 remaining)
+- runtime (`core + protocol + host + app-server`): `19,560 / 20,000` lines (97.8%; 440 remaining)
+- release Rust source (excluding experimental CLI/REPL): `29,545 / 30,000` lines (98.5%; 455 remaining)
 - Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
   the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
   the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
@@ -93,8 +93,7 @@ continuation, verifier retry/terminal transitions, resume/clear stale-result
 guards, and the removal of manual workflow Goal controls are implemented through
 the serialized GoalRuntime owner. Goal step/timeout/token-budget execution is
 now wired through the same turn boundary; the current release-source margin is
-`2,338` lines, with `512` lines still needed for the current `27,150` optimization
-target.
+`455` lines, with the hard release-source gate now the primary capacity limit.
 
 The first Skill dependency/activation slice is implemented in Capabilities.
 Skill frontmatter may declare up to 16 bounded `builtin` or `mcp` references;
@@ -102,7 +101,7 @@ the metadata catalog exposes non-empty declarations, and
 `Discovery::activate_skill` returns a typed metadata-only activation. It does
 not read Skill bodies, start MCP, enable providers, or grant approval. App Server
 Turn activation and Host allowlist resolution remain the next Skill batch; the
-  current release-source margin is `2,338` lines. The experimental CLI/REPL is
+  the current release-source margin is `455` lines. The experimental CLI/REPL is
 still reported separately at `2,707` lines and does not consume this gate.
 
 The first Plugin provider slice is implemented in Capabilities: selecting a
@@ -114,12 +113,13 @@ those remain Host/MCP work for a later bounded batch.
 The bounded ThreadItem projection is implemented in App Server Protocol.
 `turn/event` and `turn/read` expose `UserMessage`, `AgentMessage`, `Reasoning`,
 generic `ToolCall`, and `ContextCompaction` items derived from existing Core
-events/messages. Tool items reuse `callId`, preserve the original arguments
-through completion, redact sensitive keys, and apply recursive byte/depth/count
-bounds; text and output remain bounded to 16 KiB. This is still a projection
-only: no second Session log, Item listing method, Artifact API, or specialized
-source classification is introduced. Core, Goal, and settings notifications
-now share one ordered runtime bus at the App Server boundary.
+events/messages. Dedicated `item/started`/`item/completed` notifications and
+cursor-bounded `thread/items/list` replay are also implemented. Tool items reuse
+`callId`, preserve bounded/redacted arguments through completion, and keep
+bounded text/output; Session JSONL remains the only durable history authority.
+Specialized source classification and Artifact APIs remain deferred. Core, Goal,
+settings, and Item notifications share one ordered runtime bus at the App Server
+boundary.
 
 Goal Runtime is converged on the Codex Thread/Turn/ThreadItem model. The
 canonical `thread/goal/set|get|clear` contract, settled-checkpoint verifier and
@@ -154,8 +154,8 @@ cooperative and does not kill a synchronous tool effect. Core, Goal, and
    allowlist resolution only with a measured offset and public evidence.
 4. Add Plugin MCP tool loading and Dynamic Tool mapping only through the existing
    provider/approval path; no Plugin-specific executor.
-5. Extend ThreadItem lifecycle/listing and persisted identity before introducing
-   bounded sidecar Artifact references.
+5. Preserve the bounded ThreadItem lifecycle/listing and persisted identity;
+   introduce bounded sidecar Artifact references only with a concrete use case.
 6. Keep the fault-injected and restart/resume Goal evidence; add provider-backed
    verifier evidence only when an explicit bounded seam exists. Paid calls are
    not a default gate.

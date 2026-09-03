@@ -265,6 +265,26 @@ where
         }
     }
 
+    pub(super) async fn handle_thread_items_list(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<ThreadItemsListParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        match self.server.thread_items_action(params).await {
+            Ok(response) => {
+                let value = response.value.clone();
+                response_action_with(request.id, response, value)
+            }
+            Err(error) => response_error(request.id, map_action_error(error)),
+        }
+    }
+
     pub(super) async fn handle_thread_close(
         &self,
         request: JsonRpcRequest,

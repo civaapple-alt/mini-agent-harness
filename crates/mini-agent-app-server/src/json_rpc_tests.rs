@@ -491,6 +491,102 @@ async fn preserves_cross_stream_notification_order() {
 }
 
 #[tokio::test]
+async fn emits_thread_item_lifecycle_notifications_on_the_ordered_stream() {
+    let (mut connection, root) = managed_connection("thread-item-lifecycle");
+    let initialized = connection
+        .handle_request(initialize_request(1, "thread-item-lifecycle-test"))
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(initialized["capabilities"]["threadItemsList"], true);
+    assert_eq!(
+        initialized["capabilities"]["itemLifecycleNotifications"],
+        true
+    );
+    connection
+        .handle_request(turn_start_request(2, "hello"))
+        .await
+        .unwrap();
+
+    let mut methods = Vec::new();
+    loop {
+        let notification = connection.next_notification().await.unwrap();
+        methods.push(notification.method.clone());
+        if notification.method == METHOD_TURN_EVENT {
+            let params = notification.params.unwrap();
+            let event: TurnEventNotification = serde_json::from_value(params).unwrap();
+            if matches!(event.event, mini_agent_protocol::Event::TurnFinished { .. }) {
+                break;
+            }
+        }
+    }
+    assert!(methods.contains(&mini_agent_app_server_protocol::METHOD_ITEM_STARTED.to_string()));
+    assert!(methods.contains(&mini_agent_app_server_protocol::METHOD_ITEM_COMPLETED.to_string()));
+    let started = methods
+        .iter()
+        .position(|method| method == mini_agent_app_server_protocol::METHOD_ITEM_STARTED)
+        .unwrap();
+    let completed = methods
+        .iter()
+        .position(|method| method == mini_agent_app_server_protocol::METHOD_ITEM_COMPLETED)
+        .unwrap();
+    assert!(started < completed);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn lists_bounded_thread_items_with_cursor_projection() {
+    let (mut connection, root) = managed_connection("thread-items-list");
+    initialize_connection(&mut connection, "thread-items-list-test").await;
+    connection
+        .handle_request(turn_start_request(2, "hello"))
+        .await
+        .unwrap();
+    loop {
+        let notification = connection.next_notification().await.unwrap();
+        if notification.method == METHOD_TURN_EVENT {
+            let event: TurnEventNotification =
+                serde_json::from_value(notification.params.unwrap()).unwrap();
+            if matches!(event.event, mini_agent_protocol::Event::TurnFinished { .. }) {
+                break;
+            }
+        }
+    }
+
+    let first = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
+            3,
+            mini_agent_app_server_protocol::METHOD_THREAD_ITEMS_LIST,
+            serde_json::json!({"threadId": "thread-1", "limit": 1}),
+        ),
+    )
+    .await;
+    assert_eq!(first["value"]["data"].as_array().unwrap().len(), 1);
+    let cursor = first["value"]["nextCursor"].as_str().unwrap().to_string();
+    let second = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
+            4,
+            mini_agent_app_server_protocol::METHOD_THREAD_ITEMS_LIST,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "cursor": cursor,
+                "limit": 1
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(second["value"]["data"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        first["value"]["data"][0]["turnId"],
+        second["value"]["data"][0]["turnId"]
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn exposes_codex_shaped_thread_goal_lifecycle() {
     let (mut connection, root) = managed_connection("thread-goal-rpc");
     initialize_connection(&mut connection, "thread-goal-test").await;
