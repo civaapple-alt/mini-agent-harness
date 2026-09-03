@@ -99,21 +99,15 @@ fn rpc_root(name: &str) -> std::path::PathBuf {
     root
 }
 
-struct ShellApprovalModel;
-
-struct StepLimitModel;
-
-struct BudgetModel;
-
-struct CountingModel {
-    calls: Arc<AtomicUsize>,
+enum ScenarioModel {
+    ShellApproval,
+    StepLimit,
+    Budget,
+    Counting(Arc<AtomicUsize>),
+    Timeout(Arc<tokio::sync::Notify>),
 }
 
-struct TimeoutModel {
-    release: Arc<tokio::sync::Notify>,
-}
-
-impl Model for ShellApprovalModel {
+impl Model for ScenarioModel {
     type Error = Infallible;
 
     async fn respond<'a>(
@@ -121,111 +115,75 @@ impl Model for ShellApprovalModel {
         request: ModelRequest<'a>,
         _events: &'a mut (dyn ModelEventSink + Send),
     ) -> Result<ModelResponse, Self::Error> {
-        if request.messages.iter().any(|message| {
-            matches!(
-                message,
-                Message::Tool {
-                    name,
-                    outcome: Some(ToolExecutionStatus::Completed),
-                    ..
-                } if name == "shell"
-            )
-        }) {
-            return Ok(ModelResponse {
+        match self {
+            Self::ShellApproval => {
+                if request.messages.iter().any(|message| {
+                    matches!(
+                        message,
+                        Message::Tool {
+                            name,
+                            outcome: Some(ToolExecutionStatus::Completed),
+                            ..
+                        } if name == "shell"
+                    )
+                }) {
+                    return Ok(ModelResponse {
+                        reasoning: String::new(),
+                        text: "shell completed".to_string(),
+                        tool_calls: Vec::new(),
+                        usage: None,
+                    });
+                }
+                Ok(ModelResponse {
+                    reasoning: String::new(),
+                    text: String::new(),
+                    tool_calls: vec![ToolCall {
+                        id: "shell-call-1".to_string(),
+                        name: "shell".to_string(),
+                        arguments: serde_json::json!({"command": shell_approval_command()}),
+                    }],
+                    usage: None,
+                })
+            }
+            Self::StepLimit => Ok(ModelResponse {
                 reasoning: String::new(),
-                text: "shell completed".to_string(),
-                tool_calls: Vec::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "step-limit-call".to_string(),
+                    name: "missing_tool".to_string(),
+                    arguments: serde_json::json!({}),
+                }],
                 usage: None,
-            });
-        }
-        Ok(ModelResponse {
-            reasoning: String::new(),
-            text: String::new(),
-            tool_calls: vec![ToolCall {
-                id: "shell-call-1".to_string(),
-                name: "shell".to_string(),
-                arguments: serde_json::json!({"command": shell_approval_command()}),
-            }],
-            usage: None,
-        })
-    }
-}
-
-impl Model for StepLimitModel {
-    type Error = Infallible;
-
-    async fn respond<'a>(
-        &'a mut self,
-        _request: ModelRequest<'a>,
-        _events: &'a mut (dyn ModelEventSink + Send),
-    ) -> Result<ModelResponse, Self::Error> {
-        Ok(ModelResponse {
-            reasoning: String::new(),
-            text: String::new(),
-            tool_calls: vec![ToolCall {
-                id: "step-limit-call".to_string(),
-                name: "missing_tool".to_string(),
-                arguments: serde_json::json!({}),
-            }],
-            usage: None,
-        })
-    }
-}
-
-impl Model for BudgetModel {
-    type Error = Infallible;
-
-    async fn respond<'a>(
-        &'a mut self,
-        _request: ModelRequest<'a>,
-        _events: &'a mut (dyn ModelEventSink + Send),
-    ) -> Result<ModelResponse, Self::Error> {
-        Ok(ModelResponse {
-            reasoning: String::new(),
-            text: "budget reached".to_string(),
-            tool_calls: Vec::new(),
-            usage: Some(ModelUsage {
-                input_tokens: 3,
-                cached_input_tokens: 0,
-                output_tokens: 2,
             }),
-        })
-    }
-}
-
-impl Model for CountingModel {
-    type Error = Infallible;
-
-    async fn respond<'a>(
-        &'a mut self,
-        _request: ModelRequest<'a>,
-        _events: &'a mut (dyn ModelEventSink + Send),
-    ) -> Result<ModelResponse, Self::Error> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(ModelResponse {
-            reasoning: String::new(),
-            text: "replayed".to_string(),
-            tool_calls: Vec::new(),
-            usage: None,
-        })
-    }
-}
-
-impl Model for TimeoutModel {
-    type Error = Infallible;
-
-    async fn respond<'a>(
-        &'a mut self,
-        _request: ModelRequest<'a>,
-        _events: &'a mut (dyn ModelEventSink + Send),
-    ) -> Result<ModelResponse, Self::Error> {
-        self.release.notified().await;
-        Ok(ModelResponse {
-            reasoning: String::new(),
-            text: "released".to_string(),
-            tool_calls: Vec::new(),
-            usage: None,
-        })
+            Self::Budget => Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "budget reached".to_string(),
+                tool_calls: Vec::new(),
+                usage: Some(ModelUsage {
+                    input_tokens: 3,
+                    cached_input_tokens: 0,
+                    output_tokens: 2,
+                }),
+            }),
+            Self::Counting(calls) => {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(ModelResponse {
+                    reasoning: String::new(),
+                    text: "replayed".to_string(),
+                    tool_calls: Vec::new(),
+                    usage: None,
+                })
+            }
+            Self::Timeout(release) => {
+                release.notified().await;
+                Ok(ModelResponse {
+                    reasoning: String::new(),
+                    text: "released".to_string(),
+                    tool_calls: Vec::new(),
+                    usage: None,
+                })
+            }
+        }
     }
 }
 
@@ -682,9 +640,7 @@ async fn resumes_settled_goal_without_replaying_turn() {
         .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let (mut connection, root) = managed_connection_at(
-        CountingModel {
-            calls: calls.clone(),
-        },
+        ScenarioModel::Counting(calls.clone()),
         root,
         crate::workflows::GoalLimits::default(),
     );
@@ -715,7 +671,7 @@ async fn resumes_settled_goal_without_replaying_turn() {
 #[tokio::test]
 async fn enforces_goal_step_budget_at_the_core_boundary() {
     let (mut connection, root) = managed_connection_with(
-        StepLimitModel,
+        ScenarioModel::StepLimit,
         "goal-step-budget",
         crate::workflows::GoalLimits {
             milestone_step_budget: 1,
@@ -743,7 +699,7 @@ async fn enforces_goal_step_budget_at_the_core_boundary() {
 #[tokio::test]
 async fn records_goal_usage_and_enforces_token_budget() {
     let (mut connection, root) = managed_connection_with(
-        BudgetModel,
+        ScenarioModel::Budget,
         "goal-token-budget",
         crate::workflows::GoalLimits::default(),
     );
@@ -770,9 +726,7 @@ async fn records_goal_usage_and_enforces_token_budget() {
 async fn enforces_goal_timeout_with_cooperative_cancellation() {
     let release = Arc::new(tokio::sync::Notify::new());
     let (mut connection, root) = managed_connection_with(
-        TimeoutModel {
-            release: release.clone(),
-        },
+        ScenarioModel::Timeout(release.clone()),
         "goal-timeout",
         crate::workflows::GoalLimits {
             milestone_timeout_secs: 1,
@@ -937,7 +891,11 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         ThreadStart::new(ThreadId::new("thread-1")),
         Thread::new(
             ThreadId::new("initial"),
-            Harness::new(ShellApprovalModel, registry, HarnessConfig::default()),
+            Harness::new(
+                ScenarioModel::ShellApproval,
+                registry,
+                HarnessConfig::default(),
+            ),
         ),
     );
 

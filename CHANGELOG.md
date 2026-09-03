@@ -18,6 +18,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **App Server test maintenance:** remove duplicate blocked-Goal waiting logic,
   generic approval forwarding, and first-event smoke coverage already exercised
   by the public approval and event-trace scenarios.
+- **App Server test fixtures:** consolidate the repeated scenario-only Model
+  implementations without changing the public lifecycle coverage.
 
 ## [0.7.0] - 2026-09-02
 
