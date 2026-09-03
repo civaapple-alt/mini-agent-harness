@@ -583,20 +583,25 @@ Server 完成协调；UI 不能仅因为 WebSocket 断开就猜测它是 `paused
 Web UI 应为每个活动 Thread 保持一个状态对象，并按 `requestId` 保存待批准请求映射。
 通知必须按 `threadId` 路由；其他 Thread 的待批准请求不能出现在当前 Thread 的输入框中。
 
-批准面板应提供：
+批准面板应分成两个相互独立的部分：
 
 ```text
-请求批准
-允许一次
-本会话允许
-项目访问（当前 Project 工作区）
-完全访问（整机范围，高风险）
+批准模式：
+  仅本次操作（per_action）
+  当前 Session
+  当前 Project（该 Project 下所有 Session 共享）
+
+访问范围：
+  Project access（当前 Project 工作区）
+  Full access（整机范围，高风险）
+
 拒绝并说明原因
 ```
 
-“完全访问”必须显示为整机范围，并显示高风险确认和仍然存在的 Deny/确认保护；“项目访问”
-必须标出当前 Project 工作区以及 reference/editable 目录。两个访问范围不能合并成模糊的
-“允许全部”标签。
+默认批准模式是 `per_action`。“完全访问”必须显示为整机范围，并显示高风险确认和仍然存在的
+Deny/确认保护；“项目访问”必须标出当前 Project 工作区以及 reference/editable 目录。两个
+访问范围和三个批准模式不能合并成模糊的“允许全部”标签。Auto Copilot 的组合应明确显示为
+`Goal + Full access + 当前 Project 批准`。
 
 加号菜单和 slash 命令应调用类型化 API：
 

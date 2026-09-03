@@ -757,21 +757,28 @@ The Web UI should keep one state object per active Thread and a map of pending
 approvals by `requestId`. It must route notifications by `threadId`; a pending
 approval from another Thread must not appear in the active Thread's composer.
 
-The approval dock should expose:
+The approval dock should expose two independent groups:
 
 ```text
-请求批准
-允许一次
-本会话允许
-Project access（当前项目工作区）
-Full access（整机范围，高风险）
-拒绝并说明原因
+Approval mode:
+  This action only (per_action)
+  Current Session
+  Current Project (shared by all Sessions in this Project)
+
+Access scope:
+  Project access (current Project workspace)
+  Full access (machine-wide, high risk)
+
+Deny with reason
 ```
 
-`Full access` must be rendered as machine-wide access with its high-risk
-confirmation and remaining Deny/confirmation guardrails. `Project access` must
-identify the current Project workspace and its reference/editable roots. The
-two access scopes must not be collapsed into a vague “allow everything” label.
+The default approval mode is `per_action`. `Full access` must be rendered as
+machine-wide access with its high-risk confirmation and remaining
+Deny/confirmation guardrails. `Project access` must identify the current
+Project workspace and its reference/editable roots. The two access scopes and
+the three approval modes must not be collapsed into a vague “allow everything”
+label. The Auto Copilot combination is visibly `Goal + Full access + Current
+Project approval`.
 
 The plus menu and slash commands should call typed APIs:
 
