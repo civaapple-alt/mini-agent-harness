@@ -20,6 +20,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   by the public approval and event-trace scenarios.
 - **App Server test fixtures:** consolidate the repeated scenario-only Model
   implementations without changing the public lifecycle coverage.
+- **Goal test fixtures:** consolidate repeated verifier verdict construction
+  while retaining every Goal transition and retry-budget assertion.
 
 ## [0.7.0] - 2026-09-02
 

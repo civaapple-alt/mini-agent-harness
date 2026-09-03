@@ -1,6 +1,14 @@
 use super::*;
 use crate::test_support::test_root as test_dir;
 
+fn verdict(outcome: VerdictOutcome, score: u32, summary: &str) -> VerifierVerdict {
+    VerifierVerdict {
+        outcome,
+        score: Some(score),
+        summary: summary.to_string(),
+    }
+}
+
 #[test]
 fn plan_mode_overlay_keeps_architect_foundation() {
     let overlay = with_plan_mode_overlay("You are a coding agent.");
@@ -70,30 +78,18 @@ fn goal_workspace_lifecycle_and_milestones() {
     let plan_content = fs::read_to_string(plan_file).unwrap();
     assert!(plan_content.contains("Autonomous Goal Plan: Refactor auth"));
 
-    let verdict_pass = VerifierVerdict {
-        outcome: VerdictOutcome::Approved,
-        score: Some(90),
-        summary: "Milestone 1 verified".to_string(),
-    };
+    let verdict_pass = verdict(VerdictOutcome::Approved, 90, "Milestone 1 verified");
 
     let next = advance_goal_milestone(&dir, Some(verdict_pass)).unwrap();
     assert_eq!(next.current_milestone, 2);
     assert_eq!(next.loop_count, 1);
     assert_eq!(next.last_verifier_score, Some(90));
 
-    let verdict_pass2 = VerifierVerdict {
-        outcome: VerdictOutcome::Approved,
-        score: Some(95),
-        summary: "Milestone 2 verified".to_string(),
-    };
+    let verdict_pass2 = verdict(VerdictOutcome::Approved, 95, "Milestone 2 verified");
     let next2 = advance_goal_milestone(&dir, Some(verdict_pass2)).unwrap();
     assert_eq!(next2.current_milestone, 3);
 
-    let verdict_pass3 = VerifierVerdict {
-        outcome: VerdictOutcome::Approved,
-        score: Some(100),
-        summary: "Final milestone verified".to_string(),
-    };
+    let verdict_pass3 = verdict(VerdictOutcome::Approved, 100, "Final milestone verified");
     let final_state = advance_goal_milestone(&dir, Some(verdict_pass3)).unwrap();
     assert_eq!(final_state.status, GoalStatus::Converged);
 
@@ -129,11 +125,7 @@ fn rejected_verdict_does_not_advance_milestone() {
     .unwrap();
     let next = advance_goal_milestone(
         &dir,
-        Some(VerifierVerdict {
-            outcome: VerdictOutcome::Rejected,
-            score: Some(30),
-            summary: "Needs more evidence".to_string(),
-        }),
+        Some(verdict(VerdictOutcome::Rejected, 30, "Needs more evidence")),
     )
     .unwrap();
     assert_eq!(next.current_milestone, state.current_milestone);
@@ -179,41 +171,15 @@ fn terminal_goal_state_does_not_advance_again() {
         },
     )
     .unwrap();
-    advance_goal_milestone(
-        &dir,
-        Some(VerifierVerdict {
-            outcome: VerdictOutcome::Approved,
-            score: Some(100),
-            summary: "first".to_string(),
-        }),
-    )
-    .unwrap();
-    advance_goal_milestone(
-        &dir,
-        Some(VerifierVerdict {
-            outcome: VerdictOutcome::Approved,
-            score: Some(100),
-            summary: "second".to_string(),
-        }),
-    )
-    .unwrap();
-    let converged = advance_goal_milestone(
-        &dir,
-        Some(VerifierVerdict {
-            outcome: VerdictOutcome::Approved,
-            score: Some(100),
-            summary: "final".to_string(),
-        }),
-    )
-    .unwrap();
+    advance_goal_milestone(&dir, Some(verdict(VerdictOutcome::Approved, 100, "first"))).unwrap();
+    advance_goal_milestone(&dir, Some(verdict(VerdictOutcome::Approved, 100, "second"))).unwrap();
+    let converged =
+        advance_goal_milestone(&dir, Some(verdict(VerdictOutcome::Approved, 100, "final")))
+            .unwrap();
 
     let unchanged = advance_goal_milestone(
         &dir,
-        Some(VerifierVerdict {
-            outcome: VerdictOutcome::Rejected,
-            score: Some(0),
-            summary: "late result".to_string(),
-        }),
+        Some(verdict(VerdictOutcome::Rejected, 0, "late result")),
     )
     .unwrap();
     assert_eq!(unchanged, converged);
@@ -234,11 +200,7 @@ fn rejected_verdict_exhausts_retry_budget_without_advancing() {
     .unwrap();
     let failed = advance_goal_milestone(
         &dir,
-        Some(VerifierVerdict {
-            outcome: VerdictOutcome::Rejected,
-            score: Some(10),
-            summary: "retry exhausted".to_string(),
-        }),
+        Some(verdict(VerdictOutcome::Rejected, 10, "retry exhausted")),
     )
     .unwrap();
     assert_eq!(failed.status, GoalStatus::Failed);

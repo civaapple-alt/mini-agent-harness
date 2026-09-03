@@ -377,8 +377,8 @@ questions have answers, placeholders are replaced, and each of the six designate
 admission confirmations is checked exactly once; reviewers remain responsible for
 answer quality.
 
-The current hard-budget snapshot is runtime `19,681 / 20,000` lines and release
-Rust source `29,032 / 30,000` lines, excluding the experimental CLI/REPL. The
+The current hard-budget snapshot is runtime `19,643 / 20,000` lines and release
+Rust source `28,994 / 30,000` lines, excluding the experimental CLI/REPL. The
 CLI is still reported separately for visibility. The approximate `26,900` Stage
 1 target is now within the enforced release-source total and remains an
 optimization reference rather than a reason to delete protected behavior.
