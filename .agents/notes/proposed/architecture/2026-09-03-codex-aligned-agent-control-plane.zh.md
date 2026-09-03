@@ -653,6 +653,29 @@ Project
 因此 Project 后续修改关联目录不会静默改变旧对话的含义。重新绑定已有 Session 必须
 通过明确的 fork/新建 Session 完成，不能原地修改其工作区。
 
+控制面的数据结构应当小而明确：
+
+```json
+{
+  "schemaVersion": 1,
+  "projectId": "project-1",
+  "workspaceId": "workspace-1",
+  "workspaceRevision": 3,
+  "primaryRoot": {"path": "D:/work/app", "role": "primary"},
+  "associatedRoots": [
+    {"rootId": "root-ref-1", "path": "D:/work/docs", "role": "reference"},
+    {"rootId": "root-edit-1", "path": "D:/work/shared", "role": "editable"}
+  ]
+}
+```
+
+Host 在分配稳定身份前必须规范化并校验每条路径；示例是控制面记录，不是模型生成的上下文。
+`planScratchRoot` 不是 Project 根目录，也不能由模型提供，而是由选中的 Plan Runtime 在规范
+Session 目录下生成。Project 工作区编辑会创建新的 `workspaceRevision`；新 Session 绑定新版本，
+已有 Session 保留自己的快照。对应操作应显式表达为（`project/workspace/update`、带 revision
+的 `session/create`、带精确绑定的 `session/attach`），任何 API 都不能静默修改运行中 Session
+的 cwd 或根目录清单。
+
 当前 Project API 已经接受主目录和多个 `source_folders`，但 Web Runtime 当前用进程
 cwd 启动 SDK，并没有将完整清单传入 Host 工具构建。必须打通以下链路：
 
@@ -976,6 +999,9 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture，优�
 29. Goal 控制调用在 SDK/Web 等待 deadline 和重连期间仍按 App Server 权威保持 `running` 或
     结算；只有明确的 cancel/pause 或权威结果才能改变 Runtime 分类，并且到期/容量拒绝的
     批准不能在之后恢复 Tool 调用。
+30. `project/workspace/update` 会创建新的 `workspaceRevision`；`session/create` 和
+    `session/attach` 必须绑定精确版本，已有的 `workspace.json` 保持不变，且
+    `planScratchRoot` 归 Session 所有，不属于 Project 根目录。
 
 Provider 支持的验证保持为可选，默认不能使用付费调用。正常证据路径使用 Mock Provider、
 Protocol Fixture 和 Harness Scenario。

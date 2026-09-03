@@ -834,6 +834,32 @@ later edit to a Project's associated directories cannot silently change the
 meaning of an old conversation. Rebinding an existing Session requires an
 explicit fork/new Session, not an in-place mutation of its workspace.
 
+The control-plane shape should be small and explicit:
+
+```json
+{
+  "schemaVersion": 1,
+  "projectId": "project-1",
+  "workspaceId": "workspace-1",
+  "workspaceRevision": 3,
+  "primaryRoot": {"path": "D:/work/app", "role": "primary"},
+  "associatedRoots": [
+    {"rootId": "root-ref-1", "path": "D:/work/docs", "role": "reference"},
+    {"rootId": "root-edit-1", "path": "D:/work/shared", "role": "editable"}
+  ]
+}
+```
+
+The Host canonicalizes and validates every path before assigning the stable
+identity; the example is a control-plane record, not model-authored context.
+`planScratchRoot` is not a Project root and is never supplied by the model: it
+is generated under the canonical Session directory for the selected Plan
+Runtime. A Project workspace edit creates a new `workspaceRevision`; new
+Sessions bind to that revision, while existing Sessions retain their snapshot.
+The corresponding operations should be explicit (`project/workspace/update`,
+`session/create` with a revision, and `session/attach` with an exact binding),
+so no API can silently mutate a running Session's cwd or root list.
+
 The current project API already accepts a primary path and multiple
 `source_folders`, but the Web runtime currently launches the SDK with the
 process cwd and does not pass the complete manifest into Host tool creation.
@@ -1267,6 +1293,10 @@ The following scenarios are required before the proposal can move to
     authority across SDK/Web wait deadlines and reconnects; only explicit
     cancel/pause or an authoritative outcome changes the Runtime classification,
     and expired/capacity-rejected approvals cannot later resume a Tool call.
+30. `project/workspace/update` creates a new `workspaceRevision`; `session/create`
+    and `session/attach` bind an exact revision, existing `workspace.json` files
+    remain unchanged, and `planScratchRoot` is Session-owned rather than a
+    Project root.
 
 Provider-backed verification remains opt-in and must not use paid calls by
 default. The normal evidence path uses mock providers, protocol fixtures, and
