@@ -31,6 +31,8 @@
 
 ### Proposed
 
+- [Codex-Aligned Agent Control Plane](proposed/architecture/2026-09-03-codex-aligned-agent-control-plane.md)
+- [Codex-Aligned Agent Control Plane（中文）](proposed/architecture/2026-09-03-codex-aligned-agent-control-plane.zh.md)
 - [Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems](proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md)
 - [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
 - [CLI Through App Server](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md)
