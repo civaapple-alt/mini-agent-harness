@@ -23,7 +23,7 @@ without introducing a standalone Profile layer:
 
 ```text
 Thread Mode (session): chat | plan | goal
-Access and Approval (runtime): access scope + policy + bounded lifetime
+Access and Approval (runtime): access scope + approval mode
 Execution ownership: Core Turn | Plan lifecycle | Goal lifecycle
 ```
 
@@ -57,6 +57,9 @@ The intended user-facing flow is deliberately simple:
    `plan.md`. Enter Goal with `/goal`. Goal remains visible above the
    conversation for the selected Thread and exposes Start/Resume, Pause,
    Update, and Delete actions.
+6. For Auto Copilot, choose `Goal + Full access (machine-wide) +
+   current-project approval`. This is an explicit Project-owned machine-wide
+   autonomous runtime, not a Profile or a global allow-all setting.
 
 Plan and Goal remain the existing canonical Thread boundaries. This proposal
 does not create a second Workflow service, a second turn loop, or a generic
@@ -171,7 +174,7 @@ as a one-way alias to that access preset; it must not survive as a Runtime or
 Profile identity. Expose the actual user decisions independently:
 
 - access: `project` or `machine`;
-- approval policy: `per_action`, `auto_approve`, or `strict`;
+- approval mode: `per_action`, `current_session`, or `current_project`;
 - mode: Chat/Plan through `/plan`;
 - the selected Thread's Plan runtime state and Goal lifecycle through `/goal`
   and its persistent header.
@@ -205,7 +208,7 @@ Session-owned scratch root, with declared Project roots mounted or exposed as
 read inputs. Chat and Goal may keep the Project primary root as their normal
 working directory according to their own Runtime rules.
 
-### Approval policy, access scope, and lifetime are different
+### Approval mode and access scope are different
 
 `per_action` describes when an action must ask. It does not mean that every
 action is automatically allowed. Tool exposure, Host security policy, Plan
@@ -214,18 +217,18 @@ lock, and human approval remain separate gates.
 The public decision vocabulary is:
 
 ```text
-policy: per_action | auto_approve | strict
-access:  project | machine
-lifetime: once | session
+approval: per_action | current_session | current_project
+access:   project | machine
 ```
 
 Rules:
 
 - `per_action` means that each approval-gated action can ask; it does not mean
   that every action is automatically allowed;
-- `once` approves only the current `requestId`;
-- `session` allows the same bounded action class within the current Thread or
-  App Server session, according to the selected lifetime;
+- `current_session` remembers a bounded approval only for the current Thread/
+  Session;
+- `current_project` remembers a bounded approval for all Sessions belonging to
+  the current Web Studio Project;
 - `project` limits file/process admission to the immutable Project
   WorkspaceSpec;
 - `machine` means machine-wide access scope for the current Runtime/Session;
@@ -233,15 +236,18 @@ Rules:
 - Plan Mode's formal Project-mutation gate cannot be bypassed by approval;
   bounded writes under the Session-owned Plan scratch root and the explicit
   `plan.md` artifact remain allowed;
-- `auto_approve` may skip interactive waiting for admissible actions but cannot
-  override explicit Deny or Plan restrictions;
-- `strict` denies approval-gated actions without opening a user prompt.
+- current-project sharing never expands a Session's immutable WorkspaceSpec or
+  turns a reference root into an editable root;
+- a current-project approval is keyed to the Project, WorkspaceSpec revision,
+  access scope, action class, and bounded path scope. It is not a global
+  approval cache.
 
 The approval key must include the bounded owner and action identity, for
 example:
 
 ```text
-(access scope, thread/session scope, tool name, normalized action class)
+(project/session owner, WorkspaceSpec revision, access scope, tool name,
+ normalized action class, bounded path scope)
 ```
 
 Raw unbounded commands, secrets, or arbitrary prompt text must not become an
@@ -249,11 +255,11 @@ approval rule.
 
 ### Product presets: Project access and machine-wide Full access
 
-The common user path should not require selecting a new lifetime or scope for
-every tool call. The Studio-facing presets are deliberately few. The normal
-default remains `per_action`. When an approval request appears, the user can
-choose machine-wide `Full access` for the current Runtime/Session instead of
-configuring another runtime preset or answering the same class of request repeatedly:
+The common user path should not require selecting a new approval mode or scope for
+every tool call. The Studio-facing choices are deliberately few. The normal
+default remains `per_action`. The user can separately choose Project-shared
+approval when they want all Sessions in the current Project to reuse a bounded
+decision:
 
 ```text
 Project access:
@@ -263,6 +269,10 @@ Project access:
 Full access:
   access scope: machine-wide for the current Runtime/Session
   confirmation: explicit high-risk confirmation before activation
+
+Current-project approval:
+  approval owner: the current Web Studio Project
+  coverage: all Sessions in that Project, subject to the bounded approval key
 ```
 
 `Full access` is the user-facing name for machine-wide access; it must not be
@@ -276,9 +286,32 @@ confirmed high-risk preset rather than being hidden behind `per_action` or
 
 `Project access` remains bounded by the current Project's immutable
 WorkspaceSpec, explicit security Deny, Plan locks, and configured tool scope.
-The approval policy is independent of both presets. The UI detail text must
-say either “current Project workspace” or “entire machine”, and identify any
-remaining Deny/confirmation guardrails.
+The approval choice is independent of the access preset. The UI detail text
+must say either “current Project workspace” or “entire machine”, identify the
+approval owner (current Session or current Project), and identify any remaining
+Deny/confirmation guardrails.
+
+### Auto Copilot is an explicit composition, not a Profile
+
+The user-facing Auto Copilot scenario is the following composition:
+
+```text
+mode:     Goal
+access:   Full access (machine-wide)
+approval: current_project
+```
+
+`Goal` supplies cross-Turn execution, verification, and continuation. `Full
+access` supplies the machine-wide admission scope. `current_project` shares
+bounded approval decisions across Sessions owned by the same Web Studio
+Project. Together they create a Project-owned machine-wide autonomous runtime;
+they do not create a Profile or a global allow-all switch.
+
+Enabling this combination requires an explicit high-risk confirmation and must
+show the effective meaning in the UI. Hard security Deny, unavailable tools,
+Plan locks, pause/cancel, and any non-overridable confirmation remain in force.
+If the user wants project-only autonomy, the safer composition is `Goal` plus
+`Project access` plus `current_project` approval.
 
 Project editing is the durable way to expand the workspace. It should offer
 two explicit directory intents: `Add as reference` and `Add as editable
@@ -402,7 +435,7 @@ All approval notifications and responses must be validated against this chain.
 ### Thread settings
 
 Extend the existing `thread/settings/update` contract with an optional typed
-`approvalPolicy`; keep `collaborationMode` and bounded `builtinTools` in the
+`approvalMode`; keep `collaborationMode` and bounded `builtinTools` in the
 same Thread boundary. The result and `thread/settings/updated` notification
 must return the effective values and existing `stateRevision`.
 
@@ -420,7 +453,7 @@ is created, these startup inputs are immutable for that identity; changing them
 requires an explicit Runtime recreation or a new Session. Profile-shaped startup
 input is rejected; it is not parsed or translated.
 
-### Approval lifecycle
+### Approval protocol
 
 Keep the existing methods and add bounded fields rather than inventing a second
 approval transport:
@@ -434,7 +467,7 @@ approval transport:
   "toolName": "shell",
   "action": "shell command `cargo test`",
   "accessScopes": ["project", "machine"],
-  "lifetimes": ["once", "session"]
+  "approvalModes": ["per_action", "current_session", "current_project"]
 }
 ```
 
@@ -443,16 +476,23 @@ approval transport:
   "requestId": "approval-1",
   "approved": true,
   "access": "machine",
-  "lifetime": "once",
+  "approval": "current_project",
   "reason": ""
 }
 ```
 
-`approval/resolved` must echo the final access, lifetime, and correlation
-fields. The new wire contract accepts only the typed `access` and `lifetime`
+`approval/resolved` must echo the final access, approval mode, and correlation
+fields. The new wire contract accepts only the typed `access` and `approval`
 fields; legacy `remember` and boolean-only approval responses are rejected.
 The App Server must no longer silently remember every successful boolean
 approval.
+
+`current_project` decisions are owned by the App Server/Host approval authority
+and keyed by `projectId`; Web `state.json` may display or reference the setting
+but cannot store or enforce it. A Project approval is shared across its
+Sessions only when the bounded WorkspaceSpec revision, access scope, action
+class, and path scope match. It is revocable and never becomes a process-global
+allow rule.
 
 ### Explicit compaction
 
@@ -796,13 +836,13 @@ state.
 
 ### Batch 2 — Approval correctness and routing
 
-- make `once` genuinely one-shot;
-- make `session` lifetime and `project`/`machine` access explicit bounded
-  decision entries;
+- make `per_action` genuinely one-shot at the request boundary;
+- make `current_session` and `current_project` approval ownership explicit
+  bounded decision entries;
 - carry `project` versus `machine` access scope separately from approval
-  lifetime and policy;
+  mode;
 - preserve Deny and Plan lock precedence;
-- pass access scope and approval lifetime through App Server → SDK → FastAPI →
+- pass access scope and approval mode through App Server → SDK → FastAPI →
   Studio;
 - remove Web's duplicate approval authority;
 - route pending requests by Thread and request ID;
@@ -843,7 +883,7 @@ This is the first implementation batch and is a security correctness gate.
 - render an exceptional runtime-guard outcome as a protection diagnostic, not
   as “8 steps”, “step limit reached”, or “interrupted”;
 - implement the plus menu and approval dock;
-- add active Thread status indicators for mode, Goal, approval policy, MCP,
+- add active Thread status indicators for mode, Goal, approval mode, MCP,
   and Runtime revision.
 
 ### Batch 6 — Slash and review workflows
@@ -857,8 +897,10 @@ corresponding capability evidence is accepted.
 The following scenarios are required before the proposal can move to
 `implemented/`:
 
-1. `allow once` causes a second identical action to request approval again.
-2. `session` approval affects only the intended Thread/session.
+1. `per_action` causes a second identical action to request approval again.
+2. `current_session` approval affects only the intended Thread/Session, while
+   `current_project` approval is shared by all Sessions in the same Project and
+   never affects another Project.
 3. `project` access/approval does not affect another Project or unrelated
    action class.
 4. Security Deny cannot be overridden by any UI scope.
@@ -888,6 +930,8 @@ The following scenarios are required before the proposal can move to
     workspace, while `Full access` explicitly covers machine-wide scope for
     the current Runtime/Session. Both preserve hard security Deny; shell
     confirmation and other remaining guardrails are visible in the details.
+    The Auto Copilot composition is explicitly `Goal + Full access +
+    current_project` approval and requires a high-risk confirmation.
 13. Changing a Project's associated roots does not change an existing Session's
    `workspace.json`; a new Session or explicit fork receives the new manifest.
 14. A path mentioned only in a message can be used as bounded reference
@@ -950,7 +994,7 @@ Harness scenarios.
    Rust batch must identify a measured offset or remain net-zero, run
    `python scripts/line_budget.py`, and record actual before/after counts.
 5. **Visible surface:** Add only bounded WorkspaceSpec root metadata,
-   Session catalog/status fields, access scope and approval lifetime metadata,
+   Session catalog/status fields, access scope and approval mode metadata,
    typed control fields, and Thread-scoped notifications. Do not expose
    arbitrary prompt replacement, unlimited root lists/paths, unrestricted
    extension activation, or unbounded event payload. Reference roots are
@@ -967,14 +1011,14 @@ Harness scenarios.
 
 ## Change test
 
-- **Hypothesis:** Independent Project/machine access, bounded approval
-  lifetime, and Thread-owned Plan/Goal runtimes let a client reproduce
+- **Hypothesis:** Independent Project/machine access, bounded approval mode,
+  Project-shared approval ownership, and Thread-owned Plan/Goal runtimes let a client reproduce
   Codex-like controls without weakening Host security, losing multi-root
   boundaries, or duplicating execution state. Removing Profile and routine
   step-budget controls keeps ownership understandable.
 - **Distinguishing trace:** `projectId → workspaceId → sessionId → threadId →
   turnId → callId → requestId`, followed by root admission, Session lock/status,
-  access scope/lifetime, resolved outcome, ToolItem completion, Plan scratch
+  access scope/approval owner, resolved outcome, ToolItem completion, Plan scratch
   cleanup state, retained `plan.md`, stop reason, and canonical readback. The
   same trace must prove that history selection and a paused Session resume do
   not create a duplicate checkpoint or turn. It must also distinguish a

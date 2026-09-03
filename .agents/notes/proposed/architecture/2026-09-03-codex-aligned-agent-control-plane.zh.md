@@ -21,7 +21,7 @@ Web Studio
 
 ```text
 Thread Mode（Session）：chat | plan | goal
-访问与批准（运行时）：访问范围 + 策略 + 有界生命周期
+访问与批准（运行时）：访问范围 + 批准模式
 执行所有权：Core Turn | Plan 生命周期 | Goal 生命周期
 ```
 
@@ -45,6 +45,9 @@ Workspace Binding（Session）：primaryRoot + associatedRoots + 每个目录的
    中的路径不能静默扩展 Project。
 5. 通过 `/plan` 进入计划模式，通过 `/goal` 进入 Goal 模式。Goal 对当前 Thread
    会话持续显示在对话上方，并提供开始/恢复、暂停、更新和删除操作。
+6. 如果需要 Auto Copilot，选择 `Goal + Full access（machine-wide） +
+   current-project 批准`。这是由 Project 所有的整机自主 Runtime，不是 Profile，也不是全局
+   allow-all 设置。
 
 Plan 和 Goal 继续沿用现有的 Thread 边界。本提案不创建第二个 Workflow
 Service、第二个 Turn Loop，也不引入通用策略/插件框架。
@@ -130,14 +133,14 @@ Studio 应显示当前 Mode 和 Goal 状态，但 Mode 的启动应遵循用户�
 Runtime 或 Profile 身份。面向用户只独立暴露真正的决定：
 
 - 访问：`project` 或 `machine`；
-- 批准策略：`per_action`、`auto_approve` 或 `strict`；
+- 批准模式：`per_action`、`current_session` 或 `current_project`；
 - Mode：通过 `/plan` 控制 Chat/Plan；
 - 所选 Thread 的 Plan Runtime 状态和 Goal 生命周期：通过 `/goal` 和持久顶部栏控制。
 
 启动输入变化必须通过 Runtime 重建或明确的下一个 Runtime 操作生效，不能只更新 Python
 偏好字段而不改变实际 Runtime 行为。
 
-### Approval Policy、访问范围与生命周期不同
+### 批准模式与访问范围不同
 
 `per_action` 表示何时必须询问，不表示每个操作都会自动获准。工具暴露范围、Host
 安全策略、Plan 锁和人工批准仍然是相互独立的门槛。
@@ -145,36 +148,36 @@ Runtime 或 Profile 身份。面向用户只独立暴露真正的决定：
 公开决策词汇为：
 
 ```text
-policy: per_action | auto_approve | strict
-access:  project | machine
-lifetime: once | session
+approval: per_action | current_session | current_project
+access:   project | machine
 ```
 
 规则：
 
 - `per_action` 表示每个需要批准的操作都可以询问；不表示每个操作都会自动获准；
-- `once` 只批准当前 `requestId`；
-- `session` 在当前 Thread 或 App Server Session 内，对相同的有界操作类别生效，具体生命周期按选定范围执行；
+- `current_session` 只在当前 Thread/Session 内记住有界批准；
+- `current_project` 为当前 Web Studio Project 下的所有 Session 记住有界批准；
 - `project` 将文件/进程准入限制在不可变的 Project WorkspaceSpec 内；
 - `machine` 表示当前 Runtime/Session 的整机访问范围；
 - 明确的安全 Deny 始终优先于 UI 批准；
 - Plan Mode 的修改锁不能被批准绕过；
-- `auto_approve` 可以跳过可准入操作的交互等待，但不能覆盖明确 Deny 或 Plan 限制；
-- `strict` 在不打开用户批准请求的情况下拒绝需要批准的操作。
+- Project 共享批准不能扩展 Session 的不可变 WorkspaceSpec，也不能把 reference 根目录变成 editable 根目录；
+- current-project 批准必须绑定 Project、WorkspaceSpec revision、访问范围、操作类别和有界路径范围，不能成为全局批准缓存。
 
 批准键必须包含有界的所有者和操作身份，例如：
 
 ```text
-(access scope, thread/session scope, tool name, normalized action class)
+(project/session owner, WorkspaceSpec revision, access scope, tool name,
+ normalized action class, bounded path scope)
 ```
 
 不能将原始的无限制命令、密钥或任意 Prompt 文本变成批准规则。
 
 ### 产品预设：“项目访问”与整机范围的“完全访问”
 
-普通用户路径不应要求为每次工具调用重新选择生命周期或范围。Studio 面向用户只保留少量预设。
-默认策略仍为 `per_action`；出现批准请求时，用户可以为当前 Runtime/Session 启用一次整机
-范围的“完全访问”，不需要配置其他 Runtime 预设，也不需要反复回答同一类请求：
+普通用户路径不应要求为每次工具调用重新选择批准模式或范围。Studio 面向用户只保留少量选择。
+默认仍为 `per_action`；如果希望当前 Project 下的所有 Session 复用有界批准，可以单独选择
+Project 级共享批准：
 
 ```text
 项目访问：
@@ -184,6 +187,10 @@ lifetime: once | session
 完全访问：
   访问范围：当前 Runtime/Session 的整机范围
   启用条件：启用前明确确认高风险访问
+
+当前 Project 批准：
+  批准所有者：当前 Web Studio Project
+  覆盖范围：该 Project 下的所有 Session，但必须受有界批准键约束
 ```
 
 “完全访问”是面向用户的整机访问名称，不能重新命名或文档化为 Project 范围权限。当前
@@ -192,8 +199,27 @@ lifetime: once | session
 产品选项，必须使用单独名称并明确确认为高风险预设，不能藏在 `per_action` 或 `profile=auto` 后面。
 
 “项目访问”仍受当前 Project 不可变 WorkspaceSpec、明确的安全 Deny、Plan 锁和已配置工具范围
-约束。批准策略独立于这两个访问预设。UI 详情必须明确写出“当前 Project 工作区”或“整台机器”，
-并说明仍然存在的 Deny/确认保护。
+约束。批准选择独立于访问预设。UI 详情必须明确写出“当前 Project 工作区”或“整台机器”，
+说明批准所有者是当前 Session 还是当前 Project，并说明仍然存在的 Deny/确认保护。
+
+### Auto Copilot 是明确组合，不是 Profile
+
+面向用户的 Auto Copilot 场景是以下组合：
+
+```text
+运行模式：Goal
+访问范围：Full access（machine-wide）
+批准：current_project
+```
+
+`Goal` 提供跨 Turn 的执行、验证和继续；`Full access` 提供整机范围的准入能力；
+`current_project` 让同一个 Web Studio Project 所属的多个 Session 共享有界批准决定。三者
+组合成“由 Project 所有的整机自主 Runtime”，但不会创建 Profile，也不会成为全局的 allow-all
+开关。
+
+启用这个组合必须明确确认高风险访问，并在 UI 中展示实际含义。硬性安全 Deny、不可用工具、
+Plan 锁、暂停/取消和其他不可覆盖的确认仍然有效。如果只需要项目内自主运行，更安全的组合是
+`Goal` + `Project access` + `current_project` 批准。
 
 Project 编辑是持久扩展工作区的正式方式，应提供两种明确的目录意图： “添加为参考”和
 “添加为可编辑工作区”。普通消息中提到的路径只是临时上下文，不是工作区变更。
@@ -294,7 +320,7 @@ projectId → workspaceId → sessionId → threadId → turnId → callId/itemI
 
 ### Thread 设置
 
-在现有 `thread/settings/update` 契约中增加可选的类型化 `approvalPolicy`；将
+在现有 `thread/settings/update` 契约中增加可选的类型化 `approvalMode`；将
 `collaborationMode` 和有界的 `builtinTools` 保持在同一个 Thread 边界中。结果和
 `thread/settings/updated` 通知必须返回生效后的值以及现有的 `stateRevision`。
 
@@ -308,7 +334,7 @@ App Server 初始化和 Runtime 创建应直接接收类型化输入：Provider/
 不再有 `profile` 字段。Runtime/Session 创建后，这些启动输入对该身份不可变；变更必须明确
 重建 Runtime 或新建 Session。Profile 形态的启动输入直接拒绝，不解析也不翻译。
 
-### Approval 生命周期
+### Approval 协议
 
 保留现有方法，通过增加有界字段来扩展，不创建第二套批准传输：
 
@@ -321,7 +347,7 @@ App Server 初始化和 Runtime 创建应直接接收类型化输入：Provider/
   "toolName": "shell",
   "action": "shell command `cargo test`",
   "accessScopes": ["project", "machine"],
-  "lifetimes": ["once", "session"]
+  "approvalModes": ["per_action", "current_session", "current_project"]
 }
 ```
 
@@ -330,14 +356,19 @@ App Server 初始化和 Runtime 创建应直接接收类型化输入：Provider/
   "requestId": "approval-1",
   "approved": true,
   "access": "machine",
-  "lifetime": "once",
+  "approval": "current_project",
   "reason": ""
 }
 ```
 
-`approval/resolved` 必须回显最终访问范围、生命周期和关联字段。新的线协议只接受类型化的
-`access` 和 `lifetime` 字段；旧的 `remember` 和只有布尔值的批准响应直接拒绝。App Server
+`approval/resolved` 必须回显最终访问范围、批准模式和关联字段。新的线协议只接受类型化的
+`access` 和 `approval` 字段；旧的 `remember` 和只有布尔值的批准响应直接拒绝。App Server
 不得再静默地记住每次成功的布尔批准。
+
+`current_project` 决定由 App Server/Host 的批准权威负责，并以 `projectId` 为所有者；
+Web `state.json` 只能展示或引用该设置，不能保存或执行批准。只有在 WorkspaceSpec revision、
+访问范围、操作类别和有界路径范围都匹配时，Project 批准才可被其 Session 共享。该批准必须
+可撤销，不能成为进程全局的 allow 规则。
 
 ### 显式压缩
 
@@ -616,10 +647,10 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
 
 ### Batch 2 — 批准正确性与路由
 
-- 让 `once` 真正只生效一次；
-- 让 `session` 生命周期以及 `project`/`machine` 访问范围成为明确的有界决策条目；
+- 让 `per_action` 在请求边界真正只生效一次；
+- 让 `current_session` 和 `current_project` 的批准所有权成为明确的有界决策条目；
 - 保持 Deny 和 Plan 锁的优先级；
-- 将访问范围和批准生命周期从 App Server → SDK → FastAPI → Studio 传递完整；
+- 将访问范围和批准模式从 App Server → SDK → FastAPI → Studio 传递完整；
 - 删除 Web 的重复批准权威；
 - 按 Thread 和 request ID 路由待批准请求；
 - 增加 Core/Host/App Server 边界测试和一个 SDK/Web 批准场景。
@@ -648,7 +679,7 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
   只展示有效的有界 Runtime 输入；
 - 将异常的 Runtime 安全保护展示为保护诊断，不能展示为“8 步”“达到步骤上限”或“中断”；
 - 实现加号菜单和批准面板；
-- 增加当前 Thread 的 Mode、Goal、批准策略、MCP 和 Runtime revision 状态指示器。
+- 增加当前 Thread 的 Mode、Goal、批准模式、MCP 和 Runtime revision 状态指示器。
 
 ### Batch 6 — Slash 与 Review Workflow
 
@@ -659,8 +690,9 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
 
 提案只有在以下场景全部满足后才能移动到 `implemented/`：
 
-1. `allow once` 使第二次相同操作再次请求批准。
-2. `session` 批准只影响目标 Thread/Session。
+1. `per_action` 使第二次相同操作再次请求批准。
+2. `current_session` 批准只影响目标 Thread/Session；`current_project` 批准
+   由同一 Project 下的所有 Session 共享，但不会影响其他 Project。
 3. `project` 访问/批准不影响其他 Project 或无关的操作类别。
 4. 任何 UI 范围都不能覆盖安全 Deny。
 5. Plan Mode 允许读取声明的根目录、执行有界探索命令、在 `planScratchRoot` 下创建临时
@@ -678,8 +710,9 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture。不�
     目录只读，`editable` 目录只有通过明确的 Project 或 machine 访问，且继续受
     Plan/security/approval 门槛约束时才可写；Plan 临时写入隔离在 `planScratchRoot` 中。
 12. 面向用户的“项目访问”预设只覆盖声明的 Project 工作区；“完全访问”明确覆盖当前
-    Runtime/Session 的整机范围。两者都保留硬性安全 Deny，Shell 确认和其他保护必须在
-    详情中可见。
+     Runtime/Session 的整机范围。两者都保留硬性安全 Deny，Shell 确认和其他保护必须在
+     详情中可见。Auto Copilot 的组合明确为 `Goal + Full access + current_project` 批准，
+     并要求高风险确认。
 13. 修改 Project 的关联目录不会改变已有 Session 的 `workspace.json`；新 Session 或明确 fork
     才能获取新清单。
 14. 只在消息中提到的路径可以作为有界参考上下文使用；要求同步/更新时必须形成明确的
@@ -723,7 +756,7 @@ Protocol Fixture 和 Harness Scenario。
    剩余空间分别为 446 和 672 行。提案不构成一个无限制实现批次。每个 Rust 批次都必须记录
    可测量的抵消或保持净零，运行 `python scripts/line_budget.py`，并记录前后实际计数。
 5. **可见表面：** 只增加有界的 WorkspaceSpec 根目录元数据、每个根目录的访问模式、Session
-   目录/状态字段、访问范围与批准生命周期元数据、类型化控制字段和 Thread 范围通知。
+   目录/状态字段、访问范围与批准模式元数据、类型化控制字段和 Thread 范围通知。
    不公开任意 Prompt 替换、无限制根目录列表/路径、无限制扩展激活或无界事件内容。
    Reference 根目录只读；Editable 根目录必须由 Project 或 machine 访问决定明确授权，
    并继续受批准/Plan 约束。Plan scratch、`plan.md` 和清理状态是有界的 Thread 所属产物。
@@ -734,11 +767,11 @@ Protocol Fixture 和 Harness Scenario。
 
 ## 变更测试
 
-- **假设：** 独立的 Project/machine 访问范围、有界的批准生命周期和 Thread 所属的 Plan/Goal
-  Runtime，可以在不削弱 Host 安全、不丢失多根工作区边界、不重复执行状态的前提下，为客户端
+- **假设：** 独立的 Project/machine 访问范围、有界的批准模式、Project 共享的批准所有权以及
+  Thread 所属的 Plan/Goal Runtime，可以在不削弱 Host 安全、不丢失多根工作区边界、不重复执行状态的前提下，为客户端
   提供类似 Codex 的控制。移除 Profile 和常规步数预算控制，可以让所有权更容易理解。
 - **区分结果的 Trace：** `projectId → workspaceId → sessionId → threadId → turnId → callId →
-  requestId`，随后是根目录准入、Session 锁/状态、访问范围/生命周期、解析结果、ToolItem 完成、
+  requestId`，随后是根目录准入、Session 锁/状态、访问范围/批准所有者、解析结果、ToolItem 完成、
   Plan scratch 清理状态、保留的 `plan.md`、Stop Reason 和规范 readback。同一条 Trace 必须证明
   历史选择和暂停 Session 恢复不会生成重复 checkpoint 或 Turn，并区分 Project 配置的 Editable
   根目录、只作参考的一次性消息路径，以及明确批准的同步/更新。
