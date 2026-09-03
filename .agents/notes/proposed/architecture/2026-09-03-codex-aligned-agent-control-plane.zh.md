@@ -140,6 +140,24 @@ Runtime 或 Profile 身份。面向用户只独立暴露真正的决定：
 启动输入变化必须通过 Runtime 重建或明确的下一个 Runtime 操作生效，不能只更新 Python
 偏好字段而不改变实际 Runtime 行为。
 
+### Plan 是读多写少，不是只读
+
+Plan 为所选 Thread 管理有界的探索 Runtime。它可以读取声明的 Project 根目录，执行分析
+命令或脚本，在 Session 所有的 `planScratchRoot` 下写入临时脚本和生成输出，并写入明确的
+`plan.md` 产物。scratch 区域不是 Project 根目录，也不是持久的实现工作区。
+
+正式 Project 修改包括源文件、Project 配置，以及用户预期保留的业务/生成产物变化。即使
+当前访问范围是整机范围，Plan 也必须通过已有的 Plan 门槛延后这些修改。批准和 Full access
+只授权准入范围，不能静默把 Plan 变成实现模式。
+
+Plan Runtime 必须维护有界的清理清单。正常结算、取消或明确退出时，清理 scratch 脚本和输出，
+但保留 `plan.md` 以及有界的探索摘要。清理失败必须展示为 `cleanup_pending`，不能静默显示为
+干净完成。如果用户明确要求保留某个探索输出，则它必须变成一次单独审查的 Project 修改。
+
+Plan 探索的 shell/tool 工作目录默认应为 Session 所有的 scratch 根目录，声明的 Project 根目录
+作为读取输入挂载或暴露。Chat 和 Goal 可以根据各自 Runtime 规则，以 Project primary root
+作为常规工作目录。
+
 ### 批准模式与访问范围不同
 
 `per_action` 表示何时必须询问，不表示每个操作都会自动获准。工具暴露范围、Host
