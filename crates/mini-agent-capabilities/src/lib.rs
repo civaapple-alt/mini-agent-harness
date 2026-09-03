@@ -4,6 +4,7 @@
 //! selects providers through bounded identifiers and remains responsible for
 //! profile resolution and runtime orchestration.
 
+mod blocking;
 mod image;
 mod mcp;
 mod model;

@@ -2,10 +2,6 @@ use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
-#[cfg(test)]
-#[path = "path_policy_tests.rs"]
-mod tests;
-
 /// Normalizes an existing or not-yet-created path for policy comparisons.
 pub fn normalize_path(path: &Path) -> PathBuf {
     if let Ok(canonical) = path.canonicalize() {

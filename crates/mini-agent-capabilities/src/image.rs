@@ -64,7 +64,7 @@ impl FileUploader for DeepSeekFiles {
         let filename = filename.to_string();
         let media_type = media_type.to_string();
         let bytes = bytes.to_vec();
-        run_blocking(async move {
+        crate::blocking::run("mini-agent-files", "files", async move {
             let part = reqwest::multipart::Part::bytes(bytes)
                 .file_name(filename)
                 .mime_str(&media_type)
@@ -543,26 +543,6 @@ pub(crate) fn wire_image_block(image: &ProjectedImage) -> Value {
             "text": note
         }),
     }
-}
-
-fn run_blocking<T>(
-    fut: impl std::future::Future<Output = Result<T, ToolError>> + Send + 'static,
-) -> Result<T, ToolError>
-where
-    T: Send + 'static,
-{
-    let join = std::thread::Builder::new()
-        .name("mini-agent-files".into())
-        .spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|error| ToolError(format!("cannot start files runtime: {error}")))?
-                .block_on(fut)
-        })
-        .map_err(|error| ToolError(format!("cannot start files thread: {error}")))?;
-    join.join()
-        .unwrap_or_else(|_| Err(ToolError("files thread panicked".to_string())))
 }
 
 #[cfg(test)]

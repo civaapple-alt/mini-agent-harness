@@ -1,7 +1,6 @@
 use super::*;
 use crate::test_support::{remove_test_root, test_root};
 use mini_agent_protocol::ToolExecutionStatus;
-use std::io::Cursor;
 
 struct StubFiles(&'static str);
 
@@ -203,33 +202,6 @@ fn shell_denial_is_explicit_before_sandbox_execution() {
         format!("user denied: shell command `{command}`")
     );
     assert!(!marker.exists());
-    remove_test_root(&root);
-}
-
-#[test]
-fn shell_admission_describes_approval_before_execution() {
-    let root = test_root();
-    let shell = Shell(
-        workspace(
-            root.clone(),
-            ApprovalController::new(ApprovalMode::Automatic),
-            Vec::new(),
-            SandboxKind::Native,
-        ),
-        ResultStore::default(),
-    );
-    let request = ToolExecutionRequest::new(
-        "call-shell",
-        "shell",
-        json!({"command": "printf admission"}),
-    );
-
-    assert_eq!(
-        shell.admission(&request).unwrap(),
-        ToolAdmission::ApprovalRequired {
-            action: "shell command `printf admission`".to_string(),
-        }
-    );
     remove_test_root(&root);
 }
 
@@ -532,15 +504,6 @@ fn write_file_creates_but_does_not_replace() {
 }
 
 #[test]
-fn bounded_capture_keeps_head_and_tail() {
-    let captured = capture_bounded(Cursor::new(b"0123456789abcdef"), 8).unwrap();
-
-    assert_eq!(captured.bytes, b"0123cdef");
-    assert_eq!(captured.total_bytes, 16);
-    assert!(captured.truncated);
-}
-
-#[test]
 fn shell_process_has_a_timeout() {
     let root = test_root();
     let command = if cfg!(windows) {
@@ -627,21 +590,6 @@ fn large_shell_output_is_retained_as_bounded_artifact() {
     let output = shell.execute(&json!({"command": command})).unwrap();
     assert!(output.contains("handle=\"result-1\""), "{output}");
 
-    remove_test_root(&root);
-}
-
-#[test]
-fn docker_sandbox_checks_availability_or_reports_clear_error() {
-    let root = test_root();
-    let result = run_shell(
-        "echo hello",
-        &root,
-        SandboxKind::Docker,
-        Duration::from_secs(5),
-    );
-    if let Err(err) = result {
-        assert!(err.0.contains("docker sandbox is unavailable"));
-    }
     remove_test_root(&root);
 }
 

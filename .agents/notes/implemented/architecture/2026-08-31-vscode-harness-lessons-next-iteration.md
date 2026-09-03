@@ -1990,3 +1990,35 @@ Responses request 和 WebFetch 构造，不减少测试场景或改变 provider 
 
 Decision: **accept this bounded cleanup batch**. Runtime is `184` lines below the requested
 `18,799` target; release-source cleanup still needs `657` lines to reach `27,150`.
+
+#### 2026-09-03：Capabilities blocking helper与低层重复测试清理
+
+本批继续收敛 Capabilities 内部重复实现和低层测试。两个同步包装路径现在共享一个
+有界 blocking-runtime helper；删除只覆盖路径规范化别名、Shell admission 形态、独立
+bounded capture 细节和 Docker 不可用分支的重复测试。保留工作区公共路径、真实 Shell
+拒绝与超时、bounded artifact、Docker 挂载、SSRF/redirect、MCP、图片和 provider 解析
+证据；不改变审批、沙箱、持久化或协议行为。
+
+本批六项准入记录：
+
+```text
+1. Layer: Capabilities internal runtime and unit-test surface; Host/Core/App Server
+   public boundaries and the existing six-tool admission contract are unchanged.
+2. Duplicate responsibility: image upload and web fetch duplicated the same blocking
+   Tokio-thread bootstrap; the removed low-level tests duplicated behavior already
+   exercised by workspace/public-path or stronger bounded/security scenarios.
+3. Replace vs add: use one shared helper and retain the stronger boundary tests; add no
+   alternate execution path, compatibility endpoint, or model-visible tool surface.
+4. Net line delta: runtime `18,615 -> 18,615` (`0`); release Rust source
+   `27,807 -> 27,719` (`-88`).
+5. Visible surface: no model-visible input, event, persistence, or public protocol
+   behavior changes; only internal helper reuse and redundant evidence were removed.
+6. Boundary evidence: `cargo test -p mini-agent-capabilities` (62 passed),
+   `cargo fmt --all`, `git diff --check`, and `python scripts/line_budget.py all`
+   passed. Scoped Clippy passed with the repository's existing
+   `session.rs::initialize_new` `too_many_arguments` lint excluded; the previously
+   committed Host/App Server public approval evidence remains the admission boundary.
+```
+
+Decision: **accept this bounded cleanup batch**. Runtime remains `184` lines below the
+`18,799` target; release-source cleanup still needs `569` lines to reach `27,150`.

@@ -237,27 +237,9 @@ fn same_class_redirect(
 
 fn http_get(url: &str) -> Result<FetchedPage, ToolError> {
     let (admitted, class) = classify_url(url)?;
-    run_blocking(async move { fetch_admitted(admitted, class).await })
-}
-
-fn run_blocking<T>(
-    fut: impl std::future::Future<Output = Result<T, ToolError>> + Send + 'static,
-) -> Result<T, ToolError>
-where
-    T: Send + 'static,
-{
-    let join = std::thread::Builder::new()
-        .name("mini-agent-web-fetch".into())
-        .spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|error| ToolError(format!("cannot start fetch runtime: {error}")))?
-                .block_on(fut)
-        })
-        .map_err(|error| ToolError(format!("cannot start fetch thread: {error}")))?;
-    join.join()
-        .unwrap_or_else(|_| Err(ToolError("fetch thread panicked".to_string())))
+    crate::blocking::run("mini-agent-web-fetch", "fetch", async move {
+        fetch_admitted(admitted, class).await
+    })
 }
 
 async fn fetch_admitted(url: Url, class: TargetClass) -> Result<FetchedPage, ToolError> {
