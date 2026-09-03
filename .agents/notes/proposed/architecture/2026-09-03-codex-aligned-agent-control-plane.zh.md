@@ -325,7 +325,10 @@ Steps: 8）”。
 | Web 人工批准等待 | `session_manager` 当前 `600s` | 增加 Host/App Server 所有的批准等待护栏，Auto Copilot 建议默认 `1800s`；超时产生 `expired`，不能遗留悬挂批准 |
 | Core Turn 安全保护 | 默认 `max_steps=8`，以及输入/上下文/模型响应/Tool 输出等字节和调用次数上限 | 从用户控制面移除 `max_steps`；其余仍是不可配置或 Host 选择的安全护栏，不因 Goal 自动取消 |
 | 批准缓存 | `ApprovalStore` 当前最多 `1024` 条，满后清空全部缓存 | 改为按 Session/Project 所有者和批准键有界；溢出只影响对应范围并要求重新批准，不能清空其他 Project 的批准 |
-| 待批准队列/事件队列 | App Server 有 `32` command buffer、`256` event buffer；Web 待批准映射没有明确上限 | 为待批准请求增加有界数量和生命周期；达到上限返回 `unavailable`/保护诊断，不静默丢请求。事件队列保持 cursor/replay 语义，不靠无限扩大 buffer 解决断线 |
+| 待输入/批准/事件队列 | Core 最多接受 `16` 个待处理输入；App Server 有 `32` command buffer、`256` event buffer；Web 待批准映射没有明确上限 | 为待批准请求增加有界数量和生命周期；达到上限返回 `unavailable`/保护诊断，不静默丢请求。事件队列保持 cursor/replay 语义，不靠无限扩大 buffer 解决断线 |
+| 历史/读取投影 | App Server worker 的 item list 上限为 `128`；verifier history 限定为 `24` 条消息 | 保持 cursor 分页、有界读取和明确的截断元数据；不能把不完整 Turn 重放成 settled 历史，也不能为了 UI 分页无限扩大模型上下文 |
+| Capability 操作/载荷 | source read 上限 `8MiB`；read 默认/最大为 `200/2000` 行、分页 `15KiB`；write `1MiB`；patch `512KiB`、`16` 个文件、`32k` 行；command `16KiB`、capture `8MiB`；MCP 为 `120s`、`32` 个工具、schema `16KiB`、结果 `64KiB` | 与 Goal continuation 独立保持这些操作和载荷上限；只有经过单独度量的 Capability 安全实验才能提高，并必须有明确的截断/失败结果 |
+| Host 上下文/路径元数据 | World context 上限 `8KiB`、每条路径 `1KiB`；Project instructions 上限 `16KiB` | 在进入模型可见上下文前保持 Project 根目录和 Runtime 指令有界；更大材料写入规范 artifact |
 | Tool/MCP 单次副作用 | Shell/MCP 当前约 `120s`，命令和结果也有字节上限 | 与 Goal continuation 分开；除非另有明确的 Host 安全实验，不因 Auto Copilot 无条件放大，不得被批准模式覆盖 |
 | Goal 文本/验证证据 | objective `8KiB`、plan/verifier `32KiB`、verifier history `24` 条消息 | 保持有界；较长内容写入规范 artifact，不把它们扩展成无限模型上下文 |
 
@@ -333,6 +336,12 @@ Steps: 8）”。
 只投影状态；达到 limit 时必须先结算可恢复状态，再报告 `usage_limited`、`expired`、
 `unavailable` 或运行保护诊断。增加 Goal 的 loops/step budget/timeout 不能隐式增加
 machine access、批准范围、并发 Session 数、消息大小或工具结果大小。
+
+超时和队列的结算必须明确：Goal 控制调用先返回 accepted/running 投影，最终 settled 状态以
+App Server 为权威；SDK 或 Web 的等待 deadline 可以停止等待，但除非有明确的 cancel/pause
+或权威 Runtime 结果，不能将 Runtime 归类为 paused、settled 或 failed。重连时从服务器 cursor
+和 settled checkpoint 继续协调。批准等待到期必须结算为 `expired`，容量拒绝必须结算为
+`unavailable`；两者都不能遗留一个之后还能恢复 Tool 调用的待处理请求。
 
 Plan 和 Goal 有意不同：Plan 是用户通过 slash 启动的、读多写少的探索 Runtime，产出计划文件；
 Goal 是用户通过 slash 启动的自主 Runtime，可以在获得批准后执行项目修改、验证结果，并跨 Turn
@@ -918,6 +927,9 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture，优�
 28. Goal milestone 的 `1800s` 默认不会被 SDK 的 `60s` 等待或 Web 的批准等待提前伪装成
     中断；批准超时产生 `expired`，Core/Host/传输队列达到上限产生清晰的保护状态，并且
     ApprovalStore 溢出不会清空其他 Project 的批准。
+29. Goal 控制调用在 SDK/Web 等待 deadline 和重连期间仍按 App Server 权威保持 `running` 或
+    结算；只有明确的 cancel/pause 或权威结果才能改变 Runtime 分类，并且到期/容量拒绝的
+    批准不能在之后恢复 Tool 调用。
 
 Provider 支持的验证保持为可选，默认不能使用付费调用。正常证据路径使用 Mock Provider、
 Protocol Fixture 和 Harness Scenario。

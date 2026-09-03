@@ -442,8 +442,11 @@ must not all be treated as the Goal's step budget:
 | Web human-approval wait | `session_manager` currently uses `600s` | Add a Host/App Server-owned approval-wait guard, proposed default `1800s` for Auto Copilot; expiry produces `expired` and never leaves a dangling approval |
 | Core Turn safety guard | default `max_steps=8`, plus byte and call-count limits for input/context/model response/Tool output | Remove `max_steps` from the user control surface; retain other limits as non-user or Host-selected safety guards and do not auto-remove them for Goal |
 | Approval cache | `ApprovalStore` currently holds at most `1024` entries and clears all when full | Bound entries by Session/Project owner and approval key; overflow affects only that scope and requires approval again, never clearing another Project |
-| Pending/event queues | App Server has `32` command and `256` event buffers; Web pending approvals have no explicit cap | Add bounded pending-request count and lifetime; at capacity return `unavailable`/a protection diagnostic rather than silently dropping requests. Keep cursor/replay semantics for events instead of solving disconnects with an unbounded buffer |
-| Per-tool/MCP side effect | Shell/MCP are currently about `120s`, with command and result byte caps | Keep independent from Goal continuation; do not enlarge unconditionally for Auto Copilot without a separate Host safety experiment, and never let approval mode override it |
+| Pending/approval/event queues | Core accepts at most `16` pending inputs; App Server has `32` command and `256` event buffers; Web pending approvals have no explicit cap | Add bounded pending-request count and lifetime; at capacity return `unavailable`/a protection diagnostic rather than silently dropping requests. Keep cursor/replay semantics for events instead of solving disconnects with an unbounded buffer |
+| History/read projection | App Server worker item lists are capped at `128`; verifier history is bounded to `24` messages | Keep cursor-based, bounded reads and explicit truncation metadata; do not replay an incomplete Turn as settled history or expand the model context to satisfy a UI page |
+| Capability payloads | Source reads are capped at `8MiB`; read defaults/max are `200/2000` lines with `15KiB` pages; writes `1MiB`; patches `512KiB`, `16` files, `32k` lines; commands `16KiB` and `8MiB` capture; MCP has `120s`, `32` tools, `16KiB` schemas, and `64KiB` results | Keep these operation and payload limits independent from Goal continuation. Increase them only as a separately measured capability experiment with explicit truncation/failure outcomes |
+| Host context/path metadata | World context is capped at `8KiB` with `1KiB` per path; Project instructions are capped at `16KiB` | Keep Project roots and runtime instructions bounded before they enter model-visible context; put larger material in canonical artifacts |
+| Per-tool/MCP side effect | Shell/MCP calls are currently about `120s`, with command and result byte caps | Keep independent from Goal continuation; do not enlarge unconditionally for Auto Copilot without a separate Host safety experiment, and never let approval mode override it |
 | Goal text/evidence | objective `8KiB`, plan/verifier `32KiB`, verifier history `24` messages | Keep bounded; put longer material in canonical artifacts instead of expanding model-visible context without a bound |
 
 The common rule is that Core, Host, or App Server enforces each limit at its
@@ -452,6 +455,15 @@ limit must settle recoverable state before reporting `usage_limited`, `expired`,
 `unavailable`, or a runtime-protection diagnostic. Increasing Goal loops, step
 budget, or timeout must not implicitly increase machine access, approval scope,
 concurrent Session count, message size, or tool-result size.
+
+Timeout and queue settlement are explicit: a Goal command returns an accepted/
+running projection and App Server settlement remains authoritative; an SDK or
+Web wait deadline may stop waiting, but it must not classify the Runtime as
+paused, settled, or failed unless an explicit cancel/pause or an authoritative
+runtime outcome exists. Reconnection resumes from the server cursor and
+settled checkpoint. An approval wait that expires resolves as `expired`, and a
+capacity rejection resolves as `unavailable`; neither leaves a pending request
+that can later resume a Tool call.
 
 Plan and Goal are deliberately different: Plan is a user-invoked,
 read-mostly exploration runtime that produces a plan artifact; Goal is the
@@ -1196,6 +1208,10 @@ The following scenarios are required before the proposal can move to
     of the SDK's `60s` wait or the Web approval wait; approval expiry produces
     `expired`, Core/Host/transport capacity limits produce a clear protection
     state, and ApprovalStore overflow never clears another Project's grants.
+29. A Goal control call remains `running` or settles according to App Server
+    authority across SDK/Web wait deadlines and reconnects; only explicit
+    cancel/pause or an authoritative outcome changes the Runtime classification,
+    and expired/capacity-rejected approvals cannot later resume a Tool call.
 
 Provider-backed verification remains opt-in and must not use paid calls by
 default. The normal evidence path uses mock providers, protocol fixtures, and
