@@ -1,8 +1,6 @@
 use super::AppServer;
 use super::AppServerConnection;
 use super::AppServerError;
-use super::ApprovalBroker;
-use super::ApprovalEvent;
 use super::JsonlTrace;
 use super::LocalAppServerClient;
 use super::ThreadUpdate;
@@ -720,27 +718,6 @@ async fn routes_multiple_preconfigured_threads_by_identity() {
             .thread_id,
         ThreadId::new("thread-2")
     );
-}
-
-#[tokio::test]
-async fn approval_broker_exposes_request_and_resolution_events() {
-    let broker = ApprovalBroker::new();
-    let requester = broker.clone();
-    let task = tokio::task::spawn_blocking(move || requester.request("shell command pwd"));
-
-    let request = match broker.next_event().await {
-        ApprovalEvent::Requested(request) => request,
-        ApprovalEvent::Resolved(_) => panic!("expected approval request"),
-    };
-    broker.respond(&request.request_id, true).unwrap();
-    let resolution = match broker.next_event().await {
-        ApprovalEvent::Resolved(resolution) => resolution,
-        ApprovalEvent::Requested(_) => panic!("expected approval resolution"),
-    };
-
-    assert_eq!(resolution.action, "shell command pwd");
-    assert!(resolution.approved);
-    assert!(task.await.unwrap().unwrap());
 }
 
 #[tokio::test]

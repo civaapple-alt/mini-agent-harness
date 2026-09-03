@@ -24,6 +24,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   while retaining every Goal transition and retry-budget assertion.
 - **Capabilities test fixtures:** move embedded MCP Python servers into bounded
   testdata files without changing transport, timeout, or discovery coverage.
+- **Session construction:** consolidate the repeated New/Named/Fork store
+  initialization and initial checkpoint writes while preserving their distinct
+  resume, fork lineage, and cleanup semantics.
+- **App Server test maintenance:** remove the standalone approval-broker smoke
+  test; the public Shell approval scenario remains the correlation boundary.
 
 ## [0.7.0] - 2026-09-02
 

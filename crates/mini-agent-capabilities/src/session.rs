@@ -263,41 +263,16 @@ impl SessionStore {
                     return Err(format!("cannot create session file: {error}"));
                 }
             };
-            let thread_id = new_id("t");
-            let now = timestamp_ms();
-            let mut store = Self {
-                session_id: session_id.clone(),
-                thread_id: thread_id.clone(),
-                session_dir: session_dir.clone(),
+            let store = Self::initialize_new(
+                workspace,
+                &session_id,
+                session_dir,
                 path,
                 file,
-                bytes: 0,
-                next_seq: 1,
-                checkpoint_seq: 0,
-                turn_count: 0,
-                thread_turn_count: 0,
-                created_at_ms: now,
-                append_lock: Arc::new(Mutex::new(())),
-                _lock: lock,
-            };
-            store.append_records(vec![
-                json!({
-                    "kind": "session_created",
-                    "schema_version": SCHEMA_VERSION,
-                    "session_id": session_id,
-                    "workspace": workspace,
-                    "timestamp_ms": now,
-                }),
-                json!({
-                    "kind": "thread_started",
-                    "thread_id": thread_id,
-                    "timestamp_ms": now,
-                }),
-                store.checkpoint_record(&[]),
-            ])?;
-            store.checkpoint_seq = store.next_seq.saturating_sub(1);
-            write_prompt_context(&session_dir, workspace, &session_id);
-            store.update_summary_and_signals("", 0, None);
+                lock,
+                &[],
+                None,
+            )?;
             return Ok(OpenedSession {
                 store,
                 state: SessionState::new(),
@@ -338,41 +313,16 @@ impl SessionStore {
                 return Err(format!("cannot create session file: {error}"));
             }
         };
-        let thread_id = new_id("t");
-        let now = timestamp_ms();
-        let mut store = Self {
-            session_id: session_id.to_string(),
-            thread_id: thread_id.clone(),
-            session_dir: session_dir.clone(),
+        let store = Self::initialize_new(
+            workspace,
+            session_id,
+            session_dir,
             path,
             file,
-            bytes: 0,
-            next_seq: 1,
-            checkpoint_seq: 0,
-            turn_count: 0,
-            thread_turn_count: 0,
-            created_at_ms: now,
-            append_lock: Arc::new(Mutex::new(())),
-            _lock: lock,
-        };
-        store.append_records(vec![
-            json!({
-                "kind": "session_created",
-                "schema_version": SCHEMA_VERSION,
-                "session_id": session_id,
-                "workspace": workspace,
-                "timestamp_ms": now,
-            }),
-            json!({
-                "kind": "thread_started",
-                "thread_id": thread_id,
-                "timestamp_ms": now,
-            }),
-            store.checkpoint_record(&[]),
-        ])?;
-        store.checkpoint_seq = store.next_seq.saturating_sub(1);
-        write_prompt_context(&session_dir, workspace, session_id);
-        store.update_summary_and_signals("", 0, None);
+            lock,
+            &[],
+            None,
+        )?;
         Ok(OpenedSession {
             store,
             state: SessionState::new(),
@@ -453,49 +403,20 @@ impl SessionStore {
                 Err(error) => return Err(format!("cannot create session: {error}")),
             };
             let lock = acquire_lock(&session_dir, SESSION_LOCK_NAME)?;
-            let thread_id = new_id("t");
-            let now = timestamp_ms();
-            let mut store = Self {
-                session_id: session_id.clone(),
-                thread_id: thread_id.clone(),
-                session_dir: session_dir.clone(),
+            let store = Self::initialize_new(
+                workspace,
+                &session_id,
+                session_dir.clone(),
                 path,
                 file,
-                bytes: 0,
-                next_seq: 1,
-                checkpoint_seq: 0,
-                turn_count: 0,
-                thread_turn_count: 0,
-                created_at_ms: now,
-                append_lock: Arc::new(Mutex::new(())),
-                _lock: lock,
-            };
-            store.append_records(vec![
-                json!({
-                    "kind": "session_created",
-                    "schema_version": SCHEMA_VERSION,
-                    "session_id": session_id,
-                    "workspace": workspace,
-                    "timestamp_ms": now,
-                    "forked_from": {
-                        "parent_session_id": parent_session_id,
-                        "parent_checkpoint_seq": parent_checkpoint_seq,
-                    }
-                }),
-                json!({
-                    "kind": "thread_started",
-                    "thread_id": thread_id,
-                    "timestamp_ms": now,
-                }),
-                store.checkpoint_record(&parent_messages),
-            ])?;
-            store.checkpoint_seq = store.next_seq.saturating_sub(1);
+                lock,
+                &parent_messages,
+                Some((parent_session_id, parent_checkpoint_seq)),
+            )?;
             copy_attachments(
                 &parent_dir.join("attachments"),
                 &session_dir.join("attachments"),
             );
-            write_prompt_context(&session_dir, workspace, &session_id);
-            store.update_summary_and_signals("", 0, None);
             return Ok(OpenedSession {
                 store,
                 state: SessionState::from_messages(parent_messages),
@@ -503,6 +424,61 @@ impl SessionStore {
             });
         }
         Err("cannot allocate a unique session id".to_string())
+    }
+
+    fn initialize_new(
+        workspace: &Path,
+        session_id: &str,
+        session_dir: PathBuf,
+        path: PathBuf,
+        file: File,
+        lock: SessionLock,
+        checkpoint: &[Message],
+        forked_from: Option<(&str, u64)>,
+    ) -> Result<Self, String> {
+        let thread_id = new_id("t");
+        let now = timestamp_ms();
+        let mut store = Self {
+            session_id: session_id.to_string(),
+            thread_id: thread_id.clone(),
+            session_dir,
+            path,
+            file,
+            bytes: 0,
+            next_seq: 1,
+            checkpoint_seq: 0,
+            turn_count: 0,
+            thread_turn_count: 0,
+            created_at_ms: now,
+            append_lock: Arc::new(Mutex::new(())),
+            _lock: lock,
+        };
+        let mut header = json!({
+            "kind": "session_created",
+            "schema_version": SCHEMA_VERSION,
+            "session_id": session_id,
+            "workspace": workspace,
+            "timestamp_ms": now,
+        });
+        if let Some((parent_session_id, parent_checkpoint_seq)) = forked_from {
+            header["forked_from"] = json!({
+                "parent_session_id": parent_session_id,
+                "parent_checkpoint_seq": parent_checkpoint_seq,
+            });
+        }
+        store.append_records(vec![
+            header,
+            json!({
+                "kind": "thread_started",
+                "thread_id": thread_id,
+                "timestamp_ms": now,
+            }),
+            store.checkpoint_record(checkpoint),
+        ])?;
+        store.checkpoint_seq = store.next_seq.saturating_sub(1);
+        write_prompt_context(&store.session_dir, workspace, session_id);
+        store.update_summary_and_signals("", 0, None);
+        Ok(store)
     }
 
     fn item_record(&self, turn_id: Option<&str>, message: &Message) -> Value {
