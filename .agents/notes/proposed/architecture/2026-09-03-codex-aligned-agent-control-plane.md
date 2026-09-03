@@ -675,6 +675,32 @@ Sessions only when the bounded WorkspaceSpec revision, access scope, action
 class, and path scope match. It is revocable and never becomes a process-global
 allow rule.
 
+### Final user-facing decision matrix
+
+The Studio should make the following product contract visible without exposing
+the internal Host objects:
+
+| User intent | Mode | Access | Approval lifetime | Meaning |
+| --- | --- | --- | --- | --- |
+| Ordinary task | Chat | Project access | `per_action` (default) | Work inside the declared Project roots; ask again for each askable action |
+| Explore and write a plan | Plan | Project access, or explicitly Full access when exploration needs machine-wide reads | `per_action` or an explicitly chosen session/project lifetime | Read-mostly exploration with bounded scratch; it does not authorize final Project edits |
+| Scoped autonomous work | Goal | Project access | `current_project` | Continue across Turns and share exact, bounded approvals within the Project |
+| Auto Copilot | Goal | Full access (machine-wide) | `current_project` | Continue across Turns with machine-wide admission and Project-owned approval reuse |
+
+The three axes remain independent:
+
+1. `Full access` changes the resource/path scope to machine-wide; by itself it
+   does not approve any askable action or choose an approval lifetime.
+2. `current_project` changes who may reuse a matching approval; by itself it
+   does not upgrade `Project access` to machine-wide access.
+3. `Goal` changes the execution lifecycle to execute → verify → continue; it
+   does not grant access or approval.
+
+Only the fourth row is the named Auto Copilot experience. The UI may offer it
+as a convenience after separately showing the three underlying choices, but it
+must persist and transmit those typed choices rather than a new `copilot`,
+`profile`, or `allow_all` flag.
+
 ### Project approval lifecycle
 
 `current_project` means that an approval decision is shared by a Project; it

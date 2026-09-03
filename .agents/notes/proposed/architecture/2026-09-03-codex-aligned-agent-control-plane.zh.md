@@ -522,6 +522,29 @@ Web `state.json` 只能展示或引用该设置，不能保存或执行批准。
 访问范围、操作类别和有界路径范围都匹配时，Project 批准才可被其 Session 共享。该批准必须
 可撤销，不能成为进程全局的 allow 规则。
 
+### 面向用户的最终决策矩阵
+
+Studio 应向用户展示下面这套产品契约，但不暴露内部 Host 对象：
+
+| 用户意图 | Mode | 访问范围 | 批准生命周期 | 含义 |
+| --- | --- | --- | --- | --- |
+| 普通任务 | Chat | Project access | `per_action`（默认） | 在声明的 Project 根目录内工作；每个可询问操作重新批准 |
+| 探索并形成计划 | Plan | Project access；如果探索需要整机读取，可明确选择 Full access | `per_action` 或明确选择 Session/Project 生命周期 | 读多写少的探索和有界 scratch；不授权正式 Project 修改 |
+| 有范围的自主工作 | Goal | Project access | `current_project` | 跨 Turn 继续，并在同一 Project 内共享精确、有界的批准 |
+| Auto Copilot | Goal | Full access（machine-wide） | `current_project` | 跨 Turn 继续，具备整机准入范围并复用 Project 所有的批准 |
+
+三个轴必须保持独立：
+
+1. `Full access` 将资源/路径范围改为整机范围；它本身不会批准任何可询问操作，
+   也不会选择批准生命周期。
+2. `current_project` 只改变谁可以复用匹配的批准；它本身不能将 `Project access`
+   升级为整机访问。
+3. `Goal` 只改变执行生命周期，使其执行 → 验证 → 继续；它不授予访问或批准。
+
+只有第四行才是命名的 Auto Copilot 体验。UI 可以在分别展示三个底层选择后提供一个便捷
+入口，但必须持久化并传输这些类型化选择，不能新增 `copilot`、`profile` 或 `allow_all`
+标志。
+
 ### Project 批准生命周期
 
 `current_project` 表示“批准决定由 Project 共享”，不表示 Project 自动获得某个访问范围。
