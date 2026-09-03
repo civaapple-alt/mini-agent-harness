@@ -33,6 +33,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   auto-mode warning out of Host/App Server frontend adapters into the
   experimental CLI edge. CLI behavior and its tests are unchanged, while the
   runtime budget no longer carries terminal presentation code.
+- **Host test surface:** remove static catalog assertions and generic fake-tool
+  Orchestrator approval tests now covered by the real six-tool catalog and the
+  public App Server Shell approval path; Core and lifecycle-boundary coverage is
+  unchanged.
 
 ## [0.7.0] - 2026-09-02
 

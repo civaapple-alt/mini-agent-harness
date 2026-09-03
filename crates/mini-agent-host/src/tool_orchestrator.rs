@@ -62,7 +62,3 @@ fn classify_outcome(outcome: ToolExecutionOutcome) -> ToolExecutionOutcome {
     };
     ToolExecutionOutcome { status, ..outcome }
 }
-
-#[cfg(test)]
-#[path = "tool_orchestrator_tests.rs"]
-mod tests;

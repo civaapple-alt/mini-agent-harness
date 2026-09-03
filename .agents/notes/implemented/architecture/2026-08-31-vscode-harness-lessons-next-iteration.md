@@ -1926,7 +1926,39 @@ REPL 三个实现文件从 649 行压缩到 444 行，净减少 205 行（31.6%�
    `git diff --check`, and `python scripts/line_budget.py` pass.
 ```
 
-Decision: **accept and commit the 30% REPL compression batch**. Future REPL additions
-must justify a direct Core turn/execution need; no new workflow, session-management,
-Thread/Artifact, or runtime configuration command should be added to the REPL while
-Studio/TUI remains the product interaction layer.
+Decision: **accept the 30% REPL compression batch**. Future REPL additions must justify
+a direct Core turn/execution need; no new workflow, session-management, Thread/Artifact,
+or runtime configuration command should be added to the REPL while Studio/TUI remains
+the product interaction layer.
+
+#### 2026-09-03：P1 重复 Host 测试清理——保留真实公共路径
+
+本批继续释放全局预算。删除 Host 中仅断言静态内建目录元数据的测试，以及使用
+假工具验证通用 `ToolOrchestrator` 审批顺序的测试。前者由 Capabilities 的真实六工具
+目录和 App Server `thread/settings/update` 选择路径覆盖；后者由真实内建 Shell 的
+公共 JSON-RPC approval 场景覆盖 `requestId`、`turnId`、`callId`、审批响应和工具完成
+事件。没有删除 Core turn、Actor/CAS/Session、Goal、Session 持久化或安全拒绝路径。
+
+本批六项准入记录：
+
+```text
+1. Layer: Host test-only catalog and Orchestrator coverage; production Core, Host
+   admission, App Server protocol, and Capabilities behavior are unchanged.
+2. Duplicate responsibility: static catalog values are exercised by the real built-in
+   provider and public settings projection; fake-tool approval order is exercised by
+   the real Shell/App Server path.
+3. Replace vs add: remove lower-level duplicate tests; add no helper, compatibility
+   path, or alternate execution loop.
+4. Net line delta: runtime `18,941 -> 18,726` (`-215`); release Rust source
+   `28,210 -> 27,995` (`-215`).
+5. Visible surface: no model-visible input, event, persistence, or public protocol
+   behavior changes.
+6. Boundary evidence: Host tests (28 passed), `cargo fmt --all`, `git diff --check`,
+   and `python scripts/line_budget.py all` passed; the public Shell approval scenario
+   remains in App Server JSON-RPC tests.
+```
+
+Decision: **accept and commit this P1 batch**. Runtime is below the current target
+(`18,799`); release-source cleanup still needs `845` lines to reach the requested
+`27,150` target. Continue with bounded Capabilities duplicate/compatibility cleanup,
+without weakening security, MCP, Goal, Session, or public App Server evidence.

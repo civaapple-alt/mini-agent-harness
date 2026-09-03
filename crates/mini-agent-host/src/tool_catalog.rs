@@ -170,7 +170,3 @@ pub(crate) fn retain_default_builtin_tools(tools: Vec<Box<dyn Tool>>) -> Vec<Box
         })
         .collect()
 }
-
-#[cfg(test)]
-#[path = "tool_catalog_tests.rs"]
-mod tests;
