@@ -1,369 +1,49 @@
-# mini-agent-harness Architecture and Design Decisions (Agent Notes)
+# Agent Notes
 
+本目录记录 `mini-agent-harness` 的架构决策、实验依据和被拒方案。它是决策
+索引，不是当前产品规格，也不是持续追加的项目日志。
 
-This directory records dated architectural decisions (ADRs), technology selections,
-and trade-off analyses for the **mini-agent-harness** project. It is a forward-moving
-change record, not the source of truth for current behavior. Current specifications
-belong in `docs/`; do not build a current-state index by chaining notes together.
-
----
-
-## Current Maintenance Gate (2026-09-03)
-
-The line-budget release work has completed its low-risk Stage 1 audit and the targeted **Stage 2: protect core boundaries** acceptance. It is now operating under **Stage 3: normal budget admission**, with the hard gates still active:
-
-- runtime (`core + protocol + host + app-server`): `19,560 / 20,000` lines (97.8%; 440 remaining)
-- release Rust source (excluding experimental CLI/REPL): `29,545 / 30,000` lines (98.5%; 455 remaining)
-- Stage 1 released `679` lines; the Stage 2 timeout lifecycle fix adds `51` structural lines,
-  the bounded Trace batch adds `374`, the CLI Trace export batch adds `255`, the Docker runtime probe adds `23` test lines, the REPL core-surface batch removes `756` lines, and the REPL management-surface batch removes another `176` lines, so
-  the first ToolRouter → ToolExecutionDelegate → Host ToolOrchestrator seam adds `75` lines,
-  and the Shell typed-admission batch adds `145` runtime / `207` all-Rust lines,
-  and the App Server Shell approval-correlation batch adds `384` runtime / `418` all-Rust lines,
-  and the App Server worker-isolation batch is net `-8` runtime / `-8` all-Rust lines,
-  and the Edit/Write typed-admission batch adds `56` all-Rust lines,
-  and the Process typed-admission batch adds `74` all-Rust lines,
-  and the MCP/ReadImage typed-admission batch adds `69` all-Rust lines,
-  and the Handler/Runtime role split adds `43` runtime / `82` all-Rust lines,
-  and the builtin prompt template extraction adds `5` runtime / removes `90`
-  all-Rust lines, and the first `collaborationMode` App Server batch adds
-  `98` runtime / `98` all-Rust lines, the P0 facade/REPL management batch
-  removes `112` runtime / `188` all-Rust lines, and the P1 duplicate-test batch
-  removes `11` runtime / `17` all-Rust lines, and the REPL core-surface follow-up
-  removes `78` all-Rust lines, and the REPL 30% compression batch removes `246`
-  all-Rust lines, and the Goal admission boundary batch adds `66` runtime /
-  `66` all-Rust lines, and the verifier checkpoint/preparation batch adds
-  `152` runtime / `152` all-Rust lines. The Host Catalog and reversible
-  Thread `builtinTools` selection batches add `404` runtime / `404` all-Rust
-  lines, and the first typed Skill dependency/activation metadata slice adds
-  `191` all-Rust lines, and Plugin-to-provider-input selection adds `38`
-  all-Rust lines. The bounded ThreadItem projection adds `283` runtime /
-  `283` release-source lines, and the Goal step/timeout/token-budget execution
-  batch adds `428` runtime / `428` all-Rust lines, the verifier validation batch
-  adds `99` runtime / `99` all-Rust lines, and the restart/resume public evidence
-  batch adds `81` runtime / `81` all-Rust lines. The ordered notification,
-  bounded ToolCall projection, and verifier-history batch adds `264` runtime /
-  `264` all-Rust lines, and the GoalRuntime fixture batch removes `36` runtime /
-  `36` all-Rust lines, and the Capabilities outcome projection batch removes `6`
-  all-Rust lines, and the compact Builtin/read/patch capability batch adds `48`
-  runtime / `850` all-Rust lines. The current release-source total excludes the
-  experimental CLI/REPL and is now below the approximate `26,900` reference.
-
-The latest maintenance batches removed repeated App Server action transport wrapping, one-time facade wrappers, duplicate capability argument/error wrappers, repeated skill metadata projection, duplicate result argument validation, duplicated built-in provider descriptors, static shell/image/configuration tests, duplicate App Server test fixtures, repeated WorldState result projection, repeated workflow goal response projection, a Host OpenAI builder forwarding wrapper, an App Server runtime image mirror plus unused accessors, two frontend forwarding functions, a duplicate frontend workflow enum projection, duplicate Python test fixture probing, dead Plan slash-command parsing and prompt facades, dead local WorldState summary accessors, the REPL `/status`/`/info` management projection, repeated GoalRuntime verifier fixtures, and repeated post-admission outcome mapping. The latest capability batch makes the default Builtin surface four tools and adds bounded paged `read_file` plus Codex-style prevalidated `apply_patch`; the active Builtin selection is returned through Thread settings, and the former workflow aggregate endpoint is removed. The remaining three compatibility tools stay opt-in. Core tests and the Actor/CAS/Session boundaries remain protected. Remaining public convenience APIs and configuration aliases are recorded as compatibility candidates and are not removed without an explicit API decision.
-
-The first Stage 1 release batches are now complete: the REPL keeps core turn execution, streaming events, approval, `/steer`, startup-selected manual/auto execution, and session persistence/resume entry points, while session metadata, Plan/Goal workflow orchestration, and interactive management are left to App Server clients such as Studio. Host still owns the world snapshot and capability loading; the REPL only consumes those facts for execution context. The Host Catalog now exposes a reversible active-Thread `builtinTools` selection through `thread/settings/update`; MCP and other external providers remain outside this Builtin filter. Stage 2 boundary protections remain in force while Stage 3 is the active admission mode and the budget gates stay active. The admission rule for each follow-up batch is: keep the diff to a few hundred lines, run the affected crate tests and Clippy, run `python scripts/line_budget.py`, update the relevant note, and commit the batch.
-
-Stage 2 targeted boundary checks pass for Core, Protocol, App Server Protocol, App Server, Capabilities, Host, and the CLI interactive integration target. The goal-timeout lifecycle now settles `turn/interrupt` and durable checkpoint state before marking the goal failed. App Server and the one-shot CLI now export bounded, redacted JSONL Trace records through explicit caller-selected paths. Core/Capabilities now have test-only fault evidence for malformed or missing tool arguments, partial model streams, and retryable tool results; CLI public-path recovery now verifies an unknown-tool result reaches the next model round; App Server public events and checkpoints now preserve non-empty `NeedsApproval` rejection and MCP timeout results. The REPL scope batches removed only CLI-local Plan/Goal orchestration, World/MCP/extension presentation, session metadata presentation, and their duplicate CLI code; App Server/Core workflow and management evidence remains protected. The full workspace test suite remains unrun pending explicit approval.
-
-The Core/Host `ToolRouter → ToolOrchestrator` approval-admission audit is complete. The first migration slice now injects a Host `ToolOrchestrator` through the protocol-level `ToolExecutionDelegate`: Core `ToolRouter` resolves and delegates, Host retains legacy outcome classification, and built-in Capabilities still perform approval and sandbox checks locally. App Server owns approval notifications plus settled-turn persistence, and Actor/CAS/Session authority remains intact. Full centralized admission is deferred until typed admission semantics, approval correlation, and a real built-in public approval scenario can be defined within the line budget.
-
-The first typed-admission migration is now complete for Shell, EditFile, WriteFile, ProcessStart, ProcessWrite, ProcessStop, MCP tool calls, and ReadImage paths outside the workspace. Each validates its bounded arguments and describes `ApprovalRequired { action }`; Host `ToolOrchestrator` calls the shared `ApprovalController` and invokes the tool only through its post-admission path. Direct legacy `execute` remains approval-safe for compatibility. Read-only ProcessRead, ProcessList, ReadFile, and result retrieval remain `Legacy`; MCP server startup approval remains an independent Host assembly gate. The real built-in App Server public scenario now correlates `requestId`, `turnId`, and `callId` across `turn/start`, approval request/respond/resolved, and `turn/event`. The App Server worker now isolates synchronous approval waits on a dedicated runtime thread, so the public connection runtime remains responsive; the callback itself remains synchronous and one Thread still serializes on its worker.
-
-The four execution roles are now explicit in the protocol and implementation: Core
-`ToolRouter` resolves a named tool, `ToolHandler` owns schema/argument parsing and
-admission description, Host `ToolOrchestrator` owns approval and lifecycle order,
-and `ToolRuntime` owns the actual effect. `Tool` remains the composition boundary
-used by the existing registry/provider/delegate. Sandbox selection remains a Host profile/Capabilities assembly
-concern, with sandbox attach performed by the concrete runtime; this avoids a
-second generic sandbox wrapper while preserving the same approval-before-effect
-invariant.
-
-Stable built-in prompt bodies are now crate-owned Markdown assets under each
-crate's `builtin/prompts` directory and are embedded at compile time. The current
-Core default/compaction, Capabilities agent/persona, and App Server verifier
-templates preserve the previous prompt bytes; Host continues to compose bounded
-project, extension, world, and workflow inputs. App Server startup profile
-selection remains the public configuration seam. Its raw `systemPrompt` is not
-publicly replaceable; the existing `ThreadUpdate::ReplaceConfig` is local and
-internal to frontend control paths.
-
-Stage 3 is now the active admission mode. The approximate `26,900` Stage 1 target is optimization debt, not permission to remove protected behavior. New changes must preserve both hard ceilings, report the runtime and release-source line delta, and default to net-zero growth or identify an explicit offset. Code changes run the affected tests, Clippy, formatting, and `python scripts/line_budget.py`; new Core/Protocol/Actor/CAS/Session behavior also needs an architecture note and boundary-level evidence.
-
-The six qualitative questions are collected in the repository [PR template](../../.github/pull_request_template.md). Pull-request CI checks that all six questions are answered, placeholders are replaced, and the confirmations are checked; reviewers enforce layer ownership, duplicate-path analysis, replacement-vs-addition reasoning, visible-surface impact, and boundary evidence.
-
-The Plan public control now uses the typed `thread/settings/update` method with
-`collaborationMode`; the removed `workflow/plan/set` method has no compatibility
-wrapper. The same method accepts optional `builtinTools`: Host validates the
-bounded Builtin subset and Core Router applies a reversible visibility filter.
-The Runtime Actor applies both settings at one serialized mutation boundary;
-MCP/external tools are preserved. The active Thread and same-object resume path
-retain the filter, while new/forked factory Threads and durable capability
-checkpointing remain deferred. `thread/settings/updated` is emitted from the
-same Runtime Actor revision as the mutation response. Settled-checkpoint Goal
-continuation, verifier retry/terminal transitions, resume/clear stale-result
-guards, and the removal of manual workflow Goal controls are implemented through
-the serialized GoalRuntime owner. Goal step/timeout/token-budget execution is
-now wired through the same turn boundary; the current release-source margin is
-`455` lines, with the hard release-source gate now the primary capacity limit.
-
-The first Skill dependency/activation slice is implemented in Capabilities.
-Skill frontmatter may declare up to 16 bounded `builtin` or `mcp` references;
-the metadata catalog exposes non-empty declarations, and
-`Discovery::activate_skill` returns a typed metadata-only activation. It does
-not read Skill bodies, start MCP, enable providers, or grant approval. App Server
-Turn activation and Host allowlist resolution remain the next Skill batch; the
-  the current release-source margin is `455` lines. The experimental CLI/REPL is
-still reported separately at `2,707` lines and does not consume this gate.
-
-The first Plugin provider slice is implemented in Capabilities: selecting a
-validated Plugin name now retains all of that Plugin's discovered MCP provider
-inputs, while individual server labels remain selectable. This does not start a
-server, load tools, grant approval, or add a Plugin-specific execution path;
-those remain Host/MCP work for a later bounded batch.
-
-The bounded ThreadItem projection is implemented in App Server Protocol.
-`turn/event` and `turn/read` expose `UserMessage`, `AgentMessage`, `Reasoning`,
-generic `ToolCall`, and `ContextCompaction` items derived from existing Core
-events/messages. Dedicated `item/started`/`item/completed` notifications and
-cursor-bounded `thread/items/list` replay are also implemented. Tool items reuse
-`callId`, preserve bounded/redacted arguments through completion, and keep
-bounded text/output; Session JSONL remains the only durable history authority.
-Specialized source classification and Artifact APIs remain deferred. Core, Goal,
-settings, and Item notifications share one ordered runtime bus at the App Server
-boundary.
-
-Goal Runtime is converged on the Codex Thread/Turn/ThreadItem model. The
-canonical `thread/goal/set|get|clear` contract, settled-checkpoint verifier and
-continuation, settings notifications, resume/clear stale-result guards, and
-manual Goal API retirement are implemented. Follow the [Goal Runtime
-implementation appendix](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
-for the state machine and evidence record. The active Goal now binds relative
-`goal/...` tool paths to the session-owned Goal workspace, and Host rejects
-objectives larger than 8 KiB before creating Goal state. Verifier checkpoint
-freshness and preparation failure handling are now explicit and tested. Budget
-enforcement is now wired to Core/App Server turn execution: Goal step and
-timeout exhaustion project as `usageLimited`, provider-reported usage is
-durable, and token-budget exhaustion projects as `budgetLimited`. Timeout is
-cooperative and does not kill a synchronous tool effect. Core, Goal, and
-  settings notifications now share one ordered runtime bus; a public
-  settings-before-Goal scenario covers the cross-stream boundary. GoalRuntime
-  now has direct fault-injection evidence for rejected verdicts, verifier
-  execution errors, and late-result disposal; the public App Server path asserts
-  the bounded active-to-blocked Goal notification sequence. A fresh App Server
-  rebind public scenario verifies that a settled Goal resumes through verifier
-  preparation without replaying its main turn. Verifier input is cropped to the
-  newest 24 settled messages before Core's byte-level context guard. A
-  provider-backed verifier remains optional follow-up evidence.
-
-### Next iteration order (evidence-triggered)
-
-1. Keep both hard ceilings and the six-question admission gate active; no Rust
-   feature starts without net-zero growth or an explicit offset.
-2. Keep the REPL as a core-capability reference surface; Plan/Goal workflow UI
-   and orchestration stay in App Server clients such as Studio/SDK.
-3. Extend Skill activation from metadata to explicit Turn input and Host
-   allowlist resolution only with a measured offset and public evidence.
-4. Add Plugin MCP tool loading and Dynamic Tool mapping only through the existing
-   provider/approval path; no Plugin-specific executor.
-5. Preserve the bounded ThreadItem lifecycle/listing and persisted identity;
-   introduce bounded sidecar Artifact references only with a concrete use case.
-6. Keep the fault-injected and restart/resume Goal evidence; add provider-backed
-   verifier evidence only when an explicit bounded seam exists. Paid calls are
-   not a default gate.
-7. Review the Docker isolation policy and cross-platform evidence before
-   changing sandbox defaults. Defer provider comparison and retry/backoff until
-   a second provider or an explicit bounded policy exists.
-
-Every item must remain a few-hundred-line batch, pass affected tests and Clippy,
-refresh the budget report, update the relevant note/CHANGELOG, and land in its
-own commit. Missing evidence or a missing bounded seam means stop and defer the
-item, not add speculative plumbing.
-
----
-
-## 1. Multi-Level Directory Semantics & Layout
-
-Every Agent Note has two orthogonal axes encoded directly in its file path: `{lifecycle}/{class}/yyyy-mm-dd-topic-title.md`.
+## 生命周期目录
 
 ```text
 .agents/notes/
-├── proposed/                  # Proposals under review; not yet built (or partially built)
-├── implemented/               # Decisions implemented and shipped in production
-│   ├── architecture/          # Structural design, microkernel, capability seams, services
-│   ├── feature/               # User- or model-facing agent capabilities
-│   ├── simplification/        # Removing dead code/complexity without losing capabilities
-│   ├── process/               # Development workflows, gates, tooling
-│   ├── testing/               # Testing strategies and infrastructure
-│   └── bug-fix/               # Postmortem fixes and architectural defect closure
-├── rejected/                  # Proposals considered and declined (retained only if guardrail)
-└── archived/                  # Completed historical snapshots that no longer guide future work
-    └── experiments/
+├── README.md
+├── proposed/     评审中或尚未完成验证的方案
+├── implemented/  已落地、仍对当前实现有指导意义的决策
+├── rejected/     需要保留其否决理由的方案
+└── archived/     已冻结、只供历史追溯的记录
 ```
 
-### Primary Axis: Lifecycle (`{lifecycle}/`)
-- **`proposed/`**: Proposals under review prior to implementation. Free-form future tense (`## Proposal`, `## Acceptance criteria`, `## Risks`).
-- **`implemented/`**: Shipped reality. Kept current with actual code (facts, paths, names). Uses present tense (`## Decision`, `## Consequences`).
-- **`rejected/`**: Proposals declined during review. Carries `Status: rejected — <why, in one line>`. Kept only when its rationale prevents a tempting mistake.
-- **`archived/`**: Shipped decisions that are 100% complete and whose rationale is superseded or unlikely to guide future changes. Permanently frozen.
+文件路径使用 `{lifecycle}/{class}/yyyy-mm-dd-topic-title.md`。`class` 包括
+`architecture`、`feature`、`simplification`、`process`、`testing` 和
+`bug-fix`。
 
-### Secondary Axis: Class (`{class}/`)
-| Class | Scope & Coverage |
-| :--- | :--- |
-| `architecture` | Structural decisions about shipped source code: microkernel, service matrices, capability seams, protocols. |
-| `feature` | New user-facing or model-facing capabilities (e.g. new plugin, TUI component). |
-| `simplification` | Removing code, behavior, or cognitive overhead without sacrificing capability. |
-| `process` | Tooling, workflow, package management, and linting around the codebase. |
-| `testing` | Test frameworks, mocking strategies, and regression gates. |
-| `bug-fix` | Postmortem fixes for subtle architectural defects. |
+## 当前决策入口
 
----
+### Implemented
 
-## 2. Lifecycle Progression & Evolution Methodology
+- [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md)
+- [Hard Limits System](implemented/architecture/2026-08-24-hard-limits-system.md)
+- [Session as Single Durable Store](implemented/architecture/2026-08-28-session-single-source-of-truth.md)
+- [Runtime Authority and Action Ordering](implemented/architecture/2026-08-30-runtime-authority-and-action-ordering.md)
+- [Python SDK and App Server Integration](implemented/architecture/2026-08-31-python-sdk-architecture-and-app-server-integration.md)
+- [Codex-Aligned Thread and Goal Runtime](implemented/architecture/2026-09-03-codex-aligned-thread-goal-runtime.md)
 
-```mermaid
-graph LR
-    P["proposed/<br/>(Proposal)"] -->|Implementation Shipped| I["implemented/<br/>(Active Decision)"]
-    P -->|Declined / Impractical| R["rejected/<br/>(Guardrail)"]
-    I -->|Superseded / Closed History| A["archived/<br/>(Frozen Snapshot)"]
-```
+### Proposed
 
-### 1. Advancing from `proposed/` to `implemented/`
-When code for a proposal is built, verified, and merged:
-1. **Move File**: Move from `proposed/{topic}.md` to `implemented/{class}/{topic}.md`.
-2. **Update Status**: Change `Status: proposed` to `Status: implemented`.
-3. **Rewrite Body**:
-   - Replace `## Proposal` with `## Decision` (written in present-tense fact).
-   - Fold `## Acceptance criteria` and `## Risks` into `## Consequences` or `## Verification`.
-   - Remove hypothetical or migration planning text in favor of what actually shipped.
+- [Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems](proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md)
+- [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
+- [CLI Through App Server](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md)
+- [Stabilization and Evidence Gates](proposed/process/2026-08-27-stabilization-and-evidence-gates.md)
 
-### 2. Archiving from `implemented/` to `archived/`
-When a decision is completely shipped, stable, and its rationale has been superseded or absorbed into newer notes:
-1. **Move File**: Move from `implemented/{class}/{topic}.md` to `archived/{class}/{topic}.md` (`implemented` is omitted in the archive path).
-2. **Add Archive Header**: Insert `Archived: YYYY-MM-DD` immediately below `Status: implemented`.
-3. **Freeze Content**: Do not edit, translate, or refactor archived notes; they remain historical records.
+Other records remain discoverable under their lifecycle directory but are not
+listed here unless they are active reference points.
 
-### 3. Rejecting a Proposal
-If a proposed approach is rejected during review:
-1. **Move File**: Move from `proposed/{topic}.md` to `rejected/{class}/{topic}.md`.
-2. **Update Status**: Set `Status: rejected — <concise rationale in one line>`.
-3. **Retention Policy**: Retain only if the rejected proposal prevents a recurring, tempting mistake; otherwise delete.
+## 维护规则
 
----
-
-## 3. Working Inventory of Agent Notes
-
-### Proposed Notes Under Review (`proposed/`)
-
-#### Architecture (`proposed/architecture/`)
-
-| Date | Title | Focus |
-|---|---|---|
-| 2026-09-01 | [Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems](proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md) | 完整对齐 Skill、Plugin、Builtin/Host/MCP/Dynamic Tool、Thread/Turn/ThreadItem、审批和 Artifact 侧车结果的提案；六工具删除与 Host Tool Catalog 首批已落地 |
-| 2026-09-01 | [Goal Runtime and `thread/goal/*` implementation appendix](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md) | Codex-shaped Goal control is landed; serialized owner, automatic continuation, notifications, migration and retirement gates |
-| 2026-08-31 | [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md) | Threat model, candidate strict profile, compatibility, cross-platform evidence, and fail-closed behavior before Docker flags |
-| 2026-08-28 | [CLI Through App Server: Unified Execution Base](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md) | Implementation complete locally; cross-platform CI/native-platform and authorized real-provider evidence remain open |
-
-#### Bug Fixes (`proposed/bug-fix/`)
-
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-28 | [Goal Mode Runtime Repair and End-to-End Evidence](proposed/bug-fix/2026-08-28-goal-runtime-and-verifier-evidence.md) | Repair worker timer construction and verifier history admission; gate Goal readiness on the actual CLI workflow |
-
-#### Development Process (`proposed/process/`)
-
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-27 | [Stabilization and Evidence Gates](proposed/process/2026-08-27-stabilization-and-evidence-gates.md) | Close runtime boundary defects, verify complete workflows, and align release claims with evidence before expanding scope |
-
----
-
-### Active Implemented Notes (`implemented/`)
-
-#### Architecture (`implemented/architecture/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-09-03 | [Codex-Aligned Thread and Goal Runtime Architecture](implemented/architecture/2026-09-03-codex-aligned-thread-goal-runtime.md) | 已落地 Thread settings、Thread Goal、GoalService、per-thread GoalRuntimeHandle、ThreadManager 和 ThreadListener 的 App Server/Host 运行时边界 |
-| 2026-08-28 | [In-Process Agent Protocol](../../crates/mini-agent-protocol) | Portable model, tool, message, event, stop, and limit contracts shared by hosts |
-| 2026-08-28 | [Codex-Style Core and Protocol Reorganization](implemented/architecture/2026-08-28-codex-style-core-and-protocol-reorganization.md) | Core-owned runtime semantics, structured tool outcomes, storage-neutral checkpoints, and a thin app-server control plane |
-| 2026-08-28 | [Current Harness Execution Flow](implemented/architecture/2026-08-28-harness-execution-flow.md) | Actual one-shot, interactive, and app-server paths through Thread, Harness, model/tool steps, events, control, and persistence |
-| 2026-08-28 | [External Harness and ACP Boundary](implemented/architecture/2026-08-28-external-harness-and-acp-boundary.md) | Four-layer CLI → App Server → Host/Workflows → Core/Protocol boundary with JSON-RPC, stdio, approvals, lifecycle, and experimental ACP mapping |
-| 2026-08-29 | [App Server Session, World, and MCP Management](implemented/architecture/2026-08-29-app-server-session-world-mcp-management.md) | Shared local and JSON-RPC management service for session metadata, workspace state, execution policy, and MCP status/retry |
-| 2026-08-29 | [CLI Without Direct Host and Capabilities Dependencies](implemented/architecture/2026-08-29-cli-without-host-capabilities-dependencies.md) | App Server frontend facade removes direct CLI compilation dependencies; provider experiments move to a separate crate |
-| 2026-08-29 | [CLI Workflow Control Plane Through App Server](implemented/architecture/2026-08-29-cli-workflow-control-plane.md) | Goal, Plan, verifier, and restart workflow operations use the LocalAppServerClient management contract |
-| 2026-08-30 | [Runtime Control-Plane Ownership](implemented/architecture/2026-08-30-runtime-control-plane-ownership.md) | One local/remote App Server path, one runtime service unit, and fewer duplicated runtime state sources |
-| 2026-08-30 | [File Boundaries and Runtime Start Options](implemented/architecture/2026-08-30-file-boundaries-and-runtime-start-options.md) | Internal module boundaries for large files and one named host runtime startup input |
-| 2026-08-30 | [Capabilities API Boundaries](implemented/architecture/2026-08-30-capabilities-api-boundaries.md) | Capabilities root facade split into stable contracts, composition seams, and crate-internal implementation |
-| 2026-08-30 | [Goal Verifier Naming Boundary](implemented/architecture/2026-08-30-goal-verifier-naming.md) | Replaced current Mentor implementation names with Goal verifier terminology without retaining legacy environment aliases |
-| 2026-08-31 | [Python SDK Architecture & App Server Integration](implemented/architecture/2026-08-31-python-sdk-architecture-and-app-server-integration.md) | Official Python SDK packaging, async context manager, strongly typed event stream models, and Codex-aligned layered architecture |
-| 2026-08-30 | [Runtime Authority and Action Ordering](implemented/architecture/2026-08-30-runtime-authority-and-action-ordering.md) | Core/App Server/Host authority boundaries, internal action envelopes, and separate action/event ordering |
-| 2026-08-30 | [Runtime State Actor Queue](implemented/architecture/2026-08-30-runtime-state-actor-queue.md) | Session, World, MCP, and Workflow state ownership through one App Server actor queue |
-| 2026-08-30 | [Runtime Revision, CAS, and Transaction Boundary](implemented/architecture/2026-08-30-runtime-revision-cas-and-transaction.md) | Unified runtime revisions, stale-write rejection, and the Thread/Session persistence boundary |
-| 2026-08-29 | [Model Provider Factory Seam](implemented/architecture/2026-08-29-model-provider-factory-seam.md) | Generic Core Model construction through Host and App Server provider factories with an external provider example |
-| 2026-08-29 | [CLI REPL Worker Split](implemented/architecture/2026-08-29-cli-repl-worker-split.md) | Terminal presentation and command queueing separated from App Server worker and workflow execution |
-| 2026-08-29 | [App Server Owned Frontend Approval Contract](implemented/architecture/2026-08-29-app-server-owned-frontend-approval.md) | Approval lifecycle is wrapped at the App Server boundary while CLI startup policy remains explicit |
-| 2026-08-29 | [Core Protocol Boundary and Harness Module Ownership](implemented/architecture/2026-08-29-core-protocol-boundary-and-harness-modules.md) | Protocol contracts are imported directly and Harness execution responsibilities are split into private Core modules |
-| 2026-08-24 | [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md) | Strict boundary between pure microkernel core and host CLI adapters |
-| 2026-08-24 | [Hard Limits System](implemented/architecture/2026-08-24-hard-limits-system.md) | Hard bounds on context, responses, step count, and UTF-8 head/tail truncation |
-| 2026-08-26 | [Event-Driven Reactive Loop](implemented/architecture/2026-08-26-event-driven-reactive-loop.md) | Passive immutable observers driving live client UI and session-backed durable history |
-| 2026-08-28 | [Session as the Single Durable Runtime Store](implemented/architecture/2026-08-28-session-single-source-of-truth.md) | Session JSONL owns settled history and result handles; live events remain in-process |
-| 2026-08-26 | [Session Branching Lanes](implemented/architecture/2026-08-26-session-branching-lanes.md) | Multi-branch tree conversations and speculative exploration lanes |
-| 2026-08-26 | [Local Sandbox Adapter](implemented/architecture/2026-08-26-local-sandbox-adapter.md) | Approval rules, path checks, Docker execution, and native process-tree cleanup |
-| 2026-08-27 | [Model Context Boundaries & CLI Decoupling](implemented/architecture/2026-08-27-model-context-boundaries-and-cli-decoupling.md) | Model item ceilings, atomic turn trimming, CLI decoupling, and session continuity |
-| 2026-08-27 | [Historical: Subprocess CLI & ACP Subagent Execution](implemented/architecture/2026-08-27-subprocess-cli-and-acp-subagent-execution.md) | Retired bounded subprocess-subagent design and its replacement by the single App Server mainline |
-| 2026-08-27 | [Historical: Multi-turn Interactive Subagent Sessions](implemented/architecture/2026-08-27-multi-turn-interactive-subagent-sessions.md) | Retired child-session resumption design and bounded persistence rationale |
-| 2026-08-27 | [Historical: Subagent Trace Replay & Session Lineage](implemented/architecture/2026-08-27-subagent-trace-replay-and-session-lineage.md) | Retired parent/child records and rationale for not aggregating recursive traces |
-| 2026-08-27 | [Session Directory & Metadata Architecture](implemented/architecture/2026-08-27-session-directory-and-metadata-architecture.md) | Actual session files, goal/plan state, attachments, and subagent records |
-| 2026-08-27 | [Historical: Builtin Agent & Persona Prompt System](implemented/architecture/2026-08-27-builtin-agent-personas-and-file-contracts.md) | Retired persona/subagent prompt experiment and its file-contract design history |
-| 2026-08-27 | [Goal and Plan Subsystem Architecture](implemented/architecture/2026-08-27-goal-and-plan-subsystem-architecture.md) | Explicit triggers, Living Plan protocol (plan.md), and autonomous verification state machine (goal/) |
-| 2026-08-27 | [web_fetch / read_image session impact](implemented/architecture/2026-08-27-web-fetch-and-read-image-session-impact.md) | Envelope-only history; resume/fork attachments; compact empty tools; prefix-cache misses |
-| 2026-08-28 | [Interactive Steer and Follow-up Run Control](implemented/architecture/2026-08-28-steer-and-follow-up-run-control.md) | `/steer` priority correction, FIFO follow-up queue, cooperative safe checkpoints, and durable `steered` turns |
-| 2026-08-28 | [Host Capability Profiles and Runtime Seams](implemented/architecture/2026-08-28-host-capability-profiles-and-runtime-seams.md) | CLI/App Server/ACP profile selection, regular-agent prompt/rule scope, bounded manifests, startup profile resolution, and selected MCP loading |
-
-#### Features & Extensions (`implemented/feature/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-24 | [Context Compaction](implemented/feature/2026-08-24-context-compaction.md) | Prefix compaction preserving latest world state and recent tool work verbatim |
-| 2026-08-24 | [Durable Sessions & Recovery](implemented/feature/2026-08-24-durable-sessions-and-recovery.md) | Append-only JSONL session checkpoints with torn-tail auto recovery |
-| 2026-08-24 | [Historical: Independent Mentor System](implemented/feature/2026-08-24-independent-mentor-system.md) | Superseded standalone Mentor design; retained behavior is the Goal verifier |
-| 2026-08-24 | [MCP & Skills Integration](implemented/feature/2026-08-24-mcp-and-skills-integration.md) | Stdio and HTTP MCP support with progressive skill discovery |
-| 2026-08-24 | [Explicit World State](implemented/feature/2026-08-24-explicit-world-state.md) | Deterministic host environment detection and context injection |
-| 2026-08-26 | [Fail-Closed Approval](implemented/feature/2026-08-26-fail-closed-approval-and-tool-orchestration.md) | Permission matrix, interactive TTY approval, and path containment |
-| 2026-08-26 | [Autonomous Goal Mode](implemented/feature/2026-08-26-autonomous-goal-mode.md) | Long-running goal execution with convergence gates and loop detection |
-| 2026-08-26 | [MCP Circuit Breaker](implemented/feature/2026-08-26-mcp-circuit-breaker.md) | Circuit breaking and graceful degradation for failing remote HTTP MCP servers |
-
-#### Simplification (`implemented/simplification/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-24 | [Source Code Line Budget](implemented/simplification/2026-08-24-source-code-line-budget.md) | 20k runtime and 30k total Rust-source hard gates for 0.4.0 |
-| 2026-08-29 | [Mainline Simplification: 39k to 29k Rust Lines](implemented/simplification/2026-08-29-mainline-simplification-39000-to-29000.md) | Removal of non-mainline edges, duplicate seams, and redundant test layers while preserving the canonical CLI → App Server → Host → Core path |
-| 2026-08-29 | [Mainline Simplification: 29k to 26k Rust Lines](implemented/simplification/2026-08-29-mainline-simplification-29k-to-26k.md) | Follow-up removal of stale replay, persona, profile, capability, and App Server compatibility seams; establishes the safer 26,984-line baseline |
-
-#### Testing (`implemented/testing/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-27 | [Historical Real LLM Scenario Runner](implemented/testing/2026-08-27-real-llm-scenario-runner.md) | Retired bounded real-provider scenario contract; current real-provider evidence remains an explicit open gate |
-
----
-
-### Rejected Proposals (Guardrails) (`rejected/`)
-
-#### Architecture (`rejected/architecture/`)
-| Date | Title | Rationale |
-|---|---|---|
-| 2026-08-24 | [Generic Persistence in Core](rejected/architecture/2026-08-24-generic-persistence-in-core.md) | Cannot settle non-idempotent external effects; persistence belongs at edge |
-| 2026-08-27 | [Subagent Task Scheduling & Delegation](rejected/architecture/2026-08-27-subagent-task-scheduling-and-delegation.md) | In-process multi-tenant scheduler adds unnecessary core complexity; replaced by Subprocess CLI execution and session-backed multi-turn architecture |
-| 2026-08-26 | [Event Stream Rollout Replay](rejected/architecture/2026-08-26-event-stream-rollout-replay.md) | Detailed external trace replay was prompt-weight-specific; session JSONL is the mainline durable record |
-
-#### Features & Extensions (`rejected/feature/`)
-| Date | Title | Rationale |
-|---|---|---|
-| 2026-08-24 | [Un-Settled Effect Replay](rejected/feature/2026-08-24-un-settled-effect-replay.md) | Replaying interrupted effects produces duplicate non-idempotent actions |
-| 2026-08-24 | [Unrestricted Whole-File Rewrite](rejected/feature/2026-08-24-unrestricted-whole-file-rewrite.md) | Full rewrites drop unrelated code in long contexts; exact replacement is safer |
-| 2026-08-24 | [Prompt Weight Protocol](rejected/feature/2026-08-24-prompt-weight.md) | Prompt-weight benchmarking is optional and outside the project mainline |
-| 2026-08-26 | [Prompt Weight Evaluation](rejected/feature/2026-08-26-prompt-weight-evaluation.md) | Real-model prompt comparison is optional and outside the project mainline |
-
----
-
-### Historical Archive (`archived/`)
-
-#### Experiments (`archived/experiments/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-24 | [Unknown-Tool Recovery](archived/experiments/2026-08-24-unknown-tool.md) | Recovery-capable model passes by projecting tool failure back to context |
-| 2026-08-24 | [Edit Surface Comparison](archived/experiments/2026-08-24-edit-surface.md) | Exact unique replacement preserves collateral content over full rewrite |
-| 2026-08-24 | [Tool-Output Retention](archived/experiments/2026-08-24-tool-output-retention.md) | Head-plus-tail truncation preserves both orientation and final verdict |
-| 2026-08-24 | [Effect Recovery Boundary](archived/experiments/2026-08-24-effect-recovery.md) | Replay safety simulation across non-idempotent crash boundaries |
-
-#### Features (`archived/feature/`)
-| Date | Title | Focus |
-|---|---|---|
-| 2026-08-27 | [DeepSeek and GLM Provider Seams](archived/feature/2026-08-27-deepseek-and-glm-provider-seams.md) | Historical provider seam record superseded by the single Responses protocol |
+- 当前行为写入 `docs/` 的主题文档；决策理由写入本目录的一篇主题记录；
+- 一个主题只保留一个当前决策入口，不在旧记录末尾追加下一轮工作日志；
+- 提案完成后移动到 `implemented/` 并改写为已实现的事实；被否决的方案只在
+  仍能阻止重复误入时保留；
+- 已进入 `archived/` 的文件冻结，不再翻译、重排或追加内容；
+- 不在本索引复制完整方案、测试输出、当前限制或用户操作步骤。

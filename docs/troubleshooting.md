@@ -79,12 +79,13 @@ preserved.
 
 ## File tools and workspace paths
 
-`read_file`, `read_image`, `edit_file`, and `write_file` accept paths located inside the active
-workspace, whether given as relative paths (e.g. `src/main.rs`) or absolute paths
+`read_file` and `read_image` accept paths located inside the active workspace,
+whether given as relative paths (e.g. `src/main.rs`) or absolute paths
 (e.g. `D:\workspace\src\main.rs`). Paths that escape the workspace (such as
 `../secret` or external directories) or point to `.git` are strictly rejected.
-`apply_patch` is intentionally stricter: its Codex-style patch paths must be relative to the
-workspace, and it validates every affected file before writing.
+`apply_patch` is the only Builtin file mutation path. Its Codex-style patch paths
+must be relative to the workspace, and it validates every affected file before
+writing. The removed `write_file` and `edit_file` names are not accepted.
 
 ## Real-time web search and network data
 

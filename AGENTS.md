@@ -5,6 +5,24 @@
 Mini Agent Harness studies agent harness behavior. It is not a smaller copy of
 every feature in Codex, Pi, fx, or Qi.
 
+## Documentation topology
+
+- `README.md` is the lightweight project entry point. It owns project identity,
+  the shortest install/run path, and the cross-directory documentation map.
+- `docs/README.md` is the local index for stable specifications and runbooks in
+  `docs/`; each `docs/*.md` file owns one topic and is not a second project map.
+- `.agents/notes/README.md` is a lightweight index for decisions and proposals.
+  Dated notes are evidence and rationale, not the current product specification.
+- A README under a directory describes only that directory and its children. Do
+  not repeat neighboring README content or add cross-directory documentation
+  maps below the root.
+- Keep one canonical explanation per topic. Move CLI detail to `docs/cli.md`,
+  protocol detail to `docs/app-server.md`, configuration to
+  `docs/configuration.md`, boundaries to `docs/harness-boundaries.md`, and
+  limits to `docs/limits.md`; do not append these sections back to root README.
+- Historical records and dated notes are frozen or status-indexed. Do not turn
+  an old note into a running changelog by appending every subsequent batch.
+
 ## Hard boundaries
 
 - `mini-agent-core` owns only portable model/tool contracts, the explicit run

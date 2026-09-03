@@ -252,9 +252,9 @@ match the current Goal runtime state.
 ## Project extensions
 
 Installed skills, plugins, and MCP configs stay inside the startup workspace.
-`read_file` and `apply_patch` are the default workspace tools. `edit_file` and `write_file`
-remain workspace-scoped compatibility tools that can be enabled through the bounded
-`builtinTools` selection.
+`read_file`, `apply_patch`, `shell`, and `read_image` are the default workspace
+tools. `web_fetch` and MCP tools are explicit extensions; `write_file` and
+`edit_file` are not part of the current tool surface or compatibility selection.
 
 ### Skills
 

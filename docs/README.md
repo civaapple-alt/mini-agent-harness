@@ -19,6 +19,7 @@ index of other Markdown files.
 
 | Document | Covers |
 | --- | --- |
+| [CLI](cli.md) | Installation, provider setup, commands, arguments, sessions, trace, and CLI safety boundaries. |
 | [Configuration](configuration.md) | Provider settings, runtime profiles, prompt/rule sources, extensions, and environment variables. |
 | [Harness limits](limits.md) | Byte, count, step, timeout, context, and Goal budget limits. |
 | [Troubleshooting](troubleshooting.md) | Common setup, provider, shell, tool, session, and runtime issues. |
