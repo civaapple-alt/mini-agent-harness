@@ -35,17 +35,17 @@ PROJECT:
 
 Use `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.";
 
-pub const REPL_HELP: &str = "mini-agent repl
+pub const REPL_HELP: &str = "mini-agent repl (experimental)
 
 USAGE:
     mini-agent [--session-id SESSION_ID] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--no-tools]
 
-Starts the interactive REPL. Core keeps an internal bounded loop guard; it is
-not a task setting. Durable sessions persist settled checkpoints under
-~/.mini-agent/sessions.
+Starts the experimental local App Server adapter. Core keeps an internal
+bounded loop guard; it is not a task setting. Durable sessions persist settled
+checkpoints under ~/.mini-agent/sessions.
 Use `/steer <message>` to redirect a running turn at a safe checkpoint.
-Plan and Goal workflows, session inspection, and project controls are exposed
-through App Server clients such as Studio and the SDK.
+Plan and Goal workflows, Project controls, and the primary user flow belong to
+App Server clients such as Web Studio and the Python SDK.
 
 OPTIONS:
     --session-id SESSION_ID     Resume this durable session instead of opening a new one

@@ -688,7 +688,7 @@ fn run_completes_bounded_cross_file_refactor_on_public_path() {
 }
 
 #[test]
-fn repl_starts_with_automatic_execution_for_its_local_adapter() {
+fn repl_is_fail_closed_for_non_interactive_tool_approval() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (requests_tx, requests_rx) = mpsc::channel();
@@ -740,14 +740,9 @@ fn repl_starts_with_automatic_execution_for_its_local_adapter() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stdout.contains("mini-agent — /steer /exit"));
-    assert!(stdout.contains("auto-started"));
-    assert_eq!(
-        stderr
-            .matches("unsandboxed shell commands without approval")
-            .count(),
-        0
-    );
+    assert!(stdout.contains("experimental REPL"));
+    assert!(stdout.contains("tool[error]> denied non-interactive action"));
+    assert!(stderr.is_empty());
 
     let requests = (0..2)
         .map(|_| serde_json::from_slice::<Value>(&requests_rx.recv().unwrap()).unwrap())

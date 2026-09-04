@@ -52,15 +52,15 @@ CLI 的完整命令、参数、Session resume/fork 和 trace 用法见
 ## 架构总览
 
 ```text
-CLI / external client
-          ↓
-App Server (Thread, Actor, control, events)
+mini-agent-core + Protocol
           ↓
 Host (workflow and runtime composition)
           ↓
-Capabilities (provider, workspace, sandbox, MCP, approval)
+App Server (Thread, Turn, Goal, control, events)
           ↓
-Core + Protocol (bounded turn loop and portable contracts)
+Python SDK → FastAPI Gateway → Web Studio
+
+Experimental edges: Rust REPL / Python TUI → App Server
 ```
 
 | 层 | 主要责任 |
@@ -70,10 +70,11 @@ Core + Protocol (bounded turn loop and portable contracts)
 | Capabilities | Provider、Workspace、Process、Sandbox、MCP、Skill/Plugin |
 | Host | Prompt/Rule、ToolOrchestrator 和 Runtime 组合 |
 | App Server | Thread/Turn/Goal、Actor/CAS、事件、审批和 JSON-RPC |
-| CLI | 终端输入、输出、批准交互和本地客户端入口 |
+| CLI | 终端输入、输出、批准交互和实验性本地客户端入口 |
 
-主路径是 `CLI → App Server → Host → Core`。Web、TUI 或其他客户端应消费
-App Server 的 Thread/Turn/Item 契约，不另建执行循环。
+主线是 `mini-agent-core → Host → App Server → Python SDK → FastAPI Gateway →
+Web Studio`。Web Studio 是用户主流程；Rust REPL 和 Python TUI 只是实验性边界，
+消费 App Server 的 Thread/Turn/Item 契约，不另建执行循环。
 
 默认 model-visible Builtin 工具只有 `read_file`、`apply_patch`、`shell` 和
 `read_image`；MCP 与 `web_fetch` 是显式扩展。文件修改统一由 `apply_patch`

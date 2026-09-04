@@ -41,10 +41,10 @@ pub(super) fn run_prompt(
         (_, true) => {
             send_event(
                 events,
-                ReplEvent::Warning(format!(
-                    "warning: stopped after {} model steps",
-                    outcome.steps
-                )),
+                ReplEvent::Warning(
+                    "warning: runtime protection triggered; inspect the settled result or retry"
+                        .to_string(),
+                ),
             );
         }
         _ => {}

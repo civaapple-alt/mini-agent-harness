@@ -34,9 +34,7 @@ mod repl_worker;
 
 use repl_worker::{ReplEvent, WorkerCommand};
 
-#[allow(clippy::too_many_arguments)]
 pub async fn run(
-    initial_approval: ApprovalMode,
     no_tools: bool,
     session_request: SessionRequest,
     preset: SecurityPreset,
@@ -49,7 +47,7 @@ pub async fn run(
     let approval_events = event_tx.clone();
     let interactive_terminal = io::stdin().is_terminal();
     let approval = ApprovalController::with_policy_and_callback(
-        initial_approval,
+        ApprovalMode::Interactive,
         SecurityPolicy::for_preset(preset),
         move |action| {
             if interactive_terminal {
@@ -80,7 +78,10 @@ pub async fn run(
     );
 
     println!("{}", crate::version_line());
-    println!("mini-agent — /steer /exit");
+    println!(
+        "mini-agent — experimental REPL (local App Server reference; main flow is App Server/SDK/Web Studio)"
+    );
+    println!("/steer /exit");
     let mut pending_work = 0usize;
     let mut pending_approval: VecDeque<mpsc::SyncSender<bool>> = VecDeque::new();
     let mut ready = false;

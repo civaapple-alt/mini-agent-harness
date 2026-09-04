@@ -11,7 +11,6 @@ use args::HelpTopic;
 use args::help_text;
 use args::parse_args;
 use mini_agent_app_server::SessionRequest;
-use mini_agent_app_server::frontend::ApprovalMode;
 
 pub(crate) fn version_line() -> String {
     format!("mini-agent {} ({})", env!("CARGO_PKG_VERSION"), git_sha())
@@ -37,7 +36,6 @@ async fn main() -> ExitCode {
                 .session_id
                 .map_or(SessionRequest::New, SessionRequest::Resume);
             repl::run(
-                ApprovalMode::Automatic,
                 invocation.no_tools,
                 request,
                 invocation.security_preset,
@@ -78,7 +76,6 @@ async fn main() -> ExitCode {
         }
         Command::Resume => {
             repl::run(
-                ApprovalMode::Automatic,
                 invocation.no_tools,
                 SessionRequest::Resume(invocation.prompt),
                 invocation.security_preset,
@@ -91,7 +88,6 @@ async fn main() -> ExitCode {
         }
         Command::Fork => {
             repl::run(
-                ApprovalMode::Automatic,
                 invocation.no_tools,
                 SessionRequest::Fork(invocation.prompt),
                 invocation.security_preset,

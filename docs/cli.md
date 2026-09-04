@@ -57,6 +57,15 @@ mini-agent fork SESSION_ID
 settled Session，`fork` 创建独立分支。运行中的进程、队列输入
 和其他 live effect 不会被恢复。
 
+### REPL 的实验性定位
+
+`mini-agent repl`、`resume` 和 `fork` 的交互入口是实验性本地 App Server
+参考客户端，用于验证 Core/Host/App Server 的终端边界。它使用交互式逐次批准，
+只保留 `/steer` 和 `/exit` 等最小终端控制，不提供独立的 Profile、Plan 或 Goal
+控制面。用户主流程是 `mini-agent-core → Host → App Server → Python SDK →
+FastAPI Gateway → Web Studio`；Plan、Goal、项目会话和 Web 控制应通过 App Server
+客户端完成。
+
 ## Turn 参数
 
 | 参数 | 适用命令 | 作用 |
