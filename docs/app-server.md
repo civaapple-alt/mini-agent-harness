@@ -124,3 +124,175 @@ Thread; an embedded runtime requires requested IDs to match the frozen
 composition. Provider instances, credentials, commands, and paths never cross the
 JSON-RPC boundary. The current registry exposes `openai` for models and
 `builtin` for the other three categories.
+
+## Public JSON-RPC interface
+
+The following is the complete public JSON-RPC surface of protocol version 1.
+The executable contract is defined by
+`crates/mini-agent-app-server-protocol`; this section explains the direction,
+lifecycle, and fields that an SDK or Web Studio client needs. JSON object
+fields use `camelCase`; enum values use `snake_case` unless noted otherwise.
+
+### Handshake
+
+| Method | Direction | Parameters / result |
+| --- | --- | --- |
+| `initialize` | client request | Required `protocolVersion`, `clientName`, `clientVersion`; optional `capabilities` (`approvals`, `notifications`) and `providers` (`model`, `tools`, `extensions`, `policy`). Returns `protocolVersion`, server identity, `capabilities`, and the secret-free `capabilityManifest`. |
+| `initialized` | client notification | No parameters and no response. Enables all methods after a successful `initialize`. |
+
+`initialize` must be the first request. Clients should send `initialized`
+after accepting its result. A request received before that notification is
+rejected. The server currently accepts protocol version `1` only.
+
+### Method index
+
+Every row below is a request unless marked as a notification. Request results
+for runtime actions are normally wrapped as `ActionResult`; the direct
+structural exceptions are handshake responses, `thread/list`, and an existing
+Thread returned by `thread/start`.
+
+#### Thread and session lifecycle
+
+| Method | Parameters | Result / effect |
+| --- | --- | --- |
+| `thread/start` | Optional `threadId` | Starts or returns the selected Thread; result contains `threadId`. |
+| `thread/list` | Optional `cursor`, `limit` | Returns `{data: [threadId], nextCursor}`. This is a bounded index query. |
+| `thread/fork` | `sourceThreadId`, `newThreadId` | Creates a Thread from the source checkpoint; result contains the new `threadId`. |
+| `thread/resume` | `threadId`, `checkpoint` | Installs the supplied bounded `ThreadReadResult` checkpoint and resumes the Thread identity. |
+| `thread/read` | `threadId` | Returns status, messages, context revision, turn counters, last turn, and next event sequence. |
+| `thread/close` | `threadId` | Closes the Thread; the action value is `{closed: true}`. |
+| `thread/items/list` | `threadId`; optional `turnId`, `cursor`, `limit`, `sortDirection` | Returns cursor-bounded `data` entries, `nextCursor`, and `backwardsCursor`. |
+| `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
+
+`thread/resume` is a controlled checkpoint install, not a second persistence
+format. The Session store and App Server remain the authorities for the
+active Thread; clients should use `thread/read` and `thread/items/list` for
+history instead of reading session files directly.
+
+#### Turn execution
+
+| Method | Parameters | Result / effect |
+| --- | --- | --- |
+| `turn/start` | `threadId`, `input: {mode, text}` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. |
+| `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, and optional error. |
+| `turn/steer` | `threadId`, `turnId`, `text` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. |
+| `turn/interrupt` | `threadId`, `turnId` | Requests cooperative cancellation and returns `{accepted: true}` when admitted. |
+
+`turn/start` is asynchronous. Clients should render `turn/event` and Item
+notifications while the turn is running, then use `turn/read` for the settled
+result. Steering and interruption are requests to the runtime; they do not
+force an immediate stop before the runtime reaches a cancellation boundary.
+
+#### Thread settings, Plan, and Goal
+
+| Method | Parameters | Result / effect |
+| --- | --- | --- |
+| `thread/settings/update` | `threadId`, `collaborationMode: {mode}`, optional `builtinTools: [name]` | Updates the Thread's `default` or `plan` mode and optional bounded Builtin tool selection. Emits `thread/settings/updated`. |
+| `thread/goal/set` | `threadId`; optional `objective`, `status`, `tokenBudget` | Sets or replaces a Goal subject to lifecycle checks; returns the public Goal projection and emits `thread/goal/updated`. A running Goal must be cleared before replacement. |
+| `thread/goal/get` | `threadId` | Returns `{goal}` where `goal` may be `null`. |
+| `thread/goal/clear` | `threadId` | Clears the Goal and returns `{cleared: true|false}`; emits `thread/goal/cleared` when applicable. |
+
+Goal status values are `active`, `paused`, `blocked`, `usage_limited`,
+`budget_limited`, and `complete`. Goal continuation, verification, pause,
+resume, and checkpoint association belong to GoalRuntime; clients do not
+submit verifier verdicts or advance milestones directly.
+
+#### Runtime management
+
+| Method | Parameters | Result / effect |
+| --- | --- | --- |
+| `world/state` | No parameters | Returns the current workspace, structured status, status lines, and bounded model context. |
+| `world/refresh` | No parameters | Refreshes the world and returns `{changed, state}`. |
+| `world/set_execution` | `access`, `approval` | Sets execution scope and returns `{changed, state}`. `access` is `project` or `full_machine`; `approval` is `per_action`, `current_session`, or `current_project`. |
+| `mcp/status` | No parameters | Returns enabled/inactive servers, tool count, and whether retry is available. |
+| `mcp/retry` | No parameters | Retries MCP setup and returns enabled/inactive servers, diagnostics, and tool count. |
+
+`world/set_execution` changes runtime configuration, not the security order.
+`full_machine` expands the candidate filesystem range but does not mean
+allow-all: Deny, Plan locks, tool availability, and high-risk confirmation
+still apply. The approval lifetime is scoped to the current action, session,
+or project according to the selected value.
+
+#### Approval response
+
+| Method | Parameters | Result / effect |
+| --- | --- | --- |
+| `approval/respond` | `requestId`, `decision` (`approve` or `deny`), `access`, `approval`, optional `reason` | Resolves one pending approval. The server emits `approval/resolved`; it does not return a second approval authority to the client. |
+
+The response must preserve the access and approval scope selected by the
+client. An approval is matched against the request's project, workspace,
+workspace revision, action class, and path scope. A changed workspace
+revision, project switch, policy change, or revocation invalidates a prior
+project/session reuse decision.
+
+### Server notifications
+
+Notifications have no JSON-RPC `id` and never receive a response. They are
+emitted on one ordered runtime stream.
+
+| Notification | Payload highlights | Use |
+| --- | --- | --- |
+| `turn/event` | `threadId`, optional `turnId`, Core `sequence`, bounded `items`, `event` | Ordered Core execution events, including turn settlement. |
+| `item/started` | `threadId`, `turnId`, `item`, `startedAtMs` | One ThreadItem becomes visible. |
+| `item/completed` | `threadId`, `turnId`, `item`, `completedAtMs` | Authoritative final projection for that item. |
+| `approval/request` | Request identity, project/workspace/revision, action class, summary, path scope, access, allowed approval modes, risk | Requests a user decision for a sensitive action. |
+| `approval/resolved` | Request identity, outcome, selected approval, and the original scope metadata | Reports `approved`, `denied`, `expired`, `revoked`, or `unavailable`. |
+| `thread/settings/updated` | `threadId`, effective mode, Builtin tools, `stateRevision` | Projects a settings change. |
+| `thread/goal/updated` | `threadId`, optional `turnId`, Goal projection | Projects Goal creation, update, or runtime progress. |
+| `thread/goal/cleared` | `threadId` | Projects Goal removal. |
+
+`sequence` is the Core Thread event sequence. `actionSequence` in an action
+response is the App Server admission order; they are different counters and
+must not be merged by clients. The stable ToolCall item identity is the model
+`callId`, which lets a client merge model, start, completion, and replay
+projections.
+
+### Common response and error rules
+
+The JSON-RPC envelope is `{"jsonrpc":"2.0","id":...,"result":...}` or
+`{"jsonrpc":"2.0","id":...,"error":...}`. An admitted runtime action
+uses:
+
+```json
+{
+  "value": {},
+  "actionId": 1,
+  "actionSequence": 1,
+  "stateRevision": 1
+}
+```
+
+The metadata identifies the admitted action, its server ordering, and the
+Runtime revision observed when the result was produced. Actor-rejected
+actions carry the same metadata in JSON-RPC error `data`; requests rejected
+before admission do not claim an action.
+
+The standard error codes currently used are:
+
+| Code | Meaning |
+| ---: | --- |
+| `-32700` | Parse error. |
+| `-32600` | Invalid JSON-RPC request or protocol version. |
+| `-32601` | Method not found, including removed legacy methods. |
+| `-32602` | Invalid or incomplete parameters. |
+| `-32000` | Runtime, capability, approval, or management failure. |
+
+All messages, tool arguments, tool output, event lists, item projections,
+cursor pages, and model context are bounded. Sensitive approval and item
+fields are redacted according to the Host policy.
+
+### Removed and deferred surface
+
+The following are intentionally not public protocol methods:
+
+- `workflow/state` and the former `workflow/goal/*` and `workflow/plan/set`
+  methods; use Thread settings and Thread Goal methods.
+- Profile or `turbomode` selection; startup provider selection is limited to
+  the bounded `providers` selectors in `initialize`.
+- Specialized Item variants and generic Artifact APIs; these remain deferred
+  until an independent contract and evidence set is accepted.
+
+The protocol list in this document must be updated together with the constants
+and DTOs in `mini-agent-app-server-protocol`. It must not document private
+Host constructors, `LocalAppServerClient` helper methods, or provider
+credentials as if they were wire interfaces.
