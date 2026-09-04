@@ -1,4 +1,4 @@
-//! Declarative capability profiles used to assemble a host runtime.
+//! Declarative runtime composition used to assemble a host runtime.
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -6,12 +6,9 @@ use serde::Serialize;
 use mini_agent_capabilities::SandboxKind;
 use mini_agent_capabilities::SecurityPreset;
 
-#[path = "profile_file.rs"]
-mod profile_file;
 #[path = "profile_manifest.rs"]
 mod profile_manifest;
 
-pub use profile_file::load_workspace_profile;
 pub use profile_manifest::CapabilityManifest;
 pub use profile_manifest::ContextLimits;
 pub use profile_manifest::RulePolicy;
@@ -122,8 +119,8 @@ impl Default for RuleSources {
 ///
 /// Foundational agents and personas compose with this configuration; they do
 /// not replace it. Keeping the settings in a named structure leaves room for
-/// typed base-prompt, output-contract, and context-policy presets without
-/// putting arbitrary prompt text in a profile.
+/// typed base-prompt, output-contract, and context-policy selections without
+/// putting arbitrary prompt text in the runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RegularAgentConfig {
@@ -133,13 +130,12 @@ pub struct RegularAgentConfig {
 
 /// Declarative selections used by a frontend before host composition starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RuntimeProfile {
-    pub name: String,
+pub struct RuntimeComposition {
     /// Bounded identifier resolved by the capability provider registry.
     pub model_provider: String,
-    /// Bounded identifier for the tool provider selected by this profile.
+    /// Bounded identifier for the tool provider selected by this composition.
     pub tool_provider: String,
-    /// Bounded identifier for the extension provider selected by this profile.
+    /// Bounded identifier for the extension provider selected by this composition.
     pub extension_provider: String,
     /// Bounded identifier for the sandbox, security, and approval provider.
     pub policy_provider: String,
@@ -154,36 +150,11 @@ pub struct RuntimeProfile {
     pub security: SecurityPreset,
 }
 
-impl RuntimeProfile {
-    /// Resolves only the profiles intentionally exposed at an application
-    /// edge. Workspace files may further narrow these selections, but cannot
-    /// introduce a new wire-visible profile name.
-    pub fn builtin(name: &str) -> Option<Self> {
-        match name {
-            "interactive" => Some(Self::interactive_default()),
-            "ask" => Some(Self::ask_default()),
-            "auto" => Some(Self::auto_default()),
-            _ => None,
-        }
-    }
-
-    pub fn interactive_default() -> Self {
-        Self::named("interactive", ToolScope::All, ExtensionLoadDepth::Enabled)
-    }
-
-    pub fn ask_default() -> Self {
-        Self::named("ask", ToolScope::All, ExtensionLoadDepth::Enabled)
-    }
-
-    pub fn auto_default() -> Self {
-        Self::named("auto", ToolScope::All, ExtensionLoadDepth::Enabled)
-    }
-
+impl RuntimeComposition {
     pub fn without_tools(mut self) -> Self {
         self.tools = ToolScope::None;
         self.extensions = ExtensionLoadDepth::None;
         self.extension_selection = ExtensionSelection::All;
-        self.name.push_str("-no-tools");
         self
     }
 
@@ -227,16 +198,17 @@ impl RuntimeProfile {
         }
         sections.join("\n\n")
     }
+}
 
-    fn named(name: &str, tools: ToolScope, extensions: ExtensionLoadDepth) -> Self {
+impl Default for RuntimeComposition {
+    fn default() -> Self {
         Self {
-            name: name.to_string(),
             model_provider: mini_agent_capabilities::OPENAI_MODEL_PROVIDER.to_string(),
             tool_provider: mini_agent_capabilities::BUILTIN_TOOL_PROVIDER.to_string(),
             extension_provider: mini_agent_capabilities::BUILTIN_EXTENSION_PROVIDER.to_string(),
             policy_provider: mini_agent_capabilities::BUILTIN_POLICY_PROVIDER.to_string(),
-            tools,
-            extensions,
+            tools: ToolScope::All,
+            extensions: ExtensionLoadDepth::Enabled,
             extension_selection: ExtensionSelection::All,
             agent: AgentKind::General,
             persona: PersonaKind::None,
@@ -245,12 +217,6 @@ impl RuntimeProfile {
             sandbox: SandboxKind::Native,
             security: SecurityPreset::Default,
         }
-    }
-}
-
-impl Default for RuntimeProfile {
-    fn default() -> Self {
-        Self::interactive_default()
     }
 }
 

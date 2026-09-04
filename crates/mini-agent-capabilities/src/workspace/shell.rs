@@ -46,9 +46,8 @@ impl ToolRuntime for Shell {
 
 impl Shell {
     fn ensure_allowed(&self, command: &str) -> Result<(), ToolError> {
-        if is_read_only_shell_command(command) {
-            Ok(())
-        } else if self.0.approval.living_plan().is_some() && self.0.is_plan_scratch_command(command)
+        if is_read_only_shell_command(command)
+            || (self.0.approval.living_plan().is_some() && self.0.is_plan_scratch_command(command))
         {
             Ok(())
         } else if self.0.approval.living_plan().is_some() {

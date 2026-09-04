@@ -19,7 +19,9 @@ impl AgentsMd {
     pub fn fingerprint(&self) -> Option<String> {
         match self {
             Self::Absent => None,
-            Self::Loaded { body, .. } => Some(crate::profile::stable_fingerprint(body.as_bytes())),
+            Self::Loaded { body, .. } => Some(crate::runtime_composition::stable_fingerprint(
+                body.as_bytes(),
+            )),
         }
     }
 

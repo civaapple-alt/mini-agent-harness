@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use super::WorkflowScope;
 use super::{
-    AgentKind, ExtensionLoadDepth, ExtensionSelection, PersonaKind, RuntimeProfile, ToolScope,
+    AgentKind, ExtensionLoadDepth, ExtensionSelection, PersonaKind, RuntimeComposition, ToolScope,
 };
 use mini_agent_capabilities::SecurityPreset;
 
@@ -17,7 +17,7 @@ const PROMPT_RULE_PRECEDENCE: [&str; 7] = [
     "extensions",
 ];
 
-/// The effective typed policy derived from a runtime profile.
+/// The effective typed policy derived from a runtime composition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RulePolicy {
@@ -26,7 +26,7 @@ pub struct RulePolicy {
     pub workflow_scope: WorkflowScope,
 }
 
-/// Resolution state for one bounded rule source in the profile precedence
+/// Resolution state for one bounded rule source in the composition precedence
 /// chain.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,7 +61,7 @@ pub(crate) fn stable_fingerprint(bytes: &[u8]) -> String {
         .to_string()
 }
 
-impl RuntimeProfile {
+impl RuntimeComposition {
     pub fn rule_policy(&self) -> RulePolicy {
         let read_only = self.agent.is_read_only();
         RulePolicy {
@@ -89,12 +89,15 @@ impl RuntimeProfile {
                 enabled.push("workspace-write".to_string());
             }
         } else {
-            disabled.push(("tools".to_string(), "profile scope: no-tools".to_string()));
+            disabled.push((
+                "tools".to_string(),
+                "composition scope: no-tools".to_string(),
+            ));
         }
         if self.extensions == ExtensionLoadDepth::None {
             disabled.push((
                 "extensions".to_string(),
-                "profile extension depth: none".to_string(),
+                "composition extension depth: none".to_string(),
             ));
         } else {
             enabled.push("extensions".to_string());
@@ -124,7 +127,7 @@ impl RuntimeProfile {
         } else {
             disabled.push((
                 "workflows".to_string(),
-                "profile workflow scope: disabled".to_string(),
+                "composition workflow scope: disabled".to_string(),
             ));
         }
         let mut rule_conflicts = Vec::new();

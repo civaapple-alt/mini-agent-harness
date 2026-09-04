@@ -17,8 +17,8 @@ use mini_agent_capabilities::CapabilityRegistry;
 use mini_agent_capabilities::ImageStore;
 use mini_agent_capabilities::ModelProviderSettings;
 use mini_agent_core::HarnessConfig;
+use mini_agent_host::RuntimeComposition;
 use mini_agent_host::RuntimeConfig;
-use mini_agent_host::RuntimeProfile;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ModelEventSink;
 use mini_agent_protocol::ModelRequest;
@@ -67,9 +67,9 @@ fn echo_factory(
 }
 
 /// The host still assembles tools and policy; this function supplies only the
-/// model implementation and a registry entry for its stable profile ID.
+/// model implementation and a registry entry for its stable provider ID.
 async fn start(runtime_config: RuntimeConfig) -> Result<AppServerRuntime<EchoModel>, String> {
-    let profile = RuntimeProfile::interactive_default().with_model_provider("example-model");
+    let composition = RuntimeComposition::default().with_model_provider("example-model");
     let registry = CapabilityRegistry::builtin().with_model_provider(CapabilityDescriptor {
         id: "example-model",
         kind: CapabilityKind::Model,
@@ -82,7 +82,7 @@ async fn start(runtime_config: RuntimeConfig) -> Result<AppServerRuntime<EchoMod
             harness_config: HarnessConfig::default(),
             session_request: SessionRequest::Disabled,
             control: std::sync::Arc::new(mini_agent_core::RunControl::new()),
-            profile,
+            composition,
             registry,
         },
         echo_factory,

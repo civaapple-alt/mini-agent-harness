@@ -143,9 +143,9 @@ pub fn print_final_answer(text: &str) {
     );
 }
 
-pub fn print_auto_warning() {
+pub fn print_automatic_approval_warning() {
     eprintln!(
-        "warning: auto mode runs workspace writes, MCP servers, and unsandboxed shell commands without approval"
+        "warning: automatic approval permits workspace writes, MCP servers, and unsandboxed shell commands"
     );
 }
 

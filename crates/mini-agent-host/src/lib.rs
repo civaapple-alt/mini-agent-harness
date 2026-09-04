@@ -1,16 +1,17 @@
-//! Application-host profile resolution and runtime composition for mini-agent.
+//! Application-host runtime composition for mini-agent.
 //!
 //! Concrete model, policy, and persistence providers live in
-//! `mini-agent-capabilities`. This crate owns profile resolution, runtime
-//! composition, and product workflows. It deliberately does not own terminal
-//! input or command-line dispatch; those belong to `mini-agent-cli`.
+//! `mini-agent-capabilities`. This crate owns runtime composition and product
+//! workflows. It deliberately does not own terminal input or command-line
+//! dispatch; those belong to `mini-agent-cli`.
 
 pub mod config;
 pub mod env_file;
 mod goal;
 mod harness_builder;
-pub mod profile;
 pub mod project_context;
+#[path = "profile.rs"]
+mod runtime_composition;
 pub mod runtime_factory;
 mod tool_catalog;
 mod tool_orchestrator;
@@ -38,26 +39,23 @@ pub use goal::with_plan_mode_overlay;
 pub use harness_builder::HarnessBuild;
 pub use harness_builder::HostRuntime;
 pub use harness_builder::ModelProviderFactory;
-pub use harness_builder::harness_config;
-pub use harness_builder::harness_config_auto;
 pub use harness_builder::prepare_harness_with_model_factory;
-pub use profile::AgentKind;
-pub use profile::CapabilityManifest;
-pub use profile::ContextLimits;
-pub use profile::ExtensionLoadDepth;
-pub use profile::ExtensionSelection;
-pub use profile::PersonaKind;
-pub use profile::PromptSources;
-pub use profile::RegularAgentConfig;
-pub use profile::RulePolicy;
-pub use profile::RuleSourceState;
-pub use profile::RuleSourceStatus;
-pub use profile::RuleSources;
-pub use profile::RuntimeProfile;
-pub use profile::SourceFingerprint;
-pub use profile::ToolScope;
-pub use profile::WorkflowScope;
-pub use profile::load_workspace_profile;
+pub use runtime_composition::AgentKind;
+pub use runtime_composition::CapabilityManifest;
+pub use runtime_composition::ContextLimits;
+pub use runtime_composition::ExtensionLoadDepth;
+pub use runtime_composition::ExtensionSelection;
+pub use runtime_composition::PersonaKind;
+pub use runtime_composition::PromptSources;
+pub use runtime_composition::RegularAgentConfig;
+pub use runtime_composition::RulePolicy;
+pub use runtime_composition::RuleSourceState;
+pub use runtime_composition::RuleSourceStatus;
+pub use runtime_composition::RuleSources;
+pub use runtime_composition::RuntimeComposition;
+pub use runtime_composition::SourceFingerprint;
+pub use runtime_composition::ToolScope;
+pub use runtime_composition::WorkflowScope;
 pub use runtime_factory::HostRuntimeFactory;
 pub use tool_catalog::BuiltinToolSelection;
 pub use tool_orchestrator::ToolOrchestrator;

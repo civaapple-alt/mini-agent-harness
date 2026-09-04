@@ -2,7 +2,7 @@
 //!
 //! This crate owns provider implementations and their local resources. Host
 //! selects providers through bounded identifiers and remains responsible for
-//! profile resolution and runtime orchestration.
+//! runtime composition and orchestration.
 
 mod blocking;
 mod image;

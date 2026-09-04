@@ -1,10 +1,8 @@
 use super::*;
-use crate::test_support::test_root;
-use std::fs;
 
 #[test]
-fn default_profile_exposes_tools_and_prompt_rule_sources() {
-    let profile = RuntimeProfile::interactive_default();
+fn default_composition_exposes_tools_and_prompt_rule_sources() {
+    let profile = RuntimeComposition::default();
     let manifest = profile.manifest();
 
     assert_eq!(manifest.model_provider, "openai");
@@ -59,8 +57,8 @@ fn default_profile_exposes_tools_and_prompt_rule_sources() {
 }
 
 #[test]
-fn no_tools_profile_is_explicit_and_does_not_admit_extensions() {
-    let manifest = RuntimeProfile::ask_default().without_tools().manifest();
+fn no_tools_composition_is_explicit_and_does_not_admit_extensions() {
+    let manifest = RuntimeComposition::default().without_tools().manifest();
 
     assert!(!manifest.enabled.iter().any(|name| name == "workspace"));
     assert!(
@@ -81,11 +79,11 @@ fn no_tools_profile_is_explicit_and_does_not_admit_extensions() {
 }
 
 #[test]
-fn explicit_agent_and_persona_profiles_render_one_bounded_overlay() {
-    let profile = RuntimeProfile {
+fn explicit_agent_and_persona_composition_renders_one_bounded_overlay() {
+    let profile = RuntimeComposition {
         agent: AgentKind::Plan,
         persona: PersonaKind::Reviewer,
-        ..RuntimeProfile::default()
+        ..RuntimeComposition::default()
     };
 
     let overlay = profile.prompt_overlay();
@@ -107,11 +105,11 @@ fn explicit_agent_and_persona_profiles_render_one_bounded_overlay() {
 
 #[test]
 fn rule_policy_reports_shadowed_sources_and_read_only_security() {
-    let profile = RuntimeProfile {
+    let profile = RuntimeComposition {
         agent: AgentKind::Plan,
         extensions: ExtensionLoadDepth::None,
         security: SecurityPreset::FullMachine,
-        ..RuntimeProfile::default()
+        ..RuntimeComposition::default()
     };
     let manifest = profile.manifest();
 
@@ -136,53 +134,4 @@ fn rule_policy_reports_shadowed_sources_and_read_only_security() {
         manifest.rule_source_status[6].state,
         RuleSourceState::Shadowed
     );
-}
-
-#[test]
-fn workspace_profile_file_overlays_bounded_selections() {
-    let root = test_root();
-    fs::create_dir_all(root.join(".agents")).unwrap();
-    fs::write(
-        root.join(".agents/profile.json"),
-        r#"{
-            "name": "repo-review",
-            "modelProvider": "openai",
-            "toolProvider": "builtin",
-            "extensionProvider": "builtin",
-            "policyProvider": "builtin",
-            "tools": "none",
-            "extensionDepth": "selected",
-            "selectedExtensions": ["review"],
-            "agent": "plan",
-            "persona": "reviewer",
-            "workflows": "plan",
-            "promptSources": {"project": true, "extensions": false, "workflows": true},
-            "ruleSources": {"project": false, "extensions": true, "workflows": true},
-            "sandbox": "none",
-            "security": "full-machine"
-        }"#,
-    )
-    .unwrap();
-
-    let profile = load_workspace_profile(&root, RuntimeProfile::ask_default()).unwrap();
-
-    assert_eq!(profile.name, "repo-review");
-    assert_eq!(profile.model_provider, "openai");
-    assert_eq!(profile.tool_provider, "builtin");
-    assert_eq!(profile.extension_provider, "builtin");
-    assert_eq!(profile.policy_provider, "builtin");
-    assert_eq!(profile.tools, ToolScope::None);
-    assert_eq!(profile.extensions, ExtensionLoadDepth::Selected);
-    assert_eq!(
-        profile.extension_selection,
-        ExtensionSelection::Named(vec!["review".into()])
-    );
-    assert_eq!(profile.agent, AgentKind::Plan);
-    assert_eq!(profile.persona, PersonaKind::Reviewer);
-    assert_eq!(profile.workflows, WorkflowScope::Plan);
-    assert!(!profile.regular_agent.rules.project);
-    assert_eq!(profile.sandbox, SandboxKind::None);
-    assert_eq!(profile.security, SecurityPreset::FullMachine);
-
-    fs::remove_dir_all(root).unwrap();
 }

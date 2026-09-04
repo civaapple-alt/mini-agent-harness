@@ -4,16 +4,16 @@ use mini_agent_app_server::frontend::SecurityPreset;
 pub const HELP: &str = "mini-agent — bounded native coding-agent CLI
 
 USAGE:
-    mini-agent                         Interactive session
-    mini-agent auto [PROMPT]           Autonomous session (REPL when omitted)
-    mini-agent ask [PROMPT]             One-shot/script-friendly turn
-    mini-agent <COMMAND> --help         Detailed command help
+    mini-agent                         Start the interactive REPL
+    mini-agent run [PROMPT]            Run one bounded turn
+    mini-agent <COMMAND> --help        Detailed command help
 
 QUICK START:
-    mini-agent ask \"summarize repo\"    Run one provider-backed turn
-    mini-agent auto                     Start the interactive copilot
+    mini-agent run \"summarize repo\"  Run one provider-backed turn
+    mini-agent                         Continue a conversation interactively
 
 COMMANDS:
+    run                                 One-shot/script-friendly turn
     resume, fork                        Durable session management
 
 COMMON OPTIONS:
@@ -21,12 +21,12 @@ COMMON OPTIONS:
     --sandbox KIND                      native | docker
     --web-search / --no-web-search      Built-in web search toggle
     --no-tools                          Model-only runtime; disable all tools and extensions
-    --auto-approve, -y                  Allow sensitive tools in non-TTY ask/run
-    --json                              Machine-readable output
+    --auto-approve, -y                  Allow sensitive tools for a non-interactive run
+    --json                              Machine-readable output for run
 
 CONFIG:
     OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL
-    More provider and extension settings: `mini-agent help ask` and docs.
+    Goal Runtime limits are configured separately by the App Server.
 
 PROJECT:
     GitHub:  https://github.com/civaapple-alt/mini-agent-harness
@@ -35,24 +35,49 @@ PROJECT:
 
 Use `mini-agent help COMMAND` or `mini-agent COMMAND --help` for details.";
 
-pub const INTERACTIVE_HELP: &str = "mini-agent interactive
+pub const REPL_HELP: &str = "mini-agent repl
 
 USAGE:
     mini-agent [--session-id SESSION_ID] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--no-tools]
 
-Starts the interactive REPL. Tools run without per-step approval; shell is protected by the sandbox.
-Interactive, one-shot ask, and auto sessions persist settled checkpoints under ~/.mini-agent/sessions.
-Use `mini-agent auto` to enter copilot mode; execution mode is selected at startup.
+Starts the interactive REPL. Core keeps an internal bounded loop guard; it is
+not a task setting. Durable sessions persist settled checkpoints under
+~/.mini-agent/sessions.
 Use `/steer <message>` to redirect a running turn at a safe checkpoint.
-Plan and Goal workflows, session inspection, and interactive management are exposed through App Server clients such as Studio and the SDK; this REPL stays focused on core turn execution.
+Plan and Goal workflows, session inspection, and project controls are exposed
+through App Server clients such as Studio and the SDK.
 
 OPTIONS:
     --session-id SESSION_ID     Resume this durable session instead of opening a new one
+    --security-preset PRESET    Security policy preset: default, full-machine [default: default]
+    --sandbox KIND              Execution sandbox: native (JobObject/process groups), docker [default: native]
+    --web-search, --search      Enable built-in Responses web_search [default: enabled]
+    --no-web-search, --no-search Disable built-in Responses web_search
+    --no-tools                  Disable all Builtin and extension tools
+";
+
+pub const RUN_HELP: &str = "mini-agent run
+
+USAGE:
+    mini-agent run [--session-id SESSION_ID] [--auto-approve|-y] [--json] [--trace-jsonl PATH] [--no-tools] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
+
+Runs one provider-backed turn. If PROMPT is omitted, reads at most 32 KiB
+from stdin. Core keeps an internal bounded loop guard; the guard is reported
+as runtime protection and is not a user task setting.
+On a TTY, tools run with the local automatic approval adapter. When stdin is
+not a TTY, sensitive tools fail closed unless --auto-approve (or -y).
+Progress is written to stderr and the final result to stdout.
+
+OPTIONS:
+    --session-id SESSION_ID      Resume this durable session instead of opening a new one
+    --auto-approve, -y           Permit sensitive tools non-interactively (alias: --yes)
     --security-preset PRESET     Security policy preset: default, full-machine [default: default]
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
     --web-search, --search       Enable built-in Responses web_search [default: enabled]
     --no-web-search, --no-search Disable built-in Responses web_search
-    --no-tools                   Disable all Builtin and extension tools
+    --no-tools                   Disable all host tools and extension loading
+    --json                       Emit a machine-readable final result
+    --trace-jsonl PATH           Write a bounded redacted trace; PATH must not exist
 ";
 
 pub const RESUME_HELP: &str = "mini-agent resume
@@ -69,46 +94,6 @@ USAGE:
 
 Forks a new independent session from the latest settled checkpoint of an existing session.";
 
-pub const ASK_HELP: &str = "mini-agent ask
-
-USAGE:
-    mini-agent ask [--session-id SESSION_ID] [--auto-approve|-y] [--max-steps N] [--json] [--trace-jsonl PATH] [--no-tools] [--security-preset PRESET] [--sandbox KIND] [--web-search|--no-web-search] [--] [PROMPT]
-
-Runs one script-facing turn (8 steps by default, no compaction). If PROMPT is omitted, reads at most 32 KiB from stdin.
-On a TTY, tools run without per-step approval. When stdin is not a TTY, sensitive tools fail closed unless `--auto-approve` (or `-y`).
-Progress is written to stderr and the final result to stdout.
-
-OPTIONS:
-    --session-id SESSION_ID      Resume this durable session instead of opening a new one
-    --auto-approve, -y           Permit sensitive tools non-interactively (aliases: --yes, --auto)
-    --max-steps N                Cap model steps for this turn (default: 8; 0 means unlimited)
-    --security-preset PRESET     Security policy preset: default, full-machine [default: default]
-    --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
-    --web-search, --search       Enable built-in Responses web_search [default: enabled]
-    --no-web-search, --no-search Disable built-in Responses web_search
-    --no-tools                   Disable all host tools and extension loading
-    --json                       Emit a machine-readable final result
-    --trace-jsonl PATH            Write a bounded redacted trace; PATH must not exist
-";
-
-pub const AUTO_HELP: &str = "mini-agent auto
-
-USAGE:
-    mini-agent auto [--session-id SESSION_ID] [--security-preset PRESET] [--sandbox KIND] [--no-tools] [--web-search|--no-web-search] [--] [PROMPT]
-
-Unattended copilot: runs continuous model/tool cycles without per-step approval, unlimited steps (unless capped by MINI_AGENT_MAX_STEPS), and automatic context compaction that preserves recent tool work.
-With a prompt, runs one autonomous copilot turn to completion.
-Without a prompt, starts the interactive REPL in copilot mode.
-
-OPTIONS:
-    --session-id SESSION_ID      Resume this durable session instead of opening a new one
-    --security-preset PRESET     Security policy preset: default, full-machine [default: default]
-    --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
-    --web-search, --search       Enable built-in Responses web_search [default: enabled]
-    --no-web-search, --no-search Disable built-in Responses web_search
-    --no-tools                   Disable all host tools and extension loading
-";
-
 pub const VERSION_HELP: &str = "mini-agent version
 
 USAGE:
@@ -117,9 +102,8 @@ USAGE:
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
-    Interactive,
-    Ask,
-    Auto,
+    Repl,
+    Run,
     Resume,
     Fork,
     Help,
@@ -131,7 +115,7 @@ pub struct Invocation {
     pub command: Command,
     pub prompt: String,
     pub json: bool,
-    pub automatic: bool,
+    pub auto_approve: bool,
     pub no_tools: bool,
     pub session_id: Option<String>,
     pub security_preset: SecurityPreset,
@@ -139,7 +123,6 @@ pub struct Invocation {
     pub sandbox_kind: SandboxKind,
     pub sandbox_kind_explicit: bool,
     pub web_search: Option<bool>,
-    pub max_steps: Option<usize>,
     pub trace_path: Option<std::path::PathBuf>,
     pub help_topic: HelpTopic,
 }
@@ -147,9 +130,8 @@ pub struct Invocation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HelpTopic {
     Root,
-    Interactive,
-    Ask,
-    Auto,
+    Repl,
+    Run,
     Resume,
     Fork,
     Version,
@@ -180,13 +162,9 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             args.next();
             Command::Version
         }
-        Some("ask") => {
+        Some("run") => {
             args.next();
-            Command::Ask
-        }
-        Some("auto") => {
-            args.next();
-            Command::Auto
+            Command::Run
         }
         Some("resume") => {
             args.next();
@@ -196,8 +174,8 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             args.next();
             Command::Fork
         }
-        None => Command::Interactive,
-        Some(other) if other.starts_with('-') => Command::Interactive,
+        None => Command::Repl,
+        Some(other) if other.starts_with('-') => Command::Repl,
         Some(other) => return Err(format!("unknown command: {other}")),
     };
     let remaining = args.collect::<Vec<_>>();
@@ -220,7 +198,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             command,
             prompt: String::new(),
             json: false,
-            automatic: false,
+            auto_approve: false,
             no_tools: false,
             session_id: None,
             security_preset: SecurityPreset::Default,
@@ -228,7 +206,6 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             sandbox_kind: SandboxKind::Native,
             sandbox_kind_explicit: false,
             web_search: None,
-            max_steps: None,
             trace_path: None,
             help_topic: HelpTopic::Root,
         });
@@ -237,7 +214,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut args = remaining.into_iter();
     let mut prompt = Vec::new();
     let mut json = false;
-    let mut automatic = false;
+    let mut auto_approve = false;
     let mut no_tools = false;
     let mut session_id = None;
     let mut security_preset = SecurityPreset::Default;
@@ -245,7 +222,6 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     let mut sandbox_kind = SandboxKind::Native;
     let mut sandbox_kind_explicit = false;
     let mut web_search = None;
-    let mut max_steps = None;
     let mut trace_path = None;
     let mut options = true;
     while let Some(argument) = args.next() {
@@ -257,15 +233,12 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             }
             json = true;
         } else if options
-            && (argument == "--auto-approve"
-                || argument == "-y"
-                || argument == "--yes"
-                || argument == "--auto")
+            && (argument == "--auto-approve" || argument == "-y" || argument == "--yes")
         {
-            if automatic {
+            if auto_approve {
                 return Err(format!("{argument} may be provided only once"));
             }
-            automatic = true;
+            auto_approve = true;
         } else if options && argument == "--no-tools" {
             if no_tools {
                 return Err("--no-tools may be provided only once".to_string());
@@ -301,18 +274,6 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
                 return Err(format!("{argument} may be provided only once"));
             }
             web_search = Some(false);
-        } else if options && argument == "--max-steps" {
-            if max_steps.is_some() {
-                return Err("--max-steps may be provided only once".to_string());
-            }
-            let value = args
-                .next()
-                .ok_or_else(|| "--max-steps requires a number".to_string())?;
-            max_steps = Some(
-                value
-                    .parse::<usize>()
-                    .map_err(|_| "--max-steps requires a non-negative integer".to_string())?,
-            );
         } else if options && argument == "--trace-jsonl" {
             if trace_path.is_some() {
                 return Err("--trace-jsonl may be provided only once".to_string());
@@ -327,8 +288,8 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
             prompt.push(argument);
         }
     }
-    if matches!(command, Command::Interactive) && !prompt.is_empty() {
-        return Err("interactive mode does not accept a prompt; use `ask`".to_string());
+    if command == Command::Repl && !prompt.is_empty() {
+        return Err("the REPL does not accept a prompt; use `run`".to_string());
     }
     if command == Command::Resume && prompt.len() != 1 {
         return Err("resume requires exactly one SESSION_ID".to_string());
@@ -336,31 +297,26 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
     if command == Command::Fork && prompt.len() != 1 {
         return Err("fork requires exactly one SESSION_ID".to_string());
     }
-    if json && !matches!(command, Command::Ask) {
-        return Err("--json is supported only by ask".to_string());
+    if json && command != Command::Run {
+        return Err("--json is supported only by run".to_string());
     }
-    if automatic && !matches!(command, Command::Ask) {
-        return Err("--auto-approve is supported only by ask".to_string());
+    if auto_approve && command != Command::Run {
+        return Err("--auto-approve is supported only by run".to_string());
     }
-    if session_id.is_some()
-        && !matches!(command, Command::Ask | Command::Interactive | Command::Auto)
-    {
-        return Err("--session-id is supported only by ask, auto, and interactive".to_string());
+    if session_id.is_some() && !matches!(command, Command::Run | Command::Repl) {
+        return Err("--session-id is supported only by run and the REPL".to_string());
     }
-    if max_steps.is_some() && !matches!(command, Command::Ask) {
-        return Err("--max-steps is supported only by ask".to_string());
+    if trace_path.is_some() && command != Command::Run {
+        return Err("--trace-jsonl is supported only by run".to_string());
     }
-    if trace_path.is_some() && !matches!(command, Command::Ask) {
-        return Err("--trace-jsonl is supported only by ask".to_string());
-    }
-    if no_tools && !matches!(command, Command::Interactive | Command::Ask | Command::Auto) {
-        return Err("--no-tools is supported only by interactive, ask, and auto".to_string());
+    if no_tools && !matches!(command, Command::Run | Command::Repl) {
+        return Err("--no-tools is supported only by run and the REPL".to_string());
     }
     Ok(Invocation {
         command,
         prompt: prompt.join(" "),
         json,
-        automatic,
+        auto_approve,
         no_tools,
         session_id,
         security_preset,
@@ -368,7 +324,6 @@ pub fn parse_args(args: Vec<String>) -> Result<Invocation, String> {
         sandbox_kind,
         sandbox_kind_explicit,
         web_search,
-        max_steps,
         trace_path,
         help_topic: HelpTopic::Root,
     })
@@ -379,7 +334,7 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         command: Command::Help,
         prompt: String::new(),
         json: false,
-        automatic: false,
+        auto_approve: false,
         no_tools: false,
         session_id: None,
         security_preset: SecurityPreset::Default,
@@ -387,7 +342,6 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
         sandbox_kind: SandboxKind::Native,
         sandbox_kind_explicit: false,
         web_search: None,
-        max_steps: None,
         trace_path: None,
         help_topic,
     }
@@ -395,9 +349,8 @@ fn help_invocation(help_topic: HelpTopic) -> Invocation {
 
 fn help_topic(name: &str) -> Result<HelpTopic, String> {
     match name {
-        "interactive" | "repl" => Ok(HelpTopic::Interactive),
-        "ask" => Ok(HelpTopic::Ask),
-        "auto" => Ok(HelpTopic::Auto),
+        "repl" => Ok(HelpTopic::Repl),
+        "run" => Ok(HelpTopic::Run),
         "resume" => Ok(HelpTopic::Resume),
         "fork" => Ok(HelpTopic::Fork),
         "version" => Ok(HelpTopic::Version),
@@ -407,22 +360,19 @@ fn help_topic(name: &str) -> Result<HelpTopic, String> {
 
 fn help_topic_for(command: Command) -> HelpTopic {
     match command {
-        Command::Interactive => HelpTopic::Interactive,
-        Command::Ask => HelpTopic::Ask,
-        Command::Auto => HelpTopic::Auto,
+        Command::Repl => HelpTopic::Repl,
+        Command::Run => HelpTopic::Run,
         Command::Resume => HelpTopic::Resume,
         Command::Fork => HelpTopic::Fork,
-        Command::Version => HelpTopic::Version,
-        Command::Help => HelpTopic::Root,
+        Command::Version | Command::Help => HelpTopic::Root,
     }
 }
 
 pub fn help_text(topic: HelpTopic) -> &'static str {
     match topic {
         HelpTopic::Root => HELP,
-        HelpTopic::Interactive => INTERACTIVE_HELP,
-        HelpTopic::Ask => ASK_HELP,
-        HelpTopic::Auto => AUTO_HELP,
+        HelpTopic::Repl => REPL_HELP,
+        HelpTopic::Run => RUN_HELP,
         HelpTopic::Resume => RESUME_HELP,
         HelpTopic::Fork => FORK_HELP,
         HelpTopic::Version => VERSION_HELP,
@@ -434,266 +384,108 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_to_interactive_mode() {
+    fn defaults_to_repl() {
         let invocation = parse_args(Vec::new()).unwrap();
-
-        assert_eq!(invocation.command, Command::Interactive);
+        assert_eq!(invocation.command, Command::Repl);
         assert_eq!(invocation.prompt, "");
         assert!(!invocation.json);
-        assert!(!invocation.automatic);
-        assert_eq!(invocation.security_preset, SecurityPreset::Default);
-        assert!(!invocation.security_preset_explicit);
-        assert_eq!(invocation.sandbox_kind, SandboxKind::Native);
-        assert!(!invocation.sandbox_kind_explicit);
-        assert_eq!(invocation.web_search, None);
+        assert!(!invocation.auto_approve);
     }
 
     #[test]
-    fn joins_one_shot_prompt() {
+    fn parses_one_shot_run() {
         let invocation = parse_args(vec![
-            "ask".to_string(),
+            "run".to_string(),
             "explain".to_string(),
             "the".to_string(),
             "code".to_string(),
         ])
         .unwrap();
-
-        assert_eq!(invocation.command, Command::Ask);
+        assert_eq!(invocation.command, Command::Run);
         assert_eq!(invocation.prompt, "explain the code");
-        assert!(!invocation.json);
-        assert!(!invocation.automatic);
     }
 
     #[test]
-    fn option_delimiter_allows_prompt_starting_with_dash() {
+    fn run_accepts_script_options_but_not_a_step_budget() {
         let invocation = parse_args(vec![
-            "ask".to_string(),
-            "--".to_string(),
-            "-v".to_string(),
-            "--json".to_string(),
-        ])
-        .unwrap();
-
-        assert_eq!(invocation.command, Command::Ask);
-        assert_eq!(invocation.prompt, "-v --json");
-        assert!(!invocation.json);
-        assert!(!invocation.automatic);
-    }
-
-    #[test]
-    fn parses_durable_session_commands() {
-        let resume = parse_args(vec!["resume".to_string(), "s-12345678".to_string()]).unwrap();
-        assert_eq!(resume.command, Command::Resume);
-        assert_eq!(resume.prompt, "s-12345678");
-
-        let auto_repl = parse_args(vec!["auto".to_string()]).unwrap();
-        assert_eq!(auto_repl.command, Command::Auto);
-        assert_eq!(
-            parse_args(vec!["auto".to_string(), "--ephemeral".to_string()]).unwrap_err(),
-            "unknown option: --ephemeral"
-        );
-
-        assert_eq!(
-            parse_args(vec!["resume".to_string()]).unwrap_err(),
-            "resume requires exactly one SESSION_ID"
-        );
-    }
-
-    #[test]
-    fn parses_script_ask_options() {
-        let invocation = parse_args(vec![
-            "ask".to_string(),
+            "run".to_string(),
             "--json".to_string(),
             "--auto-approve".to_string(),
-            "explain".to_string(),
-            "the".to_string(),
-            "code".to_string(),
-        ])
-        .unwrap();
-
-        assert_eq!(invocation.command, Command::Ask);
-        assert_eq!(invocation.prompt, "explain the code");
-        assert!(invocation.json);
-        assert!(invocation.automatic);
-        assert!(!invocation.no_tools);
-        assert_eq!(invocation.max_steps, None);
-
-        let restricted = parse_args(vec![
-            "ask".to_string(),
-            "--no-tools".to_string(),
-            "explain".to_string(),
-        ])
-        .unwrap();
-        assert!(restricted.no_tools);
-
-        let stepped = parse_args(vec![
-            "ask".to_string(),
-            "--max-steps".to_string(),
-            "50".to_string(),
-            "go".to_string(),
-        ])
-        .unwrap();
-        assert_eq!(stepped.max_steps, Some(50));
-
-        let traced = parse_args(vec![
-            "ask".to_string(),
             "--trace-jsonl".to_string(),
             "trace.jsonl".to_string(),
             "go".to_string(),
         ])
         .unwrap();
-        assert_eq!(
-            traced.trace_path,
-            Some(std::path::PathBuf::from("trace.jsonl"))
-        );
+        assert!(invocation.json);
+        assert!(invocation.auto_approve);
+        assert_eq!(invocation.trace_path, Some("trace.jsonl".into()));
         assert_eq!(
             parse_args(vec![
-                "auto".to_string(),
-                "--trace-jsonl".to_string(),
-                "trace.jsonl".to_string(),
+                "run".to_string(),
+                "--max-steps".to_string(),
+                "50".to_string(),
             ])
             .unwrap_err(),
-            "--trace-jsonl is supported only by ask"
+            "unknown option: --max-steps"
         );
     }
 
     #[test]
-    fn parses_subcommand_help_forms() {
-        let root = parse_args(vec!["--help".to_string()]).unwrap();
-        assert_eq!(root.command, Command::Help);
-        assert_eq!(root.help_topic, HelpTopic::Root);
-
-        let ask_positional = parse_args(vec!["help".to_string(), "ask".to_string()]).unwrap();
-        assert_eq!(ask_positional.command, Command::Help);
-        assert_eq!(ask_positional.help_topic, HelpTopic::Ask);
-
-        let ask_flag = parse_args(vec!["ask".to_string(), "--help".to_string()]).unwrap();
-        assert_eq!(ask_flag.command, Command::Help);
-        assert_eq!(ask_flag.help_topic, HelpTopic::Ask);
-    }
-
-    #[test]
-    fn root_help_stays_actionable_and_identifies_the_project() {
-        assert!(HELP.lines().count() <= 60);
-        assert!(HELP.contains("QUICK START:"));
-        assert!(HELP.contains("https://github.com/civaapple-alt/mini-agent-harness"));
-        assert!(HELP.contains("Creator: civaapple-alt"));
-        assert!(HELP.contains("License: MIT"));
-    }
-
-    #[test]
-    fn parses_version_command() {
-        let invocation = parse_args(vec!["version".to_string()]).unwrap();
-        assert_eq!(invocation.command, Command::Version);
-        assert_eq!(invocation.prompt, "");
-
-        let flag = parse_args(vec!["--version".to_string()]).unwrap();
-        assert_eq!(flag.command, Command::Version);
-        assert_eq!(flag.prompt, "");
-    }
-
-    #[test]
-    fn parses_auto_mode() {
-        let invocation = parse_args(vec![
-            "auto".to_string(),
-            "finish".to_string(),
-            "the task".to_string(),
-        ])
-        .unwrap();
-
-        assert_eq!(invocation.command, Command::Auto);
-        assert_eq!(invocation.prompt, "finish the task");
-    }
-
-    #[test]
-    fn parses_auto_mode_without_prompt() {
-        let invocation = parse_args(vec!["auto".to_string()]).unwrap();
-
-        assert_eq!(invocation.command, Command::Auto);
-        assert_eq!(invocation.prompt, "");
-    }
-
-    #[test]
-    fn parses_fork_command() {
-        let invocation = parse_args(vec!["fork".to_string(), "s-12345678".to_string()]).unwrap();
-        assert_eq!(invocation.command, Command::Fork);
-        assert_eq!(invocation.prompt, "s-12345678");
-
+    fn rejects_removed_commands_and_aliases() {
         assert_eq!(
-            parse_args(vec!["fork".to_string()]).unwrap_err(),
-            "fork requires exactly one SESSION_ID"
+            parse_args(vec!["ask".to_string()]).unwrap_err(),
+            "unknown command: ask"
+        );
+        assert_eq!(
+            parse_args(vec!["auto".to_string()]).unwrap_err(),
+            "unknown command: auto"
+        );
+        assert_eq!(
+            parse_args(vec!["run".to_string(), "--auto".to_string()]).unwrap_err(),
+            "unknown option: --auto"
         );
     }
 
     #[test]
-    fn parses_security_preset_and_sandbox_options() {
-        let ask_inv = parse_args(vec![
-            "ask".to_string(),
+    fn rejects_removed_turbomode_alias() {
+        assert_eq!(
+            parse_args(vec![
+                "run".to_string(),
+                "--security-preset".to_string(),
+                "turbomode".to_string(),
+            ])
+            .unwrap_err(),
+            "unknown security preset: turbomode"
+        );
+    }
+
+    #[test]
+    fn parses_durable_commands_and_help() {
+        let resume = parse_args(vec!["resume".to_string(), "s-12345678".to_string()]).unwrap();
+        assert_eq!(resume.command, Command::Resume);
+        assert_eq!(resume.prompt, "s-12345678");
+        let help = parse_args(vec!["help".to_string(), "run".to_string()]).unwrap();
+        assert_eq!(help.command, Command::Help);
+        assert_eq!(help.help_topic, HelpTopic::Run);
+    }
+
+    #[test]
+    fn parses_security_and_web_options() {
+        let invocation = parse_args(vec![
+            "run".to_string(),
             "--security-preset".to_string(),
-            "turbomode".to_string(),
+            "full-machine".to_string(),
             "--sandbox".to_string(),
             "native".to_string(),
+            "--no-web-search".to_string(),
+            "--no-tools".to_string(),
             "list files".to_string(),
         ])
         .unwrap();
-
-        assert_eq!(ask_inv.command, Command::Ask);
-        assert_eq!(ask_inv.security_preset, SecurityPreset::FullMachine);
-        assert!(ask_inv.security_preset_explicit);
-        assert_eq!(ask_inv.sandbox_kind, SandboxKind::Native);
-        assert!(ask_inv.sandbox_kind_explicit);
-        assert_eq!(ask_inv.prompt, "list files");
-
-        let interactive_inv = parse_args(vec![
-            "--security-preset".to_string(),
-            "turbomode".to_string(),
-            "--sandbox".to_string(),
-            "native".to_string(),
-        ])
-        .unwrap();
-
-        assert_eq!(interactive_inv.command, Command::Interactive);
-        assert_eq!(interactive_inv.security_preset, SecurityPreset::FullMachine);
-        assert!(interactive_inv.security_preset_explicit);
-        assert_eq!(interactive_inv.sandbox_kind, SandboxKind::Native);
-        assert!(interactive_inv.sandbox_kind_explicit);
-    }
-
-    #[test]
-    fn parses_web_search_options() {
-        let default_inv = parse_args(vec!["ask".to_string(), "hello".to_string()]).unwrap();
-        assert_eq!(default_inv.web_search, None);
-
-        let enabled_inv = parse_args(vec![
-            "ask".to_string(),
-            "--web-search".to_string(),
-            "hello".to_string(),
-        ])
-        .unwrap();
-        assert_eq!(enabled_inv.web_search, Some(true));
-
-        let disabled_inv = parse_args(vec![
-            "ask".to_string(),
-            "--no-web-search".to_string(),
-            "hello".to_string(),
-        ])
-        .unwrap();
-        assert_eq!(disabled_inv.web_search, Some(false));
-    }
-
-    #[test]
-    fn rejects_options_unsupported_by_a_command() {
-        assert_eq!(
-            parse_args(vec!["--json".to_string()]).unwrap_err(),
-            "--json is supported only by ask"
-        );
-        let auto_inv = parse_args(vec![
-            "ask".to_string(),
-            "--auto".to_string(),
-            "prompt".to_string(),
-        ])
-        .unwrap();
-        assert!(auto_inv.automatic);
-        assert_eq!(auto_inv.prompt, "prompt");
+        assert_eq!(invocation.security_preset, SecurityPreset::FullMachine);
+        assert!(invocation.security_preset_explicit);
+        assert!(invocation.sandbox_kind_explicit);
+        assert_eq!(invocation.web_search, Some(false));
+        assert!(invocation.no_tools);
     }
 }

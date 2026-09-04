@@ -1,12 +1,12 @@
 //! Host-owned runtime construction seam.
 //!
-//! App Server and frontends select a bounded [`RuntimeProfile`], while this
+//! App Server and frontends select a bounded [`RuntimeComposition`], while this
 //! factory remains the only place that turns the selection into concrete
 //! provider, tool, extension, policy, and session-bound artifacts.
 
 use crate::HostRuntime;
+use crate::RuntimeComposition;
 use crate::RuntimeConfig;
-use crate::RuntimeProfile;
 use crate::harness_builder::prepare_harness_with_model_factory;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::CapabilityRegistry;
@@ -28,8 +28,8 @@ fn openai_model_factory(
 /// Builds a concrete host runtime for an App Server service boundary.
 ///
 /// The factory carries edge configuration and the frontend approval callback,
-/// while the profile selects the concrete policy provider and sandbox. Profile
-/// selection remains explicit so each frontend can choose an allowlisted
+/// while the composition selects the concrete policy provider and sandbox.
+/// Composition selection remains explicit so each frontend can choose an allowlisted
 /// capability scope without creating a second execution loop.
 pub struct HostRuntimeFactory<'a> {
     runtime_config: &'a RuntimeConfig,
@@ -60,16 +60,16 @@ impl<'a> HostRuntimeFactory<'a> {
 
     pub fn build(
         &self,
-        profile: RuntimeProfile,
+        composition: RuntimeComposition,
         results: ResultStore,
     ) -> Result<HostRuntime, String> {
         self.approval
-            .set_read_only_agent(profile.agent.is_read_only());
+            .set_read_only_agent(composition.agent.is_read_only());
         prepare_harness_with_model_factory(
             self.runtime_config,
             self.approval.clone(),
             self.config.clone(),
-            profile,
+            composition,
             results,
             self.registry.clone(),
             openai_model_factory,

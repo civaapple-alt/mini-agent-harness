@@ -19,7 +19,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 #[test]
-fn ask_reads_stdin_and_keeps_machine_output_clean() {
+fn run_reads_stdin_and_keeps_machine_output_clean() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (requests_tx, requests_rx) = mpsc::channel();
@@ -47,7 +47,7 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
     )
     .unwrap();
     let mut child = mini_agent(&root)
-        .args(["ask", "--json"])
+        .args(["run", "--json"])
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
@@ -115,7 +115,7 @@ fn ask_reads_stdin_and_keeps_machine_output_clean() {
 }
 
 #[test]
-fn ask_exports_a_bounded_redacted_trace_to_a_new_file() {
+fn run_exports_a_bounded_redacted_trace_to_a_new_file() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (request_tx, request_rx) = mpsc::channel();
@@ -139,7 +139,7 @@ fn ask_exports_a_bounded_redacted_trace_to_a_new_file() {
 
     let output = mini_agent(&root)
         .args([
-            "ask",
+            "run",
             "--json",
             "--trace-jsonl",
             trace_path.to_str().unwrap(),
@@ -179,7 +179,7 @@ fn ask_exports_a_bounded_redacted_trace_to_a_new_file() {
 }
 
 #[test]
-fn ask_refuses_to_overwrite_an_existing_trace_file() {
+fn run_refuses_to_overwrite_an_existing_trace_file() {
     let root = test_root();
     let trace_path = root.join("trace.jsonl");
     fs::write(&trace_path, "keep this artifact\n").unwrap();
@@ -191,7 +191,7 @@ fn ask_refuses_to_overwrite_an_existing_trace_file() {
 
     let output = mini_agent(&root)
         .args([
-            "ask",
+            "run",
             "--json",
             "--trace-jsonl",
             trace_path.to_str().unwrap(),
@@ -211,7 +211,7 @@ fn ask_refuses_to_overwrite_an_existing_trace_file() {
 }
 
 #[test]
-fn ask_no_tools_uses_model_only_scope_without_extension_tools() {
+fn run_no_tools_uses_model_only_scope_without_extension_tools() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (request_tx, request_rx) = mpsc::channel();
@@ -239,7 +239,7 @@ fn ask_no_tools_uses_model_only_scope_without_extension_tools() {
     .unwrap();
 
     let output = mini_agent(&root)
-        .args(["ask", "--json", "--no-tools", "explain the scope"])
+        .args(["run", "--json", "--no-tools", "explain the scope"])
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
@@ -259,86 +259,11 @@ fn ask_no_tools_uses_model_only_scope_without_extension_tools() {
             .unwrap()
             .contains("should-not-load")
     );
-    assert_eq!(response["capabilities"]["profile"], "ask-no-tools");
+    assert_eq!(response["capabilities"]["security"], "default");
     assert!(
         response["capabilities"]["disabled"]
             .to_string()
             .contains("tools")
-    );
-}
-
-#[test]
-fn ask_applies_workspace_profile_file_before_running_a_turn() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    let (request_tx, request_rx) = mpsc::channel();
-    let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        request_tx.send(read_request_body(&mut stream)).unwrap();
-        write_reasoning_sse_response(&mut stream, "checking", "profile answer");
-    });
-    let root = test_root();
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
-    fs::create_dir_all(root.join(".agents")).unwrap();
-    fs::write(
-        root.join(".agents/profile.json"),
-        r#"{"name":"repo-review","tools":"none","extensionDepth":"none","agent":"plan","persona":"reviewer","workflows":"disabled","sandbox":"none","security":"full-machine"}"#,
-    )
-    .unwrap();
-    let mut child = mini_agent(&root)
-        .args(["ask", "--json", "review the repository"])
-        .env_remove("OPENAI_API_KEY")
-        .env_remove("OPENAI_MODEL")
-        .env_remove("OPENAI_BASE_URL")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let status = wait_for_child(&mut child);
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    child
-        .stdout
-        .take()
-        .unwrap()
-        .read_to_string(&mut stdout)
-        .unwrap();
-    child
-        .stderr
-        .take()
-        .unwrap()
-        .read_to_string(&mut stderr)
-        .unwrap();
-    server.join().unwrap();
-    fs::remove_dir_all(root).unwrap();
-
-    assert!(status.success(), "stderr: {stderr}");
-    let output: Value = serde_json::from_str(stdout.trim()).unwrap();
-    assert_eq!(output["output"], "profile answer");
-    assert_eq!(output["capabilities"]["profile"], "repo-review");
-    assert_eq!(output["capabilities"]["sandbox"], "none");
-    assert_eq!(output["capabilities"]["security"], "full-machine");
-    assert!(
-        output["capabilities"]["disabled"]
-            .to_string()
-            .contains("no-tools")
-    );
-    let request: Value = serde_json::from_slice(&request_rx.recv().unwrap()).unwrap();
-    assert_eq!(request["tools"].as_array().unwrap().len(), 0);
-    assert!(
-        request["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("read-only software architect")
     );
 }
 
@@ -439,7 +364,6 @@ fn steer_interrupts_a_running_turn_at_a_checkpoint() {
     )
     .unwrap();
     let mut child = mini_agent(&root)
-        .arg("auto")
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
@@ -529,7 +453,6 @@ fn follow_up_is_queued_until_the_running_turn_finishes() {
     )
     .unwrap();
     let mut child = mini_agent(&root)
-        .arg("auto")
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
@@ -576,7 +499,7 @@ fn follow_up_is_queued_until_the_running_turn_finishes() {
 }
 
 #[test]
-fn ask_without_auto_denies_shell_when_stdin_is_not_a_tty() {
+fn run_without_auto_approval_denies_shell_when_stdin_is_not_a_tty() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (requests_tx, requests_rx) = mpsc::channel();
@@ -612,7 +535,7 @@ fn ask_without_auto_denies_shell_when_stdin_is_not_a_tty() {
     )
     .unwrap();
     let output = mini_agent(&root)
-        .args(["ask", "inspect the workspace"])
+        .args(["run", "inspect the workspace"])
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
@@ -637,7 +560,7 @@ fn ask_without_auto_denies_shell_when_stdin_is_not_a_tty() {
 }
 
 #[test]
-fn ask_recovers_from_unknown_tool_on_public_path() {
+fn run_recovers_from_unknown_tool_on_public_path() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (requests_tx, requests_rx) = mpsc::channel();
@@ -675,7 +598,7 @@ fn ask_recovers_from_unknown_tool_on_public_path() {
     .unwrap();
 
     let output = mini_agent(&root)
-        .args(["ask", "--json", "recover from the missing tool"])
+        .args(["run", "--json", "recover from the missing tool"])
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
         .env_remove("OPENAI_BASE_URL")
@@ -693,7 +616,7 @@ fn ask_recovers_from_unknown_tool_on_public_path() {
 }
 
 #[test]
-fn ask_completes_bounded_cross_file_refactor_on_public_path() {
+fn run_completes_bounded_cross_file_refactor_on_public_path() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (requests_tx, requests_rx) = mpsc::channel();
@@ -736,7 +659,7 @@ fn ask_completes_bounded_cross_file_refactor_on_public_path() {
 
     let output = mini_agent(&root)
         .args([
-            "ask",
+            "run",
             "--json",
             "--auto-approve",
             "rename shared_name in both files",
@@ -765,7 +688,7 @@ fn ask_completes_bounded_cross_file_refactor_on_public_path() {
 }
 
 #[test]
-fn auto_session_starts_with_automatic_execution() {
+fn repl_starts_with_automatic_execution_for_its_local_adapter() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (requests_tx, requests_rx) = mpsc::channel();
@@ -797,7 +720,6 @@ fn auto_session_starts_with_automatic_execution() {
     )
     .unwrap();
     let mut child = mini_agent(&root)
-        .arg("auto")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -819,13 +741,12 @@ fn auto_session_starts_with_automatic_execution() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stdout.contains("mini-agent — /steer /exit"));
-    assert!(stdout.contains("auto mode on"));
     assert!(stdout.contains("auto-started"));
     assert_eq!(
         stderr
             .matches("unsandboxed shell commands without approval")
             .count(),
-        1
+        0
     );
 
     let requests = (0..2)
@@ -836,7 +757,7 @@ fn auto_session_starts_with_automatic_execution() {
         requests[0]["tools"][2]["description"]
             .as_str()
             .unwrap()
-            .contains("without per-command approval")
+            .contains("after per-action user approval")
     );
     fs::remove_dir_all(root).unwrap();
 }

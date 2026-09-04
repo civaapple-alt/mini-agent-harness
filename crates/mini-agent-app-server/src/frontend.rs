@@ -16,7 +16,6 @@ pub use mini_agent_capabilities::SecurityPreset;
 pub use mini_agent_core::DEFAULT_MAX_PENDING_INPUTS;
 pub use mini_agent_core::InputQueueError;
 pub use mini_agent_core::RunControl;
-pub use mini_agent_host::harness_config_auto;
 pub use mini_agent_protocol::EventEnvelope;
 pub use mini_agent_protocol::EventSink;
 pub use mini_agent_protocol::Message;
@@ -25,56 +24,6 @@ pub use mini_agent_protocol::ToolError;
 pub use mini_agent_protocol::TurnInput;
 pub use mini_agent_protocol::TurnInputMode;
 pub use mini_agent_protocol::TurnStatus;
-
-/// App Server owned profile selector used by local frontend startup.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RuntimeProfile(mini_agent_host::RuntimeProfile);
-
-impl RuntimeProfile {
-    pub fn interactive_default() -> Self {
-        Self(mini_agent_host::RuntimeProfile::interactive_default())
-    }
-
-    pub fn auto_default() -> Self {
-        Self(mini_agent_host::RuntimeProfile::auto_default())
-    }
-
-    pub fn without_tools(self) -> Self {
-        Self(self.0.without_tools())
-    }
-
-    pub fn with_sandbox(self, sandbox: SandboxKind) -> Self {
-        Self(self.0.with_sandbox(sandbox))
-    }
-
-    pub fn with_security(self, security: SecurityPreset) -> Self {
-        Self(self.0.with_security(security))
-    }
-
-    pub fn sandbox(&self) -> SandboxKind {
-        self.0.sandbox
-    }
-
-    pub fn manifest(&self) -> CapabilityManifest {
-        crate::capability_manifest_to_protocol(
-            &self
-                .0
-                .manifest_with_config(&mini_agent_core::HarnessConfig::default()),
-        )
-    }
-
-    pub(crate) fn into_host(self) -> mini_agent_host::RuntimeProfile {
-        self.0
-    }
-}
-
-/// Loads a bounded workspace profile through the App Server launch boundary.
-pub fn load_workspace_profile(
-    workspace: &std::path::Path,
-    base: RuntimeProfile,
-) -> Result<RuntimeProfile, String> {
-    mini_agent_host::load_workspace_profile(workspace, base.into_host()).map(RuntimeProfile)
-}
 
 /// App Server owned frontend handle for approval policy and interaction.
 ///

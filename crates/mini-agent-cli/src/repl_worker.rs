@@ -35,7 +35,6 @@ impl EventSink for ChannelObserver {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_worker(
-    copilot: bool,
     no_tools: bool,
     approval: ApprovalController,
     session_request: SessionRequest,
@@ -55,7 +54,6 @@ pub(super) fn spawn_worker(
                 .build()
                 .map_err(|error| format!("error: cannot start REPL worker: {error}"))?;
             let launch = mini_agent_app_server::local::prepare(LocalRuntimeRequest {
-                automatic: copilot,
                 no_tools,
                 security_preset: preset,
                 security_preset_explicit,
@@ -63,7 +61,6 @@ pub(super) fn spawn_worker(
                 sandbox_kind_explicit,
                 web_search_override,
                 session_request,
-                max_steps: None,
             })?;
             let mut runtime =
                 model_runtime

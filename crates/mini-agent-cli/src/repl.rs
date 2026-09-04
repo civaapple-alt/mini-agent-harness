@@ -1,5 +1,4 @@
 use crate::observer::RunObserver;
-use crate::observer::print_auto_warning;
 use mini_agent_app_server::AppServerRuntime;
 use mini_agent_app_server::SessionRequest;
 use mini_agent_app_server::ThreadUpdate;
@@ -38,7 +37,6 @@ use repl_worker::{ReplEvent, WorkerCommand};
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     initial_approval: ApprovalMode,
-    copilot: bool,
     no_tools: bool,
     session_request: SessionRequest,
     preset: SecurityPreset,
@@ -68,7 +66,6 @@ pub async fn run(
     let (worker_tx, worker_rx) = mpsc::channel();
     let run_control = RunControl::new();
     let worker = repl_worker::spawn_worker(
-        copilot,
         no_tools,
         approval,
         session_request,
@@ -84,10 +81,6 @@ pub async fn run(
 
     println!("{}", crate::version_line());
     println!("mini-agent — /steer /exit");
-    print_auto_warning();
-    if copilot {
-        println!("auto mode on");
-    }
     let mut pending_work = 0usize;
     let mut pending_approval: VecDeque<mpsc::SyncSender<bool>> = VecDeque::new();
     let mut ready = false;

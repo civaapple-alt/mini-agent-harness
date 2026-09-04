@@ -31,8 +31,8 @@ use mini_agent_core::RunControl;
 use mini_agent_core::Thread;
 use mini_agent_host::CapabilityManifest;
 use mini_agent_host::ModelProviderFactory;
+use mini_agent_host::RuntimeComposition;
 use mini_agent_host::RuntimeConfig;
-use mini_agent_host::RuntimeProfile;
 use mini_agent_host::prepare_harness_with_model_factory;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ThreadId;
@@ -106,7 +106,7 @@ pub struct RuntimeStartOptions {
     pub harness_config: HarnessConfig,
     pub session_request: SessionRequest,
     pub control: std::sync::Arc<RunControl>,
-    pub profile: RuntimeProfile,
+    pub composition: RuntimeComposition,
     pub registry: CapabilityRegistry,
 }
 
@@ -133,7 +133,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             harness_config,
             session_request,
             control,
-            profile,
+            composition,
             registry,
         } = options;
         let workspace = runtime_config.workspace();
@@ -185,7 +185,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             &runtime_config,
             approval.clone(),
             harness_config,
-            profile,
+            composition,
             results,
             registry,
             model_factory,

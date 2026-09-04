@@ -22,7 +22,6 @@ pub struct RuntimeConfig {
     verifier_api_key: Option<ResolvedValue>,
     verifier_model: Option<ResolvedValue>,
     verifier_base_url: Option<String>,
-    max_agent_steps: Option<usize>,
     goal_limits: GoalLimits,
     web_search: bool,
     project_id: Option<String>,
@@ -59,11 +58,6 @@ impl RuntimeConfig {
         let verifier_model = resolve_value(VERIFIER_OPENAI_MODEL, &workspace_env, &user_env);
         let verifier_base_url = resolve_value(VERIFIER_OPENAI_BASE_URL, &workspace_env, &user_env)
             .map(|value| value.value);
-        let max_agent_steps = match resolve_value("MINI_AGENT_MAX_STEPS", &workspace_env, &user_env)
-        {
-            Some(value) => Some(parse_max_agent_steps(&value.value)?),
-            None => None,
-        };
         let goal_limits = GoalLimits {
             max_loops: resolve_positive_usize(
                 "MINI_AGENT_GOAL_MAX_LOOPS",
@@ -103,7 +97,6 @@ impl RuntimeConfig {
             verifier_api_key,
             verifier_model,
             verifier_base_url,
-            max_agent_steps,
             goal_limits,
             web_search,
             project_id,
@@ -162,10 +155,6 @@ impl RuntimeConfig {
         self.extra_read_roots.hash(&mut hasher);
         self.extra_write_roots.hash(&mut hasher);
         hasher.finish()
-    }
-
-    pub fn copilot_max_steps(&self) -> usize {
-        self.max_agent_steps.unwrap_or(0)
     }
 
     pub fn goal_limits(&self) -> GoalLimits {
@@ -236,12 +225,6 @@ fn validate_base_url_named(name: &str, base_url: &str) -> Result<(), String> {
         return Err(format!("{name} must be an absolute http or https URL"));
     }
     Ok(())
-}
-
-fn parse_max_agent_steps(value: &str) -> Result<usize, String> {
-    value.parse::<usize>().map_err(|_| {
-        "MINI_AGENT_MAX_STEPS must be a non-negative integer (0 = unlimited)".to_string()
-    })
 }
 
 fn resolve_positive_usize(
@@ -396,25 +379,6 @@ mod tests {
         let config = RuntimeConfig::load_from(workspace, Some(user_env)).unwrap();
 
         assert_eq!(config.api_key.as_ref().unwrap().value, "workspace-key");
-    }
-
-    #[test]
-    fn copilot_max_steps_reads_workspace_env() {
-        let workspace = unique_dir("workspace");
-        fs::write(workspace.join(".env"), "MINI_AGENT_MAX_STEPS=40\n").unwrap();
-        let config = RuntimeConfig::load_from(workspace, None).unwrap();
-        assert_eq!(config.copilot_max_steps(), 40);
-    }
-
-    #[test]
-    fn copilot_max_steps_rejects_invalid_values() {
-        let workspace = unique_dir("workspace");
-        fs::write(workspace.join(".env"), "MINI_AGENT_MAX_STEPS=-1\n").unwrap();
-        let error = match RuntimeConfig::load_from(workspace, None) {
-            Ok(_) => panic!("expected MINI_AGENT_MAX_STEPS to be rejected"),
-            Err(error) => error,
-        };
-        assert!(error.contains("MINI_AGENT_MAX_STEPS"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::observer::RunObserver;
 use crate::observer::ScriptFormat;
-use crate::observer::print_auto_warning;
+use crate::observer::print_automatic_approval_warning;
 use crate::observer::print_final_answer;
 use mini_agent_app_server::JsonlTrace;
 use mini_agent_app_server::SessionRequest;
@@ -28,7 +28,7 @@ const MAX_STDIN_PROMPT_BYTES: usize = 32 * 1024;
 pub async fn run(
     prompt: String,
     json_output: bool,
-    automatic: bool,
+    auto_approve: bool,
     no_tools: bool,
     preset: SecurityPreset,
     security_preset_explicit: bool,
@@ -36,7 +36,6 @@ pub async fn run(
     sandbox_kind_explicit: bool,
     web_search_override: Option<bool>,
     session_request: SessionRequest,
-    max_steps: Option<usize>,
     trace_path: Option<PathBuf>,
 ) -> ExitCode {
     let prompt = match resolve_prompt(prompt) {
@@ -44,14 +43,13 @@ pub async fn run(
         Err(error) => return preflight_error(json_output, &error),
     };
     let tty = io::stdin().is_terminal();
-    let mode = if automatic || tty {
-        print_auto_warning();
+    let mode = if auto_approve || tty {
+        print_automatic_approval_warning();
         ApprovalMode::Automatic
     } else {
         ApprovalMode::Interactive
     };
     let launch = match mini_agent_app_server::local::prepare(LocalRuntimeRequest {
-        automatic,
         no_tools,
         security_preset: preset,
         security_preset_explicit,
@@ -59,7 +57,6 @@ pub async fn run(
         sandbox_kind_explicit,
         web_search_override,
         session_request,
-        max_steps,
     }) {
         Ok(launch) => launch,
         Err(error) => return preflight_error(json_output, &error),
@@ -75,7 +72,7 @@ pub async fn run(
     } else {
         ScriptFormat::Text
     };
-    let mut observer = match CliObserver::new(automatic, format, trace_path.as_deref()) {
+    let mut observer = match CliObserver::new(auto_approve, format, trace_path.as_deref()) {
         Ok(observer) => observer,
         Err(error) => return preflight_error(json_output, &error),
     };
@@ -190,11 +187,11 @@ struct CliObserver {
 
 impl CliObserver {
     fn new(
-        automatic: bool,
+        stream_output: bool,
         format: ScriptFormat,
         trace_path: Option<&Path>,
     ) -> Result<Self, String> {
-        let output = if automatic && !matches!(format, ScriptFormat::Json) {
+        let output = if stream_output && !matches!(format, ScriptFormat::Json) {
             RunObserver::new()
         } else {
             RunObserver::for_script(format)

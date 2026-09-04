@@ -1,7 +1,8 @@
 mod args;
-mod ask;
 mod observer;
 mod repl;
+#[path = "ask.rs"]
+mod run;
 
 use std::process::ExitCode;
 
@@ -11,8 +12,6 @@ use args::help_text;
 use args::parse_args;
 use mini_agent_app_server::SessionRequest;
 use mini_agent_app_server::frontend::ApprovalMode;
-use mini_agent_app_server::frontend::SandboxKind;
-use mini_agent_app_server::frontend::SecurityPreset;
 
 pub(crate) fn version_line() -> String {
     format!("mini-agent {} ({})", env!("CARGO_PKG_VERSION"), git_sha())
@@ -33,13 +32,12 @@ async fn main() -> ExitCode {
         }
     };
     match invocation.command {
-        Command::Interactive => {
+        Command::Repl => {
             let request = invocation
                 .session_id
                 .map_or(SessionRequest::New, SessionRequest::Resume);
             repl::run(
                 ApprovalMode::Automatic,
-                false,
                 invocation.no_tools,
                 request,
                 invocation.security_preset,
@@ -50,15 +48,15 @@ async fn main() -> ExitCode {
             )
             .await
         }
-        Command::Ask => {
+        Command::Run => {
             let request = match invocation.session_id {
                 Some(id) => SessionRequest::Named(id),
                 None => SessionRequest::New,
             };
-            ask::run(
+            run::run(
                 invocation.prompt,
                 invocation.json,
-                invocation.automatic,
+                invocation.auto_approve,
                 invocation.no_tools,
                 invocation.security_preset,
                 invocation.security_preset_explicit,
@@ -66,45 +64,7 @@ async fn main() -> ExitCode {
                 invocation.sandbox_kind_explicit,
                 invocation.web_search,
                 request,
-                invocation.max_steps,
                 invocation.trace_path,
-            )
-            .await
-        }
-        Command::Auto if invocation.prompt.is_empty() => {
-            let request = if let Some(session_id) = invocation.session_id {
-                SessionRequest::Resume(session_id)
-            } else {
-                SessionRequest::New
-            };
-            repl::run(
-                ApprovalMode::Automatic,
-                true,
-                invocation.no_tools,
-                request,
-                invocation.security_preset,
-                invocation.security_preset_explicit,
-                invocation.sandbox_kind,
-                invocation.sandbox_kind_explicit,
-                invocation.web_search,
-            )
-            .await
-        }
-        Command::Auto => {
-            let request = if let Some(session_id) = invocation.session_id {
-                SessionRequest::Resume(session_id)
-            } else {
-                SessionRequest::New
-            };
-            run_auto(
-                invocation.prompt,
-                invocation.security_preset,
-                invocation.security_preset_explicit,
-                invocation.sandbox_kind,
-                invocation.sandbox_kind_explicit,
-                invocation.web_search,
-                request,
-                invocation.no_tools,
             )
             .await
         }
@@ -119,7 +79,6 @@ async fn main() -> ExitCode {
         Command::Resume => {
             repl::run(
                 ApprovalMode::Automatic,
-                false,
                 invocation.no_tools,
                 SessionRequest::Resume(invocation.prompt),
                 invocation.security_preset,
@@ -133,7 +92,6 @@ async fn main() -> ExitCode {
         Command::Fork => {
             repl::run(
                 ApprovalMode::Automatic,
-                false,
                 invocation.no_tools,
                 SessionRequest::Fork(invocation.prompt),
                 invocation.security_preset,
@@ -145,32 +103,4 @@ async fn main() -> ExitCode {
             .await
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn run_auto(
-    prompt: String,
-    preset: SecurityPreset,
-    security_preset_explicit: bool,
-    sandbox: SandboxKind,
-    sandbox_kind_explicit: bool,
-    web_search_override: Option<bool>,
-    session_request: SessionRequest,
-    no_tools: bool,
-) -> ExitCode {
-    crate::ask::run(
-        prompt,
-        false,
-        true,
-        no_tools,
-        preset,
-        security_preset_explicit,
-        sandbox,
-        sandbox_kind_explicit,
-        web_search_override,
-        session_request,
-        None,
-        None,
-    )
-    .await
 }

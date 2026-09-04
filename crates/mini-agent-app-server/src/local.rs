@@ -1,7 +1,7 @@
 //! Local embedded-client bootstrap helpers.
 //!
-//! These helpers keep profile resolution and runtime construction behind the
-//! App Server boundary. A CLI or another local frontend supplies only its
+//! These helpers keep runtime composition and construction behind the App
+//! Server boundary. A CLI or another local frontend supplies only its
 //! input/output and approval adapter.
 
 use crate::AppServerRuntime;
@@ -12,15 +12,12 @@ use mini_agent_capabilities::SandboxKind;
 use mini_agent_capabilities::SecurityPreset;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::RunControl;
+use mini_agent_host::RuntimeComposition;
 use mini_agent_host::RuntimeConfig;
-use mini_agent_host::RuntimeProfile;
-use mini_agent_host::harness_config;
-use mini_agent_host::harness_config_auto;
 use std::sync::Arc;
 
 /// Inputs used by an embedded local frontend to resolve one runtime.
 pub struct LocalRuntimeRequest {
-    pub automatic: bool,
     pub no_tools: bool,
     pub security_preset: SecurityPreset,
     pub security_preset_explicit: bool,
@@ -28,7 +25,6 @@ pub struct LocalRuntimeRequest {
     pub sandbox_kind_explicit: bool,
     pub web_search_override: Option<bool>,
     pub session_request: SessionRequest,
-    pub max_steps: Option<usize>,
 }
 
 /// Fully resolved local runtime inputs, before the frontend approval callback
@@ -36,7 +32,7 @@ pub struct LocalRuntimeRequest {
 pub struct LocalRuntimeLaunch {
     runtime_config: RuntimeConfig,
     harness_config: HarnessConfig,
-    profile: RuntimeProfile,
+    composition: RuntimeComposition,
     session_request: SessionRequest,
 }
 
@@ -45,50 +41,33 @@ impl LocalRuntimeLaunch {
         self.runtime_config.clone()
     }
 
-    pub fn copilot_max_steps(&self) -> usize {
-        self.runtime_config.copilot_max_steps()
-    }
-
     pub fn security_preset(&self) -> SecurityPreset {
-        self.profile.security
+        self.composition.security
     }
 }
 
-/// Resolves configuration and the bounded workspace profile for a local
+/// Resolves configuration and the bounded runtime composition for a local
 /// embedded client. No provider resources or Thread are created here.
 pub fn prepare(request: LocalRuntimeRequest) -> Result<LocalRuntimeLaunch, String> {
     let mut runtime_config = RuntimeConfig::load()?;
     if let Some(enabled) = request.web_search_override {
         runtime_config = runtime_config.with_web_search(enabled);
     }
-    let profile = if request.automatic {
-        RuntimeProfile::auto_default()
-    } else {
-        RuntimeProfile::ask_default()
-    };
-    let mut profile =
-        mini_agent_host::load_workspace_profile(&runtime_config.workspace(), profile)?;
+    let mut composition = RuntimeComposition::default();
     if request.no_tools {
-        profile = profile.without_tools();
+        composition = composition.without_tools();
     }
     if request.sandbox_kind_explicit {
-        profile = profile.with_sandbox(request.sandbox_kind);
+        composition = composition.with_sandbox(request.sandbox_kind);
     }
     if request.security_preset_explicit {
-        profile = profile.with_security(request.security_preset);
+        composition = composition.with_security(request.security_preset);
     }
-    let harness_config = match (request.automatic, request.max_steps) {
-        (true, steps) => harness_config_auto(
-            true,
-            steps.unwrap_or_else(|| runtime_config.copilot_max_steps()),
-        ),
-        (false, Some(steps)) => harness_config_auto(true, steps),
-        (false, None) => harness_config(false),
-    };
+    let harness_config = HarnessConfig::default();
     Ok(LocalRuntimeLaunch {
         runtime_config,
         harness_config,
-        profile,
+        composition,
         session_request: request.session_request,
     })
 }
@@ -113,7 +92,7 @@ impl LocalRuntimeLaunch {
             harness_config: self.harness_config,
             session_request: self.session_request,
             control,
-            profile: self.profile,
+            composition: self.composition,
             registry: mini_agent_capabilities::CapabilityRegistry::builtin(),
         })
         .await

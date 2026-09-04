@@ -66,5 +66,5 @@ fn main() {
             descriptor.kind, descriptor.id, descriptor.description
         );
     }
-    println!("select `example-echo` in a RuntimeProfile to expose external_echo");
+    println!("select `example-echo` in the runtime composition to expose external_echo");
 }

@@ -18,8 +18,8 @@ use mini_agent_capabilities::SessionStore;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
 use mini_agent_host::HostRuntimeFactory;
+use mini_agent_host::RuntimeComposition;
 use mini_agent_host::RuntimeConfig;
-use mini_agent_host::RuntimeProfile;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
 use mini_agent_protocol::ToolApprovalRequest;
@@ -39,14 +39,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         SecurityPreset::Default,
         ApprovalScope::PerAction,
     );
-    let base_profile = RuntimeProfile::interactive_default();
+    let base_composition = RuntimeComposition::default();
     let startup_config = runtime_config.clone();
     let stdin = BufReader::new(tokio::io::stdin());
     let stdout = tokio::io::stdout();
     serve_stdio_with_startup_and_services(broker.clone(), stdin, stdout, move |params| {
-        let mut profile = base_profile.clone();
-        apply_provider_selection(&mut profile, params.providers.as_ref())?;
-        let factory_profile = profile.clone();
+        let mut composition = base_composition.clone();
+        apply_provider_selection(&mut composition, params.providers.as_ref())?;
+        let factory_composition = composition.clone();
         let session = open_session(&startup_config)?;
         let goal_workspace = session
             .as_ref()
@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             runtime_approval.clone(),
             HarnessConfig::default(),
         )
-        .build(profile, results)?;
+        .build(composition, results)?;
         let mini_agent_host::HarnessBuild {
             harness,
             images,
@@ -119,11 +119,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     security,
                     approval_scope(selected_approval),
                 );
-                let mut thread_profile = factory_profile.clone();
-                thread_profile.security = security;
+                let mut thread_composition = factory_composition.clone();
+                thread_composition.security = security;
                 let runtime =
                     HostRuntimeFactory::new(&factory_config, approval, HarnessConfig::default())
-                        .build(thread_profile, Default::default())
+                        .build(thread_composition, Default::default())
                         .map_err(AppServerError::Checkpoint)?;
                 Ok(Thread::new(thread_id, runtime.harness))
             },
@@ -176,23 +176,23 @@ fn open_session(runtime_config: &RuntimeConfig) -> Result<Option<OpenedSession>,
 }
 
 fn apply_provider_selection(
-    profile: &mut RuntimeProfile,
+    composition: &mut RuntimeComposition,
     providers: Option<&CapabilityProviderSelection>,
 ) -> Result<(), String> {
     let Some(providers) = providers else {
         return Ok(());
     };
     if let Some(provider) = providers.model.as_deref() {
-        profile.model_provider = provider.to_string();
+        composition.model_provider = provider.to_string();
     }
     if let Some(provider) = providers.tools.as_deref() {
-        profile.tool_provider = provider.to_string();
+        composition.tool_provider = provider.to_string();
     }
     if let Some(provider) = providers.extensions.as_deref() {
-        profile.extension_provider = provider.to_string();
+        composition.extension_provider = provider.to_string();
     }
     if let Some(provider) = providers.policy.as_deref() {
-        profile.policy_provider = provider.to_string();
+        composition.policy_provider = provider.to_string();
     }
     Ok(())
 }
