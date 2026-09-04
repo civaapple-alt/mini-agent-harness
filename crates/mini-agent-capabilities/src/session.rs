@@ -666,12 +666,7 @@ mod tests {
 
     #[test]
     fn item_index_survives_session_resume() {
-        let root = std::env::temp_dir().join(format!(
-            "mini-agent-session-items-{}-{}",
-            std::process::id(),
-            timestamp_ms()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = crate::test_support::test_root();
         let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
         let session_id = opened.store.session_id().to_string();
         let messages = vec![
@@ -706,6 +701,6 @@ mod tests {
         assert_eq!(resumed.store.items().len(), 2);
         assert_eq!(resumed.store.items()[0].turn_id.as_deref(), Some("turn-1"));
         drop(resumed);
-        std::fs::remove_dir_all(root).unwrap();
+        crate::test_support::remove_test_root(&root);
     }
 }

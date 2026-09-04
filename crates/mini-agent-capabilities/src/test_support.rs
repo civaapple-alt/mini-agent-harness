@@ -22,6 +22,9 @@ pub(crate) fn test_root() -> PathBuf {
 }
 
 pub(crate) fn remove_test_root(root: &Path) {
+    if let Ok(session_dir) = crate::session::session_directory(root) {
+        let _ = fs::remove_dir_all(session_dir);
+    }
     for _ in 0..50 {
         match fs::remove_dir_all(root) {
             Ok(()) => return,
