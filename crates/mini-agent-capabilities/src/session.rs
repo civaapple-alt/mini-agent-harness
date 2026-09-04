@@ -464,7 +464,10 @@ impl SessionStore {
         checkpoint: &[Message],
         forked_from: Option<(&str, u64)>,
     ) -> Result<Self, String> {
-        let thread_id = new_id("t");
+        let thread_id = env::var("MINI_AGENT_THREAD_ID")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| new_id("t"));
         let now = timestamp_ms();
         let mut store = Self {
             session_id: session_id.to_string(),

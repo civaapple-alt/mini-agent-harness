@@ -10,8 +10,11 @@ use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ApprovalMode;
 use mini_agent_capabilities::ApprovalScope;
 use mini_agent_capabilities::ApprovalStore;
+use mini_agent_capabilities::OpenedSession;
 use mini_agent_capabilities::SecurityPolicy;
 use mini_agent_capabilities::SecurityPreset;
+use mini_agent_capabilities::SessionRequest;
+use mini_agent_capabilities::SessionStore;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
 use mini_agent_host::HostRuntimeFactory;
@@ -44,15 +47,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mut profile = base_profile.clone();
         apply_provider_selection(&mut profile, params.providers.as_ref())?;
         let factory_profile = profile.clone();
-        let management_approval = startup_approval.clone();
+        let session = open_session(&startup_config)?;
+        let goal_workspace = session
+            .as_ref()
+            .and_then(|opened| opened.store.path().parent().map(std::path::PathBuf::from))
+            .unwrap_or_else(|| startup_config.workspace().to_path_buf());
+        let runtime_approval = startup_approval.clone();
+        if let Some(opened) = &session {
+            runtime_approval.bind_session_file(opened.store.path());
+            runtime_approval.bind_approval_context(
+                Some(startup_config.project_id()),
+                Some(startup_config.workspace().display().to_string()),
+                Some(startup_config.workspace_revision()),
+                Some(opened.store.session_id().to_string()),
+            );
+        }
+        let management_approval = runtime_approval.clone();
+        let results = session
+            .as_ref()
+            .map(|opened| opened.store.result_store())
+            .unwrap_or_default();
         let runtime = HostRuntimeFactory::new(
             &startup_config,
-            startup_approval.clone(),
+            runtime_approval.clone(),
             HarnessConfig::default(),
         )
-        .build(profile, Default::default())?;
+        .build(profile, results)?;
         let mini_agent_host::HarnessBuild {
             harness,
+            images,
             world,
             enabled_mcp_servers,
             mcp_tool_count,
@@ -61,9 +84,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
             capability_manifest,
             ..
         } = runtime;
+        let mut harness = harness;
+        if let Some(opened) = &session {
+            images.bind_session_file(opened.store.path());
+            if opened.resumed {
+                harness
+                    .restore_session(opened.state.clone())
+                    .map_err(|error| error.to_string())?;
+            }
+        }
         let capability_manifest = capability_manifest_to_protocol(&capability_manifest);
-        let thread_id = ThreadId::new("default");
-        let thread = Thread::new(thread_id.clone(), harness);
+        let thread_id = session
+            .as_ref()
+            .map(|opened| ThreadId::new(opened.store.thread_id().to_string()))
+            .unwrap_or_else(|| ThreadId::new("default"));
+        let mut thread = Thread::new(thread_id.clone(), harness);
+        if let Some(opened) = &session {
+            thread.set_next_turn_number(opened.store.thread_turn_count() as u64 + 1);
+        }
         let factory_broker = broker.clone();
         let factory_store = approval_store.clone();
         let factory_config = startup_config.clone();
@@ -92,7 +130,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
         let management = RuntimeManagementService::new(
             server.clone(),
-            None,
+            session,
             world,
             enabled_mcp_servers,
             mcp_tool_count,
@@ -102,7 +140,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let thread_settings = mini_agent_app_server::ThreadSettingsService::new()
             .with_stable_system_prompt(stable_system_prompt);
         let goals = mini_agent_app_server::ThreadGoalRequestProcessor::new(
-            startup_config.workspace(),
+            goal_workspace,
             startup_config.goal_limits(),
         )
         .with_verifier_config(startup_config.clone());
@@ -116,6 +154,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
     })
     .await?;
     Ok(())
+}
+
+fn open_session(runtime_config: &RuntimeConfig) -> Result<Option<OpenedSession>, String> {
+    let mode = std::env::var("MINI_AGENT_SESSION_MODE").unwrap_or_else(|_| "disabled".to_string());
+    let request = match mode.as_str() {
+        "disabled" => return Ok(None),
+        "new" => SessionRequest::New,
+        "named" => SessionRequest::Named(
+            std::env::var("MINI_AGENT_SESSION_ID")
+                .map_err(|_| "MINI_AGENT_SESSION_ID is required for named sessions".to_string())?,
+        ),
+        "resume" => {
+            SessionRequest::Resume(std::env::var("MINI_AGENT_SESSION_ID").map_err(|_| {
+                "MINI_AGENT_SESSION_ID is required for resumed sessions".to_string()
+            })?)
+        }
+        other => return Err(format!("unknown MINI_AGENT_SESSION_MODE: {other}")),
+    };
+    SessionStore::open(&runtime_config.workspace(), request).map(Some)
 }
 
 fn apply_provider_selection(
