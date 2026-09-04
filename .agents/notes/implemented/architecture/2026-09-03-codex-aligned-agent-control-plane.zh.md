@@ -1,10 +1,48 @@
 # 面向 Codex 的 Agent 控制平面：批准、计划、目标与 Web Studio
 
-状态：提案中 — 等待评审和分批实现
+状态：已实现 — 已落地并于 2026-09-04 完成验证
 日期：2026-09-03
 范围：mini-codex Protocol/Host/App Server，以及 mini-agent-web SDK/FastAPI/Web Studio
 
-## 待决策事项
+## 已实现决策
+
+本记录现已晋级为已实现的控制平面决策。落地后的责任链为：
+
+```text
+mini-agent-core + Protocol → Host → App Server → Python SDK → FastAPI Gateway → Web Studio
+```
+
+Web Studio 是用户主界面；Rust REPL 和 Python TUI 是实验性验证边界，不创建第二个
+执行循环或控制平面权威。访问范围（`project` / `full_machine`）、批准生命周期
+（`per_action` / `current_session` / `current_project`）和 Thread Runtime 模式
+（`chat` / `plan` / `goal`）保持三个独立轴。当前 Auto Copilot 组合为
+`Goal + Full access + current_project`。
+
+实现采用直接切换：不迁移旧 Web checkpoint 或 Profile 输入，直接拒绝 `turbomode`，
+规范 SessionStore 仍是唯一的对话/恢复权威。Project 工作区清单、范围批准所有权、
+Plan scratch 清理、Goal continuation、Session 目录投影，以及按 Thread 路由的
+SDK/Web 控制均已在两个仓库中落地并有界验证。
+
+命令面保持精简。Core 压缩由 Runtime 自动执行并通过事件投影；当前不增加公开的
+`/compact` 或 `thread/compact` 命令，避免再次引入控制旁路。Review 和动态
+Skill/Plugin 选择仍是单独的 allowlist 实验，属于非目标范围。
+
+### 验证快照
+
+截至 2026-09-04，本实现记录由以下离线证据支撑：
+
+- `cargo test -p mini-agent-cli -p mini-agent-app-server`：75 个相关测试通过，覆盖批准路由、
+  Goal 生命周期、Session 持久化、运行保护和实验性 REPL 边界；
+- `cargo clippy -p mini-agent-cli -p mini-agent-app-server --all-targets -- -D warnings`：通过；
+- `python scripts/line_budget.py`：Runtime 为 `19,795/20,000`，Release Rust source 为
+  `29,894/30,000`；
+- `mini-agent-web`：`uv run pytest -q` 的 48 个测试通过，`uv run ruff check .` 通过，覆盖
+  SDK、Gateway、Studio Session 目录、批准、Goal、清理和 TUI 回归路径。
+
+以下正文保留原始设计依据和验收清单，作为实现记录；当前运行行为以 `docs/` 和
+`mini-agent-web` 各目录 README 为准。
+
+## 原始设计依据
 
 将 Mini Agent 的执行路径和 Web Studio 控制面统一到一条明确的控制链：
 
@@ -31,7 +69,7 @@ Thread Mode（Session）：chat | plan | goal
 Workspace Binding（Session）：primaryRoot + associatedRoots + 每个目录的访问策略
 ```
 
-面向用户的操作流程应当刻意保持简单：
+面向用户的操作流程刻意保持简单：
 
 1. 在 Web Studio 创建 Project 并开始任务。
 2. 任务需要编辑时，只需选择一次“完全访问”。它表示当前 Runtime/Session
@@ -62,7 +100,7 @@ Service、第二个 Turn Loop，也不引入通用策略/插件框架。
 新实现只从规范 Session Store 和新的 `~/.mini-agent/web/state.json` 开始，不增加通用迁移解析器、
 导入器、回退路径或兼容层。
 
-## 当前证据与问题
+## 实现前的历史证据与问题
 
 当前实现已经具备所需组件，但它们的权威边界和语义分散在三个仓库中：
 
@@ -102,7 +140,7 @@ Service、第二个 Turn Loop，也不引入通用策略/插件框架。
 - `sdk/python/src/mini_agent/client.py`：Stdio JSON-RPC 和通知适配；
 - `frontend/src/App.jsx`、`frontend/src/utils/slashCommands.js`：Studio 控制状态和本地命令分发。
 
-## 目标语义
+## 已实现语义
 
 ### 不引入独立的 Profile 层
 
@@ -446,7 +484,7 @@ Core 不需要知道 Project 或 UI 批准词汇；它只接收 Host 已准入�
 4. 撤销后两个 Session 的后续请求都不能静默通过，硬性 Deny 仍然优先；
 5. App Server 重启后不得从 Web 状态恢复旧的 Project machine-wide 批准。
 
-## 建议的 Protocol 变更
+## 已实现的 Protocol 形状
 
 ### Thread 设置
 
@@ -639,17 +677,17 @@ Project 下的 Session 复用。每个 Runtime/Session 仍然拥有自己的生�
   `projectId` 为边界；
 - Web 只提交查看/撤销请求，不能通过本地状态文件直接修改共享批准。
 
-### 显式压缩
+### 压缩决策
 
-通过诸如 `thread/compact` 的显式 Thread 控制方法暴露已有的、有界的 Core/App Server
-压缩路径。它必须持久化生成的 checkpoint，并发出正常的、有界的
-`ContextCompaction`/Turn 投影；不得创建第二个历史存储或可向模型暴露的无限制输入路径。
+Core 压缩保持自动、有界，并由 Core/App Server Runtime 所有。其
+`ContextCompaction`/Turn 投影通过规范 SessionStore 路径持久化。当前公开控制面不
+增加 `/compact` 或 `thread/compact`；如需增加，必须另行记录有界协议决策并补充证据批次。
 
 ## 规范存储、工作区范围与 Session 生命周期
 
 ### 决策：统一权威，不统一所有文件
 
-存储模型应围绕 Rust `SessionStore` 统一，但 Web Studio 的展示状态仍应保持为更小的
+存储模型已围绕 Rust `SessionStore` 统一，但 Web Studio 的展示状态仍保持为更小的
 独立关注点。关键规则是：持久化对话状态只有一个权威，而不是把 Runtime、UI 和项目
 数据塞进一个巨大的 JSON 文件。
 
@@ -659,7 +697,7 @@ prompt context、attachments 和 Session 锁。Web Studio 当前另外创建
 作为第二个恢复权威。Web 元数据可以缓存引用和展示字段，但 transcript、items、checkpoint、
 resume 和锁状态必须通过 App Server/SDK 适配器从规范 Session Store 获取。
 
-目标目录结构如下：
+已实现的目录结构如下：
 
 ```text
 ~/.mini-agent/
@@ -717,7 +755,7 @@ Project
 因此 Project 后续修改关联目录不会静默改变旧对话的含义。重新绑定已有 Session 必须
 通过明确的 fork/新建 Session 完成，不能原地修改其工作区。
 
-控制面的数据结构应当小而明确：
+控制面的数据结构保持小而明确：
 
 ```json
 {
@@ -736,12 +774,12 @@ Project
 Host 在分配稳定身份前必须规范化并校验每条路径；示例是控制面记录，不是模型生成的上下文。
 `planScratchRoot` 不是 Project 根目录，也不能由模型提供，而是由选中的 Plan Runtime 在规范
 Session 目录下生成。Project 工作区编辑会创建新的 `workspaceRevision`；新 Session 绑定新版本，
-已有 Session 保留自己的快照。对应操作应显式表达为（`project/workspace/update`、带 revision
+已有 Session 保留自己的快照。对应操作显式表达为（`project/workspace/update`、带 revision
 的 `session/create`、带精确绑定的 `session/attach`），任何 API 都不能静默修改运行中 Session
 的 cwd 或根目录清单。
 
-当前 Project API 已经接受主目录和多个 `source_folders`，但 Web Runtime 当前用进程
-cwd 启动 SDK，并没有将完整清单传入 Host 工具构建。必须打通以下链路：
+已落地的 Web Runtime 接受主目录和多个 `source_folders`，将它们绑定到当前 Project
+Runtime，并通过 SDK/App Server 启动配置将有界的目录意图传入 Host 工具构建：
 
 ```text
 Project source_folders
@@ -751,8 +789,8 @@ Project source_folders
     → Capabilities Workspace 路径准入
 ```
 
-根目录清单属于控制面配置，不是模型生成的输入。创建 Runtime 前必须对其校验、限制、
-canonical 化，并将其纳入 Runtime/Session 身份。
+根目录清单属于控制面配置，不是模型生成的输入。创建 Runtime 前会对其校验、限制、
+canonical 化，并纳入 Runtime/Session 身份。
 
 ### 工作区范围规则
 
@@ -811,7 +849,7 @@ attach/resume 操作恢复。
 事件订阅，不能取消另一个 Session 的活动 Turn。批准请求、活动 Turn ID、Goal 控制和
 待处理 UI 状态必须按 `sessionId`/`threadId` 建立，不能由一个全局 Web 值承载。
 
-权威读取路径应当有界且明确：
+权威读取路径保持有界且明确：
 
 ```text
 App Server:  session/list(workspaceId, cursor, limit)
@@ -832,11 +870,10 @@ Studio:     按 Project 展示 Running / Paused / History 分组
 - 明确的 resume/attach 行为：如果另一个所有者持有锁，则以只读失败，不强行合并或窃取 Session；
 - interrupt/pause 和 resume 的状态转换始终关联同一个 Thread/Session，并在刷新后可见。
 
-对于不同的 WorkspaceSpec，Web 后端必须维护相互独立的 Runtime handle，或维护独立的
-App Server Runtime 实例，因为一个可变的进程 cwd 不能表达多个 primary root。在同一个
-WorkspaceSpec 内，只有当 App Server 路由和 SessionStore 锁仍然按 Thread/Session 隔离时，
-才允许复用同一个 Runtime 来复用多个 Thread/Session。当前 Web 的 singleton client 和
-全局 `_active_turns`/批准展示只是待移除的实现约束，不是产品语义。
+对于不同的 WorkspaceSpec，Web 后端会使用当前 Project 的有界工作区配置重新绑定 Runtime，
+因为一个可变的进程 cwd 不能表达多个 primary root。在同一个 WorkspaceSpec 内，只有当
+App Server 路由和 SessionStore 锁仍然按 Thread/Session 隔离时，才允许复用同一个 Runtime。
+Web 批准状态只是投影，App Server/Host 仍然是权威。
 
 ### 历史读取与会话切换行为
 
@@ -857,10 +894,10 @@ Server 完成协调；UI 不能仅因为 WebSocket 断开就猜测它是 `paused
 
 ## Studio 与命令契约
 
-Web UI 应为每个活动 Thread 保持一个状态对象，并按 `requestId` 保存待批准请求映射。
-通知必须按 `threadId` 路由；其他 Thread 的待批准请求不能出现在当前 Thread 的输入框中。
+Web UI 为每个活动 Thread 保持一个状态对象，并按 `requestId` 保存待批准请求映射。
+通知按 `threadId` 路由；其他 Thread 的待批准请求不会出现在当前 Thread 的输入框中。
 
-批准面板应分成两个相互独立的部分：
+批准面板分成两个相互独立的部分：
 
 ```text
 批准模式：
@@ -879,14 +916,14 @@ Web UI 应为每个活动 Thread 保持一个状态对象，并按 `requestId` �
 Deny/确认保护；“项目访问”必须标出当前 Project 工作区以及 reference/editable 目录。两个
 访问范围和三个批准模式不能合并成模糊的“允许全部”标签。Auto Copilot 的组合应明确显示为
 `Goal + Full access + 当前 Project 批准`。
-Project 设置还必须提供当前 Project 共享批准的查看和撤销；撤销后不再自动批准后续请求。
+Project 设置提供当前 Project 共享批准的查看和撤销；撤销后不会自动批准后续请求。
 
-加号菜单和 slash 命令应调用类型化 API：
+已落地的加号菜单和 slash 命令调用类型化 API：
 
 | 命令 | 操作 |
 | --- | --- |
 | `/status` | 读取 World、当前 Thread 设置、Goal 和 MCP 状态 |
-| `/compact` | 调用显式 Thread 压缩 |
+| （自动） | Core/App Server 执行有界压缩并通过事件投影；当前不提供公开 `/compact` 命令 |
 | `/plan on\|off` | 启动/停止当前 Thread 的读多写少探索 Runtime |
 | `/goal <objective>` | 创建并启动有界的 Thread Goal |
 | `/goal start\|resume` | 开始或恢复当前 Thread Goal |
@@ -922,7 +959,7 @@ Workflow 记录；在刷新和 Session 切换后仍应保留。
 `/goal resume` 使用；`/goal clear` 清除当前 Goal 配置，但 Session 历史仍然保留。切换
 Thread 时，顶部栏必须切换到所选 Thread 的 Goal，不能展示其他 Thread 的目标或控制项。
 
-## 实施批次
+## 已实施批次（历史记录）
 
 ### Batch 0 — 契约与 Trace Fixture
 
@@ -992,12 +1029,14 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture，优�
 
 ### Batch 6 — Slash 与 Review Workflow
 
-优先实现 `/status`、`/compact`、`/plan`、`/goal` 和 `/mcp`。只有在对应能力证据被接受后，
-才通过现有 allowlist 增加 `/review` 和 Skill/Plugin 选择。
+当前客户端已实现有界的 `/status`、`/plan`、`/goal` 和 `/mcp` 控制路径。Core 压缩保持
+自动执行并通过有界事件投影，`/compact` 有意不作为公开命令。只有在单独的能力证据决策
+接受后，才通过现有 allowlist 增加 `/review` 和 Skill/Plugin 选择。
 
-## 验收证据
+## 验证记录
 
-提案只有在以下场景全部满足后才能移动到 `implemented/`：
+以下场景构成已实现决策的验证记录。显式 `/compact`、`/review` 和动态 Skill/Plugin
+命令面被有意排除在当前公开契约之外，本记录不暗示它们已经提供。
 
 1. `per_action` 使第二次相同操作再次请求批准。
 2. `current_session` 批准只影响目标 Thread/Session；`current_project` 批准
@@ -1013,7 +1052,8 @@ Core 安全保护。在改变执行逻辑前增加离线 Protocol Fixture，优�
 7. 两个活动 Thread 不能展示或解析彼此的批准请求。
 8. Web Studio 和 REPL 没有 Profile 控制，也不保留 Profile 身份。Profile 形态的输入，
    包括 `profile=auto`，直接拒绝。`turbomode`/`Turbomode` 也直接拒绝，不能改变 Mode 或循环语义。
-9. `/status`、`/plan`、`/goal`、`/mcp` 和 `/compact` 使用控制 API，而不是意外变成模型 Prompt。
+9. `/status`、`/plan`、`/goal` 和 `/mcp` 使用控制 API，而不是意外变成模型 Prompt；
+   压缩由 Runtime 自动执行并通过事件投影，不增加第二个公开控制路径。
 10. `item/started`、批准事件、`approval/resolved`、`item/completed` 和 `turn/read` 保持相同的有界 call identity 和最终结果。
 11. 一个包含主目录和多个关联目录的 Project，可以从每个声明的目录读取文件；`reference`
     目录只读，`editable` 目录只有通过明确的 Project 或 machine 访问，且继续受

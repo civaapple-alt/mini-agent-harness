@@ -1,10 +1,59 @@
 # Codex-Aligned Agent Control Plane for Approval, Plan, Goal, and Web Studio
 
-Status: proposed — pending review and bounded implementation batches
+Status: implemented — shipped and verified on 2026-09-04
 Date: 2026-09-03
 Scope: mini-codex Protocol/Host/App Server and mini-agent-web SDK/FastAPI/Web Studio
 
-## Decision requested
+## Decision
+
+This record is now the implemented control-plane decision. The shipped contract
+uses one ownership chain:
+
+```text
+mini-agent-core + Protocol → Host → App Server → Python SDK → FastAPI Gateway → Web Studio
+```
+
+Web Studio is the primary user surface. The Rust REPL and Python TUI are
+experimental verification edges and do not create a second execution loop or
+control-plane authority. Access scope (`project` / `full_machine`), approval
+lifetime (`per_action` / `current_session` / `current_project`), and Thread
+runtime mode (`chat` / `plan` / `goal`) remain independent axes. The shipped
+Auto Copilot composition is `Goal + Full access + current_project`.
+
+The implementation is a direct cutover: legacy Web checkpoints and profile
+inputs are not migrated, `turbomode` is rejected, and canonical SessionStore
+records remain the only conversation/resume authority. Project workspace
+manifests, scoped approval ownership, Plan scratch cleanup, Goal continuation,
+Session catalog projections, and Thread-routed SDK/Web controls are implemented
+with bounded evidence in both repositories.
+
+The command surface deliberately stays small. Core compaction is automatic and
+bounded and is projected through events; an explicit public `/compact` or
+`thread/compact` command is deferred rather than adding another control path.
+Review and dynamic Skill/Plugin selection remain separately allowlisted
+experiments, as stated in the non-goals.
+
+### Verification snapshot
+
+The implementation record is backed by the following offline evidence as of
+2026-09-04:
+
+- `cargo test -p mini-agent-cli -p mini-agent-app-server`: 75 relevant tests
+  passed, including approval routing, Goal lifecycle, Session persistence,
+  runtime protection, and the experimental REPL boundary;
+- `cargo clippy -p mini-agent-cli -p mini-agent-app-server --all-targets -- -D warnings`:
+  passed;
+- `python scripts/line_budget.py`: runtime `19,795/20,000` and release Rust
+  source `29,894/30,000`;
+- `mini-agent-web`: `uv run pytest -q` passed with 48 tests, and `uv run ruff
+  check .` passed, including the SDK, Gateway, Studio Session catalog,
+  approval, Goal, cleanup, and TUI regression coverage.
+
+The sections below retain the original design rationale and acceptance ledger
+as an implementation record. Current operational behavior belongs in `docs/`
+and the `mini-agent-web` READMEs.
+
+## Original design rationale
 
 Converge the Mini Agent execution path and Web Studio control surface around one
 explicit control plane:
@@ -79,7 +128,7 @@ The new implementation starts from its canonical Session Store and new
 `~/.mini-agent/web/state.json`; no general migration parser, importer,
 fallback, or compatibility layer is admitted.
 
-## Current evidence and problem statement
+## Historical evidence and problem statement (before implementation)
 
 The current implementation has the required pieces, but their authority and
 semantics are split across the three repositories:
@@ -135,19 +184,19 @@ Relevant existing owners are:
 - `frontend/src/App.jsx` and `frontend/src/utils/slashCommands.js`: Studio
   control state and local command dispatch.
 
-## Target semantics
+## Implemented semantics
 
 ### No standalone Profile layer
 
-The product and protocol should not model `Profile` as a separate control-plane
+The product and protocol do not model `Profile` as a separate control-plane
 layer. Runtime startup receives the actual bounded inputs it needs: provider,
 prompt/rule sources, extensions, tools, sandbox/security, access scope, and the
 immutable WorkspaceSpec. If an implementation needs to pass these values as an
 internal struct, it remains a private runtime configuration object rather than
 a user-visible Profile, a selectable workflow, or a persisted Session axis.
 
-Studio should show the current mode and Goal state, but mode activation should
-follow the user's explicit slash commands rather than requiring a second mode
+Studio shows the current mode and Goal state, and mode activation follows the
+user's explicit slash commands rather than requiring a second mode
 selector:
 
 | Studio label | Canonical operation | Runtime meaning |
@@ -163,7 +212,7 @@ overridden by workspace configuration. In the stdio App Server path, selecting
 legacy embedded/local `automatic` path changes loop budgeting and context
 compaction; that is an execution implementation detail, not a user persona.
 
-Therefore Web Studio and the REPL should remove the profile selector and the
+Therefore Web Studio and the REPL remove the profile selector and the
 `profile=auto` runtime option. The new public contract rejects profile-shaped
 inputs instead of translating them. No runtime or Session retains a Profile
 identity. The only machine-wide access name is user-facing `Full access`,
@@ -201,9 +250,9 @@ Cleanup failure is surfaced as `cleanup_pending` and never silently presented
 as a clean Plan completion. If the user explicitly asks to keep an exploratory
 output, that becomes a separately reviewed Project mutation.
 
-For Plan exploration, the shell/tool working directory should default to the
+For Plan exploration, the shell/tool working directory defaults to the
 Session-owned scratch root, with declared Project roots mounted or exposed as
-read inputs. Chat and Goal may keep the Project primary root as their normal
+read inputs. Chat and Goal keep the Project primary root as their normal
 working directory according to their own Runtime rules.
 
 ### Approval mode and access scope are different
@@ -253,7 +302,7 @@ approval rule.
 
 ### Product presets: Project access and machine-wide Full access
 
-The common user path should not require selecting a new approval mode or scope for
+The common user path does not require selecting a new approval mode or scope for
 every tool call. The Studio-facing choices are deliberately few. The normal
 default remains `per_action`. The user can separately choose Project-shared
 approval when they want all Sessions in the current Project to reuse a bounded
@@ -311,7 +360,7 @@ Plan locks, pause/cancel, and any non-overridable confirmation remain in force.
 If the user wants project-only autonomy, the safer composition is `Goal` plus
 `Project access` plus `current_project` approval.
 
-Project editing is the durable way to expand the workspace. It should offer
+Project editing is the durable way to expand the workspace. It offers
 two explicit directory intents: `Add as reference` and `Add as editable
 workspace`. A path mentioned in a normal message is temporary context, not a
 workspace mutation. `reference <path>` may grant bounded one-time reading;
@@ -348,8 +397,8 @@ Plan and Goal own their own runtime lifecycle:
   add a global Profile or step-budget layer.
 
 “Settled” remains an internal persistence/lifecycle term and does not mean
-“completed”. App Server and SDK should preserve the final semantic status and
-the raw diagnostic fields for debugging. Web Studio should show Completed,
+“completed”. App Server and SDK preserve the final semantic status and
+the raw diagnostic fields for debugging. Web Studio shows Completed,
 Cancelled, Waiting for approval, or “Runtime protection triggered; inspect or
 retry” only when those outcomes actually occur. Raw implementation counters are
 not part of the public status contract; internal diagnostics may record them
@@ -362,7 +411,7 @@ next Turn or Goal action, not an unbounded automatic loop.
 
 ### Goal is the objective-driven autonomous runtime
 
-Goal should be understood as a long-lived, objective-driven Agent/Copilot
+Goal is a long-lived, objective-driven Agent/Copilot
 runtime, not as a `profile=auto` switch and not as a larger single Turn. Its
 unit of progress is a verified cycle across multiple Turns in the same
 Thread:
@@ -404,7 +453,7 @@ must not be rendered as an unexplained “Turn interrupted”.
 
 ### Goal runtime limits for long-lived autonomy
 
-The default Goal limits should favor meaningful autonomous progress instead of
+The default Goal limits favor meaningful autonomous progress instead of
 short single-Turn runs. The proposed initial baseline is:
 
 | Variable | Current default | Proposed Goal default | Boundary |
@@ -491,7 +540,7 @@ All approval notifications and responses must be validated against this chain.
 
 ### First vertical slice: the Auto Copilot approval loop
 
-The first implementation slice should validate one complete scenario: two
+The first implementation slice validates one complete scenario: two
 Sessions belong to the same Web Studio Project; the user selects
 `Goal + Full access + current_project` in one Session; after one approval, the
 other Session may reuse it for the same bounded action, but cannot cross an
@@ -563,7 +612,7 @@ The first offline Harness Fixture must cover at least:
 5. an App Server restart cannot restore the old Project machine-wide approval
    from Web state.
 
-## Proposed protocol changes
+## Implemented protocol shape
 
 ### Thread settings
 
@@ -578,7 +627,7 @@ authoritative through the independent canonical methods.
 
 ### One typed control envelope across the chain
 
-Every Web Studio control request and every approval/event projection should
+Every Web Studio control request and every approval/event projection carries
 carry the same bounded identity envelope:
 
 ```json
@@ -613,7 +662,7 @@ outcome from a disconnected transport.
 
 ### Runtime startup inputs without Profile
 
-App Server initialization and Runtime construction should receive direct typed
+App Server initialization and Runtime construction receive direct typed
 inputs: provider/model selection, bounded tool and extension selection,
 prompt/rule sources, sandbox/security, access scope, and WorkspaceSpec. There
 is no `profile` field in the new public startup contract. Once a Runtime/Session
@@ -710,7 +759,7 @@ allow rule.
 
 ### Final user-facing decision matrix
 
-The Studio should make the following product contract visible without exposing
+The Studio makes the following product contract visible without exposing
 the internal Host objects:
 
 | User intent | Mode | Access | Approval lifetime | Meaning |
@@ -749,7 +798,7 @@ security policy. The effective admission remains:
 admission”; it does not mean “set SecurityPolicy to Allow for every tool”.
 `current_project` only resolves an exact askable request for its bounded
 lifetime; it must never turn `Deny` into `Ask`/`Allow` or widen a path scope.
-The UI should expose the resulting state as blocked, waiting for approval,
+The UI exposes the resulting state as blocked, waiting for approval,
 approved by a Project grant, or executing, rather than showing a single
 “allowed” boolean.
 
@@ -798,19 +847,20 @@ access by sharing an approval.
 - Web may submit inspect/revoke requests but cannot mutate shared approvals
   through a local state file.
 
-### Explicit compaction
+### Compaction decision
 
-Expose the already bounded Core/App Server compaction path through an explicit
-Thread control method such as `thread/compact`. It must persist the resulting
-checkpoint and emit the normal bounded `ContextCompaction`/turn projection. It
-must not create a second history store or model-visible unbounded input path.
+Core compaction remains automatic, bounded, and owned by the Core/App Server
+runtime. Its `ContextCompaction`/turn projections are persisted through the
+canonical SessionStore path. The current public control surface does not add an
+explicit `/compact` or `thread/compact` command; adding one requires a separate
+bounded protocol decision and evidence batch.
 
 ## Canonical storage, workspace scope, and Session lifecycle
 
 ### Decision: unify authority, not every file
 
-The storage model should be unified around the Rust `SessionStore`, but Web
-Studio's presentation state should remain a separate, smaller concern. The
+The storage model is unified around the Rust `SessionStore`, while Web Studio's
+presentation state remains a separate, smaller concern. The
 important rule is one authority for durable conversation state, not one giant
 JSON file containing runtime, UI, and project data.
 
@@ -822,7 +872,7 @@ second resume authority. Web metadata may cache references and display fields,
 but transcript, items, checkpoint, resume, and lock state must come from the
 canonical Session Store through App Server/SDK adapters.
 
-The target layout is:
+The implemented layout is:
 
 ```text
 ~/.mini-agent/
@@ -890,7 +940,7 @@ later edit to a Project's associated directories cannot silently change the
 meaning of an old conversation. Rebinding an existing Session requires an
 explicit fork/new Session, not an in-place mutation of its workspace.
 
-The control-plane shape should be small and explicit:
+The control-plane shape is small and explicit:
 
 ```json
 {
@@ -912,14 +962,13 @@ identity; the example is a control-plane record, not model-authored context.
 is generated under the canonical Session directory for the selected Plan
 Runtime. A Project workspace edit creates a new `workspaceRevision`; new
 Sessions bind to that revision, while existing Sessions retain their snapshot.
-The corresponding operations should be explicit (`project/workspace/update`,
+The corresponding operations are explicit (`project/workspace/update`,
 `session/create` with a revision, and `session/attach` with an exact binding),
 so no API can silently mutate a running Session's cwd or root list.
 
-The current project API already accepts a primary path and multiple
-`source_folders`, but the Web runtime currently launches the SDK with the
-process cwd and does not pass the complete manifest into Host tool creation.
-The implementation must close that gap across the chain:
+The shipped Web runtime accepts a primary path and multiple `source_folders`,
+binds them to the active Project runtime, and passes the bounded root intent to
+Host construction through the SDK/App Server startup configuration:
 
 ```text
 Project source_folders
@@ -930,7 +979,7 @@ Project source_folders
 ```
 
 The root manifest is control-plane configuration, not model-authored input. It
-must be validated, bounded, canonicalized, and included in the runtime/session
+is validated, bounded, canonicalized, and included in the runtime/session
 identity before tools are built.
 
 ### Workspace scope rules
@@ -1004,7 +1053,7 @@ subscription; it must not cancel another Session's active turn. Approval
 requests, active turn IDs, Goal controls, and pending UI state are keyed by
 `sessionId`/`threadId` and never stored as one global Web value.
 
-The authoritative read path should be bounded and explicit:
+The authoritative read path is bounded and explicit:
 
 ```text
 App Server:  session/list(workspaceId, cursor, limit)
@@ -1031,13 +1080,12 @@ contract must provide:
 - interrupt/pause and resume transitions that remain correlated to the same
   Thread/Session and are visible after a reload.
 
-For different WorkspaceSpecs, the Web backend must keep separate runtime
-handles (or separate App Server Runtime instances) because a single process cwd
+For different WorkspaceSpecs, the Web backend rebinds the runtime with the
+selected Project's bounded workspace configuration because a single process cwd
 cannot represent multiple primary roots. Within one WorkspaceSpec, multiple
-Threads/Sessions may be multiplexed only if App Server routing and SessionStore
-locks remain Thread/Session-scoped. The current singleton Web client and
-global `_active_turns`/approval presentation are therefore implementation
-constraints to remove, not product semantics.
+Threads/Sessions are multiplexed only while App Server routing and SessionStore
+locks remain Thread/Session-scoped. Web approval state is a projection; the
+App Server/Host remains the authority.
 
 ### History and switching behavior
 
@@ -1066,11 +1114,11 @@ WebSocket disappeared.
 
 ## Studio and command contract
 
-The Web UI should keep one state object per active Thread and a map of pending
-approvals by `requestId`. It must route notifications by `threadId`; a pending
-approval from another Thread must not appear in the active Thread's composer.
+The Web UI keeps one state object per active Thread and a map of pending
+approvals by `requestId`. It routes notifications by `threadId`; a pending
+approval from another Thread does not appear in the active Thread's composer.
 
-The approval dock should expose two independent groups:
+The approval dock exposes two independent groups:
 
 ```text
 Approval mode:
@@ -1092,15 +1140,15 @@ Project workspace and its reference/editable roots. The two access scopes and
 the three approval modes must not be collapsed into a vague “allow everything”
 label. The Auto Copilot combination is visibly `Goal + Full access + Current
 Project approval`.
-Project settings must also expose inspection and revocation of the current
-Project's shared approvals; revocation must not auto-approve later requests.
+Project settings expose inspection and revocation of the current Project's
+shared approvals; revocation does not auto-approve later requests.
 
-The plus menu and slash commands should call typed APIs:
+The shipped plus menu and slash commands call typed APIs:
 
 | Command | Action |
 | --- | --- |
 | `/status` | Read world, active Thread settings, Goal, and MCP status |
-| `/compact` | Call explicit Thread compaction |
+| (automatic) | Core/App Server performs bounded compaction and projects it through events; no public `/compact` command |
 | `/plan on\|off` | Start/stop the active Thread's read-mostly exploration runtime |
 | `/goal <objective>` | Create and start a bounded Thread Goal |
 | `/goal start\|resume` | Start or resume the active Thread Goal |
@@ -1141,7 +1189,7 @@ active Goal configuration while the Session history remains available. When
 the user switches Threads, the header changes to the selected Thread's Goal
 and must not display another Thread's objective or controls.
 
-## Implementation batches
+## Implemented batches (historical record)
 
 ### Batch 0 — Contract and trace fixtures
 
@@ -1241,14 +1289,18 @@ This is the first implementation batch and is a security correctness gate.
 
 ### Batch 6 — Slash and review workflows
 
-Implement `/status`, `/compact`, `/plan`, `/goal`, and `/mcp` first. Add `/review`
-and Skill/Plugin selection only through existing allowlists and after the
-corresponding capability evidence is accepted.
+The shipped clients implement the bounded `/status`, `/plan`, `/goal`, and
+`/mcp` control paths. Core compaction remains automatic and its lifecycle is
+projected as bounded events; `/compact` is intentionally not a public command.
+Add `/review` and Skill/Plugin selection only through existing allowlists and
+after a separate capability evidence decision is accepted.
 
-## Acceptance evidence
+## Verification record
 
-The following scenarios are required before the proposal can move to
-`implemented/`:
+The following scenarios are the verification record for the implemented
+decision. The explicit `/compact`, `/review`, and dynamic Skill/Plugin command
+surfaces are intentionally outside the shipped contract and are not implied by
+this record.
 
 1. `per_action` causes a second identical action to request approval again.
 2. `current_session` approval affects only the intended Thread/Session, while
@@ -1271,8 +1323,9 @@ The following scenarios are required before the proposal can move to
    Profile-shaped input, including `profile=auto`, is rejected. The removed
    `turbomode`/`Turbomode` name is also rejected and cannot change mode or loop
    semantics.
-9. `/status`, `/plan`, `/goal`, `/mcp`, and `/compact` use control APIs rather
-   than accidental model prompts.
+9. `/status`, `/plan`, `/goal`, and `/mcp` use control APIs rather than
+   accidental model prompts; compaction is automatic and event-projected rather
+   than exposed as a second public control path.
 10. `item/started`, approval events, `approval/resolved`, `item/completed`, and
     `turn/read` preserve the same bounded call identity and final outcome.
 11. A Project with one primary root and multiple associated roots can read

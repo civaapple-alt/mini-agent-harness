@@ -38,17 +38,17 @@ Codex native        = durable Session/Task/Turn/Item + tool/event runtime
 当前 mini-codex 的分层边界：
 
 ```text
-CLI / 客户端
-    ↓
-App Server（Actor、CAS/revision、事件与控制面）
+主线执行所有权：
+mini-agent-core + Protocol
     ↓
 Host（runtime/workflow 组合）
     ↓
-Capabilities（provider、workspace、process、sandbox、MCP、approval）
+App Server（Actor、CAS/revision、事件与控制面）
     ↓
-Core（Thread、Harness、Turn/Step、limits、control）
-    ↓
-Protocol（消息、工具、事件、停止原因和限制契约）
+Python SDK → FastAPI Gateway → Web Studio
+
+Host 内部能力：Capabilities（provider、workspace、process、sandbox、MCP、approval）
+实验性边界：Rust REPL / Python TUI → App Server
 ```
 
 | 概念 | mini-agent-harness | Codex 原生框架 |
@@ -105,10 +105,11 @@ Turn 内继续下一次 sampling。两者不是正确性高低差异，而是边
 | 可验证性 | bounded 输入/输出、被动事件和本地 mock 场景便于隔离验证 | 更接近生产工作流，需要更大的跨平台、真实 provider 和长期运行证据 |
 | 主要风险 | 追求小而漏掉真实 provider、平台和安全策略证据 | 功能面扩大后增加隐式状态、异步竞态和上下文成本 |
 
-因此，mini 不复制原生 Codex 的全部对象或工具生态；继续保持
-`CLI → App Server → Host → Core` 主路径，用 bounded scenario 验证每次变更
-对 Turn、Tool、Context、State 和 Boundary 的影响。只有真实场景和证据成立，
-才扩大 provider、retry 或 Docker policy。
+因此，mini 不复制原生 Codex 的全部对象或工具生态；当前主线是
+`mini-agent-core → Host → App Server → Python SDK → FastAPI Gateway → Web Studio`，
+用 bounded scenario 验证每次变更对 Turn、Tool、Context、State 和 Boundary 的影响。
+Rust REPL 与 Python TUI 只用于验证 App Server 边界，不承担 Web Studio 的控制平面。
+只有真实场景和证据成立，才扩大 provider、retry 或 Docker policy。
 
 ## 维护规则
 
