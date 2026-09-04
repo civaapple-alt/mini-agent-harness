@@ -132,10 +132,8 @@ pub async fn run(
             ExitCode::SUCCESS
         }
         Ok(outcome) => {
-            let error = format!(
-                "stopped after {} model steps without completing",
-                outcome.steps
-            );
+            let error =
+                "runtime protection triggered; inspect the settled result or retry".to_string();
             let mut outcome = outcome;
             outcome.error = Some(error.clone());
             eprintln!("error: {error}");

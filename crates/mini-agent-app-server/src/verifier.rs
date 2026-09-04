@@ -84,10 +84,10 @@ pub async fn verify_goal_checkpoint(
         .await
         .map_err(|error| format!("goal verifier failed: {error}"))?;
     if outcome.stop_reason != Some(StopReason::Completed) {
-        return Err(format!(
-            "goal verifier stopped after {} model steps without completing",
-            outcome.steps
-        ));
+        return Err(
+            "goal verifier runtime protection triggered; inspect the settled result or retry"
+                .to_string(),
+        );
     }
     let final_text = outcome.final_text.unwrap_or_default();
     let verdict = crate::goal_service::parse_verifier_verdict(&final_text);
