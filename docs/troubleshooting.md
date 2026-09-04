@@ -5,6 +5,11 @@ running `run` or the REPL. Inspect effective runtime
 state through the App Server `initialize`, `world/state`, and `mcp/status`
 interfaces; the REPL does not duplicate that management dashboard.
 
+For Web Studio startup, Project, Session attach, WebSocket, and browser blank
+page failures, follow [`studio-integration.md`](studio-integration.md) first;
+this document focuses on the CLI/Host/App Server symptoms shared by both
+frontends.
+
 ## Missing provider configuration
 
 `mini-agent --version` works without credentials. Provider-backed turns require
@@ -89,8 +94,9 @@ writing. The removed `write_file` and `edit_file` names are not accepted.
 
 ## Real-time web search and network data
 
-By default, mini-agent enables built-in Responses API `web_search` (`{"type": "web_search"}`)
-so the model can query the internet without writing raw local shell/PowerShell scrape scripts.
+For official OpenAI and DeepSeek endpoints, mini-agent enables built-in Responses API
+`web_search` (`{"type": "web_search"}`) by default; custom endpoints must opt in
+explicitly. The model can then query the internet without writing raw local shell/PowerShell scrape scripts.
 To disable web search, pass `--no-web-search` (or `--no-search`) or set `MINI_AGENT_WEB_SEARCH=false`
 in `.env`. Use host `web_fetch` for a known URL when the provider does not expose built-in search.
 

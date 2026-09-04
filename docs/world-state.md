@@ -33,7 +33,9 @@ App Server clients can inspect it with `world/state` and refresh it with
 Execution changes are also append-only. `world/set_execution` updates access and
 approval and appends an authoritative full world snapshot. `/plan` and `/goal`
 are Thread-owned App Server workflows; they do not create a second world-state
-loop. `/new` restores the current snapshot after clearing conversation history.
+loop. The current CLI has no `/new` command: a new CLI Thread receives a fresh
+snapshot, while a resumed Session restores the snapshot from its settled
+checkpoint.
 Compaction retains the newest context item next to its summary.
 
 Full snapshots are deliberate at this scale. They avoid requiring old deltas

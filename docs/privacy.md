@@ -46,3 +46,21 @@ configured remote server and receives its tool results. MCP servers do not
 inherit provider credentials implicitly, but explicit `env` or HTTP header
 placeholders can pass selected environment values. Persistent stdio plugin
 state is stored under `.agents/plugin-data/`.
+
+## Local retention and cleanup
+
+Mini-agent has no automatic retention, encryption, or remote backup policy for
+local artifacts. Before removing anything, stop the CLI, App Server, and Web
+Gateway processes that may own a Session lock. The canonical conversation data
+is under `~/.mini-agent/sessions/`; Web Studio's Project/UI registry is under
+`~/.mini-agent/web/state.json`, and Web/SDK diagnostic logs use the configured
+`MINI_AGENT_LOG_DIR` (normally `logs/`). Removing the Web registry resets its
+Project/UI metadata but does not remove canonical Session history. Removing a
+Session directory is irreversible through mini-agent and also removes its
+checkpoint, result handles, attachments, Goal state, and item history.
+
+There is currently no Web API for deleting canonical Session history. Treat
+Session-directory removal as an explicit local administrative operation, after
+confirming the Session is not locked. Project removal from the Web registry
+only removes the registry entry; it does not delete the Project directory or
+its Session history.

@@ -87,6 +87,7 @@ Web Studio`。Web Studio 是用户主流程；Rust REPL 和 Python TUI 只是实
 | CLI 安装、命令和参数 | [`docs/cli.md`](docs/cli.md) |
 | Provider、Session、Skill、Plugin、MCP | [`docs/configuration.md`](docs/configuration.md) |
 | App Server JSON-RPC、Thread、Turn、Goal、Item | [`docs/app-server.md`](docs/app-server.md) |
+| Web Studio 集成、Project、Session 和批准 | [`docs/studio-integration.md`](docs/studio-integration.md) |
 | Harness 分层与 Codex 对照 | [`docs/harness-framework.md`](docs/harness-framework.md) |
 | 责任边界与变更准入 | [`docs/harness-boundaries.md`](docs/harness-boundaries.md) |
 | Builtin 工具契约 | [`docs/harness-tool-surface.md`](docs/harness-tool-surface.md) |

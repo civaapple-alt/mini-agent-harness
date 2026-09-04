@@ -40,6 +40,30 @@ cargo test -p mini-agent-cli --test interactive <scenario> -- --exact
 尚未覆盖的跨文件重构、CLI 工具失败恢复、MCP/approval/sandbox 拒绝或独立
 provider 对比倒填为基线；后续补充结果应以新的 dated note 记录。
 
+## Scenario report template
+
+每个新增或更新的场景都应留下下面这组最小记录；测试通过本身不能替代
+边界证据：
+
+```text
+Scenario: <stable name>
+Hypothesis: <harness behavior being tested>
+Public path: <CLI command or App Server method>
+Workspace: <temporary fixture and cleanup rule>
+Allowed tools / policy: <tool selection, access, approval, sandbox>
+Stimulus: <input, fault injection, or race schedule>
+Observed trace: <event/turn/item ordering and bounded counts>
+Settled state: <turn/thread/session/goal/files>
+Boundary result: <no violation, or exact violation>
+Command: <copyable local command>
+Evidence revision: <commit or dated report>
+Known gap: <what this scenario does not prove>
+```
+
+报告应同时给出成功和失败路径的可观察结果。若场景依赖 Windows、Docker、
+真实 Provider 或付费服务，必须显式标注平台/凭证条件，不能把本地 Mock
+结果扩展解释成跨平台或真实 Provider 证据。
+
 ## Failure / timeout / retry 矩阵
 
 | Fault class | 证据 | 状态 | 剩余缺口 |

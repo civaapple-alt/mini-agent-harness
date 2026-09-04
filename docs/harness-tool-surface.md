@@ -37,6 +37,28 @@ Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk �
 所有路径和 hunk 做完整校验，再执行副作用。沿用 Workspace path policy、approval
 和 Plan Mode；后续写入失败时尽力回滚已完成的文件写入。
 
+最小调用形状如下；长文件读取必须使用返回的 `next_offset` 继续请求：
+
+```json
+{
+  "name": "read_file",
+  "arguments": {"path": "src/main.rs", "offset": 0, "limit": 200}
+}
+```
+
+```json
+{
+  "name": "apply_patch",
+  "arguments": {
+    "patch": "*** Begin Patch\n*** Update File: README.md\n@@\n+# Updated\n*** End Patch"
+  }
+}
+```
+
+`apply_patch` 的路径必须是相对于当前 Workspace 的路径；客户端不应把
+`write_file` 或 `edit_file` 当作回退接口。执行结果、批准请求和 Plan 锁定
+仍由 Host/App Server 返回的结构化事件决定。
+
 ## Six-question admission record
 
 ```text

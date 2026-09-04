@@ -131,7 +131,8 @@ The following is the complete public JSON-RPC surface of protocol version 1.
 The executable contract is defined by
 `crates/mini-agent-app-server-protocol`; this section explains the direction,
 lifecycle, and fields that an SDK or Web Studio client needs. JSON object
-fields use `camelCase`; enum values use `snake_case` unless noted otherwise.
+fields use `camelCase`; enum values below are shown using their exact wire
+spelling.
 
 ### Handshake
 
@@ -192,8 +193,8 @@ force an immediate stop before the runtime reaches a cancellation boundary.
 | `thread/goal/get` | `threadId` | Returns `{goal}` where `goal` may be `null`. |
 | `thread/goal/clear` | `threadId` | Clears the Goal and returns `{cleared: true|false}`; emits `thread/goal/cleared` when applicable. |
 
-Goal status values are `active`, `paused`, `blocked`, `usage_limited`,
-`budget_limited`, and `complete`. Goal continuation, verification, pause,
+Goal status values are `active`, `paused`, `blocked`, `usageLimited`,
+`budgetLimited`, and `complete`. Goal continuation, verification, pause,
 resume, and checkpoint association belong to GoalRuntime; clients do not
 submit verifier verdicts or advance milestones directly.
 

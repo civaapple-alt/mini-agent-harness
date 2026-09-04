@@ -25,6 +25,11 @@ Provider calls are not part of the release gate. Use local tests and build
 verification; paid provider checks, if needed, belong in an external evaluation
 harness.
 
+The commands below use the repository's current `0.7.0` version as a concrete
+example. For a later release, replace the version in the checklist, tag, archive
+names, and verification commands together; never publish a different commit
+under an existing tag.
+
 ## Before changing the version
 
 Confirm the release scope and review the complete diff. For a patch or minor
@@ -173,7 +178,8 @@ builds elsewhere.
 
 If an archive is broken before broad adoption, mark the GitHub Release as a
 pre-release or remove it from the release page while the maintainer decides
-whether to issue `0.4.1`. Do not silently replace a published archive: users
+whether to issue a new patch version. Do not silently replace a published
+archive: users
 must be able to reproduce the checksum from the tagged source.
 
 After publishing, open a fresh `Unreleased` section for follow-up work and

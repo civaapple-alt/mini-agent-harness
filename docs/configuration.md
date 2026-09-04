@@ -12,6 +12,12 @@ not copied into every workspace. A workspace `.env` still overrides the user
 file when a project needs a different key or model. The App Server initialize
 response reports the bounded non-secret capability manifest.
 
+Provider settings, verifier settings, Goal limits, and web-search settings use
+the precedence above. Project/workspace bindings and standalone App Server
+session selectors are process-level controls: the Web Gateway injects them when
+it starts one App Server process for a Project/Thread, and they are not read
+from a workspace or user `.env` by `RuntimeConfig`.
+
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | for primary commands | Bearer credential for the Responses endpoint |
@@ -20,12 +26,17 @@ response reports the bounded non-secret capability manifest.
 | `VERIFIER_OPENAI_MODEL` | for Goal verification | Goal verifier model identifier |
 | `VERIFIER_OPENAI_API_KEY` | no | Goal verifier credential override; otherwise inherits `OPENAI_API_KEY` |
 | `VERIFIER_OPENAI_BASE_URL` | no | Goal verifier API root override; otherwise inherits `OPENAI_BASE_URL` |
+| `MINI_AGENT_WEB_SEARCH` | no | Boolean web-search override; official OpenAI/DeepSeek endpoints enable it by default when unset |
+| `OPENAI_WEB_SEARCH` | no | Accepted web-search configuration alias; `MINI_AGENT_WEB_SEARCH` takes precedence |
 | `MINI_AGENT_GOAL_MAX_LOOPS` | no | Maximum Goal continuation loops; defaults to `100` |
 | `MINI_AGENT_GOAL_STEP_BUDGET` | no | Maximum Core model steps per Goal milestone; defaults to `200` |
 | `MINI_AGENT_GOAL_TIMEOUT_SECS` | no | Wall-clock timeout for one Goal milestone; defaults to `1800` seconds |
 | `MINI_AGENT_PROJECT_ID` | Web/Host binding | Trusted Project identity used for scoped approval ownership |
 | `MINI_AGENT_EXTRA_READ_ROOTS` | Web/Host binding | Path-separated associated roots exposed as read-only references |
 | `MINI_AGENT_EXTRA_WRITE_ROOTS` | Web/Host binding | Path-separated associated roots admitted for edits |
+| `MINI_AGENT_SESSION_MODE` | Standalone App Server process | `disabled`, `new`, `named`, or `resume`; defaults to `disabled` |
+| `MINI_AGENT_SESSION_ID` | Standalone App Server process | Required when `MINI_AGENT_SESSION_MODE` is `named` or `resume` |
+| `MINI_AGENT_THREAD_ID` | Session process binding | Optional Thread identity used when creating a new Session |
 
 ## Runtime composition and prompt/rule sources
 
@@ -206,7 +217,9 @@ converted into tokens.
 ## Goal verification
 
 When Goal Mode has a verifier gate, set `VERIFIER_OPENAI_MODEL` to run a separate,
-tool-free check against the latest settled checkpoint. On restart, an unsettled
+tool-free check against the latest settled checkpoint. There is currently no
+fallback from `VERIFIER_OPENAI_MODEL` to `OPENAI_MODEL`; omitting it makes
+verifier preparation fail. On restart, an unsettled
 Goal schedules a new ordinary turn; a settled Goal checkpoint is verified again
 without replaying that turn. A clear operation invalidates pending verifier
 results, so a late result cannot advance a cleared or replaced Goal:

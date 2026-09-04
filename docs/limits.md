@@ -14,6 +14,7 @@ defaults are part of the harness rather than terminal flags.
 | model steps in one run | internal safety guard | report a runtime-protection diagnostic; never treat it as a user task setting |
 | Goal milestone model steps | 200 by default | Goal becomes `usageLimited` after settling evidence |
 | Goal milestone wall-clock time | 1,800 seconds by default | request cooperative cancellation, then `usageLimited` |
+| Goal continuation loops | 100 by default | Goal stops scheduling further continuation |
 | Goal token budget | unset by default | accumulated provider input/output usage becomes `budgetLimited` |
 
 Context size is the byte length of the system prompt plus JSON-serialized
@@ -34,8 +35,9 @@ the outcome.
 
 Every runtime limit failure emits `run_failed` with a structured
 `limit_exceeded` reason. The default behavior does not compact or delete
-history behind the user's back; in the interactive terminal, `/new` is the
-explicit way to clear a conversation that has reached its context ceiling.
+history behind the user's back. The current interactive terminal has no `/new`
+command: exit it and start `mini-agent` without `--session-id` to create a new
+conversation, or use `resume` to continue a settled Session.
 
 Core keeps an internal runaway-loop guard and may compact context when the
 runtime composition allows it. `max_steps` and `step_limit` are not Web Studio
@@ -65,7 +67,9 @@ Compaction omits the tool catalog from its auxiliary request. Opening more MCP
 tools therefore makes long Goal runs worse, not better.
 
 The host currently uses context items for full world-state snapshots. The
-latest snapshot is retained across compaction and restored after `/new`.
+latest snapshot is retained across compaction. A newly started Thread receives
+the current snapshot; a resumed Session restores the snapshot from its settled
+checkpoint.
 Changing execution mode appends a new context item while leaving the system
 prompt byte-stable.
 
