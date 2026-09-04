@@ -43,8 +43,7 @@ Provider-backed 命令需要配置 `OPENAI_API_KEY`、`OPENAI_MODEL`，以及可
 ```sh
 mini-agent --version
 mini-agent
-mini-agent ask "summarize this repo"
-mini-agent auto "inspect the repo and run the tests"
+mini-agent run "summarize this repo"
 ```
 
 CLI 的完整命令、参数、Session resume/fork 和 trace 用法见

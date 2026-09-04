@@ -67,7 +67,7 @@ Core 在安全检查点先检查 cancel，再检查 steer。deadline 触发后�
 
 Trace 复用已有 observation events 和 `JsonlTrace`，只记录有界 metadata、counts
 和 hashes，不写 raw prompt、tool arguments/results 或 Session history。CLI 的
-`ask --trace-jsonl PATH` 是显式、caller-owned、create-new artifact；不恢复退役
+`run --trace-jsonl PATH` 是显式、caller-owned、create-new artifact；不恢复退役
 的外部 `--trace`，不隐式写入 Session。
 
 ### Compaction

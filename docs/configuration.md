@@ -20,7 +20,6 @@ response reports the bounded non-secret capability manifest.
 | `VERIFIER_OPENAI_MODEL` | for Goal verification | Goal verifier model identifier |
 | `VERIFIER_OPENAI_API_KEY` | no | Goal verifier credential override; otherwise inherits `OPENAI_API_KEY` |
 | `VERIFIER_OPENAI_BASE_URL` | no | Goal verifier API root override; otherwise inherits `OPENAI_BASE_URL` |
-| `MINI_AGENT_MAX_STEPS` | internal only | Optional Core runaway-loop guard for local experiments; not a Web/Goal control |
 | `MINI_AGENT_GOAL_MAX_LOOPS` | no | Maximum Goal continuation loops; defaults to `100` |
 | `MINI_AGENT_GOAL_STEP_BUDGET` | no | Maximum Core model steps per Goal milestone; defaults to `200` |
 | `MINI_AGENT_GOAL_TIMEOUT_SECS` | no | Wall-clock timeout for one Goal milestone; defaults to `1800` seconds |
@@ -105,7 +104,7 @@ AppServerRuntime::<EchoModel>::start_with_model_factory(
         harness_config,
         session_request: SessionRequest::Disabled,
         control: Arc::new(RunControl::new()),
-        profile: runtime_composition,
+        composition: runtime_composition,
         registry,
     },
     echo_factory,
@@ -157,7 +156,7 @@ values or command output.
 
 ## Durable sessions
 
-Interactive and one-shot `ask` sessions always persist; there is no
+REPL and one-shot `run` sessions always persist; there is no
 persistence opt-out setting. Restore a known session with
 `mini-agent resume SESSION_ID`.
 Settled records live under `~/.mini-agent/sessions/<workspace>/<session-id>/`,

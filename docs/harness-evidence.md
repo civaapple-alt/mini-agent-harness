@@ -21,8 +21,8 @@ Session 状态、是否越界和耗时。模型输出、工具结果、fixture �
 
 | 场景 | 公共测试 | 可审计结果 |
 | :--- | :--- | :--- |
-| 上下文组装与受限 skill 摘要 | `ask_reads_stdin_and_keeps_machine_output_clean` | 请求含 user/world/instructions，未泄漏完整 skill body，JSON 输出保持机器可读 |
-| 无工具运行时退化 | `ask_no_tools_uses_model_only_scope_without_extension_tools` | `tools=[]`，运行时组合为无工具，disabled 原因可见 |
+| 上下文组装与受限 skill 摘要 | `run_reads_stdin_and_keeps_machine_output_clean` | 请求含 user/world/instructions，未泄漏完整 skill body，JSON 输出保持机器可读 |
+| 无工具运行时退化 | `run_no_tools_uses_model_only_scope_without_extension_tools` | `tools=[]`，运行时组合为无工具，disabled 原因可见 |
 | durable Session resume | `durable_session_resumes_settled_history_after_restart` | 重启后请求同时包含旧问题、旧答案和新问题，两个 turn 均落盘 |
 | Goal tool turn 与 verifier | `goal_mode_runs_a_tool_turn_and_verifies_the_settled_history` | verifier 输入含 tool evidence，Goal 状态为 `converged` |
 | timeout → interrupt → failed | `goal_mode_timeout_is_deterministic_and_keeps_repl_alive` | timeout 后 turn settled、Goal 为 `failed`，REPL 无 `Busy` 残留 |
@@ -45,7 +45,7 @@ provider 对比倒填为基线；后续补充结果应以新的 dated note 记�
 | Fault class | 证据 | 状态 | 剩余缺口 |
 | :--- | :--- | :--- | :--- |
 | 缺少必要工具参数 | Core `missing_required_tool_argument_is_projected_for_model_recovery` | covered | 保持下一轮可见的 bounded Tool result |
-| 未知工具恢复 | CLI `ask_recovers_from_unknown_tool_on_public_path` | covered | 更广泛 provider 脏参数未穷举 |
+| 未知工具恢复 | CLI `run_recovers_from_unknown_tool_on_public_path` | covered | 更广泛 provider 脏参数未穷举 |
 | 模型部分流失败 | Core `partial_model_stream_is_failed_without_fabricating_completion` | covered | 真实 provider 截断仍需矩阵 |
 | Retryable 工具结果 | Core `retryable_tool_result_is_preserved_until_model_recovers` | covered | 无隐式重试，策略层 deferred |
 | HTTP 429 | Capabilities `maps_http_429_to_bounded_api_error_without_retrying` | covered: bounded fail-fast | provider-specific retry/backoff deferred |

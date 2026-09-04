@@ -44,9 +44,8 @@ OPENAI_BASE_URL=https://api.deepseek.com
 
 ```sh
 mini-agent                         # 交互式会话
-mini-agent ask "summarize this repo"
-mini-agent ask --json "review the current changes"
-mini-agent auto "inspect the repo and run the tests"
+mini-agent run "summarize this repo"
+mini-agent run --json "review the current changes"
 mini-agent resume SESSION_ID
 mini-agent fork SESSION_ID
 ```
@@ -54,33 +53,32 @@ mini-agent fork SESSION_ID
 使用 `mini-agent help` 或 `mini-agent help <command>` 查看命令帮助。Prompt
 以 `-` 开头时，在 Prompt 前加 `--`。
 
-`auto PROMPT` 执行一次自治 Turn；不带 Prompt 的 `auto` 进入交互式 copilot。
-`resume` 恢复 settled Session，`fork` 创建独立分支。运行中的进程、队列输入
+`run PROMPT` 执行一次有界 Turn；省略 Prompt 时从 stdin 读取。`resume` 恢复
+settled Session，`fork` 创建独立分支。运行中的进程、队列输入
 和其他 live effect 不会被恢复。
 
 ## Turn 参数
 
 | 参数 | 适用命令 | 作用 |
 | --- | --- | --- |
-| `--session-id ID` / `--session ID` | interactive、`ask`、`auto` | 使用已有 durable Session |
-| `--auto-approve` / `-y` / `--yes` / `--auto` | `ask` | 显式放行敏感工具 |
-| `--max-steps N` | `ask` | 限制模型步骤；默认 8，`0` 表示不限制 |
-| `--no-tools` | interactive、`ask`、`auto` | 禁用 Builtin 和扩展工具 |
-| `--security-preset PRESET` | interactive、`ask`、`auto` | `default` 或 `full-machine` |
-| `--sandbox KIND` | interactive、`ask`、`auto` | `native` 或 `docker` |
-| `--web-search` / `--search` | interactive、`ask`、`auto` | 启用内置 Responses `web_search` |
-| `--no-web-search` / `--no-search` | interactive、`ask`、`auto` | 禁用内置 Responses `web_search` |
-| `--json` | `ask` | 输出机器可读结果 |
-| `--trace-jsonl PATH` | `ask` | 写入一次性有界脱敏事件记录 |
+| `--session-id ID` / `--session ID` | REPL、`run` | 使用已有 durable Session |
+| `--auto-approve` / `-y` / `--yes` | `run` | 显式放行敏感工具 |
+| `--no-tools` | REPL、`run` | 禁用 Builtin 和扩展工具 |
+| `--security-preset PRESET` | REPL、`run` | `default` 或 `full-machine` |
+| `--sandbox KIND` | REPL、`run` | `native` 或 `docker` |
+| `--web-search` / `--search` | REPL、`run` | 启用内置 Responses `web_search` |
+| `--no-web-search` / `--no-search` | REPL、`run` | 禁用内置 Responses `web_search` |
+| `--json` | `run` | 输出机器可读结果 |
+| `--trace-jsonl PATH` | `run` | 写入一次性有界脱敏事件记录 |
 
 ## Session 与 trace
 
-交互式、`ask` 和 `auto` Session 默认持久化到
+REPL 和 `run` Session 默认持久化到
 `~/.mini-agent/sessions/<workspace>/<session-id>/`。Session 记录包含 settled
 turn、context item 和结果句柄；恢复只使用最新完整 checkpoint。Session 是
 对话持久化，不是未结算外部 effect 的恢复机制。
 
-`ask --trace-jsonl PATH` 必须显式指定，且目标文件不能已经存在。父目录必须
+`run --trace-jsonl PATH` 必须显式指定，且目标文件不能已经存在。父目录必须
 已存在；每条记录最多 8 KiB，完整 JSONL 最多 256 KiB。trace 只包含事件元数据、
 计数和 hash，不复制 Prompt、工具参数、工具结果或 Session 历史；写入或最终化
 失败会使命令失败。该路径不会隐式生成。
@@ -89,7 +87,7 @@ turn、context item 和结果句柄；恢复只使用最新完整 checkpoint。S
 
 - 默认 Builtin 工具是 `read_file`、`apply_patch`、`shell` 和 `read_image`；
   MCP 与 `web_fetch` 不会被默认工具面隐式启用；
-- 非交互 `ask` 对敏感工具默认拒绝，必须显式使用 `--auto-approve`；
+- 非交互 `run` 对敏感工具默认拒绝，必须显式使用 `--auto-approve`；
 - 文件访问、模型输入输出、工具调用和 Shell 结果都有硬限制，详见
   [`limits.md`](limits.md)；
 - Docker 模式提供受控容器执行，但不自动等同于完整网络、Capability 或资源

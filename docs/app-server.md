@@ -121,6 +121,6 @@ accept a Profile-shaped startup input.
 provider categories (`model`, `tools`, `extensions`, and `policy`). The
 standalone server applies these bounded IDs before constructing the first
 Thread; an embedded runtime requires requested IDs to match the frozen
-profile. Provider instances, credentials, commands, and paths never cross the
+composition. Provider instances, credentials, commands, and paths never cross the
 JSON-RPC boundary. The current registry exposes `openai` for models and
 `builtin` for the other three categories.

@@ -1,7 +1,7 @@
 # Troubleshooting
 
 Start with `mini-agent --version`, then configure the provider environment before
-running `ask`, `auto`, or the interactive session. Inspect effective runtime
+running `run` or the REPL. Inspect effective runtime
 state through the App Server `initialize`, `world/state`, and `mcp/status`
 interfaces; the REPL does not duplicate that management dashboard.
 
@@ -15,7 +15,7 @@ overrides the user file; process environment values override both.
 
 ## AGENTS.md is too large
 
-`ask` and the interactive terminal still start. Mini-agent keeps a 16 KiB head
+`run` and the interactive terminal still start. Mini-agent keeps a 16 KiB head
 and tail of root `AGENTS.md`, marks the gap with `[truncated]`, and prints a
 warning. Trim the file if the omitted middle contains rules the model must see.
 Invalid UTF-8 still prevents
@@ -28,9 +28,9 @@ PowerShell 7 and confirm `pwsh` is on `PATH` before using shell tools.
 
 ## A noninteractive tool call is denied
 
-`ask` cannot stop a script to obtain approval when stdin is not a terminal.
-Use `ask --auto-approve` (or `-y`) only inside a workspace and execution environment you trust.
-The interactive REPL does not prompt by default; `/auto off` turns prompts on.
+`run` cannot stop a script to obtain approval when stdin is not a terminal.
+Use `run --auto-approve` (or `-y`) only inside a workspace and execution environment you trust.
+The REPL uses its local approval adapter.
 
 ## A command produces too much output
 
