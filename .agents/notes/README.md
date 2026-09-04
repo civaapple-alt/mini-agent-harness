@@ -22,7 +22,7 @@
 
 ### Implemented
 
-- [Proposal Quality and Evidence Guide](implemented/process/2026-09-04-proposal-quality-and-evidence-guide.md)
+- [Proposal Quality and Evidence Guide](proposal-quality-and-evidence-guide.md)
 - [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md)
 - [Hard Limits System](implemented/architecture/2026-08-24-hard-limits-system.md)
 - [Session as Single Durable Store](implemented/architecture/2026-08-28-session-single-source-of-truth.md)
