@@ -1,6 +1,6 @@
 # Goal Runtime 与 `thread/goal/*` 实施附录
 
-Status: implemented — canonical execution appendix
+Status: implemented — canonical execution appendix; shipped and verified on 2026-09-04
 Date: 2026-09-01
 Scope: mini-agent App Server / Host workflow control plane
 

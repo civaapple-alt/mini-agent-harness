@@ -89,8 +89,6 @@ graph LR
 
 ### Proposed
 
-- [Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems](proposed/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md)
-- [Goal Runtime and Thread/Goal/Plan](proposed/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
 - [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
 - [CLI Through App Server](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md)
 - [Goal Runtime and Verifier Evidence](proposed/bug-fix/2026-08-28-goal-runtime-and-verifier-evidence.md)
@@ -103,6 +101,8 @@ graph LR
 - [Session as Single Durable Store](implemented/architecture/2026-08-28-session-single-source-of-truth.md)
 - [Runtime Authority and Action Ordering](implemented/architecture/2026-08-30-runtime-authority-and-action-ordering.md)
 - [Python SDK and App Server Integration](implemented/architecture/2026-08-31-python-sdk-architecture-and-app-server-integration.md)
+- [Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems](implemented/architecture/2026-09-01-codex-aligned-capabilities-thread-items.md)
+- [Goal Runtime and Thread/Goal/Plan](implemented/architecture/2026-09-01-goal-runtime-thread-goal-plan.md)
 - [Codex-Aligned Thread and Goal Runtime](implemented/architecture/2026-09-03-codex-aligned-thread-goal-runtime.md)
 - [Codex-Aligned Agent Control Plane](implemented/architecture/2026-09-03-codex-aligned-agent-control-plane.md)
 - [Codex-Aligned Agent Control Plane（中文）](implemented/architecture/2026-09-03-codex-aligned-agent-control-plane.zh.md)

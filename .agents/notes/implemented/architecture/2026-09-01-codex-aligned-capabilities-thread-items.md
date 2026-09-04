@@ -1,8 +1,18 @@
 # Codex-Aligned Skills, Plugins, Builtin Tools, and ThreadItems
 
-Status: implemented — canonical architecture; Goal Runtime lifecycle converged
+Status: implemented — canonical architecture; current scope shipped and verified on 2026-09-04
 
-## Proposal
+## Decision
+
+This record is implemented for the current scope. The shipped boundary covers
+the bounded Builtin catalog and Thread-level selection, typed Skill/Plugin
+metadata and provider-input selection, ordered ThreadItem lifecycle and App
+Server notifications, cursor-bounded Item listing, and the canonical Goal
+Runtime owner. Turn-time Skill activation, Host dependency allowlist resolution,
+Plugin MCP tool loading, specialized Item variants, and Artifact APIs remain
+explicitly deferred follow-up work; they are not implied by this promotion.
+
+## Design rationale
 
 Align mini-agent-harness with the current Codex App Server semantic model:
 
