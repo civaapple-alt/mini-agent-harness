@@ -48,6 +48,9 @@ impl Shell {
     fn ensure_allowed(&self, command: &str) -> Result<(), ToolError> {
         if is_read_only_shell_command(command) {
             Ok(())
+        } else if self.0.approval.living_plan().is_some() && self.0.is_plan_scratch_command(command)
+        {
+            Ok(())
         } else if self.0.approval.living_plan().is_some() {
             Err(ToolError(
                 "workspace mutations locked in Plan Mode; Shell command is not in the bounded read-only inspection subset".to_string(),
@@ -68,7 +71,8 @@ impl Shell {
     }
 
     fn run_command(&self, command: &str) -> Result<String, ToolError> {
-        let output = run_shell(command, &self.0.root, self.0.sandbox, COMMAND_TIMEOUT)?;
+        let root = self.0.shell_root(command);
+        let output = run_shell(command, &root, self.0.sandbox, COMMAND_TIMEOUT)?;
         if output.text.len() <= INLINE_COMMAND_OUTPUT_BYTES {
             return Ok(output.text);
         }
@@ -202,11 +206,11 @@ pub(super) fn shell_description(approval: ApprovalScope) -> String {
     };
     if cfg!(windows) {
         format!(
-            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Plan Mode permits only bounded read-only inspection commands; workspace mutations remain locked. Use simple cmdlet pipelines such as Get-ChildItem, Get-Content, Select-Object, Sort-Object, and Format-Table; do not use script blocks, variables, subexpressions, redirection, or process/build commands. Do not use Unix-only commands or options such as `ls -la`, `find -maxdepth`, or `head`."
+            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Plan Mode permits bounded read-only inspection and a Python/Node script stored under plan/scratch; formal Project mutations remain locked. Scratch scripts run from the Session-owned scratch directory and are cleaned after the turn. Do not use script blocks, variables, subexpressions, redirection, or process/build commands outside that bounded scratch script path."
         )
     } else {
         format!(
-            "Run one POSIX sh command in the workspace {approval}, with a 120-second deadline. Plan Mode permits only bounded read-only inspection commands; workspace mutations remain locked."
+            "Run one POSIX sh command in the workspace {approval}, with a 120-second deadline. Plan Mode permits bounded read-only inspection and a Python/Node script stored under plan/scratch; formal Project mutations remain locked. Scratch scripts are cleaned after the turn."
         )
     }
 }

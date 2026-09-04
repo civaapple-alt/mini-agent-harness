@@ -10,6 +10,8 @@ pub const MAX_GOAL_PLAN_BYTES: usize = 32 * 1024;
 pub const DEFAULT_GOAL_MAX_LOOPS: usize = 100;
 pub const DEFAULT_GOAL_MILESTONE_STEPS: usize = 200;
 pub const DEFAULT_GOAL_MILESTONE_TIMEOUT_SECS: u64 = 1_800;
+pub const MAX_PLAN_SCRATCH_ENTRIES: usize = 256;
+pub const MAX_PLAN_SCRATCH_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_GOAL_ERROR_CHARS: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +77,20 @@ pub struct PlanModeState {
     pub schema_version: u32,
     pub active: bool,
     pub plan_file: PathBuf,
+    pub scratch_dir: PathBuf,
+    pub cleanup_manifest: PathBuf,
+    pub cleanup_pending: bool,
     pub updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanCleanupManifest {
+    pub schema_version: u32,
+    pub status: String,
+    pub scratch_dir: PathBuf,
+    pub paths: Vec<String>,
+    pub updated_at_ms: u64,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +141,10 @@ impl HostWorkflowStore {
 
     pub fn disable_plan_mode(&self) -> io::Result<()> {
         disable_plan_mode(&self.session_dir)
+    }
+
+    pub fn cleanup_plan_scratch(&self) -> io::Result<()> {
+        cleanup_plan_scratch(&self.session_dir).map(|_| ())
     }
 
     pub fn plan_active(&self) -> bool {
@@ -302,7 +321,15 @@ fn current_time_ms() -> u64 {
 }
 
 pub fn living_plan_path(session_dir: &Path) -> PathBuf {
-    session_dir.join("plan.md")
+    session_dir.join("plan").join("plan.md")
+}
+
+pub fn plan_scratch_path(session_dir: &Path) -> PathBuf {
+    session_dir.join("plan").join("scratch")
+}
+
+pub fn plan_cleanup_path(session_dir: &Path) -> PathBuf {
+    session_dir.join("plan").join("cleanup.json")
 }
 
 use mini_agent_capabilities::normalize_path;
@@ -314,7 +341,8 @@ fn one_line(text: &str) -> String {
 const LIVING_PLAN_RIDER: &str = "\
 === LIVING PLAN MODE ===
 This session is Plan Mode. Keep the software-architect planning discipline.
-Write the living plan to plan.md with apply_patch. Relative path plan.md maps to the session file.
+Write the living plan to plan.md with apply_patch. Relative path plan.md maps to the Session-owned plan file.
+For bounded exploration, write scripts and outputs under plan/scratch/; they are disposable and cleaned after the turn.
 Do not produce the final deliverable in reasoning or the assistant message: no complete HTML/CSS/JS pages, full source files, or finished documents.
 Research only to inform the plan. Cite sources; do not copy full page content.
 Reply with a short summary, risks, and open questions.";
@@ -345,6 +373,8 @@ fn initial_plan_markdown(prompt: Option<&str>) -> String {
 }
 
 pub fn init_plan_mode_with_prompt(session_dir: &Path, prompt: Option<&str>) -> io::Result<PathBuf> {
+    let scratch_dir = plan_scratch_path(session_dir);
+    fs::create_dir_all(&scratch_dir)?;
     let plan_path = living_plan_path(session_dir);
     let prompt = prompt.map(one_line).filter(|text| !text.is_empty());
     if plan_path.exists() {
@@ -361,10 +391,16 @@ pub fn init_plan_mode_with_prompt(session_dir: &Path, prompt: Option<&str>) -> i
     }
 
     let plan_path = normalize_path(&plan_path);
+    let scratch_dir = normalize_path(&scratch_dir);
+    let cleanup_manifest = normalize_path(&plan_cleanup_path(session_dir));
+    write_plan_cleanup_manifest(session_dir, "active", Vec::new(), None)?;
     let plan_state = PlanModeState {
         schema_version: GOAL_SCHEMA_VERSION,
         active: true,
         plan_file: plan_path.clone(),
+        scratch_dir,
+        cleanup_manifest,
+        cleanup_pending: false,
         updated_at_ms: current_time_ms(),
     };
 
@@ -376,19 +412,125 @@ pub fn init_plan_mode_with_prompt(session_dir: &Path, prompt: Option<&str>) -> i
 }
 
 pub fn disable_plan_mode(session_dir: &Path) -> io::Result<()> {
+    let cleanup_result = cleanup_plan_scratch(session_dir);
     let state_file = session_dir.join("plan_mode.json");
+    let mut state_result = Ok(());
     if state_file.exists() {
         let plan_state = PlanModeState {
             schema_version: GOAL_SCHEMA_VERSION,
             active: false,
             plan_file: living_plan_path(session_dir),
+            scratch_dir: plan_scratch_path(session_dir),
+            cleanup_manifest: plan_cleanup_path(session_dir),
+            cleanup_pending: cleanup_result.is_err(),
             updated_at_ms: current_time_ms(),
         };
         let state_json = serde_json::to_vec_pretty(&plan_state)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        fs::write(state_file, state_json)?;
+        state_result = fs::write(state_file, state_json);
+    }
+    match (cleanup_result, state_result) {
+        (Err(error), _) => Err(error),
+        (_, Err(error)) => Err(error),
+        (Ok(_), Ok(())) => Ok(()),
+    }
+}
+
+pub fn cleanup_plan_scratch(session_dir: &Path) -> io::Result<PlanCleanupManifest> {
+    let scratch_dir = plan_scratch_path(session_dir);
+    let mut paths = Vec::new();
+    let mut bytes = 0;
+    let collect_result = if scratch_dir.is_dir() {
+        collect_plan_scratch_entries(&scratch_dir, &scratch_dir, &mut paths, &mut bytes)
+    } else {
+        Ok(())
+    };
+    if let Err(error) = collect_result {
+        let _ = write_plan_cleanup_manifest(
+            session_dir,
+            "cleanup_pending",
+            paths,
+            Some(error.to_string()),
+        );
+        return Err(error);
+    }
+
+    write_plan_cleanup_manifest(session_dir, "cleanup_pending", paths.clone(), None)?;
+    let removal_result = if scratch_dir.exists() {
+        fs::remove_dir_all(&scratch_dir)
+    } else {
+        Ok(())
+    };
+    if let Err(error) = removal_result {
+        let message = error.to_string();
+        let _ = write_plan_cleanup_manifest(
+            session_dir,
+            "cleanup_pending",
+            paths,
+            Some(message.clone()),
+        );
+        return Err(io::Error::new(error.kind(), message));
+    }
+    fs::create_dir_all(&scratch_dir)?;
+    write_plan_cleanup_manifest(session_dir, "clean", Vec::new(), None)
+}
+
+fn collect_plan_scratch_entries(
+    root: &Path,
+    current: &Path,
+    paths: &mut Vec<String>,
+    bytes: &mut u64,
+) -> io::Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        if paths.len() >= MAX_PLAN_SCRATCH_ENTRIES {
+            return Err(io::Error::other(format!(
+                "Plan scratch exceeds {MAX_PLAN_SCRATCH_ENTRIES} entries"
+            )));
+        }
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        paths.push(relative.display().to_string());
+        let metadata = entry.metadata()?;
+        if metadata.is_file() {
+            *bytes = bytes.saturating_add(metadata.len());
+            if *bytes > MAX_PLAN_SCRATCH_BYTES {
+                return Err(io::Error::other(format!(
+                    "Plan scratch exceeds {MAX_PLAN_SCRATCH_BYTES} bytes"
+                )));
+            }
+        } else if metadata.is_dir() {
+            collect_plan_scratch_entries(root, &path, paths, bytes)?;
+        }
     }
     Ok(())
+}
+
+fn write_plan_cleanup_manifest(
+    session_dir: &Path,
+    status: &str,
+    paths: Vec<String>,
+    error: Option<String>,
+) -> io::Result<PlanCleanupManifest> {
+    let manifest = PlanCleanupManifest {
+        schema_version: GOAL_SCHEMA_VERSION,
+        status: status.to_string(),
+        scratch_dir: normalize_path(&plan_scratch_path(session_dir)),
+        paths,
+        updated_at_ms: current_time_ms(),
+        error: error.map(|value| value.chars().take(MAX_GOAL_ERROR_CHARS).collect()),
+    };
+    let content = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    fs::create_dir_all(
+        plan_cleanup_path(session_dir)
+            .parent()
+            .expect("plan directory"),
+    )?;
+    fs::write(plan_cleanup_path(session_dir), content)?;
+    Ok(manifest)
 }
 
 pub fn is_plan_mode_active(session_dir: &Path) -> bool {

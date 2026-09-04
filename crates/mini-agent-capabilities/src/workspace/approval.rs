@@ -42,6 +42,7 @@ pub struct ApprovalController {
     callback: Arc<ApprovalCallback>,
     context_callback: Option<Arc<ContextualApprovalCallback>>,
     living_plan: Arc<Mutex<Option<PathBuf>>>,
+    plan_scratch: Arc<Mutex<Option<PathBuf>>>,
     read_only_agent: Arc<AtomicBool>,
     goal_dir: Arc<Mutex<Option<PathBuf>>>,
     session_dir: Arc<Mutex<Option<PathBuf>>>,
@@ -85,6 +86,7 @@ impl ApprovalController {
             callback: Arc::new(callback),
             context_callback: None,
             living_plan: Arc::new(Mutex::new(None)),
+            plan_scratch: Arc::new(Mutex::new(None)),
             read_only_agent: Arc::new(AtomicBool::new(false)),
             goal_dir: Arc::new(Mutex::new(None)),
             session_dir: Arc::new(Mutex::new(None)),
@@ -105,6 +107,7 @@ impl ApprovalController {
             callback: Arc::new(terminal_approval),
             context_callback: Some(Arc::new(callback)),
             living_plan: Arc::new(Mutex::new(None)),
+            plan_scratch: Arc::new(Mutex::new(None)),
             read_only_agent: Arc::new(AtomicBool::new(false)),
             goal_dir: Arc::new(Mutex::new(None)),
             session_dir: Arc::new(Mutex::new(None)),
@@ -166,12 +169,21 @@ impl ApprovalController {
     }
 
     pub fn set_living_plan(&self, path: Option<PathBuf>) {
-        *self.living_plan.lock().unwrap() =
-            path.map(|path| crate::path_policy::normalize_path(&path));
+        let normalized = path.map(|path| crate::path_policy::normalize_path(&path));
+        let scratch = normalized
+            .as_ref()
+            .and_then(|path| path.parent())
+            .map(|path| crate::path_policy::normalize_path(&path.join("scratch")));
+        *self.living_plan.lock().unwrap() = normalized;
+        *self.plan_scratch.lock().unwrap() = scratch;
     }
 
     pub fn living_plan(&self) -> Option<PathBuf> {
         self.living_plan.lock().unwrap().clone()
+    }
+
+    pub fn plan_scratch(&self) -> Option<PathBuf> {
+        self.plan_scratch.lock().unwrap().clone()
     }
 
     pub fn set_read_only_agent(&self, read_only: bool) {

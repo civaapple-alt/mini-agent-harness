@@ -410,7 +410,9 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
     let root = test_root();
     let session = test_root();
     fs::write(root.join("note.txt"), "workspace note").unwrap();
-    let plan = session.join("plan.md");
+    let plan_dir = session.join("plan");
+    fs::create_dir_all(&plan_dir).unwrap();
+    let plan = plan_dir.join("plan.md");
     fs::write(&plan, "# Implementation Plan\n").unwrap();
     let approval = ApprovalController::new(ApprovalMode::Automatic);
     approval.set_living_plan(Some(plan.clone()));
@@ -478,11 +480,47 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
 }
 
 #[test]
+fn plan_mode_admits_only_scripts_in_session_scratch() {
+    let root = test_root();
+    let session = test_root();
+    let plan = session.join("plan").join("plan.md");
+    fs::create_dir_all(plan.parent().unwrap().join("scratch")).unwrap();
+    fs::write(&plan, "# Plan\n").unwrap();
+    let approval = ApprovalController::new(ApprovalMode::Automatic);
+    approval.set_living_plan(Some(plan));
+    let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
+    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+
+    let request = ToolExecutionRequest::new(
+        "plan-scratch",
+        "shell",
+        json!({"command": "python plan/scratch/probe.py"}),
+    );
+    assert!(matches!(
+        shell.admission(&request),
+        Ok(ToolAdmission::ApprovalRequired { .. })
+    ));
+
+    let blocked = ToolExecutionRequest::new(
+        "plan-project",
+        "shell",
+        json!({"command": "python ../note.py"}),
+    );
+    let error = shell.admission(&blocked).unwrap_err();
+    assert!(error.0.contains("workspace mutations locked in Plan Mode"));
+
+    remove_test_root(&session);
+    remove_test_root(&root);
+}
+
+#[test]
 fn plan_mode_allows_read_only_shell_inspection() {
     let root = test_root();
     fs::write(root.join("note.txt"), "workspace note").unwrap();
     let session = test_root();
-    let plan = session.join("plan.md");
+    let plan_dir = session.join("plan");
+    fs::create_dir_all(&plan_dir).unwrap();
+    let plan = plan_dir.join("plan.md");
     fs::write(&plan, "# Plan\n").unwrap();
     let approval = ApprovalController::new(ApprovalMode::Automatic);
     approval.set_living_plan(Some(plan));

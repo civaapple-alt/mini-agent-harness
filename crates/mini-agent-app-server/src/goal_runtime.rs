@@ -91,6 +91,10 @@ impl GoalService {
         self.handle.disable_plan_mode()
     }
 
+    pub(crate) fn cleanup_plan_scratch(&self) -> io::Result<()> {
+        self.handle.cleanup_plan_scratch()
+    }
+
     pub(crate) fn load_goal_state(&self) -> io::Result<Option<GoalState>> {
         self.handle.load_goal_state()
     }
@@ -232,6 +236,10 @@ impl GoalRuntimeHandle {
 
     pub(crate) fn disable_plan_mode(&self) -> io::Result<()> {
         self.store.disable_plan_mode()
+    }
+
+    pub(crate) fn cleanup_plan_scratch(&self) -> io::Result<()> {
+        self.store.cleanup_plan_scratch()
     }
 
     pub(crate) fn load_goal_state(&self) -> io::Result<Option<GoalState>> {

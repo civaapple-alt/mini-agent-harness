@@ -54,6 +54,28 @@ fn plan_mode_prompt_seeds_living_plan_without_clobbering() {
 }
 
 #[test]
+fn plan_scratch_is_bounded_and_cleaned_without_removing_plan() {
+    let dir = test_dir();
+    let plan_file = init_plan_mode_with_prompt(&dir, Some("inspect auth")).unwrap();
+    let scratch = plan_scratch_path(&dir);
+    fs::write(scratch.join("probe.py"), "print('ok')\n").unwrap();
+    fs::write(scratch.join("result.txt"), "ok\n").unwrap();
+
+    let manifest = cleanup_plan_scratch(&dir).unwrap();
+    assert_eq!(manifest.status, "clean");
+    assert!(plan_file.is_file());
+    assert!(scratch.is_dir());
+    assert!(!scratch.join("probe.py").exists());
+    assert!(!scratch.join("result.txt").exists());
+
+    let cleanup: PlanCleanupManifest =
+        serde_json::from_str(&fs::read_to_string(plan_cleanup_path(&dir)).unwrap()).unwrap();
+    assert_eq!(cleanup.status, "clean");
+    assert!(cleanup.paths.is_empty());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn goal_workspace_lifecycle_and_milestones() {
     let dir = test_dir();
     let state = init_goal_workspace_with_limits(

@@ -32,6 +32,19 @@ pub(crate) fn is_plan_md_alias(path: &Path) -> bool {
     name.is_some_and(|name| name.eq_ignore_ascii_case("plan.md"))
 }
 
+pub(crate) fn plan_scratch_relative_rest(path: &Path) -> Option<PathBuf> {
+    let mut parts = path.components();
+    let first = parts.next()?;
+    let second = parts.next()?;
+    if !matches!(first, Component::Normal(part) if part.eq_ignore_ascii_case("plan"))
+        || !matches!(second, Component::Normal(part) if part.eq_ignore_ascii_case("scratch"))
+    {
+        return None;
+    }
+    let rest: PathBuf = parts.collect();
+    (!rest.as_os_str().is_empty()).then_some(rest)
+}
+
 pub(crate) fn goal_relative_rest(path: &Path) -> Option<PathBuf> {
     let mut parts = Vec::new();
     for component in path.components() {

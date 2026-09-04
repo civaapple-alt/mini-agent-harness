@@ -490,6 +490,9 @@ pub(super) async fn worker_loop<M>(
                             );
                         }
                     }
+                    if let Err(error) = runtime_actor::cleanup_plan_scratch(&mut runtime) {
+                        eprintln!("warning: Plan cleanup_pending: {error}");
+                    }
                     if let Some(goal_id) = goal_id.as_deref()
                         && sink.tokens_used > 0
                         && let Ok(Some(goal)) = runtime_actor::goal_turn_usage(

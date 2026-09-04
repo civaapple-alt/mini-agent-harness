@@ -42,6 +42,18 @@ pub(super) fn handle_request<M>(
     handle(request.command, receipt, runtime, threads, runtime_revision);
 }
 
+pub(super) fn cleanup_plan_scratch(
+    runtime: &mut Option<RuntimeActorState>,
+) -> Result<(), AppServerError> {
+    runtime
+        .as_ref()
+        .filter(|state| state.goal_runtime_handle.plan_active())
+        .map(|state| state.goal_runtime_handle.cleanup_plan_scratch())
+        .transpose()
+        .map(|_| ())
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))
+}
+
 pub(super) fn handle<M>(
     command: RuntimeCommand,
     receipt: ActionReceipt,

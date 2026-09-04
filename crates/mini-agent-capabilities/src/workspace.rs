@@ -225,6 +225,11 @@ impl Workspace {
         {
             return Ok(living);
         }
+        if let Some(scratch) = self.approval.plan_scratch()
+            && let Some(rest) = crate::path_policy::plan_scratch_relative_rest(path)
+        {
+            return Ok(scratch.join(rest));
+        }
         if let Some(goal_dir) = self.approval.goal_dir()
             && let Some(rest) = crate::path_policy::goal_relative_rest(path)
         {
@@ -259,7 +264,80 @@ impl Workspace {
     }
 
     fn is_session_artifact(&self, path: &Path) -> bool {
-        self.is_living_plan(path) || self.is_goal_artifact(path)
+        self.is_living_plan(path) || self.is_plan_scratch(path) || self.is_goal_artifact(path)
+    }
+
+    fn is_plan_scratch(&self, path: &Path) -> bool {
+        self.approval
+            .plan_scratch()
+            .is_some_and(|scratch| crate::path_policy::is_under_dir(path, &scratch))
+    }
+
+    fn is_plan_scratch_command(&self, command: &str) -> bool {
+        let Some(scratch) = self.approval.plan_scratch() else {
+            return false;
+        };
+        if command.chars().any(|character| {
+            matches!(
+                character,
+                '\n' | '\r' | '&' | '>' | '<' | '`' | '(' | ')' | '{' | '}' | ';' | '|'
+            )
+        }) || command.contains("$(")
+        {
+            return false;
+        }
+        let mut tokens = command.split_whitespace();
+        let Some(program) = tokens.next() else {
+            return false;
+        };
+        let program = program
+            .trim_matches(['\'', '"'])
+            .rsplit(['\\', '/'])
+            .next()
+            .unwrap_or(program)
+            .to_ascii_lowercase();
+        if !matches!(program.as_str(), "python" | "python3" | "py" | "node") {
+            return false;
+        }
+        tokens.any(|token| {
+            let token = token.trim_matches(['\'', '"']);
+            if token.starts_with('-') {
+                return false;
+            }
+            let path = Path::new(token);
+            let resolved = if let Some(rest) = crate::path_policy::plan_scratch_relative_rest(path)
+            {
+                scratch.join(rest)
+            } else if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                scratch.join(path)
+            };
+            crate::path_policy::is_under_dir(&resolved, &scratch)
+                && resolved.extension().is_some_and(|extension| {
+                    matches!(
+                        extension.to_string_lossy().to_ascii_lowercase().as_str(),
+                        "py" | "js" | "mjs" | "cjs"
+                    )
+                })
+        })
+    }
+
+    fn shell_root(&self, command: &str) -> PathBuf {
+        if self.is_plan_scratch_command(command)
+            && let Some(scratch) = self.approval.plan_scratch()
+        {
+            if command.split_whitespace().any(|token| {
+                crate::path_policy::plan_scratch_relative_rest(Path::new(
+                    token.trim_matches(['\'', '"']),
+                ))
+                .is_some()
+            }) {
+                return self.root.clone();
+            }
+            return scratch;
+        }
+        self.root.clone()
     }
 
     fn ensure_plan_mode_unlocked(&self) -> Result<(), ToolError> {
