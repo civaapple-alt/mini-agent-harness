@@ -12,6 +12,9 @@ use mini_agent_protocol::ThreadStatus;
 use mini_agent_protocol::TurnId;
 use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnStatus;
+pub use mini_agent_protocol::{
+    ActionGrantKey, ActionGrantScope, ApprovalOutcome, ApprovalPolicy, ToolApprovalResolution,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -447,7 +450,7 @@ pub struct WorldSetExecutionResult {
 #[serde(rename_all = "camelCase")]
 pub struct WorldSetExecutionParams {
     pub access: AccessScope,
-    pub approval: ApprovalMode,
+    pub policy: ApprovalPolicy,
 }
 
 /// Filesystem reach that the Host may consider for a tool call. This is an
@@ -458,17 +461,6 @@ pub struct WorldSetExecutionParams {
 pub enum AccessScope {
     Project,
     FullMachine,
-}
-
-/// Who may reuse a successful approval for a later askable action.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ApprovalMode {
-    PerAction,
-    CurrentSession,
-    CurrentProject,
-    #[serde(alias = "auto")]
-    Automatic,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -763,16 +755,6 @@ pub enum ApprovalDecision {
     Deny,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ApprovalOutcome {
-    Approved,
-    Denied,
-    Expired,
-    Revoked,
-    Unavailable,
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalRequestNotification {
@@ -792,10 +774,12 @@ pub struct ApprovalRequestNotification {
     pub tool_name: Option<String>,
     pub action_class: String,
     pub action_summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_key: Option<ActionGrantKey>,
     pub path_scope: ApprovalPathScope,
     pub access: AccessScope,
-    pub allowed_approval_modes: Vec<ApprovalMode>,
-    pub high_risk: bool,
+    pub policy: ApprovalPolicy,
+    pub allowed_grant_scopes: Vec<ActionGrantScope>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -803,7 +787,9 @@ pub struct ApprovalRequestNotification {
 pub struct ApprovalResolvedNotification {
     pub request_id: String,
     pub outcome: ApprovalOutcome,
-    pub approval: Option<ApprovalMode>,
+    pub grant_scope: Option<ActionGrantScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     pub project_id: Option<String>,
     pub workspace_id: Option<String>,
     pub workspace_revision: Option<u64>,
@@ -814,8 +800,6 @@ pub struct ApprovalResolvedNotification {
     pub tool_name: Option<String>,
     pub action_class: String,
     pub action_summary: String,
-    pub path_scope: ApprovalPathScope,
-    pub access: AccessScope,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -823,10 +807,9 @@ pub struct ApprovalResolvedNotification {
 pub struct ApprovalRespondParams {
     pub request_id: String,
     pub decision: ApprovalDecision,
-    pub access: AccessScope,
-    pub approval: ApprovalMode,
-    #[serde(default)]
-    pub reason: String,
+    pub grant_scope: Option<ActionGrantScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// A server-to-client notification carrying an ordered core event.
@@ -902,21 +885,23 @@ mod tests {
                 paths: Vec::new(),
             },
             access: AccessScope::FullMachine,
-            allowed_approval_modes: vec![ApprovalMode::PerAction, ApprovalMode::CurrentProject],
-            high_risk: true,
+            action_key: None,
+            policy: ApprovalPolicy::Interactive,
+            allowed_grant_scopes: vec![ActionGrantScope::Once, ActionGrantScope::Project],
         })
         .unwrap();
         assert_eq!(request["requestId"], "approval-1");
         assert_eq!(request["workspaceRevision"], 3);
         assert_eq!(request["access"], "full_machine");
-        assert_eq!(request["allowedApprovalModes"][0], "per_action");
+        assert_eq!(request["allowedGrantScopes"][0], "once");
         assert_eq!(request["turnId"], "turn-1");
         assert_eq!(request["callId"], "shell-call-1");
 
         let resolved = serde_json::to_value(ApprovalResolvedNotification {
             request_id: "approval-1".to_string(),
             outcome: ApprovalOutcome::Approved,
-            approval: Some(ApprovalMode::CurrentProject),
+            grant_scope: Some(ActionGrantScope::Project),
+            reason: Some("approved by test".to_string()),
             project_id: Some("project-1".to_string()),
             workspace_id: Some("workspace-1".to_string()),
             workspace_revision: Some(3),
@@ -927,16 +912,12 @@ mod tests {
             tool_name: Some("shell".to_string()),
             action_class: "shell_execute".to_string(),
             action_summary: "shell command `pwd`".to_string(),
-            path_scope: ApprovalPathScope {
-                kind: ApprovalPathKind::Machine,
-                paths: Vec::new(),
-            },
-            access: AccessScope::FullMachine,
         })
         .unwrap();
         assert_eq!(resolved["requestId"], "approval-1");
         assert_eq!(resolved["outcome"], "approved");
-        assert_eq!(resolved["approval"], "current_project");
+        assert_eq!(resolved["grantScope"], "project");
+        assert_eq!(resolved["reason"], "approved by test");
         assert_eq!(resolved["turnId"], "turn-1");
         assert_eq!(resolved["callId"], "shell-call-1");
     }

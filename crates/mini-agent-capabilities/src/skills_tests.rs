@@ -1,6 +1,6 @@
 use super::*;
-use crate::test_support::{python_command, remove_test_root, test_root};
-use crate::workspace::ApprovalMode;
+use crate::test_support::{approval_controller, python_command, remove_test_root, test_root};
+use mini_agent_protocol::{ApprovalOutcome, ApprovalPolicy};
 
 #[test]
 fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
@@ -192,7 +192,7 @@ fn discovers_and_selects_bounded_mcp_transports() {
     discovery.retain_selected(&["keep".to_string()]);
     let loaded = crate::mcp::load(
         discovery.mcp_servers(),
-        crate::workspace::ApprovalController::new(ApprovalMode::Automatic),
+        approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved),
     );
     assert_eq!(discovery.mcp_server_labels(), ["example.tools/keep"]);
     assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);

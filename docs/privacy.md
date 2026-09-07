@@ -33,9 +33,10 @@ turn prompt.
 
 Result handles are appended to the same `session.jsonl` log and are restored when
 the session is resumed. The input queue and in-flight turns remain process-local.
-Project-scoped approval reuse is owned by the App Server and is invalidated by
-scope, workspace revision, revocation, or runtime restart; it is never restored
-from Web UI state.
+Action-grant reuse is owned by Host/Capabilities and is invalidated by its
+scope owner, complete action key, workspace revision, revocation, or runtime
+restart; it is never restored from Web UI state. The Web Gateway retains only
+pending approval/UI state.
 Persistence does not make an interrupted external effect replay-safe.
 
 Project skills and compatible plugin instructions contribute only bounded

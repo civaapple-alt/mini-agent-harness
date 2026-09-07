@@ -1,17 +1,11 @@
 use super::*;
-use crate::security::ApprovalScope;
-use crate::security::ApprovalStore;
-use mini_agent_protocol::ToolApprovalRequest;
+use crate::security::{ApprovalStore, action_grant_key, is_high_risk};
+use mini_agent_protocol::{
+    ActionGrantScope, ApprovalOutcome, ApprovalPolicy, ToolApprovalRequest, ToolApprovalResolution,
+};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ApprovalMode {
-    Interactive,
-    Automatic,
-}
-
-type ApprovalCallback = dyn Fn(&str) -> Result<bool, ToolError> + Send + Sync;
-type ContextualApprovalCallback =
-    dyn Fn(&ToolApprovalRequest) -> Result<bool, ToolError> + Send + Sync;
+type ApprovalCallback =
+    dyn Fn(&ToolApprovalRequest) -> Result<ToolApprovalResolution, ToolError> + Send + Sync;
 
 #[derive(Clone, Debug, Default)]
 struct ApprovalBinding {
@@ -22,11 +16,11 @@ struct ApprovalBinding {
 }
 
 impl ApprovalBinding {
-    fn owner(&self, scope: ApprovalScope) -> Option<String> {
+    fn owner(&self, scope: ActionGrantScope) -> Option<String> {
         match scope {
-            ApprovalScope::PerAction | ApprovalScope::Automatic => None,
-            ApprovalScope::CurrentSession => self.session_id.clone(),
-            ApprovalScope::CurrentProject => match (&self.project_id, &self.workspace_id) {
+            ActionGrantScope::Once => None,
+            ActionGrantScope::Session => self.session_id.clone(),
+            ActionGrantScope::Project => match (&self.project_id, &self.workspace_id) {
                 (Some(project), Some(workspace)) => Some(format!("{project}\0{workspace}")),
                 _ => None,
             },
@@ -36,83 +30,77 @@ impl ApprovalBinding {
 
 #[derive(Clone)]
 pub struct ApprovalController {
-    automatic: Arc<AtomicBool>,
+    approval_policy: Arc<RwLock<ApprovalPolicy>>,
+    access_scope: Arc<RwLock<String>>,
     policy: Arc<RwLock<SecurityPolicy>>,
     store: ApprovalStore,
     callback: Arc<ApprovalCallback>,
-    context_callback: Option<Arc<ContextualApprovalCallback>>,
     living_plan: Arc<Mutex<Option<PathBuf>>>,
     plan_scratch: Arc<Mutex<Option<PathBuf>>>,
     read_only_agent: Arc<AtomicBool>,
     goal_dir: Arc<Mutex<Option<PathBuf>>>,
     session_dir: Arc<Mutex<Option<PathBuf>>>,
-    approval_scope: Arc<RwLock<ApprovalScope>>,
     approval_binding: Arc<RwLock<ApprovalBinding>>,
 }
 
 impl ApprovalController {
-    pub fn new(mode: ApprovalMode) -> Self {
+    pub fn new(approval_policy: ApprovalPolicy) -> Self {
         Self::with_policy_and_callback(
-            mode,
+            approval_policy,
             SecurityPolicy::for_preset(SecurityPreset::Default),
             terminal_approval,
         )
     }
 
-    pub fn with_preset(mode: ApprovalMode, preset: SecurityPreset) -> Self {
-        Self::with_policy_and_callback(mode, SecurityPolicy::for_preset(preset), terminal_approval)
+    pub fn with_preset(approval_policy: ApprovalPolicy, preset: SecurityPreset) -> Self {
+        Self::with_policy_and_callback(
+            approval_policy,
+            SecurityPolicy::for_preset(preset),
+            terminal_approval,
+        )
     }
 
     pub fn with_callback(
-        mode: ApprovalMode,
-        callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,
+        approval_policy: ApprovalPolicy,
+        callback: impl Fn(&ToolApprovalRequest) -> Result<ToolApprovalResolution, ToolError>
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self::with_policy_and_callback(
-            mode,
+            approval_policy,
             SecurityPolicy::for_preset(SecurityPreset::Default),
             callback,
         )
     }
 
     pub fn with_policy_and_callback(
-        mode: ApprovalMode,
+        approval_policy: ApprovalPolicy,
         policy: SecurityPolicy,
-        callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,
+        callback: impl Fn(&ToolApprovalRequest) -> Result<ToolApprovalResolution, ToolError>
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
-        Self::with_callbacks(mode, policy, Arc::new(callback), None)
-    }
-
-    pub fn with_policy_and_context_callback(
-        mode: ApprovalMode,
-        policy: SecurityPolicy,
-        callback: impl Fn(&ToolApprovalRequest) -> Result<bool, ToolError> + Send + Sync + 'static,
-    ) -> Self {
-        Self::with_callbacks(
-            mode,
-            policy,
-            Arc::new(terminal_approval),
-            Some(Arc::new(callback)),
-        )
+        Self::with_callbacks(approval_policy, policy, Arc::new(callback))
     }
 
     fn with_callbacks(
-        mode: ApprovalMode,
+        approval_policy: ApprovalPolicy,
         policy: SecurityPolicy,
         callback: Arc<ApprovalCallback>,
-        context_callback: Option<Arc<ContextualApprovalCallback>>,
     ) -> Self {
         Self {
-            automatic: Arc::new(AtomicBool::new(matches!(mode, ApprovalMode::Automatic))),
+            approval_policy: Arc::new(RwLock::new(approval_policy)),
+            access_scope: Arc::new(RwLock::new("project".to_string())),
             policy: Arc::new(RwLock::new(policy)),
             store: ApprovalStore::new(),
             callback,
-            context_callback,
             living_plan: Arc::new(Mutex::new(None)),
             plan_scratch: Arc::new(Mutex::new(None)),
             read_only_agent: Arc::new(AtomicBool::new(false)),
             goal_dir: Arc::new(Mutex::new(None)),
             session_dir: Arc::new(Mutex::new(None)),
-            approval_scope: Arc::new(RwLock::new(ApprovalScope::PerAction)),
             approval_binding: Arc::new(RwLock::new(ApprovalBinding::default())),
         }
     }
@@ -127,25 +115,16 @@ impl ApprovalController {
         *self.policy.write().unwrap() = policy;
     }
 
-    pub fn mode(&self) -> ApprovalMode {
-        if self.automatic.load(Ordering::Relaxed) {
-            ApprovalMode::Automatic
-        } else {
-            ApprovalMode::Interactive
-        }
+    pub fn approval_policy(&self) -> ApprovalPolicy {
+        *self.approval_policy.read().unwrap()
     }
 
-    pub fn set_mode(&self, mode: ApprovalMode) {
-        self.automatic
-            .store(matches!(mode, ApprovalMode::Automatic), Ordering::Relaxed);
+    pub fn set_approval_policy(&self, policy: ApprovalPolicy) {
+        *self.approval_policy.write().unwrap() = policy;
     }
 
-    pub fn approval_scope(&self) -> ApprovalScope {
-        *self.approval_scope.read().unwrap()
-    }
-
-    pub fn set_approval_scope(&self, scope: ApprovalScope) {
-        *self.approval_scope.write().unwrap() = scope;
+    pub fn set_access_scope(&self, access: impl Into<String>) {
+        *self.access_scope.write().unwrap() = access.into();
     }
 
     /// Binds trusted Project/Workspace/Session identity used by scoped
@@ -257,64 +236,56 @@ impl ApprovalController {
             SecurityDecision::Allow => return Ok(()),
             SecurityDecision::Ask => {}
         }
-        match self.mode() {
-            ApprovalMode::Automatic => return Ok(()),
-            ApprovalMode::Interactive => {}
-        }
-        let scope = self.approval_scope();
-        if scope == ApprovalScope::Automatic {
+        if self.approval_policy() == ApprovalPolicy::Automatic && !is_high_risk(&request) {
             return Ok(());
         }
-        let revision = request.workspace_revision.unwrap_or(0);
-        let project_owner = binding.owner(ApprovalScope::CurrentProject);
+        let key = action_grant_key(&request, &self.access_scope.read().unwrap());
+        let project_owner = binding.owner(ActionGrantScope::Project);
         let session_owner = binding
-            .owner(ApprovalScope::CurrentSession)
+            .owner(ActionGrantScope::Session)
             .or_else(|| self.session_dir().map(|path| path.display().to_string()));
-        if let Some(owner) = &session_owner
-            && self.store.is_approved_for(
-                ApprovalScope::CurrentSession,
-                owner,
-                revision,
-                &request.action,
-            )
+        if let Some(key) = &key
+            && let Some(owner) = &session_owner
+            && self.store.contains(ActionGrantScope::Session, owner, key)
         {
             return Ok(());
         }
-        if let Some(owner) = &project_owner
-            && self.store.is_approved_for(
-                ApprovalScope::CurrentProject,
-                owner,
-                revision,
-                &request.action,
-            )
+        if let Some(key) = &key
+            && let Some(owner) = &project_owner
+            && self.store.contains(ActionGrantScope::Project, owner, key)
         {
             return Ok(());
         }
-        let approved = match self.context_callback.as_ref() {
-            Some(callback) => callback(&request)?,
-            None => (self.callback)(&request.action)?,
-        };
-        if approved {
-            let owner = binding.owner(scope).or_else(|| {
-                (scope == ApprovalScope::CurrentSession)
-                    .then(|| self.session_dir().map(|path| path.display().to_string()))
-                    .flatten()
-            });
-            if scope != ApprovalScope::PerAction
-                && scope != ApprovalScope::Automatic
-                && let Some(owner) = owner
-            {
-                self.store
-                    .remember_approval_for(scope, &owner, revision, &request.action);
-            }
-            Ok(())
-        } else {
-            Err(ToolError(format!("user denied: {}", request.action)))
+        let resolution = (self.callback)(&request)?;
+        if resolution.outcome != ApprovalOutcome::Approved {
+            return Err(ToolError(format!(
+                "user denied: {}",
+                resolution
+                    .reason
+                    .as_deref()
+                    .unwrap_or(request.action.as_str())
+            )));
         }
+        if resolution.grant_scope != ActionGrantScope::Once {
+            let key = key.ok_or_else(|| {
+                ToolError("approval grant requires a complete action key".to_string())
+            })?;
+            let owner = binding
+                .owner(resolution.grant_scope)
+                .or_else(|| {
+                    (resolution.grant_scope == ActionGrantScope::Session)
+                        .then(|| self.session_dir().map(|path| path.display().to_string()))
+                        .flatten()
+                })
+                .ok_or_else(|| ToolError("approval grant owner is unavailable".to_string()))?;
+            self.store.insert(resolution.grant_scope, &owner, &key);
+        }
+        Ok(())
     }
 }
 
-fn terminal_approval(action: &str) -> Result<bool, ToolError> {
+fn terminal_approval(request: &ToolApprovalRequest) -> Result<ToolApprovalResolution, ToolError> {
+    let action = request.action.as_str();
     if !io::stdin().is_terminal() {
         return Err(ToolError(format!(
             "denied non-interactive action: {action}"
@@ -328,8 +299,13 @@ fn terminal_approval(action: &str) -> Result<bool, ToolError> {
     io::stdin()
         .read_line(&mut answer)
         .map_err(|error| ToolError(error.to_string()))?;
-    Ok(matches!(
-        answer.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
+    if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        Ok(ToolApprovalResolution::once(ApprovalOutcome::Approved))
+    } else {
+        Ok(ToolApprovalResolution {
+            outcome: ApprovalOutcome::Denied,
+            grant_scope: ActionGrantScope::Once,
+            reason: Some("user denied the action".to_string()),
+        })
+    }
 }

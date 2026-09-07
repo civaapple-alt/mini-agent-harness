@@ -56,9 +56,11 @@ validates the supplied active `turnId`;
 settled result and messages. When the host runtime is wired with
 an `ApprovalBroker`, sensitive tool calls emit an `approval/request`
 notification, then emit `approval/resolved` after the client replies with
-`approval/respond`. The request and resolution carry typed access and approval
-scope, bounded workspace identity, an action class, and the optional `turnId`
-and `callId` for the built-in Shell path. Clients can correlate
+`approval/respond`. The request carries typed access, policy, a structured
+action key, and allowed grant scopes; the resolution carries its outcome,
+selected grant scope, and optional reason. Both carry bounded workspace
+identity and the optional `turnId` and `callId` for the built-in Shell path.
+Clients can correlate
 `requestId`/`turnId`/`callId` from `approval/request` through
 `approval/respond`, `approval/resolved`, and the matching `turn/event`, without
 inferring approval from `tool/finished` content. `full_machine` means
@@ -204,27 +206,28 @@ submit verifier verdicts or advance milestones directly.
 | --- | --- | --- |
 | `world/state` | No parameters | Returns the current workspace, structured status, status lines, and bounded model context. |
 | `world/refresh` | No parameters | Refreshes the world and returns `{changed, state}`. |
-| `world/set_execution` | `access`, `approval` | Sets execution scope and returns `{changed, state}`. `access` is `project` or `full_machine`; `approval` is `per_action`, `current_session`, or `current_project`. |
+| `world/set_execution` | `access`, `policy` | Sets execution scope and returns `{changed, state}`. `access` is `project` or `full_machine`; `policy` is `interactive` or `automatic`. |
 | `mcp/status` | No parameters | Returns enabled/inactive servers, tool count, and whether retry is available. |
 | `mcp/retry` | No parameters | Retries MCP setup and returns enabled/inactive servers, diagnostics, and tool count. |
 
 `world/set_execution` changes runtime configuration, not the security order.
 `full_machine` expands the candidate filesystem range but does not mean
 allow-all: Deny, Plan locks, tool availability, and high-risk confirmation
-still apply. The approval lifetime is scoped to the current action, session,
-or project according to the selected value.
+still apply. `policy` selects the global execution posture; it does not choose
+the lifetime of an individual grant.
 
 #### Approval response
 
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
-| `approval/respond` | `requestId`, `decision` (`approve` or `deny`), `access`, `approval`, optional `reason` | Resolves one pending approval. The server emits `approval/resolved`; it does not return a second approval authority to the client. |
+| `approval/respond` | `requestId`, `decision` (`approve` or `deny`), optional `grantScope` (`once`, `session`, or `project`), optional `reason` | Resolves one pending approval. The server emits `approval/resolved`; it does not return a second approval authority to the client. |
 
-The response must preserve the access and approval scope selected by the
-client. An approval is matched against the request's project, workspace,
-workspace revision, action class, and path scope. A changed workspace
-revision, project switch, policy change, or revocation invalidates a prior
-project/session reuse decision.
+The response may select only one of the request's `allowedGrantScopes`; a
+denial cannot carry a grant scope. Host/Capabilities match grants against the
+complete structured action key: action class, normalized action, target paths,
+access scope, workspace, and revision. Web clients own only pending/UI state;
+they do not create or cache grants. A changed workspace revision, project
+switch, policy change, or revocation invalidates prior reuse.
 
 ### Server notifications
 
@@ -236,8 +239,8 @@ emitted on one ordered runtime stream.
 | `turn/event` | `threadId`, optional `turnId`, Core `sequence`, bounded `items`, `event` | Ordered Core execution events, including turn settlement. |
 | `item/started` | `threadId`, `turnId`, `item`, `startedAtMs` | One ThreadItem becomes visible. |
 | `item/completed` | `threadId`, `turnId`, `item`, `completedAtMs` | Authoritative final projection for that item. |
-| `approval/request` | Request identity, project/workspace/revision, action class, summary, path scope, access, allowed approval modes, risk | Requests a user decision for a sensitive action. |
-| `approval/resolved` | Request identity, outcome, selected approval, and the original scope metadata | Reports `approved`, `denied`, `expired`, `revoked`, or `unavailable`. |
+| `approval/request` | Request identity, project/workspace/revision, action class, summary, structured action key, access, policy, allowed grant scopes | Requests a user decision for a sensitive action. |
+| `approval/resolved` | Request identity, `outcome`, selected `grantScope`, and optional `reason` | Reports the settled approval result without creating a second authority. |
 | `thread/settings/updated` | `threadId`, effective mode, Builtin tools, `stateRevision` | Projects a settings change. |
 | `thread/goal/updated` | `threadId`, optional `turnId`, Goal projection | Projects Goal creation, update, or runtime progress. |
 | `thread/goal/cleared` | `threadId` | Projects Goal removal. |

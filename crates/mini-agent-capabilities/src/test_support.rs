@@ -6,8 +6,19 @@ use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use mini_agent_protocol::{ApprovalOutcome, ApprovalPolicy, ToolApprovalResolution};
+
 /// Serializes tests that temporarily replace process-level home directory variables.
 pub(crate) static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+pub(crate) fn approval_controller(
+    policy: ApprovalPolicy,
+    outcome: ApprovalOutcome,
+) -> crate::workspace::ApprovalController {
+    crate::workspace::ApprovalController::with_callback(policy, move |_| {
+        Ok(ToolApprovalResolution::once(outcome))
+    })
+}
 
 pub(crate) fn test_root() -> PathBuf {
     static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);

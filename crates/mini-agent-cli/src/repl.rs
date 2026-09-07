@@ -3,7 +3,7 @@ use mini_agent_app_server::AppServerRuntime;
 use mini_agent_app_server::SessionRequest;
 use mini_agent_app_server::ThreadUpdate;
 use mini_agent_app_server::frontend::ApprovalController;
-use mini_agent_app_server::frontend::ApprovalMode;
+use mini_agent_app_server::frontend::ApprovalPolicy;
 use mini_agent_app_server::frontend::DEFAULT_MAX_PENDING_INPUTS;
 use mini_agent_app_server::frontend::EventEnvelope;
 use mini_agent_app_server::frontend::EventSink;
@@ -18,6 +18,7 @@ use mini_agent_app_server::frontend::TurnInput;
 use mini_agent_app_server::frontend::TurnInputMode;
 use mini_agent_app_server::frontend::TurnStatus;
 use mini_agent_app_server::local::LocalRuntimeRequest;
+use mini_agent_protocol::ToolApprovalRequest;
 use std::collections::VecDeque;
 use std::io;
 use std::io::IsTerminal;
@@ -47,14 +48,15 @@ pub async fn run(
     let approval_events = event_tx.clone();
     let interactive_terminal = io::stdin().is_terminal();
     let approval = ApprovalController::with_policy_and_callback(
-        ApprovalMode::Interactive,
+        ApprovalPolicy::Interactive,
         SecurityPolicy::for_preset(preset),
-        move |action| {
+        move |request: &ToolApprovalRequest| {
             if interactive_terminal {
-                repl_worker::request_approval(&approval_events, action)
+                repl_worker::request_approval(&approval_events, request)
             } else {
                 Err(ToolError(format!(
-                    "denied non-interactive action: {action}"
+                    "denied non-interactive action: {}",
+                    request.action
                 )))
             }
         },

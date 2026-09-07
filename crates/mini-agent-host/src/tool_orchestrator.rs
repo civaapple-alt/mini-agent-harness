@@ -1,11 +1,8 @@
 use mini_agent_capabilities::ApprovalController;
-use mini_agent_protocol::Tool;
-use mini_agent_protocol::ToolAdmission;
-use mini_agent_protocol::ToolApprovalRequest;
-use mini_agent_protocol::ToolExecutionDelegate;
-use mini_agent_protocol::ToolExecutionOutcome;
-use mini_agent_protocol::ToolExecutionRequest;
-use mini_agent_protocol::ToolExecutionStatus;
+use mini_agent_protocol::{
+    Tool, ToolAdmission, ToolApprovalRequest, ToolExecutionDelegate, ToolExecutionOutcome,
+    ToolExecutionRequest, ToolExecutionStatus,
+};
 
 /// Typed tools perform bounded validation and describe their admission need;
 /// this orchestrator owns approval and the post-admission execution boundary.
@@ -25,8 +22,12 @@ impl ToolExecutionDelegate for ToolOrchestrator {
     fn execute(&self, tool: &dyn Tool, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
         let outcome = match tool.admission(request) {
             Ok(ToolAdmission::Legacy) => tool.execute_outcome(&request.arguments),
-            Ok(ToolAdmission::ApprovalRequired { action }) => {
-                let approval_request = ToolApprovalRequest::from_execution(action, request);
+            Ok(ToolAdmission::ApprovalRequired {
+                action,
+                target_paths,
+            }) => {
+                let approval_request =
+                    ToolApprovalRequest::from_execution(action, target_paths, request);
                 match self.approval.approve_request(&approval_request) {
                     Ok(()) => tool.execute_after_admission(request),
                     Err(error) => ToolExecutionOutcome::failed(error.to_string()),

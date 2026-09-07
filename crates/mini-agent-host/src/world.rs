@@ -1,6 +1,6 @@
-use mini_agent_capabilities::ApprovalScope;
 use mini_agent_capabilities::SandboxKind;
 use mini_agent_capabilities::SecurityPreset;
+use mini_agent_protocol::ApprovalPolicy;
 use serde_json::Value;
 use serde_json::json;
 use std::env;
@@ -24,7 +24,7 @@ pub struct WorldState {
     arch: &'static str,
     shell: &'static str,
     access: SecurityPreset,
-    approval: ApprovalScope,
+    policy: ApprovalPolicy,
     sandbox: SandboxKind,
     available_commands: Vec<&'static str>,
     unavailable_commands: Vec<&'static str>,
@@ -37,7 +37,7 @@ impl WorldState {
         workspace: &Path,
         extra_roots: Vec<PathBuf>,
         access: SecurityPreset,
-        approval: ApprovalScope,
+        policy: ApprovalPolicy,
         sandbox: SandboxKind,
     ) -> Self {
         let search_paths = env::var_os("PATH")
@@ -63,7 +63,7 @@ impl WorldState {
             arch: env::consts::ARCH,
             shell: if cfg!(windows) { "pwsh" } else { "sh" },
             access,
-            approval,
+            policy,
             sandbox,
             available_commands,
             unavailable_commands,
@@ -75,12 +75,12 @@ impl WorldState {
     pub fn with_execution(
         &self,
         access: SecurityPreset,
-        approval: ApprovalScope,
+        policy: ApprovalPolicy,
         sandbox: SandboxKind,
     ) -> Self {
         let mut state = self.clone();
         state.access = access;
-        state.approval = approval;
+        state.policy = policy;
         state.sandbox = sandbox;
         state
     }
@@ -89,8 +89,8 @@ impl WorldState {
         self.access
     }
 
-    pub fn approval(&self) -> ApprovalScope {
-        self.approval
+    pub fn policy(&self) -> ApprovalPolicy {
+        self.policy
     }
 
     pub fn sandbox(&self) -> SandboxKind {
@@ -121,8 +121,8 @@ impl WorldState {
         context.push_str("\" />");
         context.push_str("<execution mode=\"");
         context.push_str("chat");
-        context.push_str("\" approval=\"");
-        context.push_str(self.approval_name());
+        context.push_str("\" policy=\"");
+        context.push_str(self.policy_name());
         context.push_str("\" access=\"");
         context.push_str(self.access.name());
         context.push_str("\" command_sandbox=\"");
@@ -159,11 +159,9 @@ impl WorldState {
         if !self.extra_roots.is_empty() {
             context.push_str("Multiple workspace directories configured. All roots in <workspace_roots> are part of this project; inspect and modify files across these roots using absolute paths or paths relative to cwd. ");
         }
-        context.push_str(match self.approval {
-            ApprovalScope::PerAction => "Sensitive writes, shell commands, MCP connections, and MCP calls require per-action user approval.",
-            ApprovalScope::CurrentSession => "An approved action may be reused within this Session; Project or machine scope still requires a new decision.",
-            ApprovalScope::CurrentProject => "An approved action may be reused by matching Sessions in this Project and Workspace revision; denied actions and unsafe effects remain denied.",
-            ApprovalScope::Automatic => "Autonomous mode: non-destructive workspace and tool actions are automatically approved.",
+        context.push_str(match self.policy {
+            ApprovalPolicy::Interactive => "Sensitive actions pause for an explicit decision; the decision may be remembered only for its returned action grant scope.",
+            ApprovalPolicy::Automatic => "Automatic policy runs low-risk actions without interruption; high-risk, denied, or incomplete actions still require explicit approval.",
         });
         context.push_str("</execution_guidance></world_state>");
         if context.len() > MAX_WORLD_CONTEXT_BYTES {
@@ -191,7 +189,7 @@ impl WorldState {
             "shell": self.shell,
             "mode": "chat",
             "access": self.access.name(),
-            "approval": self.approval_name(),
+            "policy": self.policy_name(),
             "command_sandbox": self.sandbox.name(),
             "direct_file_scope": "workspace",
             "workspace_roots": roots,
@@ -208,7 +206,7 @@ impl WorldState {
             format!("world_shell: {}", self.shell),
             "mode: chat".to_string(),
             format!("access: {}", self.access.name()),
-            format!("approval: {}", self.approval_name()),
+            format!("policy: {}", self.policy_name()),
         ];
         for (k, v) in [
             ("project_kinds", &self.project_kinds),
@@ -221,12 +219,10 @@ impl WorldState {
         lines
     }
 
-    fn approval_name(&self) -> &'static str {
-        match self.approval {
-            ApprovalScope::PerAction => "per_action",
-            ApprovalScope::CurrentSession => "current_session",
-            ApprovalScope::CurrentProject => "current_project",
-            ApprovalScope::Automatic => "automatic",
+    fn policy_name(&self) -> &'static str {
+        match self.policy {
+            ApprovalPolicy::Interactive => "interactive",
+            ApprovalPolicy::Automatic => "automatic",
         }
     }
 }
@@ -354,7 +350,7 @@ mod tests {
             &root1,
             vec![root2.clone()],
             SecurityPreset::Default,
-            ApprovalScope::PerAction,
+            ApprovalPolicy::Interactive,
             SandboxKind::Native,
         );
         assert_eq!(world.extra_roots(), &[root2]);

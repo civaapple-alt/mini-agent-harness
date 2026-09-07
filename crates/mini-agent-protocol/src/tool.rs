@@ -65,6 +65,56 @@ pub struct ToolExecutionContext {
     pub session_id: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalPolicy {
+    Interactive,
+    Automatic,
+}
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionGrantScope {
+    Once,
+    Session,
+    Project,
+}
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalOutcome {
+    Approved,
+    Denied,
+    Expired,
+    Revoked,
+    Unavailable,
+}
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionGrantKey {
+    pub action_class: String,
+    pub normalized_action: String,
+    pub target_paths: Vec<String>,
+    pub access_scope: String,
+    pub workspace_id: String,
+    pub workspace_revision: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolApprovalResolution {
+    pub outcome: ApprovalOutcome,
+    pub grant_scope: ActionGrantScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+impl ToolApprovalResolution {
+    pub fn once(outcome: ApprovalOutcome) -> Self {
+        Self {
+            outcome,
+            grant_scope: ActionGrantScope::Once,
+            reason: None,
+        }
+    }
+}
 /// The bounded identity and action sent to an approval provider.
 ///
 /// The approval provider assigns its own request ID after receiving this
@@ -81,7 +131,7 @@ pub struct ToolApprovalRequest {
     pub workspace_id: Option<String>,
     pub workspace_revision: Option<u64>,
     pub session_id: Option<String>,
-    pub action_class: Option<String>,
+    pub target_paths: Vec<String>,
 }
 
 impl ToolApprovalRequest {
@@ -92,7 +142,11 @@ impl ToolApprovalRequest {
         }
     }
 
-    pub fn from_execution(action: impl Into<String>, request: &ToolExecutionRequest) -> Self {
+    pub fn from_execution(
+        action: impl Into<String>,
+        target_paths: Vec<String>,
+        request: &ToolExecutionRequest,
+    ) -> Self {
         let context = request.context.as_ref();
         Self {
             action: action.into(),
@@ -104,7 +158,7 @@ impl ToolApprovalRequest {
             workspace_id: context.and_then(|context| context.workspace_id.clone()),
             workspace_revision: context.and_then(|context| context.workspace_revision),
             session_id: context.and_then(|context| context.session_id.clone()),
-            action_class: Some(request.name.clone()),
+            target_paths,
         }
     }
 }
@@ -157,7 +211,10 @@ impl ToolExecutionOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToolAdmission {
     Legacy,
-    ApprovalRequired { action: String },
+    ApprovalRequired {
+        action: String,
+        target_paths: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

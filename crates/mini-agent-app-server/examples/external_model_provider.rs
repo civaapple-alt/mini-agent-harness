@@ -10,7 +10,7 @@ use mini_agent_app_server::AppServerRuntime;
 use mini_agent_app_server::RuntimeStartOptions;
 use mini_agent_app_server::SessionRequest;
 use mini_agent_capabilities::ApprovalController;
-use mini_agent_capabilities::ApprovalMode;
+use mini_agent_capabilities::ApprovalPolicy;
 use mini_agent_capabilities::CapabilityDescriptor;
 use mini_agent_capabilities::CapabilityKind;
 use mini_agent_capabilities::CapabilityRegistry;
@@ -78,7 +78,7 @@ async fn start(runtime_config: RuntimeConfig) -> Result<AppServerRuntime<EchoMod
     AppServerRuntime::<EchoModel>::start_with_model_factory(
         RuntimeStartOptions {
             runtime_config,
-            approval: ApprovalController::new(ApprovalMode::Automatic),
+            approval: ApprovalController::new(ApprovalPolicy::Automatic),
             harness_config: HarnessConfig::default(),
             session_request: SessionRequest::Disabled,
             control: std::sync::Arc::new(mini_agent_core::RunControl::new()),

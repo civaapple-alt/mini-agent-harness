@@ -2,8 +2,8 @@ use super::*;
 use crate::tests::{DoneModel, harness};
 use mini_agent_app_server_protocol::{CapabilityProviderSelection, ClientCapabilities};
 use mini_agent_capabilities::{
-    ApprovalController, ApprovalMode, ApprovalScope, ImageStore, ResultStore, SandboxKind,
-    SecurityPolicy, SecurityPreset, workspace_tools_with_read_roots_and_results,
+    ApprovalController, ApprovalPolicy, ImageStore, ResultStore, SandboxKind, SecurityPolicy,
+    SecurityPreset, workspace_tools_with_read_roots_and_results,
 };
 use mini_agent_core::{Harness, HarnessConfig, Thread, ToolRouter};
 use mini_agent_protocol::{
@@ -283,13 +283,13 @@ fn managed_connection_at<M: Model + Send + 'static>(
             &root,
             Vec::new(),
             SecurityPreset::Default,
-            ApprovalScope::CurrentSession,
+            ApprovalPolicy::Automatic,
             SandboxKind::Native,
         ),
         Vec::new(),
         0,
         Vec::new(),
-        ApprovalController::with_preset(ApprovalMode::Automatic, Default::default()),
+        ApprovalController::with_preset(ApprovalPolicy::Automatic, Default::default()),
     );
     (
         AppServerConnection::new(server).with_runtime_services(
@@ -378,7 +378,7 @@ async fn runtime_mutations_reject_stale_revision_tokens() {
                 expected_revision: crate::action::RuntimeRevision::default(),
                 command: crate::runtime_actor::RuntimeCommand::SetExecution {
                     access: SecurityPreset::Default,
-                    approval: ApprovalScope::PerAction,
+                    policy: ApprovalPolicy::Interactive,
                     reply: first_reply,
                 },
             },
@@ -392,7 +392,7 @@ async fn runtime_mutations_reject_stale_revision_tokens() {
                 expected_revision: crate::action::RuntimeRevision::default(),
                 command: crate::runtime_actor::RuntimeCommand::SetExecution {
                     access: SecurityPreset::FullMachine,
-                    approval: ApprovalScope::CurrentProject,
+                    policy: ApprovalPolicy::Automatic,
                     reply: second_reply,
                 },
             },
@@ -913,7 +913,7 @@ async fn binds_active_goal_workspace_to_approval_controller() {
     )
     .pause_goal()
     .unwrap();
-    let approval = ApprovalController::with_preset(ApprovalMode::Automatic, Default::default());
+    let approval = ApprovalController::with_preset(ApprovalPolicy::Automatic, Default::default());
     let observed_approval = approval.clone();
     let server = crate::tests::server(DoneModel);
     let management = RuntimeManagementService::new(
@@ -923,7 +923,7 @@ async fn binds_active_goal_workspace_to_approval_controller() {
             &root,
             Vec::new(),
             SecurityPreset::Default,
-            ApprovalScope::CurrentSession,
+            ApprovalPolicy::Automatic,
             SandboxKind::Native,
         ),
         Vec::new(),
@@ -1003,14 +1003,18 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
     let root = rpc_root("shell-approval-rpc");
     let broker = ApprovalBroker::new();
     let approval_broker = broker.clone();
-    let approval = ApprovalController::with_policy_and_context_callback(
-        ApprovalMode::Interactive,
+    let approval = ApprovalController::with_policy_and_callback(
+        ApprovalPolicy::Interactive,
         SecurityPolicy::for_preset(SecurityPreset::Default),
         move |request| {
             approval_broker
                 .request_resolution(request)
-                .map(|resolution| {
-                    resolution.outcome == mini_agent_app_server_protocol::ApprovalOutcome::Approved
+                .map(|resolution| mini_agent_protocol::ToolApprovalResolution {
+                    outcome: resolution.outcome,
+                    grant_scope: resolution
+                        .grant_scope
+                        .unwrap_or(mini_agent_protocol::ActionGrantScope::Once),
+                    reason: resolution.reason,
                 })
                 .map_err(mini_agent_protocol::ToolError)
         },
@@ -1080,9 +1084,8 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         serde_json::to_value(ApprovalRespondParams {
             request_id: pending.request_id.clone(),
             decision: mini_agent_app_server_protocol::ApprovalDecision::Approve,
-            access: mini_agent_app_server_protocol::AccessScope::Project,
-            approval: mini_agent_app_server_protocol::ApprovalMode::PerAction,
-            reason: String::new(),
+            grant_scope: Some(mini_agent_app_server_protocol::ActionGrantScope::Once),
+            reason: None,
         })
         .unwrap(),
     )

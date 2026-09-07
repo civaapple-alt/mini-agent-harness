@@ -5,7 +5,7 @@ use crate::observer::print_final_answer;
 use mini_agent_app_server::JsonlTrace;
 use mini_agent_app_server::SessionRequest;
 use mini_agent_app_server::frontend::ApprovalController;
-use mini_agent_app_server::frontend::ApprovalMode;
+use mini_agent_app_server::frontend::ApprovalPolicy;
 use mini_agent_app_server::frontend::EventEnvelope;
 use mini_agent_app_server::frontend::EventSink;
 use mini_agent_app_server::frontend::SandboxKind;
@@ -45,9 +45,9 @@ pub async fn run(
     let tty = io::stdin().is_terminal();
     let mode = if auto_approve || tty {
         print_automatic_approval_warning();
-        ApprovalMode::Automatic
+        ApprovalPolicy::Automatic
     } else {
-        ApprovalMode::Interactive
+        ApprovalPolicy::Interactive
     };
     let launch = match mini_agent_app_server::local::prepare(LocalRuntimeRequest {
         no_tools,

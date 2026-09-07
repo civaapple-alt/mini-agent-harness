@@ -5,10 +5,8 @@ use mini_agent_app_server::RuntimeServices;
 use mini_agent_app_server::StartupServices;
 use mini_agent_app_server::capability_manifest_to_protocol;
 use mini_agent_app_server::serve_stdio_with_startup_and_services;
-use mini_agent_app_server_protocol::CapabilityProviderSelection;
+use mini_agent_app_server_protocol::{AccessScope, ApprovalPolicy, CapabilityProviderSelection};
 use mini_agent_capabilities::ApprovalController;
-use mini_agent_capabilities::ApprovalMode;
-use mini_agent_capabilities::ApprovalScope;
 use mini_agent_capabilities::ApprovalStore;
 use mini_agent_capabilities::OpenedSession;
 use mini_agent_capabilities::SecurityPolicy;
@@ -37,7 +35,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         approval_store.clone(),
         None,
         SecurityPreset::Default,
-        ApprovalScope::PerAction,
+        ApprovalPolicy::Interactive,
+        AccessScope::Project,
     );
     let base_composition = RuntimeComposition::default();
     let startup_config = runtime_config.clone();
@@ -109,7 +108,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ThreadStart::new(thread_id.clone()),
             vec![thread],
             move |thread_id: ThreadId| {
-                let (access, selected_approval) = factory_broker.execution_scope();
+                let (access, policy) = factory_broker.execution_scope();
                 let security = security_preset(access);
                 let approval = approval_for(
                     factory_broker.clone(),
@@ -117,7 +116,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     factory_store.clone(),
                     Some(thread_id.as_str().to_string()),
                     security,
-                    approval_scope(selected_approval),
+                    policy,
+                    access,
                 );
                 let mut thread_composition = factory_composition.clone();
                 thread_composition.security = security;
@@ -203,49 +203,23 @@ fn approval_for(
     store: ApprovalStore,
     session_id: Option<String>,
     security: SecurityPreset,
-    scope: ApprovalScope,
+    policy: ApprovalPolicy,
+    access: AccessScope,
 ) -> ApprovalController {
-    let project_owner = format!(
-        "{}\0{}",
-        runtime_config.project_id(),
-        runtime_config.workspace().display()
-    );
-    let revision = runtime_config.workspace_revision();
-    let session_owner = session_id.clone();
-    let cache_store = store.clone();
-    let approval = ApprovalController::with_policy_and_context_callback(
-        ApprovalMode::Interactive,
+    let approval = ApprovalController::with_policy_and_callback(
+        policy,
         SecurityPolicy::for_preset(security),
         move |request: &ToolApprovalRequest| {
-            let resolution = broker
+            broker
                 .request_resolution(request)
-                .map_err(mini_agent_protocol::ToolError)?;
-            let approved =
-                resolution.outcome == mini_agent_app_server_protocol::ApprovalOutcome::Approved;
-            if approved && let Some(mode) = resolution.approval {
-                match mode {
-                    mini_agent_app_server_protocol::ApprovalMode::CurrentSession => {
-                        if let Some(owner) = &session_owner {
-                            cache_store.remember_approval_for(
-                                ApprovalScope::CurrentSession,
-                                owner,
-                                revision,
-                                &request.action,
-                            );
-                        }
-                    }
-                    mini_agent_app_server_protocol::ApprovalMode::CurrentProject => {
-                        cache_store.remember_approval_for(
-                            ApprovalScope::CurrentProject,
-                            &project_owner,
-                            revision,
-                            &request.action,
-                        );
-                    }
-                    _ => {}
-                }
-            }
-            Ok(approved)
+                .map(|resolution| mini_agent_protocol::ToolApprovalResolution {
+                    outcome: resolution.outcome,
+                    grant_scope: resolution
+                        .grant_scope
+                        .unwrap_or(mini_agent_protocol::ActionGrantScope::Once),
+                    reason: resolution.reason,
+                })
+                .map_err(mini_agent_protocol::ToolError)
         },
     )
     .with_approval_store(store);
@@ -255,7 +229,10 @@ fn approval_for(
         Some(runtime_config.workspace_revision()),
         session_id,
     );
-    approval.set_approval_scope(scope);
+    approval.set_access_scope(match access {
+        AccessScope::Project => "project",
+        AccessScope::FullMachine => "full_machine",
+    });
     approval
 }
 
@@ -263,18 +240,5 @@ fn security_preset(access: mini_agent_app_server_protocol::AccessScope) -> Secur
     match access {
         mini_agent_app_server_protocol::AccessScope::Project => SecurityPreset::Default,
         mini_agent_app_server_protocol::AccessScope::FullMachine => SecurityPreset::FullMachine,
-    }
-}
-
-fn approval_scope(approval: mini_agent_app_server_protocol::ApprovalMode) -> ApprovalScope {
-    match approval {
-        mini_agent_app_server_protocol::ApprovalMode::PerAction => ApprovalScope::PerAction,
-        mini_agent_app_server_protocol::ApprovalMode::CurrentSession => {
-            ApprovalScope::CurrentSession
-        }
-        mini_agent_app_server_protocol::ApprovalMode::CurrentProject => {
-            ApprovalScope::CurrentProject
-        }
-        mini_agent_app_server_protocol::ApprovalMode::Automatic => ApprovalScope::Automatic,
     }
 }

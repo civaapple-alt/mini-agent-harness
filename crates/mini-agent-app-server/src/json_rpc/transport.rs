@@ -163,10 +163,11 @@ where
                             tool_name: request.tool_name,
                             action_class: request.action_class,
                             action_summary: request.action,
+                            action_key: request.action_key,
                             path_scope: approval_path_scope(request.access),
                             access: request.access,
-                            allowed_approval_modes: request.allowed_approval_modes,
-                            high_risk: request.high_risk,
+                            policy: request.policy,
+                            allowed_grant_scopes: request.allowed_grant_scopes,
                         }).expect("approval notification is serializable"),
                     ),
                     ApprovalEvent::Resolved(resolution) => (
@@ -174,7 +175,8 @@ where
                         serde_json::to_value(ApprovalResolvedNotification {
                             request_id: resolution.request_id,
                             outcome: resolution.outcome,
-                            approval: resolution.approval,
+                            grant_scope: resolution.grant_scope,
+                            reason: resolution.reason,
                             project_id: resolution.project_id,
                             workspace_id: resolution.workspace_id,
                             workspace_revision: resolution.workspace_revision,
@@ -185,8 +187,6 @@ where
                             tool_name: resolution.tool_name,
                             action_class: resolution.action_class,
                             action_summary: resolution.action,
-                            path_scope: approval_path_scope(resolution.access),
-                            access: resolution.access,
                         }).expect("approval resolution is serializable"),
                     ),
                 };

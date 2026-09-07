@@ -61,7 +61,8 @@ impl ToolHandler for ApplyPatch {
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let plan = self.prepare(&request.arguments)?;
         Ok(ToolAdmission::ApprovalRequired {
-            action: format!("apply patch to {} file(s)", plan.paths.len()),
+            action: "apply_patch".to_string(),
+            target_paths: plan.paths,
         })
     }
 }

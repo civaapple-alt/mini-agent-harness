@@ -1,6 +1,8 @@
 use mini_agent_app_server_protocol::{
-    AccessScope, ApprovalDecision, ApprovalMode, ApprovalOutcome, ApprovalRespondParams,
+    AccessScope, ActionGrantKey, ActionGrantScope, ApprovalDecision, ApprovalOutcome,
+    ApprovalPolicy, ApprovalRespondParams,
 };
+use mini_agent_capabilities::action_grant_key;
 use mini_agent_core::{RunControl, Thread, ThreadCheckpoint};
 use mini_agent_protocol::{
     EventEnvelope, Model, ThreadId, ThreadStart, ToolApprovalRequest, TurnCancel, TurnId,
@@ -28,7 +30,7 @@ pub struct ApprovalBroker {
 #[derive(Clone, Copy)]
 struct ApprovalExecution {
     access: AccessScope,
-    approval: ApprovalMode,
+    policy: ApprovalPolicy,
 }
 
 struct ApprovalState {
@@ -50,10 +52,10 @@ pub struct ApprovalRequest {
     pub turn_id: Option<TurnId>,
     pub tool_name: Option<String>,
     pub action_class: String,
+    pub action_key: Option<ActionGrantKey>,
     pub access: AccessScope,
-    pub approval: ApprovalMode,
-    pub allowed_approval_modes: Vec<ApprovalMode>,
-    pub high_risk: bool,
+    pub policy: ApprovalPolicy,
+    pub allowed_grant_scopes: Vec<ActionGrantScope>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,9 +71,9 @@ pub struct ApprovalResolution {
     pub turn_id: Option<TurnId>,
     pub tool_name: Option<String>,
     pub action_class: String,
-    pub access: AccessScope,
-    pub approval: Option<ApprovalMode>,
+    pub grant_scope: Option<ActionGrantScope>,
     pub outcome: ApprovalOutcome,
+    pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,18 +112,18 @@ impl ApprovalBroker {
             next_id: Arc::new(AtomicU64::new(1)),
             execution: Arc::new(RwLock::new(ApprovalExecution {
                 access: AccessScope::Project,
-                approval: ApprovalMode::PerAction,
+                policy: ApprovalPolicy::Interactive,
             })),
         }
     }
 
-    pub fn set_execution_scope(&self, access: AccessScope, approval: ApprovalMode) {
-        *self.execution.write().unwrap() = ApprovalExecution { access, approval };
+    pub fn set_execution_scope(&self, access: AccessScope, policy: ApprovalPolicy) {
+        *self.execution.write().unwrap() = ApprovalExecution { access, policy };
     }
 
-    pub fn execution_scope(&self) -> (AccessScope, ApprovalMode) {
+    pub fn execution_scope(&self) -> (AccessScope, ApprovalPolicy) {
         let execution = *self.execution.read().unwrap();
-        (execution.access, execution.approval)
+        (execution.access, execution.policy)
     }
 
     /// Called by a synchronous Host approval callback with tool identity.
@@ -135,6 +137,11 @@ impl ApprovalBroker {
         let request_id = format!("approval-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
         let (sender, receiver) = std::sync::mpsc::channel();
         let execution = *self.execution.read().unwrap();
+        let access_scope = match execution.access {
+            AccessScope::Project => "project",
+            AccessScope::FullMachine => "full_machine",
+        };
+        let action_key = action_grant_key(approval, access_scope);
         let request = ApprovalRequest {
             request_id: request_id.clone(),
             action: approval.action.clone(),
@@ -147,20 +154,20 @@ impl ApprovalBroker {
             turn_id: approval.turn_id.clone(),
             tool_name: approval.tool_name.clone(),
             action_class: approval
-                .action_class
+                .tool_name
                 .clone()
                 .unwrap_or_else(|| "tool_action".to_string()),
+            action_key: action_key.clone(),
             access: execution.access,
-            approval: execution.approval,
-            allowed_approval_modes: vec![
-                ApprovalMode::PerAction,
-                ApprovalMode::CurrentSession,
-                ApprovalMode::CurrentProject,
-            ],
-            high_risk: approval
-                .tool_name
-                .as_deref()
-                .is_some_and(|name| matches!(name, "shell" | "apply_patch")),
+            policy: execution.policy,
+            allowed_grant_scopes: action_key
+                .is_some()
+                .then_some(vec![
+                    ActionGrantScope::Once,
+                    ActionGrantScope::Session,
+                    ActionGrantScope::Project,
+                ])
+                .unwrap_or_else(|| vec![ActionGrantScope::Once]),
         };
         {
             let mut state = self.state.lock().unwrap();
@@ -210,10 +217,14 @@ impl ApprovalBroker {
                 .get(request_id)
                 .map(|(request, _)| request.clone())
                 .ok_or_else(|| format!("unknown approval request: {request_id}"))?;
-            if request.access != response.access
-                || !request.allowed_approval_modes.contains(&response.approval)
+            let grant_scope = response.grant_scope;
+            if response.decision == ApprovalDecision::Approve
+                && !grant_scope.is_some_and(|scope| request.allowed_grant_scopes.contains(&scope))
             {
                 return Err("approval response exceeds the requested scope".to_string());
+            }
+            if response.decision == ApprovalDecision::Deny && grant_scope.is_some() {
+                return Err("denied approval cannot grant a scope".to_string());
             }
             state
                 .responders
@@ -236,9 +247,9 @@ impl ApprovalBroker {
             turn_id: request.turn_id,
             tool_name: request.tool_name,
             action_class: request.action_class,
-            access: response.access,
-            approval: (response.decision == ApprovalDecision::Approve).then_some(response.approval),
+            grant_scope: response.grant_scope,
             outcome,
+            reason: response.reason,
         };
         sender
             .send(resolution.clone())

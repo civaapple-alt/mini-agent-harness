@@ -1,6 +1,6 @@
 use super::*;
-use crate::test_support::{remove_test_root, test_root};
-use mini_agent_protocol::ToolExecutionStatus;
+use crate::test_support::{approval_controller, remove_test_root, test_root};
+use mini_agent_protocol::{ApprovalOutcome, ApprovalPolicy, ToolExecutionStatus};
 
 struct StubFiles(&'static str);
 
@@ -24,7 +24,7 @@ fn workspace(
 fn automatic_workspace(root: PathBuf) -> Arc<Workspace> {
     workspace(
         root,
-        ApprovalController::new(ApprovalMode::Automatic),
+        approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved),
         Vec::new(),
         SandboxKind::Native,
     )
@@ -32,7 +32,7 @@ fn automatic_workspace(root: PathBuf) -> Arc<Workspace> {
 
 #[test]
 fn policy_replacement_uses_full_machine_file_allowance() {
-    let approval = ApprovalController::with_callback(ApprovalMode::Interactive, |_| {
+    let approval = ApprovalController::with_callback(ApprovalPolicy::Interactive, |_| {
         panic!("FullMachine file access should not ask the frontend")
     });
     approval.set_policy(SecurityPolicy::for_preset(SecurityPreset::FullMachine));
@@ -191,7 +191,7 @@ fn apply_patch_denial_is_explicit_and_has_no_effect() {
     fs::write(root.join("note.txt"), "keep\n").unwrap();
     let workspace = workspace(
         root.clone(),
-        ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
+        approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Denied),
         Vec::new(),
         SandboxKind::Native,
     );
@@ -207,7 +207,8 @@ fn apply_patch_denial_is_explicit_and_has_no_effect() {
     assert_eq!(
         patch.admission(&request).unwrap(),
         ToolAdmission::ApprovalRequired {
-            action: "apply patch to 1 file(s)".to_string(),
+            action: "apply_patch".to_string(),
+            target_paths: vec!["note.txt".to_string()],
         }
     );
     let error = patch.execute(&request.arguments).unwrap_err();
@@ -270,7 +271,7 @@ fn read_image_outside_workspace_can_be_denied() {
     let abs = pictures.join("secret.png").canonicalize().unwrap();
     let workspace = workspace(
         root.clone(),
-        ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
+        approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Denied),
         Vec::new(),
         SandboxKind::Native,
     );
@@ -298,7 +299,7 @@ fn shell_denial_is_explicit_before_sandbox_execution() {
     };
     let workspace = workspace(
         root.clone(),
-        ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false)),
+        approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Denied),
         Vec::new(),
         SandboxKind::Docker,
     );
@@ -353,7 +354,7 @@ fn read_file_accepts_configured_extension_roots() {
     let skill = extra.join("SKILL.md").canonicalize().unwrap();
     let workspace = workspace(
         root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
+        approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved),
         vec![extra_root],
         SandboxKind::Native,
     );
@@ -383,7 +384,7 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
     fs::create_dir_all(&plan_dir).unwrap();
     let plan = plan_dir.join("plan.md");
     fs::write(&plan, "# Implementation Plan\n").unwrap();
-    let approval = ApprovalController::new(ApprovalMode::Automatic);
+    let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
     approval.set_living_plan(Some(plan.clone()));
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let read = ReadFile(Arc::clone(&workspace));
@@ -455,7 +456,7 @@ fn plan_mode_admits_only_scripts_in_session_scratch() {
     let plan = session.join("plan").join("plan.md");
     fs::create_dir_all(plan.parent().unwrap().join("scratch")).unwrap();
     fs::write(&plan, "# Plan\n").unwrap();
-    let approval = ApprovalController::new(ApprovalMode::Automatic);
+    let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
     approval.set_living_plan(Some(plan));
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let shell = Shell(Arc::clone(&workspace), ResultStore::default());
@@ -491,7 +492,7 @@ fn plan_mode_allows_read_only_shell_inspection() {
     fs::create_dir_all(&plan_dir).unwrap();
     let plan = plan_dir.join("plan.md");
     fs::write(&plan, "# Plan\n").unwrap();
-    let approval = ApprovalController::new(ApprovalMode::Automatic);
+    let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
     approval.set_living_plan(Some(plan));
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let shell = Shell(Arc::clone(&workspace), ResultStore::default());
@@ -507,6 +508,7 @@ fn plan_mode_allows_read_only_shell_inspection() {
         shell.admission(&request).unwrap(),
         ToolAdmission::ApprovalRequired {
             action: format!("shell command `{command}`"),
+            target_paths: Vec::new(),
         }
     );
     let output = shell.execute(&request.arguments).unwrap();
@@ -538,7 +540,7 @@ fn read_only_shell_subset_rejects_side_effect_flags() {
 #[test]
 fn read_only_agent_rule_locks_workspace_mutations() {
     let root = test_root();
-    let approval = ApprovalController::new(ApprovalMode::Automatic);
+    let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
     approval.set_read_only_agent(true);
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let patch = ApplyPatch(Arc::clone(&workspace));
@@ -567,7 +569,7 @@ fn goal_mode_allows_session_goal_plan_reads_and_workspace_writes() {
         "# Autonomous Goal Plan: Ship HTML intro\n\n## Milestone 1\n",
     )
     .unwrap();
-    let approval = ApprovalController::new(ApprovalMode::Automatic);
+    let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
     approval.set_goal_dir(Some(goal_dir.clone()));
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let read = ReadFile(Arc::clone(&workspace));
@@ -723,7 +725,7 @@ fn full_machine_preset_permits_paths_outside_workspace() {
 
     let default_workspace = workspace(
         root.clone(),
-        ApprovalController::with_preset(ApprovalMode::Automatic, SecurityPreset::Default),
+        ApprovalController::with_preset(ApprovalPolicy::Automatic, SecurityPreset::Default),
         Vec::new(),
         SandboxKind::Native,
     );
@@ -736,7 +738,7 @@ fn full_machine_preset_permits_paths_outside_workspace() {
 
     let full_workspace = workspace(
         root.clone(),
-        ApprovalController::with_preset(ApprovalMode::Automatic, SecurityPreset::FullMachine),
+        ApprovalController::with_preset(ApprovalPolicy::Automatic, SecurityPreset::FullMachine),
         Vec::new(),
         SandboxKind::Native,
     );

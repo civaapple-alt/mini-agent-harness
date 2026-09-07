@@ -6,7 +6,7 @@ impl ToolHandler for Shell {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "shell".to_string(),
-            description: shell_description(self.0.approval.approval_scope()),
+            description: shell_description(self.0.approval.approval_policy()),
             parameters: json!({
                 "type": "object",
                 "properties": { "command": {"type": "string"} },
@@ -21,6 +21,7 @@ impl ToolHandler for Shell {
         self.ensure_allowed(command)?;
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("shell command `{command}`"),
+            target_paths: Vec::new(),
         })
     }
 }
@@ -197,12 +198,10 @@ fn is_read_only_shell_segment(segment: &str) -> bool {
     }
 }
 
-pub(super) fn shell_description(approval: ApprovalScope) -> String {
-    let approval = match approval {
-        ApprovalScope::PerAction => "after per-action user approval",
-        ApprovalScope::CurrentSession => "after the first user approval in this Session",
-        ApprovalScope::CurrentProject => "after the first user approval in this Project",
-        ApprovalScope::Automatic => "automatically in autonomous mode",
+pub(super) fn shell_description(policy: mini_agent_protocol::ApprovalPolicy) -> String {
+    let approval = match policy {
+        mini_agent_protocol::ApprovalPolicy::Interactive => "after user approval when required",
+        mini_agent_protocol::ApprovalPolicy::Automatic => "automatically for low-risk actions",
     };
     if cfg!(windows) {
         format!(

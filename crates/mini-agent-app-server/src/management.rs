@@ -11,8 +11,8 @@ use crate::worker::Command;
 use crate::{AppServer, AppServerError, McpRetryResult, RuntimeSessionInfo, RuntimeTurnResult};
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
 use mini_agent_capabilities::{
-    ApprovalController, ApprovalScope, McpServerConfig, OpenedSession, SecurityPreset, SessionItem,
-    TurnCommit,
+    ApprovalController, ApprovalPolicy, McpServerConfig, OpenedSession, SecurityPreset,
+    SessionItem, TurnCommit,
 };
 use mini_agent_core::ThreadCheckpoint;
 use mini_agent_host::WorldState;
@@ -230,12 +230,12 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     pub(crate) async fn set_execution_action(
         &self,
         access: SecurityPreset,
-        approval: ApprovalScope,
+        policy: ApprovalPolicy,
     ) -> Result<ActionResponse<bool>, ActionFailure> {
         self.client
             .request_action(|reply| RuntimeCommand::SetExecution {
                 access,
-                approval,
+                policy,
                 reply,
             })
             .await

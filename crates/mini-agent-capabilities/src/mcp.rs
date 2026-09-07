@@ -156,6 +156,7 @@ impl ToolHandler for McpTool {
             .ok_or_else(|| ToolError("MCP tool arguments must be a JSON object".to_string()))?;
         Ok(ToolAdmission::ApprovalRequired {
             action: self.action(),
+            target_paths: Vec::new(),
         })
     }
 }

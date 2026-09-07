@@ -5,9 +5,8 @@ mod shell;
 
 use crate::result_store::ResultStore;
 use crate::sandbox::{ProcessSandbox, SandboxKind};
-pub use crate::security::ApprovalScope;
 use crate::security::{SecurityDecision, SecurityPolicy, SecurityPreset};
-pub use approval::{ApprovalController, ApprovalMode};
+pub use approval::ApprovalController;
 #[cfg(test)]
 use files::{ReadFile, ReadImage};
 use mini_agent_protocol::{

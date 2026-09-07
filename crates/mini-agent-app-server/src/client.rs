@@ -425,28 +425,20 @@ where
     pub async fn set_world_execution(
         &mut self,
         access: impl Into<String>,
-        approval: impl Into<String>,
+        policy: impl Into<String>,
     ) -> Result<WorldSetExecutionResult, JsonRpcError> {
         self.call(
             METHOD_WORLD_SET_EXECUTION,
             WorldSetExecutionParams {
                 access: match access.into().as_str() {
                     "project" => mini_agent_app_server_protocol::AccessScope::Project,
-                    "full_machine" | "full-machine" => {
-                        mini_agent_app_server_protocol::AccessScope::FullMachine
-                    }
+                    "full_machine" => mini_agent_app_server_protocol::AccessScope::FullMachine,
                     _ => return Err(JsonRpcError::invalid_params("unknown access scope")),
                 },
-                approval: match approval.into().as_str() {
-                    "per_action" => mini_agent_app_server_protocol::ApprovalMode::PerAction,
-                    "current_session" => {
-                        mini_agent_app_server_protocol::ApprovalMode::CurrentSession
-                    }
-                    "current_project" => {
-                        mini_agent_app_server_protocol::ApprovalMode::CurrentProject
-                    }
-                    "automatic" | "auto" => mini_agent_app_server_protocol::ApprovalMode::Automatic,
-                    _ => return Err(JsonRpcError::invalid_params("unknown approval mode")),
+                policy: match policy.into().as_str() {
+                    "interactive" => mini_agent_app_server_protocol::ApprovalPolicy::Interactive,
+                    "automatic" => mini_agent_app_server_protocol::ApprovalPolicy::Automatic,
+                    _ => return Err(JsonRpcError::invalid_params("unknown approval policy")),
                 },
             },
         )

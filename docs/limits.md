@@ -43,7 +43,8 @@ Core keeps an internal runaway-loop guard and may compact context when the
 runtime composition allows it. `max_steps` and `step_limit` are not Web Studio
 controls or Goal progress semantics. Goal's long-running behavior is owned by
 the Goal Runtime; its Auto Copilot composition is `Goal + Full access
-(machine-wide) + current-project approval`. Before a normal sampling request,
+(machine-wide) + automatic policy`, while each grant is still bounded by its
+action key and selected scope. Before a normal sampling request,
 settled history at or above half of the 1 MiB ceiling
 is compacted. The newest context item and a bounded recent tail stay verbatim:
 the last two model-step groups (each an assistant message plus its following
@@ -101,7 +102,7 @@ Host tools add their own effect-side bounds before results reach core:
 | MCP connection / tool call | 20 seconds default (120 seconds max) / 120 seconds |
 | serialized MCP result | 64 KiB before the core 16 KiB projection |
 | HTTP MCP circuit breaker | 3 consecutive failures | 30s cooldown before probe |
-| cached scoped approvals (`ApprovalStore`) | 1024 entries | bounded by scope/owner/revision; overflow requires a new approval |
+| cached action grants (`ApprovalStore`) | 1024 entries | bounded by scope/owner/action key/revision; overflow requires a new approval |
 | repetitive tool-call loop threshold | 2 consecutive identical batches | injects advisory guidance warning |
 
 Shell streams are drained concurrently with a hard capture limit, so a noisy
@@ -110,7 +111,8 @@ Large completed results are retained in the process-local result store and
 projected to the model as a bounded preview. On foreground timeout the host
 terminates the shell process tree. Shell execution is still not an isolation
 boundary. Sensitive tools require the typed approval path when policy returns
-`Ask`; a runtime access scope never becomes a global allow-all switch. `FullMachine`
+`Ask`; Automatic only bypasses clearly low-risk Ask actions, and a runtime
+access scope never becomes a global allow-all switch. `FullMachine`
 widens file path scope but does not override hard Deny, Plan locks, unavailable
 tools, or shell confirmation.
 

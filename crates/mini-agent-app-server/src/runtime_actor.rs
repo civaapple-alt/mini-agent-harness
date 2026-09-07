@@ -87,7 +87,7 @@ pub(super) fn handle<M>(
                     current.workspace(),
                     current.extra_roots().to_vec(),
                     current.access(),
-                    current.approval(),
+                    current.policy(),
                     current.sandbox(),
                 );
                 update_world(threads, state, refreshed).map(|changed| (changed, changed))
@@ -96,7 +96,7 @@ pub(super) fn handle<M>(
         }
         RuntimeCommand::SetExecution {
             access,
-            approval,
+            policy,
             reply,
         } => {
             let result = mutate(runtime, runtime_revision, |state| {
@@ -104,11 +104,12 @@ pub(super) fn handle<M>(
                 state
                     .approval
                     .set_policy(SecurityPolicy::for_preset(access));
-                state.approval.set_approval_scope(approval);
+                state.approval.set_approval_policy(policy);
+                state.approval.set_access_scope(access.name());
                 update_world(
                     threads,
                     state,
-                    current.with_execution(access, approval, current.sandbox()),
+                    current.with_execution(access, policy, current.sandbox()),
                 )
                 .map(|changed| (changed, changed))
             });

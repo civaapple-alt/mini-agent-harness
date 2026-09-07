@@ -74,29 +74,15 @@ where
                 mini_agent_capabilities::SecurityPreset::FullMachine
             }
         };
-        let approval = match params.approval {
-            mini_agent_app_server_protocol::ApprovalMode::PerAction => {
-                mini_agent_capabilities::ApprovalScope::PerAction
-            }
-            mini_agent_app_server_protocol::ApprovalMode::CurrentSession => {
-                mini_agent_capabilities::ApprovalScope::CurrentSession
-            }
-            mini_agent_app_server_protocol::ApprovalMode::CurrentProject => {
-                mini_agent_capabilities::ApprovalScope::CurrentProject
-            }
-            mini_agent_app_server_protocol::ApprovalMode::Automatic => {
-                mini_agent_capabilities::ApprovalScope::Automatic
-            }
-        };
         let management = match self.management_service() {
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
-        match management.set_execution_action(access, approval).await {
+        match management.set_execution_action(access, params.policy).await {
             Ok(response) => {
                 let changed = response.value;
                 self.approval
-                    .set_execution_scope(params.access, params.approval);
+                    .set_execution_scope(params.access, params.policy);
                 match world_state_value(management).await {
                     Ok(state) => response_action_with(
                         request.id,

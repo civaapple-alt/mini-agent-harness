@@ -616,7 +616,7 @@ fn run_recovers_from_unknown_tool_on_public_path() {
 }
 
 #[test]
-fn run_completes_bounded_cross_file_refactor_on_public_path() {
+fn run_keeps_high_risk_patch_gated_on_public_path() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (requests_tx, requests_rx) = mpsc::channel();
@@ -643,7 +643,7 @@ fn run_completes_bounded_cross_file_refactor_on_public_path() {
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
         requests_tx.send(read_request_body(&mut stream)).unwrap();
-        write_sse_response(&mut stream, "refactored both files");
+        write_sse_response(&mut stream, "patch requires explicit approval");
     });
     let root = test_root();
     fs::create_dir(root.join("src")).unwrap();
@@ -679,9 +679,9 @@ fn run_completes_bounded_cross_file_refactor_on_public_path() {
     fs::remove_dir_all(root).unwrap();
 
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
-    assert_eq!(response["output"], "refactored both files");
-    assert_eq!(first, "use renamed_name here\n");
-    assert_eq!(second, "also uses renamed_name\n");
+    assert_eq!(response["output"], "patch requires explicit approval");
+    assert_eq!(first, "use shared_name here\n");
+    assert_eq!(second, "also uses shared_name\n");
     let combined_reads = String::from_utf8_lossy(&requests[2]);
     assert!(combined_reads.contains("use shared_name here"));
     assert!(combined_reads.contains("also uses shared_name"));
@@ -752,7 +752,7 @@ fn repl_is_fail_closed_for_non_interactive_tool_approval() {
         requests[0]["tools"][2]["description"]
             .as_str()
             .unwrap()
-            .contains("after per-action user approval")
+            .contains("after user approval when required")
     );
     fs::remove_dir_all(root).unwrap();
 }

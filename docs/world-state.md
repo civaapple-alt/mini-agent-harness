@@ -11,9 +11,9 @@ discovered commands. It inspects only the current workspace and `PATH` and
 records:
 
 - operating system, architecture, workspace, and the actual host shell;
-- current access (`project` or `full_machine`), approval lifetime
-  (`per_action`, `current_session`, or `current_project`), and the selected
-  native or Docker process sandbox;
+- current access (`project` or `full_machine`), execution policy
+  (`interactive` or `automatic`), and the selected native or Docker process
+  sandbox;
 - root project markers for Rust, Maven/Gradle Java, Go, Python, Node, and .NET;
 - availability of a fixed catalog of common navigation, VCS, build, runtime,
   and package-manager commands;
@@ -31,7 +31,9 @@ App Server clients can inspect it with `world/state` and refresh it with
 `world/refresh`; the core REPL does not duplicate this management dashboard.
 
 Execution changes are also append-only. `world/set_execution` updates access and
-approval and appends an authoritative full world snapshot. `/plan` and `/goal`
+policy and appends an authoritative full world snapshot. Grant lifetime is
+selected per approval response and is owned by Host/Capabilities, not World
+state. `/plan` and `/goal`
 are Thread-owned App Server workflows; they do not create a second world-state
 loop. The current CLI has no `/new` command: a new CLI Thread receives a fresh
 snapshot, while a resumed Session restores the snapshot from its settled

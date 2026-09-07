@@ -1,3 +1,50 @@
+pub use mini_agent_protocol::ActionGrantScope;
+use mini_agent_protocol::{ActionGrantKey, ToolApprovalRequest};
+
+pub fn action_grant_key(
+    request: &ToolApprovalRequest,
+    access_scope: &str,
+) -> Option<ActionGrantKey> {
+    let action_class = request.tool_name.as_deref()?.trim();
+    let normalized_action = request.action.trim().replace('\\', "/");
+    let workspace_id = request.workspace_id.as_deref()?.trim();
+    let access_scope = access_scope.trim();
+    let workspace_revision = request.workspace_revision?;
+    if action_class.is_empty()
+        || normalized_action.is_empty()
+        || workspace_id.is_empty()
+        || access_scope.is_empty()
+    {
+        return None;
+    }
+    let mut target_paths = request
+        .target_paths
+        .iter()
+        .filter_map(|path| {
+            let path = path.trim().replace('\\', "/");
+            (!path.is_empty()).then_some(path)
+        })
+        .collect::<Vec<_>>();
+    target_paths.sort();
+    target_paths.dedup();
+    Some(ActionGrantKey {
+        action_class: action_class.to_string(),
+        normalized_action,
+        target_paths,
+        access_scope: access_scope.to_string(),
+        workspace_id: workspace_id.to_string(),
+        workspace_revision,
+    })
+}
+
+pub(crate) fn is_high_risk(request: &ToolApprovalRequest) -> bool {
+    !request.tool_name.as_deref().is_some_and(|class| {
+        matches!(
+            class.trim().to_ascii_lowercase().as_str(),
+            "read_file" | "read_image" | "file_read" | "web_fetch"
+        )
+    })
+}
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -44,20 +91,11 @@ pub enum SecurityDecision {
 
 const MAX_CACHED_APPROVALS: usize = 1024;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ApprovalScope {
-    PerAction,
-    CurrentSession,
-    CurrentProject,
-    Automatic,
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct ApprovalGrant {
-    scope: ApprovalScope,
+    scope: ActionGrantScope,
     owner: String,
-    workspace_revision: u64,
-    action: String,
+    key: ActionGrantKey,
 }
 
 #[derive(Clone, Default)]
@@ -68,29 +106,16 @@ impl ApprovalStore {
         Self(Arc::new(Mutex::new(HashSet::new())))
     }
 
-    pub fn is_approved_for(
-        &self,
-        scope: ApprovalScope,
-        owner: &str,
-        workspace_revision: u64,
-        action: &str,
-    ) -> bool {
+    pub fn contains(&self, scope: ActionGrantScope, owner: &str, key: &ActionGrantKey) -> bool {
         let store = self.0.lock().unwrap();
         store.contains(&ApprovalGrant {
             scope,
             owner: owner.to_string(),
-            workspace_revision,
-            action: action.to_string(),
+            key: key.clone(),
         })
     }
 
-    pub fn remember_approval_for(
-        &self,
-        scope: ApprovalScope,
-        owner: &str,
-        workspace_revision: u64,
-        action: &str,
-    ) {
+    pub fn insert(&self, scope: ActionGrantScope, owner: &str, key: &ActionGrantKey) {
         let mut store = self.0.lock().unwrap();
         if store.len() >= MAX_CACHED_APPROVALS {
             return;
@@ -98,8 +123,7 @@ impl ApprovalStore {
         store.insert(ApprovalGrant {
             scope,
             owner: owner.to_string(),
-            workspace_revision,
-            action: action.to_string(),
+            key: key.clone(),
         });
     }
 }
@@ -321,29 +345,25 @@ mod tests {
     #[test]
     fn scoped_approvals_require_an_exact_owner_and_workspace_revision() {
         let store = ApprovalStore::new();
-        store.remember_approval_for(
-            ApprovalScope::CurrentProject,
+        let request = ToolApprovalRequest {
+            action: "shell command `cargo test`".to_string(),
+            tool_name: Some("shell".to_string()),
+            target_paths: vec!["src\\lib.rs".to_string(), "src/lib.rs".to_string()],
+            workspace_id: Some("workspace-1".to_string()),
+            workspace_revision: Some(3),
+            ..ToolApprovalRequest::default()
+        };
+        let key = action_grant_key(&request, "project").unwrap();
+        assert_eq!(key.target_paths, vec!["src/lib.rs"]);
+        store.insert(ActionGrantScope::Project, "project-1/workspace-1", &key);
+        assert!(store.contains(ActionGrantScope::Project, "project-1/workspace-1", &key));
+        assert!(!store.contains(ActionGrantScope::Project, "project-2/workspace-1", &key));
+        let mut next_revision = key.clone();
+        next_revision.workspace_revision = 4;
+        assert!(!store.contains(
+            ActionGrantScope::Project,
             "project-1/workspace-1",
-            3,
-            "shell command `cargo test`",
-        );
-        assert!(store.is_approved_for(
-            ApprovalScope::CurrentProject,
-            "project-1/workspace-1",
-            3,
-            "shell command `cargo test`"
-        ));
-        assert!(!store.is_approved_for(
-            ApprovalScope::CurrentProject,
-            "project-2/workspace-1",
-            3,
-            "shell command `cargo test`"
-        ));
-        assert!(!store.is_approved_for(
-            ApprovalScope::CurrentProject,
-            "project-1/workspace-1",
-            4,
-            "shell command `cargo test`"
+            &next_revision
         ));
     }
 

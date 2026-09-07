@@ -76,6 +76,7 @@ impl ToolHandler for ReadImage {
         }
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("read_image {}", path.display()),
+            target_paths: vec![path.display().to_string()],
         })
     }
 }

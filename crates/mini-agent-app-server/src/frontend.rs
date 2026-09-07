@@ -10,7 +10,7 @@ pub use mini_agent_app_server_protocol::CollaborationModeKind;
 pub use mini_agent_app_server_protocol::ThreadSettingsUpdateResult;
 pub use mini_agent_capabilities::ApprovalController;
 pub use mini_agent_capabilities::ApprovalController as CapabilityApprovalController;
-pub use mini_agent_capabilities::ApprovalMode;
+pub use mini_agent_capabilities::ApprovalPolicy;
 pub use mini_agent_capabilities::SandboxKind;
 pub use mini_agent_capabilities::SecurityPolicy;
 pub use mini_agent_capabilities::SecurityPreset;

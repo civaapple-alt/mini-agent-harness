@@ -243,7 +243,7 @@ where
         &workspace,
         extra_roots,
         composition.security,
-        approval.approval_scope(),
+        approval.approval_policy(),
         composition.sandbox,
     );
     let world_context = world.model_context()?;

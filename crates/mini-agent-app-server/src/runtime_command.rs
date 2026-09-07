@@ -2,7 +2,7 @@ use crate::AppServerError;
 use crate::action::RuntimeRevision;
 use crate::action::{ActionFailure, ActionResponse, ActionResult};
 use crate::worker::Command;
-use mini_agent_capabilities::{ApprovalController, ApprovalScope, SecurityPreset};
+use mini_agent_capabilities::{ApprovalController, ApprovalPolicy, SecurityPreset};
 use mini_agent_core::ThreadCheckpoint;
 use mini_agent_protocol::ThreadId;
 use std::sync::Arc;
@@ -35,7 +35,7 @@ pub(super) enum RuntimeCommand {
     },
     SetExecution {
         access: SecurityPreset,
-        approval: ApprovalScope,
+        policy: ApprovalPolicy,
         reply: oneshot::Sender<ActionResult<bool>>,
     },
     UpdateThread {

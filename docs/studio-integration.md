@@ -20,7 +20,7 @@ Python SDK (mini-agent-web/sdk/python)
     │ stdio JSON-RPC 2.0, protocol version 1
     ▼
 mini-agent-app-server
-    │ Thread / Turn / Goal / Item / approval control
+    │ Thread / Turn / Goal / Item / policy control
     ▼
 Host → Capabilities → Core
 ```
@@ -32,14 +32,14 @@ Host → Capabilities → Core
 | Thread, Turn, Goal, ThreadItem, ordering, CAS/revision, wire protocol | App Server | Use the SDK; do not create another execution loop. |
 | Session history and settled checkpoints | App Server/SessionStore | Read the canonical projection; do not write a Web copy. |
 | Project list, names, source folders, UI preferences | Web Gateway | Persist only the derived Project/UI manifest. |
-| Current-project approval grants | Web/App Server runtime memory | Broadcast requests and submit typed responses; never restore grants from UI state. |
+| Action grants | Host/Capabilities runtime memory | Broadcast pending requests and submit typed responses; never create or restore grants from UI state. |
 
 The Web Gateway's `~/.mini-agent/web/state.json` is Project/UI metadata. The
 canonical conversation data remains under
 `~/.mini-agent/sessions/<encoded-primary-workspace>/<session-id>/`, including
 the settled checkpoint, `session.jsonl`, Goal state, Plan state, and item
 projection. A gateway restart may lose live process handles and in-memory
-approval grants, but it must not create or merge a second conversation history.
+pending approval state, but it must not create or merge a second conversation history.
 
 ## Configuration ownership
 
@@ -88,21 +88,22 @@ The relevant Gateway operations are:
 | --- | --- |
 | `GET /api/projects` | List the Project registry and current Project. |
 | `POST /api/projects/new` | Create a Project with `name`, optional `path`, and `source_folders`. |
-| `PATCH /api/projects/{project_id}` | Change Project metadata, access, approval, or source folders. |
+| `PATCH /api/projects/{project_id}` | Change Project metadata, access, policy, or source folders. |
 | `POST /api/projects/switch` | Select the active Project by ID or path. |
 | `DELETE /api/projects/{project_id}` | Remove a Project from the Gateway registry; it does not delete the directory. |
 | `POST /api/projects/{project_id}/pin` | Change sidebar pin state. |
 
 Each Project mutation that changes the active workspace causes the Gateway to
 rebind the Host/App Server process. This clears pending approvals and the
-process-local current-project grant cache. A workspace revision therefore
-changes when the primary or associated root set changes, and old approvals
-must not be reused for the new binding.
+process-local Host/Capabilities grant store. A workspace revision therefore
+changes when the primary or associated root set changes, and old grants must
+not be reused for the new binding.
 
 `project` and `full_machine` are access scopes. `full_machine` expands the
 candidate path range but is not allow-all: Deny, Plan locks, unavailable tools,
-and high-risk confirmation remain effective. `per_action`, `current_session`,
-and `current_project` are approval reuse lifetimes, not access scopes.
+and high-risk confirmation remain effective. `interactive` and `automatic` are
+execution policies; `once`, `session`, and `project` are action-grant scopes
+selected in an approval response and validated by Host/Capabilities.
 
 ## Session history and switching
 
@@ -186,11 +187,12 @@ Host/App Server → SDK approval callback
 ```
 
 The Gateway also exposes `GET /api/approval/pending`,
-`GET /api/world/approval`, and `POST /api/world/approval/revoke`. A
-`current_project` grant is retained only in process memory and is keyed by
-Project, access, workspace identity/revision, path scope, and action summary.
-Project changes, runtime restart, policy changes, or explicit revocation clear
-it. `state.json` must never be treated as an approval store.
+`GET /api/world/approval`, and `POST /api/world/approval/revoke`. The Gateway
+retains only pending/UI state; Host/Capabilities owns the process-local grant
+store and matches a complete action key (class, normalized action, target
+paths, access, workspace, and revision). Project changes, runtime restart,
+policy changes, or explicit revocation clear it. `state.json` must never be
+treated as an approval store.
 
 ## Startup and verification
 
@@ -224,8 +226,8 @@ For an end-to-end check, verify the following sequence in one report:
 2. start a Thread and confirm `MINI_AGENT_*` root bindings in the App Server
    approval request/world state;
 3. submit a turn and observe `turn/event`, Item lifecycle, and settlement;
-4. trigger approval, resolve it once, reuse it only under
-   `current_project`, then revoke it;
+4. trigger approval, resolve it with `once`, `session`, or `project`, reuse it
+   only under the matching complete action key, then revoke it;
 5. pause or stop the Session, list it from the canonical catalog, and attach it
    again without creating a second writer;
 6. switch Project or roots and confirm old approvals are not reused.

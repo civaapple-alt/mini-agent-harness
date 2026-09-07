@@ -1,6 +1,9 @@
 //! REPL worker lifecycle and turn execution.
 
 use super::*;
+use mini_agent_protocol::{
+    ActionGrantScope, ApprovalOutcome, ToolApprovalRequest, ToolApprovalResolution,
+};
 
 #[path = "repl_worker/prompt.rs"]
 mod prompt;
@@ -123,16 +126,25 @@ fn send_event(events: &mpsc::SyncSender<ReplEvent>, event: ReplEvent) {
 
 pub(super) fn request_approval(
     events: &mpsc::SyncSender<ReplEvent>,
-    action: &str,
-) -> Result<bool, ToolError> {
+    request: &ToolApprovalRequest,
+) -> Result<ToolApprovalResolution, ToolError> {
     let (response_tx, response_rx) = mpsc::sync_channel(1);
     events
         .send(ReplEvent::Approval {
-            action: action.to_string(),
+            action: request.action.clone(),
             response: response_tx,
         })
         .map_err(|_| ToolError("approval UI is unavailable".to_string()))?;
-    response_rx
+    let approved = response_rx
         .recv()
-        .map_err(|_| ToolError("approval UI closed".to_string()))
+        .map_err(|_| ToolError("approval UI closed".to_string()))?;
+    Ok(ToolApprovalResolution {
+        outcome: if approved {
+            ApprovalOutcome::Approved
+        } else {
+            ApprovalOutcome::Denied
+        },
+        grant_scope: ActionGrantScope::Once,
+        reason: (!approved).then(|| "user denied the action".to_string()),
+    })
 }

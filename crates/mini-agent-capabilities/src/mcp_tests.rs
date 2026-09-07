@@ -1,7 +1,8 @@
 use super::*;
-use crate::test_support::{python_command, remove_test_root, test_root};
-use crate::workspace::ApprovalMode;
-use mini_agent_protocol::ToolExecutionStatus;
+use crate::test_support::{approval_controller, python_command, remove_test_root, test_root};
+use mini_agent_protocol::{
+    ApprovalOutcome, ApprovalPolicy, ToolApprovalResolution, ToolExecutionStatus,
+};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
@@ -35,7 +36,17 @@ fn loads_and_calls_stdio_server_through_rmcp() {
         },
     };
 
-    let approval = ApprovalController::with_callback(ApprovalMode::Automatic, |_| Ok(false));
+    let should_approve = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let approval_decision = std::sync::Arc::clone(&should_approve);
+    let approval = ApprovalController::with_callback(ApprovalPolicy::Automatic, move |_| {
+        Ok(ToolApprovalResolution::once(
+            if approval_decision.load(std::sync::atomic::Ordering::Relaxed) {
+                ApprovalOutcome::Approved
+            } else {
+                ApprovalOutcome::Denied
+            },
+        ))
+    });
     let mut loaded = load(&[config], approval.clone());
 
     assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
@@ -56,7 +67,8 @@ fn loads_and_calls_stdio_server_through_rmcp() {
     let timed_out = tool.execute_outcome(&json!({"text": "slow"}));
     assert_eq!(timed_out.status, ToolExecutionStatus::Failed);
     assert_eq!(timed_out.content, "MCP tool call timed out");
-    approval.set_mode(ApprovalMode::Interactive);
+    should_approve.store(false, std::sync::atomic::Ordering::Relaxed);
+    approval.set_approval_policy(ApprovalPolicy::Interactive);
     let denied = tool.execute_outcome(&json!({"text": "blocked"}));
     assert_eq!(denied.status, ToolExecutionStatus::Failed);
     assert_eq!(
@@ -93,7 +105,10 @@ fn loads_and_calls_streamable_http_server_with_expanded_headers() {
         },
     };
 
-    let mut loaded = load(&[config], ApprovalController::new(ApprovalMode::Automatic));
+    let mut loaded = load(
+        &[config],
+        approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved),
+    );
 
     assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
     assert_eq!(loaded.tools.len(), 1);
@@ -137,7 +152,7 @@ fn approval_denial_prevents_server_start_and_data_creation() {
             cwd: None,
         },
     };
-    let approval = ApprovalController::with_callback(ApprovalMode::Interactive, |_| Ok(false));
+    let approval = approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Denied);
 
     let loaded = load(&[config], approval);
 
