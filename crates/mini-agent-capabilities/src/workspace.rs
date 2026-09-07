@@ -4,52 +4,33 @@ mod patch;
 mod shell;
 
 use crate::result_store::ResultStore;
-use crate::sandbox::ProcessSandbox;
-use crate::sandbox::SandboxKind;
+use crate::sandbox::{ProcessSandbox, SandboxKind};
 pub use crate::security::ApprovalScope;
-use crate::security::SecurityDecision;
-use crate::security::SecurityPolicy;
-use crate::security::SecurityPreset;
+use crate::security::{SecurityDecision, SecurityPolicy, SecurityPreset};
 pub use approval::{ApprovalController, ApprovalMode};
 #[cfg(test)]
 use files::{ReadFile, ReadImage};
-use mini_agent_protocol::Tool;
-use mini_agent_protocol::ToolAdmission;
-use mini_agent_protocol::ToolError;
-use mini_agent_protocol::ToolExecutionOutcome;
-use mini_agent_protocol::ToolExecutionRequest;
-use mini_agent_protocol::ToolHandler;
-use mini_agent_protocol::ToolRuntime;
-use mini_agent_protocol::ToolSpec;
+use mini_agent_protocol::{
+    Tool, ToolAdmission, ToolError, ToolExecutionOutcome, ToolExecutionRequest, ToolHandler,
+    ToolRuntime, ToolSpec,
+};
 #[cfg(test)]
 use patch::ApplyPatch;
-use serde_json::Value;
-use serde_json::json;
+use serde_json::{Value, json};
 #[cfg(test)]
 use shell::{Shell, is_read_only_shell_command, run_shell};
 #[cfg(test)]
 #[path = "workspace_tests.rs"]
 mod tests;
 use std::collections::VecDeque;
-use std::fs;
-use std::fs::File;
-use std::io;
-use std::io::IsTerminal;
-use std::io::Read;
-use std::io::Write;
-use std::path::Component;
-use std::path::Path;
-use std::path::PathBuf;
-use std::process::Command;
-use std::process::Stdio;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::RwLock;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
+use std::fs::{self, File};
+use std::io::{self, IsTerminal, Read, Write};
+use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const MAX_READ_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
 const DEFAULT_READ_LINES: usize = 200;

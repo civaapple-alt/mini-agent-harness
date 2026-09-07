@@ -1,24 +1,15 @@
 use mini_agent_core::SessionState;
 use mini_agent_protocol::Message;
-use serde_json::Value;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::env;
-use std::fs;
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::Seek;
-use std::io::SeekFrom;
-use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "session/storage.rs"]
 mod storage;

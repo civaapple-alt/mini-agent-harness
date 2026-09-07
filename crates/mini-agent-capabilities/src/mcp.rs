@@ -1,36 +1,23 @@
-use crate::skills::McpServerConfig;
-use crate::skills::McpTransportConfig;
+use crate::skills::{McpServerConfig, McpTransportConfig};
 use crate::workspace::ApprovalController;
-use http::HeaderName;
-use http::HeaderValue;
-use mini_agent_protocol::Tool;
-use mini_agent_protocol::ToolAdmission;
-use mini_agent_protocol::ToolError;
-use mini_agent_protocol::ToolExecutionOutcome;
-use mini_agent_protocol::ToolExecutionRequest;
-use mini_agent_protocol::ToolHandler;
-use mini_agent_protocol::ToolRuntime;
-use mini_agent_protocol::ToolSpec;
-use rmcp::ClientLifecycleMode;
-use rmcp::ClientServiceExt;
-use rmcp::model::CallToolRequestParams;
-use rmcp::model::PaginatedRequestParams;
-use rmcp::transport::StreamableHttpClientTransport;
-use rmcp::transport::TokioChildProcess;
-use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
-use rmcp::transport::which_command;
+use http::{HeaderName, HeaderValue};
+use mini_agent_protocol::{
+    Tool, ToolAdmission, ToolError, ToolExecutionOutcome, ToolExecutionRequest, ToolHandler,
+    ToolRuntime, ToolSpec,
+};
+use rmcp::model::{CallToolRequestParams, PaginatedRequestParams};
+use rmcp::transport::{
+    StreamableHttpClientTransport, TokioChildProcess,
+    streamable_http_client::StreamableHttpClientTransportConfig, which_command,
+};
+use rmcp::{ClientLifecycleMode, ClientServiceExt};
 use serde_json::Value;
-use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::path::Component;
-use std::path::Path;
-use std::path::PathBuf;
+use std::collections::{BTreeSet, HashMap};
+use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-use tokio::process::Command;
-use tokio::sync::mpsc as tokio_mpsc;
-use tokio::time::timeout;
+use tokio::{process::Command, sync::mpsc as tokio_mpsc, time::timeout};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(not(test))]
