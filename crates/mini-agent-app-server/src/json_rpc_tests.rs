@@ -87,6 +87,15 @@ async fn rpc_result<M: Model + Send + 'static>(
         .unwrap()
 }
 
+async fn rpc_call<M: Model + Send + 'static>(
+    connection: &mut AppServerConnection<M>,
+    id: u64,
+    method: &str,
+    params: Value,
+) -> Value {
+    rpc_result(connection, JsonRpcRequest::request(id, method, params)).await
+}
+
 async fn start_turn<M: Model + Send + 'static>(
     connection: &mut AppServerConnection<M>,
     id: u64,
@@ -339,9 +348,11 @@ async fn exposes_session_world_and_mcp_management() {
         true
     );
 
-    let result = rpc_result(
+    let result = rpc_call(
         &mut connection,
-        JsonRpcRequest::request(2, METHOD_SESSION_INFO, serde_json::json!({})),
+        2,
+        METHOD_SESSION_INFO,
+        serde_json::json!({}),
     )
     .await;
     assert!(result["value"].is_null());
@@ -352,9 +363,11 @@ async fn exposes_session_world_and_mcp_management() {
     assert_eq!(result["actionSequence"], 1);
     assert_eq!(result["stateRevision"], 0);
 
-    let result = rpc_result(
+    let result = rpc_call(
         &mut connection,
-        JsonRpcRequest::request(3, METHOD_WORLD_STATE, serde_json::json!({})),
+        3,
+        METHOD_WORLD_STATE,
+        serde_json::json!({}),
     )
     .await;
     assert_eq!(result["value"]["workspace"], root.display().to_string());
@@ -362,11 +375,7 @@ async fn exposes_session_world_and_mcp_management() {
     assert_eq!(result["actionSequence"], 2);
     assert_eq!(result["stateRevision"], 0);
 
-    let result = rpc_result(
-        &mut connection,
-        JsonRpcRequest::request(4, METHOD_MCP_STATUS, serde_json::json!({})),
-    )
-    .await;
+    let result = rpc_call(&mut connection, 4, METHOD_MCP_STATUS, serde_json::json!({})).await;
     assert_eq!(result["value"]["toolCount"], 0);
     assert_eq!(result["actionId"], 3);
     assert_eq!(result["actionSequence"], 3);
@@ -477,19 +486,18 @@ async fn broadcasts_thread_settings_updates_with_action_revision() {
     let (mut connection, root) = managed_connection("thread-settings-notification");
     initialize_connection(&mut connection, "thread-settings-test").await;
 
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_THREAD_SETTINGS_UPDATE,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "collaborationMode": {"mode": "plan"},
-                "builtinTools": ["shell", "read_file"]
-            }),
-        ))
-        .await
-        .unwrap();
-    let response_revision = response.result.unwrap()["stateRevision"].clone();
+    let response = rpc_call(
+        &mut connection,
+        2,
+        METHOD_THREAD_SETTINGS_UPDATE,
+        serde_json::json!({
+            "threadId": "thread-1",
+            "collaborationMode": {"mode": "plan"},
+            "builtinTools": ["shell", "read_file"]
+        }),
+    )
+    .await;
+    let response_revision = response["stateRevision"].clone();
 
     let notification = loop {
         let notification = connection.next_notification().await.unwrap();
@@ -512,17 +520,16 @@ async fn broadcasts_thread_settings_updates_with_action_revision() {
 async fn preserves_cross_stream_notification_order() {
     let (mut connection, root) = managed_connection("cross-stream-order");
     initialize_connection(&mut connection, "cross-stream-test").await;
-    connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_THREAD_SETTINGS_UPDATE,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "collaborationMode": {"mode": "plan"}
-            }),
-        ))
-        .await
-        .unwrap();
+    let _ = rpc_call(
+        &mut connection,
+        2,
+        METHOD_THREAD_SETTINGS_UPDATE,
+        serde_json::json!({
+            "threadId": "thread-1",
+            "collaborationMode": {"mode": "plan"}
+        }),
+    )
+    .await;
     let _ = set_goal(
         &mut connection,
         3,
@@ -593,28 +600,24 @@ async fn lists_bounded_thread_items_with_cursor_projection() {
     let _ = start_turn(&mut connection, 2, "hello").await;
     wait_for_turn_finished(&mut connection).await;
 
-    let first = rpc_result(
+    let first = rpc_call(
         &mut connection,
-        JsonRpcRequest::request(
-            3,
-            mini_agent_app_server_protocol::METHOD_THREAD_ITEMS_LIST,
-            serde_json::json!({"threadId": "thread-1", "limit": 1}),
-        ),
+        3,
+        mini_agent_app_server_protocol::METHOD_THREAD_ITEMS_LIST,
+        serde_json::json!({"threadId": "thread-1", "limit": 1}),
     )
     .await;
     assert_eq!(first["value"]["data"].as_array().unwrap().len(), 1);
     let cursor = first["value"]["nextCursor"].as_str().unwrap().to_string();
-    let second = rpc_result(
+    let second = rpc_call(
         &mut connection,
-        JsonRpcRequest::request(
-            4,
-            mini_agent_app_server_protocol::METHOD_THREAD_ITEMS_LIST,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "cursor": cursor,
-                "limit": 1
-            }),
-        ),
+        4,
+        mini_agent_app_server_protocol::METHOD_THREAD_ITEMS_LIST,
+        serde_json::json!({
+            "threadId": "thread-1",
+            "cursor": cursor,
+            "limit": 1
+        }),
     )
     .await;
     assert_eq!(second["value"]["data"].as_array().unwrap().len(), 1);
@@ -630,13 +633,11 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     let (mut connection, root) = managed_connection("thread-goal-rpc");
     initialize_connection(&mut connection, "thread-goal-test").await;
 
-    let result = rpc_result(
+    let result = rpc_call(
         &mut connection,
-        JsonRpcRequest::request(
-            2,
-            METHOD_THREAD_GOAL_GET,
-            serde_json::json!({"threadId": "thread-1"}),
-        ),
+        2,
+        METHOD_THREAD_GOAL_GET,
+        serde_json::json!({"threadId": "thread-1"}),
     )
     .await;
     assert!(result["value"]["goal"].is_null());
@@ -691,13 +692,11 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     );
     wait_for_goal_status(&mut connection, "blocked").await;
 
-    let result = rpc_result(
+    let result = rpc_call(
         &mut connection,
-        JsonRpcRequest::request(
-            5,
-            METHOD_THREAD_GOAL_CLEAR,
-            serde_json::json!({"threadId": "thread-1"}),
-        ),
+        5,
+        METHOD_THREAD_GOAL_CLEAR,
+        serde_json::json!({"threadId": "thread-1"}),
     )
     .await;
     assert_eq!(result["value"]["cleared"], true);
@@ -708,13 +707,11 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
         }
     }
 
-    let result = rpc_result(
+    let result = rpc_call(
         &mut connection,
-        JsonRpcRequest::request(
-            6,
-            METHOD_THREAD_GOAL_GET,
-            serde_json::json!({"threadId": "thread-1"}),
-        ),
+        6,
+        METHOD_THREAD_GOAL_GET,
+        serde_json::json!({"threadId": "thread-1"}),
     )
     .await;
     assert!(result["value"]["goal"].is_null());
@@ -1094,22 +1091,21 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         Some(mini_agent_protocol::TurnId::new("turn-1"))
     );
 
-    let approval_response = connection
-        .handle_request(JsonRpcRequest::request(
-            3,
-            METHOD_APPROVAL_RESPOND,
-            serde_json::to_value(ApprovalRespondParams {
-                request_id: pending.request_id.clone(),
-                decision: mini_agent_app_server_protocol::ApprovalDecision::Approve,
-                access: mini_agent_app_server_protocol::AccessScope::Project,
-                approval: mini_agent_app_server_protocol::ApprovalMode::PerAction,
-                reason: String::new(),
-            })
-            .unwrap(),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(approval_response.result.unwrap()["accepted"], true);
+    let approval_response = rpc_call(
+        &mut connection,
+        3,
+        METHOD_APPROVAL_RESPOND,
+        serde_json::to_value(ApprovalRespondParams {
+            request_id: pending.request_id.clone(),
+            decision: mini_agent_app_server_protocol::ApprovalDecision::Approve,
+            access: mini_agent_app_server_protocol::AccessScope::Project,
+            approval: mini_agent_app_server_protocol::ApprovalMode::PerAction,
+            reason: String::new(),
+        })
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(approval_response["accepted"], true);
 
     let resolution = tokio::time::timeout(Duration::from_secs(3), broker.next_event())
         .await
@@ -1238,29 +1234,27 @@ async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
     let turn_id: mini_agent_protocol::TurnId =
         serde_json::from_value(started["value"]["turn_id"].clone()).unwrap();
     wait_for_turn_finished(&mut connection).await;
-    let turn = connection
-        .handle_request(JsonRpcRequest::request(
-            3,
-            METHOD_TURN_READ,
-            serde_json::json!(TurnReadParams {
-                turn_id: turn_id.clone(),
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(turn.result.unwrap()["value"]["finalText"], "done");
+    let turn = rpc_call(
+        &mut connection,
+        3,
+        METHOD_TURN_READ,
+        serde_json::json!(TurnReadParams {
+            turn_id: turn_id.clone(),
+        }),
+    )
+    .await;
+    assert_eq!(turn["value"]["finalText"], "done");
 
-    let thread = connection
-        .handle_request(JsonRpcRequest::request(
-            4,
-            METHOD_THREAD_READ,
-            serde_json::json!(ThreadReadParams {
-                thread_id: ThreadId::new("thread-1"),
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(thread.result.unwrap()["value"]["status"], "idle");
+    let thread = rpc_call(
+        &mut connection,
+        4,
+        METHOD_THREAD_READ,
+        serde_json::json!(ThreadReadParams {
+            thread_id: ThreadId::new("thread-1"),
+        }),
+    )
+    .await;
+    assert_eq!(thread["value"]["status"], "idle");
 }
 
 #[tokio::test]
@@ -1275,46 +1269,41 @@ async fn exposes_factory_backed_thread_lifecycle_methods() {
     let _ = connection
         .handle_request(initialize_request(1, "lifecycle-test"))
         .await;
-    let created = connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_THREAD_START,
-            serde_json::json!(ThreadStartParams {
-                thread_id: Some(ThreadId::new("thread-2")),
-            }),
-        ))
-        .await
-        .unwrap();
-    let result = created.result.unwrap();
+    let result = rpc_call(
+        &mut connection,
+        2,
+        METHOD_THREAD_START,
+        serde_json::json!(ThreadStartParams {
+            thread_id: Some(ThreadId::new("thread-2")),
+        }),
+    )
+    .await;
     assert_eq!(result["value"]["threadId"], "thread-2");
     assert_eq!(result["actionId"], 1);
     assert_eq!(result["actionSequence"], 1);
     assert_eq!(result["stateRevision"], 0);
-    let forked = connection
-        .handle_request(JsonRpcRequest::request(
-            3,
-            METHOD_THREAD_FORK,
-            serde_json::json!(ThreadForkParams {
-                source_thread_id: ThreadId::new("thread-1"),
-                new_thread_id: ThreadId::new("thread-3"),
-            }),
-        ))
-        .await
-        .unwrap();
-    let result = forked.result.unwrap();
+    let result = rpc_call(
+        &mut connection,
+        3,
+        METHOD_THREAD_FORK,
+        serde_json::json!(ThreadForkParams {
+            source_thread_id: ThreadId::new("thread-1"),
+            new_thread_id: ThreadId::new("thread-3"),
+        }),
+    )
+    .await;
     assert_eq!(result["value"]["threadId"], "thread-3");
     assert_eq!(result["actionId"], 2);
     assert_eq!(result["actionSequence"], 2);
     assert_eq!(result["stateRevision"], 0);
-    let listed = connection
-        .handle_request(JsonRpcRequest::request(
-            4,
-            METHOD_THREAD_LIST,
-            serde_json::json!(ThreadListParams::default()),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(listed.result.unwrap()["data"].as_array().unwrap().len(), 3);
+    let listed = rpc_call(
+        &mut connection,
+        4,
+        METHOD_THREAD_LIST,
+        serde_json::json!(ThreadListParams::default()),
+    )
+    .await;
+    assert_eq!(listed["data"].as_array().unwrap().len(), 3);
 }
 
 #[tokio::test]
