@@ -308,10 +308,11 @@ pub(super) async fn worker_loop<M>(
                                 Err(error) => {
                                     let reason =
                                         format!("cannot load Goal execution limits: {error}");
-                                    let _ = runtime_actor::goal_turn_failed(
+                                    let _ = runtime_actor::goal_turn_limited(
                                         &mut runtime,
                                         goal_id,
                                         &turn_id,
+                                        mini_agent_host::GoalStatus::Failed,
                                         &reason,
                                     );
                                     break;
@@ -540,10 +541,11 @@ pub(super) async fn worker_loop<M>(
                                     },
                                 );
                             } else {
-                                let _ = runtime_actor::goal_turn_failed(
+                                let _ = runtime_actor::goal_turn_limited(
                                     &mut runtime,
                                     &goal_id,
                                     &turn_id,
+                                    mini_agent_host::GoalStatus::Failed,
                                     "goal turn did not complete successfully",
                                 );
                             }

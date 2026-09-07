@@ -486,21 +486,6 @@ pub(super) fn goal_turn_settled(
     }
 }
 
-pub(super) fn goal_turn_failed(
-    runtime: &mut Option<RuntimeActorState>,
-    goal_id: &str,
-    turn_id: &mini_agent_protocol::TurnId,
-    reason: &str,
-) -> Result<bool, AppServerError> {
-    goal_turn_limited(
-        runtime,
-        goal_id,
-        turn_id,
-        mini_agent_host::GoalStatus::Failed,
-        reason,
-    )
-}
-
 pub(super) fn goal_turn_limited(
     runtime: &mut Option<RuntimeActorState>,
     goal_id: &str,
@@ -590,7 +575,13 @@ where
         Ok(request) => Ok(request),
         Err(error) => {
             let reason = format!("goal verifier preparation failed: {error}");
-            goal_turn_failed(runtime, goal_id, turn_id, &reason)?;
+            goal_turn_limited(
+                runtime,
+                goal_id,
+                turn_id,
+                mini_agent_host::GoalStatus::Failed,
+                &reason,
+            )?;
             Ok(None)
         }
     }
