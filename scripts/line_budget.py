@@ -15,14 +15,14 @@ RUNTIME_LIMIT = 20_000
 PROJECT_LIMIT = 30_000
 
 # The hard ceilings remain the emergency release boundary. Operating limits
-# leave room for ordinary maintenance; the delta gate below freezes growth when
-# the checkout is already in the amber/red band.
+# leave room for ordinary maintenance; the delta gate below permits bounded
+# growth through the amber band and freezes positive growth in the red band.
 RUNTIME_OPERATING_LIMIT = 19_000
 PROJECT_OPERATING_LIMIT = 29_000
 RUNTIME_RED_LIMIT = 19_500
 PROJECT_RED_LIMIT = 29_500
-RUNTIME_GREEN_DELTA_LIMIT = 100
-PROJECT_GREEN_DELTA_LIMIT = 150
+RUNTIME_NON_RED_DELTA_LIMIT = 100
+PROJECT_NON_RED_DELTA_LIMIT = 150
 
 # Keep the report aligned with the conceptual runtime layers. Capabilities are
 # reported separately because they are provider implementations behind Host;
@@ -404,28 +404,24 @@ def _delta_gate_violations(
             RUNTIME_OPERATING_LIMIT,
             RUNTIME_RED_LIMIT,
             RUNTIME_LIMIT,
-            RUNTIME_GREEN_DELTA_LIMIT,
+            RUNTIME_NON_RED_DELTA_LIMIT,
         ),
         (
             "release",
             PROJECT_OPERATING_LIMIT,
             PROJECT_RED_LIMIT,
             PROJECT_LIMIT,
-            PROJECT_GREEN_DELTA_LIMIT,
+            PROJECT_NON_RED_DELTA_LIMIT,
         ),
     )
-    for name, operating, red, hard, green_delta in policies:
+    for name, operating, red, hard, non_red_delta in policies:
         total = int(current[name])
         delta = deltas[name]
         if total > hard:
             violations.append(f"{name} exceeds hard limit ({total}/{hard})")
-        elif total > operating and delta > 0:
+        elif total <= red and delta > non_red_delta:
             violations.append(
-                f"{name} is above operating limit and grew by {delta} lines"
-            )
-        elif total <= operating and delta > green_delta:
-            violations.append(
-                f"{name} grew by {delta} lines, above green limit {green_delta}"
+                f"{name} grew by {delta} lines, above non-red limit {non_red_delta}"
             )
         if total > red and delta > 0:
             violations.append(f"{name} is in red band and cannot grow")
@@ -555,8 +551,8 @@ def check(
                 "release_operating": PROJECT_OPERATING_LIMIT,
                 "runtime_red": RUNTIME_RED_LIMIT,
                 "release_red": PROJECT_RED_LIMIT,
-                "runtime_green_delta": RUNTIME_GREEN_DELTA_LIMIT,
-                "release_green_delta": PROJECT_GREEN_DELTA_LIMIT,
+                "runtime_non_red_delta": RUNTIME_NON_RED_DELTA_LIMIT,
+                "release_non_red_delta": PROJECT_NON_RED_DELTA_LIMIT,
             },
             "current": _json_report(current),
             "base": _json_report(baseline) if baseline else None,

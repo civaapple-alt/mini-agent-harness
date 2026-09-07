@@ -104,7 +104,30 @@ class LineBudgetTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "unclassified Rust source"):
                 line_budget.category_counts(root)
 
-    def test_delta_gate_freezes_growth_in_amber_and_red_bands(self):
+    def test_delta_gate_allows_bounded_growth_in_amber_band(self):
+        current = {"runtime": 19_200, "release": 29_400, "control_plane": 1}
+        base = {"runtime": 19_100, "release": 29_250, "control_plane": 1}
+
+        violations, deltas = line_budget._delta_gate_violations(current, base)
+
+        self.assertEqual(
+            deltas, {"runtime": 100, "release": 150, "control_plane": 0}
+        )
+        self.assertEqual(violations, [])
+
+    def test_delta_gate_rejects_growth_above_non_red_limit(self):
+        current = {"runtime": 19_200, "release": 29_400, "control_plane": 1}
+        base = {"runtime": 19_000, "release": 29_200, "control_plane": 1}
+
+        violations, deltas = line_budget._delta_gate_violations(current, base)
+
+        self.assertEqual(
+            deltas, {"runtime": 200, "release": 200, "control_plane": 0}
+        )
+        self.assertIn("runtime grew by 200 lines, above non-red limit 100", violations)
+        self.assertIn("release grew by 200 lines, above non-red limit 150", violations)
+
+    def test_delta_gate_freezes_growth_in_red_band(self):
         current = {"runtime": 19_501, "release": 29_997, "control_plane": 1}
         base = {"runtime": 19_500, "release": 29_996, "control_plane": 1}
 

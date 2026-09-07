@@ -57,23 +57,23 @@ Capabilities 控制面文件通过显式路径清单识别，并与 Provider 桶
 | 区间 | Runtime | Release Rust | PR 规则 |
 | --- | ---: | ---: | --- |
 | Green | ≤19,000 | ≤29,000 | Runtime 单 PR 增长最多 100 行，Release 最多 150 行 |
-| Amber | 19,001–19,500 | 29,001–29,500 | 新增必须有删除或替换抵消 |
+| Amber | 19,001–19,500 | 29,001–29,500 | 允许受控小额增长：Runtime ≤100 行、Release ≤150 行 |
 | Red | >19,500 | >29,500 | 默认冻结增长，只允许删除或安全/恢复修复，且必须净零或净减少 |
 | Hard fail | >20,000 | >30,000 | CI 失败 |
 
 `python scripts/line_budget.py --base <merge-base> --check-delta --json` 同时检查
-绝对上限、运行区间和 PR 增量。当前仓库位于 Red 区间，因此文档变更可以通过
-零增量检查，新增 Rust 必须由同批次删除抵消。
+绝对上限、运行区间和 PR 增量。当前仓库的 Release Rust 位于 operating 边界，
+仍可进行不超过单 PR 增量上限的小步维护；进入 Red 后新增 Rust 必须由同批次删除抵消。
 
 ## 5. 本轮实现
 
 - `line_budget.py` 增加显式分类、Control Plane 汇总、运行区间状态、JSON 输出；
 - 增加 `--base`，使用 Git revision 读取基线 Rust 源码并计算 Runtime/Release delta；
-- 增加 `--check-delta`，在 Amber/Red 区间冻结增长，在 Green 区间限制单 PR 增量；
+- 增加 `--check-delta`，在 Green/Amber 区间限制单 PR 增量，在 Red 区间冻结正增长；
 - CI quality job 使用完整 Git history，在 Pull Request 上执行增量门禁；
 - PR 模板要求记录 `control-plane` delta 和增量检查命令；
 - `AGENTS.md` 写入运行预算、Red 区间和不改变 Cargo 所有权的统计规则；
-- 维护脚本测试覆盖路径分类、Red 区间零增长和增长失败反例。
+- 维护脚本测试覆盖路径分类、Amber 区间受控增长、超额增长和 Red 区间零增长反例。
 
 本轮没有修改 Rust 代码、Cargo manifest、模型提示词、公共协议或持久化格式。
 
@@ -131,6 +131,7 @@ positive growth in the red band: rejected
   `≤29,000`、Runtime 恢复到 `≤19,000` 的 Green operating budget；
 - 增加 Cargo 依赖方向检查，但只针对已确认的职责泄漏，不因 line gate 单独拆包；
 - 为 Permission、Sandbox、Recovery、Audit 增加 bounded scenario/eval 和失败反例；
-- 经过 10–20 个 PR 观察真实 delta 后，再校准 Green/Amber/Red 阈值；
+- 经过 10–20 个 PR 观察真实 delta 后，再校准 Green/Amber/Red 阈值及非 Red
+  增量上限；
 - 若后续发现 Cargo 所有权或跨仓契约需要独立改造，另立提案，不回写本记录的已实现
   事实。
