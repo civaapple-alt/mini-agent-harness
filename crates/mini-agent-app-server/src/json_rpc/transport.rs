@@ -163,14 +163,7 @@ where
                             tool_name: request.tool_name,
                             action_class: request.action_class,
                             action_summary: request.action,
-                            path_scope: mini_agent_app_server_protocol::ApprovalPathScope {
-                                kind: if request.access == mini_agent_app_server_protocol::AccessScope::FullMachine {
-                                    mini_agent_app_server_protocol::ApprovalPathKind::Machine
-                                } else {
-                                    mini_agent_app_server_protocol::ApprovalPathKind::Project
-                                },
-                                paths: Vec::new(),
-                            },
+                            path_scope: approval_path_scope(request.access),
                             access: request.access,
                             allowed_approval_modes: request.allowed_approval_modes,
                             high_risk: request.high_risk,
@@ -192,14 +185,7 @@ where
                             tool_name: resolution.tool_name,
                             action_class: resolution.action_class,
                             action_summary: resolution.action,
-                            path_scope: mini_agent_app_server_protocol::ApprovalPathScope {
-                                kind: if resolution.access == mini_agent_app_server_protocol::AccessScope::FullMachine {
-                                    mini_agent_app_server_protocol::ApprovalPathKind::Machine
-                                } else {
-                                    mini_agent_app_server_protocol::ApprovalPathKind::Project
-                                },
-                                paths: Vec::new(),
-                            },
+                            path_scope: approval_path_scope(resolution.access),
                             access: resolution.access,
                         }).expect("approval resolution is serializable"),
                     ),
@@ -224,6 +210,19 @@ where
         }
     }
     Ok(())
+}
+
+fn approval_path_scope(
+    access: mini_agent_app_server_protocol::AccessScope,
+) -> mini_agent_app_server_protocol::ApprovalPathScope {
+    mini_agent_app_server_protocol::ApprovalPathScope {
+        kind: if access == mini_agent_app_server_protocol::AccessScope::FullMachine {
+            mini_agent_app_server_protocol::ApprovalPathKind::Machine
+        } else {
+            mini_agent_app_server_protocol::ApprovalPathKind::Project
+        },
+        paths: Vec::new(),
+    }
 }
 
 pub(super) async fn next_event_notification(

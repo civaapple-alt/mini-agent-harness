@@ -210,14 +210,9 @@ impl HostWorkflowStore {
         goal_id: &str,
         turn_id: &str,
     ) -> io::Result<Option<GoalState>> {
-        update_goal_state(&self.session_dir, |state| {
-            if state.goal_id != goal_id || state.status != GoalStatus::Running {
-                return Ok(None);
-            }
+        update_running_goal(&self.session_dir, goal_id, None, |state| {
             state.active_turn_id = Some(turn_id.to_string());
             state.active_turn_settled = false;
-            state.updated_at_ms = current_time_ms();
-            Ok(Some(state.clone()))
         })
     }
 
@@ -226,16 +221,8 @@ impl HostWorkflowStore {
         goal_id: &str,
         turn_id: &str,
     ) -> io::Result<Option<GoalState>> {
-        update_goal_state(&self.session_dir, |state| {
-            if state.goal_id != goal_id
-                || state.status != GoalStatus::Running
-                || state.active_turn_id.as_deref() != Some(turn_id)
-            {
-                return Ok(None);
-            }
+        update_running_goal(&self.session_dir, goal_id, Some(turn_id), |state| {
             state.active_turn_settled = true;
-            state.updated_at_ms = current_time_ms();
-            Ok(Some(state.clone()))
         })
     }
 
@@ -269,13 +256,7 @@ impl HostWorkflowStore {
         turn_id: &str,
         tokens: u64,
     ) -> io::Result<Option<GoalState>> {
-        update_goal_state(&self.session_dir, |state| {
-            if state.goal_id != goal_id
-                || state.status != GoalStatus::Running
-                || state.active_turn_id.as_deref() != Some(turn_id)
-            {
-                return Ok(None);
-            }
+        update_running_goal(&self.session_dir, goal_id, Some(turn_id), |state| {
             state.tokens_used = state
                 .tokens_used
                 .saturating_add(i64::try_from(tokens).unwrap_or(i64::MAX));
@@ -286,8 +267,6 @@ impl HostWorkflowStore {
                 state.status = GoalStatus::BudgetLimited;
                 state.last_error = Some("goal token budget exhausted".to_string());
             }
-            state.updated_at_ms = current_time_ms();
-            Ok(Some(state.clone()))
         })
     }
 
@@ -298,17 +277,9 @@ impl HostWorkflowStore {
         status: GoalStatus,
         reason: &str,
     ) -> io::Result<Option<GoalState>> {
-        update_goal_state(&self.session_dir, |state| {
-            if state.goal_id != goal_id
-                || state.status != GoalStatus::Running
-                || state.active_turn_id.as_deref() != Some(turn_id)
-            {
-                return Ok(None);
-            }
+        update_running_goal(&self.session_dir, goal_id, Some(turn_id), |state| {
             state.status = status;
             state.last_error = Some(reason.to_string());
-            state.updated_at_ms = current_time_ms();
-            Ok(Some(state.clone()))
         })
     }
 }
@@ -641,6 +612,28 @@ where
         write_goal_state(session_dir, state)?;
     }
     Ok(updated)
+}
+
+fn update_running_goal<F>(
+    session_dir: &Path,
+    goal_id: &str,
+    turn_id: Option<&str>,
+    update: F,
+) -> io::Result<Option<GoalState>>
+where
+    F: FnOnce(&mut GoalState),
+{
+    update_goal_state(session_dir, |state| {
+        if state.goal_id != goal_id
+            || state.status != GoalStatus::Running
+            || turn_id.is_some_and(|turn_id| state.active_turn_id.as_deref() != Some(turn_id))
+        {
+            return Ok(None);
+        }
+        update(state);
+        state.updated_at_ms = current_time_ms();
+        Ok(Some(state.clone()))
+    })
 }
 
 pub fn clear_goal(session_dir: &Path) -> io::Result<bool> {
