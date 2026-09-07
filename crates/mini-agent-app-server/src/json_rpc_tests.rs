@@ -87,6 +87,38 @@ async fn rpc_result<M: Model + Send + 'static>(
         .unwrap()
 }
 
+async fn start_turn<M: Model + Send + 'static>(
+    connection: &mut AppServerConnection<M>,
+    id: u64,
+    prompt: &str,
+) -> Value {
+    rpc_result(connection, turn_start_request(id, prompt)).await
+}
+
+async fn next_turn_event<M: Model + Send + 'static>(
+    connection: &mut AppServerConnection<M>,
+) -> TurnEventNotification {
+    loop {
+        let notification = connection.next_notification().await.unwrap();
+        if notification.method == METHOD_TURN_EVENT {
+            return serde_json::from_value(notification.params.unwrap()).unwrap();
+        }
+    }
+}
+
+async fn wait_for_turn_finished<M: Model + Send + 'static>(
+    connection: &mut AppServerConnection<M>,
+) {
+    loop {
+        if matches!(
+            next_turn_event(connection).await.event,
+            mini_agent_protocol::Event::TurnFinished { .. }
+        ) {
+            break;
+        }
+    }
+}
+
 fn rpc_root(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!(
         "mini-agent-{name}-{}-{}",
@@ -383,12 +415,7 @@ async fn requires_initialize_and_handles_turn_start() {
     );
     assert!(connection.initialized());
 
-    let response = connection
-        .handle_request(turn_start_request(3, "hello"))
-        .await
-        .unwrap();
-    assert!(response.error.is_none());
-    let result = response.result.unwrap();
+    let result = start_turn(&mut connection, 3, "hello").await;
     assert_eq!(result["value"]["status"], "started");
     assert_eq!(result["actionId"], 1);
     assert_eq!(result["actionSequence"], 1);
@@ -501,10 +528,7 @@ async fn emits_thread_item_lifecycle_notifications_on_the_ordered_stream() {
         initialized["capabilities"]["itemLifecycleNotifications"],
         true
     );
-    connection
-        .handle_request(turn_start_request(2, "hello"))
-        .await
-        .unwrap();
+    let _ = start_turn(&mut connection, 2, "hello").await;
 
     let mut methods = Vec::new();
     loop {
@@ -536,20 +560,8 @@ async fn emits_thread_item_lifecycle_notifications_on_the_ordered_stream() {
 async fn lists_bounded_thread_items_with_cursor_projection() {
     let (mut connection, root) = managed_connection("thread-items-list");
     initialize_connection(&mut connection, "thread-items-list-test").await;
-    connection
-        .handle_request(turn_start_request(2, "hello"))
-        .await
-        .unwrap();
-    loop {
-        let notification = connection.next_notification().await.unwrap();
-        if notification.method == METHOD_TURN_EVENT {
-            let event: TurnEventNotification =
-                serde_json::from_value(notification.params.unwrap()).unwrap();
-            if matches!(event.event, mini_agent_protocol::Event::TurnFinished { .. }) {
-                break;
-            }
-        }
-    }
+    let _ = start_turn(&mut connection, 2, "hello").await;
+    wait_for_turn_finished(&mut connection).await;
 
     let first = rpc_result(
         &mut connection,
@@ -784,16 +796,7 @@ async fn exposes_goal_pause_and_resume_through_thread_protocol() {
     assert_eq!(paused["value"]["goal"]["status"], "paused");
 
     release.notify_one();
-    loop {
-        let notification =
-            tokio::time::timeout(Duration::from_secs(3), connection.next_notification())
-                .await
-                .expect("paused Goal turn should settle")
-                .unwrap();
-        if notification.method == METHOD_TURN_EVENT {
-            break;
-        }
-    }
+    let _ = next_turn_event(&mut connection).await;
 
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -1088,11 +1091,8 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         true
     );
 
-    let turn_response = connection
-        .handle_request(turn_start_request(2, "run shell"))
-        .await
-        .unwrap();
-    assert_eq!(turn_response.result.unwrap()["value"]["turn_id"], "turn-1");
+    let turn_response = start_turn(&mut connection, 2, "run shell").await;
+    assert_eq!(turn_response["value"]["turn_id"], "turn-1");
 
     let pending = tokio::time::timeout(Duration::from_secs(3), broker.next_request())
         .await
@@ -1147,10 +1147,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
 
     let mut tool_finished_seen = false;
     loop {
-        let notification = connection.next_notification().await.unwrap();
-        assert_eq!(notification.method, METHOD_TURN_EVENT);
-        let params = notification.params.unwrap();
-        let notification: TurnEventNotification = serde_json::from_value(params).unwrap();
+        let notification = next_turn_event(&mut connection).await;
         assert_eq!(
             notification.turn_id,
             Some(mini_agent_protocol::TurnId::new("turn-1"))
@@ -1227,15 +1224,10 @@ async fn local_and_json_rpc_clients_preserve_the_same_event_trace() {
         .handle_request(initialize_request(1, "json-rpc-trace"))
         .await
         .unwrap();
-    json_rpc
-        .handle_request(turn_start_request(2, "hello"))
-        .await
-        .unwrap();
+    let _ = start_turn(&mut json_rpc, 2, "hello").await;
     let mut json_events = Vec::new();
     loop {
-        let notification = json_rpc.next_notification().await.unwrap();
-        let params = notification.params.unwrap();
-        let event: TurnEventNotification = serde_json::from_value(params).unwrap();
+        let event = next_turn_event(&mut json_rpc).await;
         let envelope =
             EventEnvelope::new(event.thread_id, event.turn_id, event.sequence, event.event);
         let finished = matches!(
@@ -1257,15 +1249,10 @@ async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
     let _ = connection
         .handle_request(initialize_request(1, "checkpoint-test"))
         .await;
-    let started = connection
-        .handle_request(turn_start_request(2, "hello"))
-        .await
-        .unwrap();
+    let started = start_turn(&mut connection, 2, "hello").await;
     let turn_id: mini_agent_protocol::TurnId =
-        serde_json::from_value(started.result.unwrap()["value"]["turn_id"].clone()).unwrap();
-    for _ in 0..6 {
-        let _ = connection.next_notification().await.unwrap();
-    }
+        serde_json::from_value(started["value"]["turn_id"].clone()).unwrap();
+    wait_for_turn_finished(&mut connection).await;
     let turn = connection
         .handle_request(JsonRpcRequest::request(
             3,
