@@ -57,12 +57,7 @@ impl<M: Model + 'static> ThreadManager<M> {
         if self.contains(thread_id.as_str()) {
             return Err(AppServerError::ThreadAlreadyExists(thread_id));
         }
-        let factory = self
-            .factory
-            .as_ref()
-            .ok_or(AppServerError::ThreadFactoryUnavailable)?;
-        let mut thread = factory.create(thread_id.clone())?;
-        thread.set_id(thread_id.clone());
+        let thread = self.create_thread(thread_id.clone())?;
         self.insert(thread);
         self.thread_ids.lock().unwrap().push(thread_id.clone());
         Ok(thread_id)
@@ -81,11 +76,7 @@ impl<M: Model + 'static> ThreadManager<M> {
             .ok_or_else(|| AppServerError::ThreadNotFound(source_thread_id.clone()))?
             .checkpoint()
             .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-        let factory = self
-            .factory
-            .as_ref()
-            .ok_or(AppServerError::ThreadFactoryUnavailable)?;
-        let mut fork = factory.create(new_thread_id.clone())?;
+        let mut fork = self.create_thread(new_thread_id.clone())?;
         let mut checkpoint = checkpoint;
         checkpoint.thread_id = new_thread_id.clone();
         fork.restore_checkpoint(checkpoint)
@@ -107,17 +98,23 @@ impl<M: Model + 'static> ThreadManager<M> {
                 .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
             return Ok(thread_id);
         }
-        let factory = self
-            .factory
-            .as_ref()
-            .ok_or(AppServerError::ThreadFactoryUnavailable)?;
-        let mut thread = factory.create(thread_id.clone())?;
+        let mut thread = self.create_thread(thread_id.clone())?;
         thread
             .restore_checkpoint(checkpoint)
             .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
         self.insert(thread);
         self.thread_ids.lock().unwrap().push(thread_id.clone());
         Ok(thread_id)
+    }
+
+    fn create_thread(&self, thread_id: ThreadId) -> Result<Thread<M>, AppServerError> {
+        let factory = self
+            .factory
+            .as_ref()
+            .ok_or(AppServerError::ThreadFactoryUnavailable)?;
+        let mut thread = factory.create(thread_id.clone())?;
+        thread.set_id(thread_id);
+        Ok(thread)
     }
 
     pub(super) fn rename(
