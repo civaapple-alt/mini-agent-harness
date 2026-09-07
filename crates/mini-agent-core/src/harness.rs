@@ -101,6 +101,12 @@ pub struct Harness<M> {
     session: SessionState,
 }
 
+enum ControlAction {
+    Proceed,
+    ContinueTurn,
+    Finish(RunOutcome),
+}
+
 impl<M: Model> Harness<M> {
     pub fn new(model: M, tools: ToolRouter, config: HarnessConfig) -> Self {
         Self {
@@ -307,32 +313,10 @@ impl<M: Model> Harness<M> {
         let mut last_tool_batch: Option<Vec<(String, serde_json::Value, String)>> = None;
 
         loop {
-            if control.take_cancel_requested() {
-                return Ok(finish(
-                    final_text,
-                    self.session.messages().to_vec(),
-                    step,
-                    StopReason::Cancelled,
-                    observer,
-                ));
-            }
-            if steering_mode == SteeringMode::ContinueSameTurn
-                && let Some(input) = control.take_steer_input()
-            {
-                if let Err(limit) = self.append_user_input(input.text) {
-                    return Err(fail_limit(limit, observer));
-                }
-                final_text.clear();
-                continue;
-            }
-            if control.is_steer_requested() {
-                return Ok(finish(
-                    final_text,
-                    self.session.messages().to_vec(),
-                    step,
-                    StopReason::Steered,
-                    observer,
-                ));
+            match self.control_action(&mut final_text, step, control, steering_mode, observer)? {
+                ControlAction::Proceed => {}
+                ControlAction::ContinueTurn => continue,
+                ControlAction::Finish(outcome) => return Ok(outcome),
             }
             step = step.saturating_add(1);
             if step > self.config.max_steps {
@@ -417,33 +401,10 @@ impl<M: Model> Harness<M> {
                 tool_calls: response.tool_calls.clone(),
             });
 
-            if control.take_cancel_requested() {
-                return Ok(finish(
-                    final_text,
-                    self.session.messages().to_vec(),
-                    step,
-                    StopReason::Cancelled,
-                    observer,
-                ));
-            }
-
-            if steering_mode == SteeringMode::ContinueSameTurn
-                && let Some(input) = control.take_steer_input()
-            {
-                if let Err(limit) = self.append_user_input(input.text) {
-                    return Err(fail_limit(limit, observer));
-                }
-                final_text.clear();
-                continue;
-            }
-            if control.is_steer_requested() {
-                return Ok(finish(
-                    final_text,
-                    self.session.messages().to_vec(),
-                    step,
-                    StopReason::Steered,
-                    observer,
-                ));
+            match self.control_action(&mut final_text, step, control, steering_mode, observer)? {
+                ControlAction::Proceed => {}
+                ControlAction::ContinueTurn => continue,
+                ControlAction::Finish(outcome) => return Ok(outcome),
             }
 
             if response.tool_calls.is_empty() {
@@ -477,39 +438,54 @@ impl<M: Model> Harness<M> {
                 let _ = self.append_context(LOOP_WARNING_TEXT);
             }
 
-            if control.take_cancel_requested() {
-                return Ok(finish(
-                    final_text,
-                    self.session.messages().to_vec(),
-                    step,
-                    StopReason::Cancelled,
-                    observer,
-                ));
-            }
-
-            if steering_mode == SteeringMode::ContinueSameTurn
-                && let Some(input) = control.take_steer_input()
-            {
-                if let Err(limit) = self.append_user_input(input.text) {
-                    return Err(fail_limit(limit, observer));
-                }
-                final_text.clear();
-                continue;
-            }
-            if control.is_steer_requested() {
-                return Ok(finish(
-                    final_text,
-                    self.session.messages().to_vec(),
-                    step,
-                    StopReason::Steered,
-                    observer,
-                ));
+            match self.control_action(&mut final_text, step, control, steering_mode, observer)? {
+                ControlAction::Proceed => {}
+                ControlAction::ContinueTurn => continue,
+                ControlAction::Finish(outcome) => return Ok(outcome),
             }
 
             if let Err(limit) = self.ensure_context_limit(&tool_specs) {
                 return Err(fail_limit(limit, observer));
             }
         }
+    }
+
+    fn control_action<O: Observer + Send>(
+        &mut self,
+        final_text: &mut String,
+        step: usize,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+        observer: &mut O,
+    ) -> Result<ControlAction, HarnessError<M::Error>> {
+        if control.take_cancel_requested() {
+            return Ok(ControlAction::Finish(finish(
+                std::mem::take(final_text),
+                self.session.messages().to_vec(),
+                step,
+                StopReason::Cancelled,
+                observer,
+            )));
+        }
+        if steering_mode == SteeringMode::ContinueSameTurn
+            && let Some(input) = control.take_steer_input()
+        {
+            if let Err(limit) = self.append_user_input(input.text) {
+                return Err(fail_limit(limit, observer));
+            }
+            final_text.clear();
+            return Ok(ControlAction::ContinueTurn);
+        }
+        if control.is_steer_requested() {
+            return Ok(ControlAction::Finish(finish(
+                std::mem::take(final_text),
+                self.session.messages().to_vec(),
+                step,
+                StopReason::Steered,
+                observer,
+            )));
+        }
+        Ok(ControlAction::Proceed)
     }
 
     fn ensure_context_limit(
