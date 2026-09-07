@@ -95,6 +95,39 @@ async fn start_turn<M: Model + Send + 'static>(
     rpc_result(connection, turn_start_request(id, prompt)).await
 }
 
+fn goal_set_request(
+    id: u64,
+    objective: Option<&str>,
+    status: Option<&str>,
+    token_budget: Option<i64>,
+) -> JsonRpcRequest {
+    let mut params = serde_json::json!({"threadId": "thread-1"});
+    if let Some(objective) = objective {
+        params["objective"] = Value::String(objective.to_string());
+    }
+    if let Some(status) = status {
+        params["status"] = Value::String(status.to_string());
+    }
+    if let Some(token_budget) = token_budget {
+        params["tokenBudget"] = Value::from(token_budget);
+    }
+    JsonRpcRequest::request(id, METHOD_THREAD_GOAL_SET, params)
+}
+
+async fn set_goal<M: Model + Send + 'static>(
+    connection: &mut AppServerConnection<M>,
+    id: u64,
+    objective: Option<&str>,
+    status: Option<&str>,
+    token_budget: Option<i64>,
+) -> Value {
+    rpc_result(
+        connection,
+        goal_set_request(id, objective, status, token_budget),
+    )
+    .await
+}
+
 async fn next_turn_event<M: Model + Send + 'static>(
     connection: &mut AppServerConnection<M>,
 ) -> TurnEventNotification {
@@ -490,17 +523,14 @@ async fn preserves_cross_stream_notification_order() {
         ))
         .await
         .unwrap();
-    connection
-        .handle_request(JsonRpcRequest::request(
-            3,
-            METHOD_THREAD_GOAL_SET,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "objective": "preserve notification order"
-            }),
-        ))
-        .await
-        .unwrap();
+    let _ = set_goal(
+        &mut connection,
+        3,
+        Some("preserve notification order"),
+        None,
+        None,
+    )
+    .await;
 
     assert_eq!(
         connection.next_notification().await.unwrap().method,
@@ -611,17 +641,12 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     .await;
     assert!(result["value"]["goal"].is_null());
 
-    let result = rpc_result(
+    let result = set_goal(
         &mut connection,
-        JsonRpcRequest::request(
-            3,
-            METHOD_THREAD_GOAL_SET,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "objective": "ship the next iteration",
-                "tokenBudget": 1200
-            }),
-        ),
+        3,
+        Some("ship the next iteration"),
+        None,
+        Some(1200),
     )
     .await;
     assert_eq!(
@@ -652,16 +677,12 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     assert_eq!(notification["goal"]["objective"], "ship the next iteration");
     assert_eq!(notification["turnId"], "turn-1");
 
-    let result = rpc_result(
+    let result = set_goal(
         &mut connection,
-        JsonRpcRequest::request(
-            4,
-            METHOD_THREAD_GOAL_SET,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "objective": "replace after verifier preparation failure"
-            }),
-        ),
+        4,
+        Some("replace after verifier preparation failure"),
+        None,
+        None,
     )
     .await;
     assert_eq!(
@@ -754,16 +775,12 @@ async fn exposes_goal_pause_and_resume_through_thread_protocol() {
     );
     initialize_connection(&mut connection, "thread-goal-pause-resume-test").await;
 
-    let started = rpc_result(
+    let started = set_goal(
         &mut connection,
-        JsonRpcRequest::request(
-            2,
-            METHOD_THREAD_GOAL_SET,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "objective": "pause before the next milestone"
-            }),
-        ),
+        2,
+        Some("pause before the next milestone"),
+        None,
+        None,
     )
     .await;
     assert_eq!(started["value"]["goal"]["status"], "active");
@@ -781,18 +798,7 @@ async fn exposes_goal_pause_and_resume_through_thread_protocol() {
         }
     }
 
-    let paused = rpc_result(
-        &mut connection,
-        JsonRpcRequest::request(
-            3,
-            METHOD_THREAD_GOAL_SET,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "status": "paused"
-            }),
-        ),
-    )
-    .await;
+    let paused = set_goal(&mut connection, 3, None, Some("paused"), None).await;
     assert_eq!(paused["value"]["goal"]["status"], "paused");
 
     release.notify_one();
@@ -816,18 +822,7 @@ async fn resumes_a_paused_goal_through_thread_protocol() {
         managed_connection_at(DoneModel, root, crate::goal_service::GoalLimits::default());
     initialize_connection(&mut connection, "thread-goal-resume-test").await;
 
-    let resumed = rpc_result(
-        &mut connection,
-        JsonRpcRequest::request(
-            2,
-            METHOD_THREAD_GOAL_SET,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "status": "active"
-            }),
-        ),
-    )
-    .await;
+    let resumed = set_goal(&mut connection, 2, None, Some("active"), None).await;
     assert_eq!(resumed["value"]["goal"]["status"], "active");
     assert_eq!(resumed["value"]["goal"]["objective"], state.objective);
     wait_for_goal_status(&mut connection, "blocked").await;
@@ -845,17 +840,14 @@ async fn enforces_goal_step_budget_at_the_core_boundary() {
         },
     );
     initialize_connection(&mut connection, "goal-step-budget-test").await;
-    connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_THREAD_GOAL_SET,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "objective": "stop after one model step"
-            }),
-        ))
-        .await
-        .unwrap();
+    let _ = set_goal(
+        &mut connection,
+        2,
+        Some("stop after one model step"),
+        None,
+        None,
+    )
+    .await;
 
     let notification = wait_for_goal_status(&mut connection, "usageLimited").await;
     assert_eq!(notification["goal"]["tokensUsed"], 0);
@@ -870,18 +862,14 @@ async fn records_goal_usage_and_enforces_token_budget() {
         crate::goal_service::GoalLimits::default(),
     );
     initialize_connection(&mut connection, "goal-token-budget-test").await;
-    connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_THREAD_GOAL_SET,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "objective": "stop at the token budget",
-                "tokenBudget": 5
-            }),
-        ))
-        .await
-        .unwrap();
+    let _ = set_goal(
+        &mut connection,
+        2,
+        Some("stop at the token budget"),
+        None,
+        Some(5),
+    )
+    .await;
 
     let notification = wait_for_goal_status(&mut connection, "budgetLimited").await;
     assert_eq!(notification["goal"]["tokensUsed"], 5);
@@ -900,17 +888,14 @@ async fn enforces_goal_timeout_with_cooperative_cancellation() {
         },
     );
     initialize_connection(&mut connection, "goal-timeout-test").await;
-    connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_THREAD_GOAL_SET,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "objective": "stop when the milestone times out"
-            }),
-        ))
-        .await
-        .unwrap();
+    let _ = set_goal(
+        &mut connection,
+        2,
+        Some("stop when the milestone times out"),
+        None,
+        None,
+    )
+    .await;
 
     loop {
         let notification =
