@@ -68,14 +68,6 @@ impl ApprovalStore {
         Self(Arc::new(Mutex::new(HashSet::new())))
     }
 
-    pub fn is_approved(&self, key: &str) -> bool {
-        self.is_approved_for(ApprovalScope::CurrentSession, "legacy", 0, key)
-    }
-
-    pub fn remember_approval(&self, key: &str) {
-        self.remember_approval_for(ApprovalScope::CurrentSession, "legacy", 0, key);
-    }
-
     pub fn is_approved_for(
         &self,
         scope: ApprovalScope,
@@ -331,16 +323,6 @@ mod tests {
             SecurityDecision::Allow
         );
         assert_eq!(full.evaluate("shell command `dir`"), SecurityDecision::Ask);
-    }
-
-    #[test]
-    fn caches_session_approvals() {
-        let store = ApprovalStore::new();
-        let key = "shell:cargo test";
-        assert!(!store.is_approved(key));
-
-        store.remember_approval(key);
-        assert!(store.is_approved(key));
     }
 
     #[test]

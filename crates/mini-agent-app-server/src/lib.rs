@@ -140,12 +140,6 @@ impl ApprovalBroker {
         (execution.access, execution.approval)
     }
 
-    /// Called by a synchronous host approval callback. The callback waits
-    /// until the external client answers the corresponding request.
-    pub fn request(&self, action: &str) -> Result<bool, String> {
-        self.request_with_context(&ToolApprovalRequest::legacy(action))
-    }
-
     /// Called by a synchronous Host approval callback with tool identity.
     ///
     /// The broker assigns `request_id`; the caller-provided Thread, Turn, and
