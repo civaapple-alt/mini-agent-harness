@@ -191,11 +191,6 @@ impl ApprovalBroker {
             .map_err(|_| "approval client disconnected".to_string())
     }
 
-    pub fn request_with_context(&self, approval: &ToolApprovalRequest) -> Result<bool, String> {
-        self.request_resolution(approval)
-            .map(|resolution| resolution.outcome == ApprovalOutcome::Approved)
-    }
-
     pub async fn next_request(&self) -> ApprovalRequest {
         loop {
             if let Some(request) = self.state.lock().unwrap().queued.pop_front() {

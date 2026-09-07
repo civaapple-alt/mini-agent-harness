@@ -1040,7 +1040,10 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         SecurityPolicy::for_preset(SecurityPreset::Default),
         move |request| {
             approval_broker
-                .request_with_context(request)
+                .request_resolution(request)
+                .map(|resolution| {
+                    resolution.outcome == mini_agent_app_server_protocol::ApprovalOutcome::Approved
+                })
                 .map_err(mini_agent_protocol::ToolError)
         },
     );
