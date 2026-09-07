@@ -67,11 +67,10 @@ pub async fn verify_goal_checkpoint(
         context_limit_behavior: ContextLimitBehavior::Reject,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRouter::new(Vec::new()), HarnessConfig::default());
+    let mut harness = Harness::new(model, ToolRouter::new(Vec::new()), config);
     harness
         .restore_history(bounded_verifier_history(messages))
         .map_err(|error| format!("cannot restore goal verifier source: {error}"))?;
-    harness.replace_config(config);
     let prompt = format!(
         "Verify the settled goal milestone against the following acceptance plan.\n\n{criteria}"
     );
