@@ -20,6 +20,10 @@ fn plan_mode_overlay_keeps_architect_foundation() {
     assert!(goal.contains("Execute the objective now"));
     assert!(goal.contains("1/3"));
     assert!(goal.contains("提供最新 Mac Studio 介绍的 html"));
+    assert!(goal.contains("*** Update File: goal/plan.md"));
+    assert!(goal.contains("never `*** Add File`"));
+    assert!(goal.contains("never use an absolute Session path"));
+    assert!(goal.contains("prompt_context.json"));
 }
 
 #[test]

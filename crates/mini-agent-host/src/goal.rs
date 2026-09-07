@@ -329,7 +329,7 @@ pub fn with_plan_mode_overlay(base: &str) -> String {
 
 pub fn goal_turn_prompt(objective: &str, milestone: usize, total: usize) -> String {
     format!(
-        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Current milestone {milestone}/{total}. Read and update goal/plan.md (relative path maps to the session goal file). If a previous verifier rejected the milestone, read goal/verifier_verdict.md and address its findings. Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
+        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Current milestone {milestone}/{total}. The Session-owned Goal artifacts already exist: read goal/plan.md first and update it with `*** Update File: goal/plan.md`, never `*** Add File`; read goal/verifier_verdict.md only when it exists and address its findings. Use workspace-relative Goal aliases only; never use an absolute Session path, `..`, or prompt_context.json. Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
     )
 }
 

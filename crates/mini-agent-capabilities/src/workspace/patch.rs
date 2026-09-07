@@ -42,7 +42,7 @@ impl ToolHandler for ApplyPatch {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "apply_patch".to_string(),
-            description: "Apply a bounded Codex-style patch to workspace files. Use relative paths only. A patch may add, update, move, or delete files; validate the complete patch before relying on its result. Update hunks use context lines prefixed with a space, removed lines with -, and added lines with +. All affected files are validated before any write.".to_string(),
+            description: "Apply a bounded Codex-style patch to workspace files. Use relative paths only. A patch may add, update, move, or delete files; validate the complete patch before relying on its result. Update hunks use context lines prefixed with a space, removed lines with -, and added lines with +. Session-owned Goal files such as goal/plan.md already exist; use *** Update File rather than *** Add File for them. All affected files are validated before any write.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -98,6 +98,12 @@ impl ApplyPatch {
                     validate_patch_path(&path)?;
                     let resolved = self.0.create_path(&json!({"path": path}))?;
                     if resolved.exists() {
+                        if self.0.is_session_artifact(&resolved) {
+                            return Err(ToolError(format!(
+                                "cannot add existing Session-owned Goal artifact {:?}; use *** Update File instead",
+                                path
+                            )));
+                        }
                         return Err(ToolError(format!(
                             "cannot add {:?}: file already exists",
                             resolved.display()
