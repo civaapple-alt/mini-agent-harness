@@ -419,21 +419,16 @@ pub(super) async fn worker_loop<M>(
                                 .messages
                                 .get(previous_message_count..)
                                 .unwrap_or(&projected.messages);
-                            let persistence_error = thread
-                                .checkpoint()
-                                .map_err(|error| AppServerError::Checkpoint(error.to_string()))
-                                .and_then(|checkpoint| {
-                                    runtime_actor::persist_turn(
-                                        &mut runtime,
-                                        started_at_ms,
-                                        &prompt,
-                                        &projected,
-                                        turn_messages,
-                                        &checkpoint,
-                                    )
-                                })
-                                .err()
-                                .map(|error| error.to_string());
+                            let persistence_error = runtime_actor::persist_turn(
+                                &mut runtime,
+                                &thread,
+                                started_at_ms,
+                                &prompt,
+                                &projected,
+                                turn_messages,
+                            )
+                            .err()
+                            .map(|error| error.to_string());
                             goal_turn_completed = result.status
                                 == mini_agent_protocol::TurnStatus::Completed
                                 && persistence_error.is_none();
@@ -459,25 +454,18 @@ pub(super) async fn worker_loop<M>(
                                 items: Vec::new(),
                                 error: Some(error.clone()),
                             };
-                            let persistence_error = thread
-                                .checkpoint()
-                                .map_err(|checkpoint_error| {
-                                    AppServerError::Checkpoint(checkpoint_error.to_string())
-                                })
-                                .and_then(|checkpoint| {
-                                    runtime_actor::persist_turn(
-                                        &mut runtime,
-                                        started_at_ms,
-                                        &prompt,
-                                        &projected,
-                                        &projected.messages,
-                                        &checkpoint,
-                                    )
-                                })
-                                .err()
-                                .map(|persist_error| {
-                                    format!("{error}; session persistence failed: {persist_error}")
-                                });
+                            let persistence_error = runtime_actor::persist_turn(
+                                &mut runtime,
+                                &thread,
+                                started_at_ms,
+                                &prompt,
+                                &projected,
+                                &projected.messages,
+                            )
+                            .err()
+                            .map(|persist_error| {
+                                format!("{error}; session persistence failed: {persist_error}")
+                            });
                             settled_turns.insert(
                                 turn_id.as_str().to_string(),
                                 SettledTurn {

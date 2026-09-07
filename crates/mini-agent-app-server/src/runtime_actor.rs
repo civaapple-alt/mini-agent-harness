@@ -11,7 +11,6 @@ use mini_agent_capabilities::McpLoadResult;
 use mini_agent_capabilities::SecurityPolicy;
 use mini_agent_capabilities::load_mcp;
 use mini_agent_core::Thread;
-use mini_agent_core::ThreadCheckpoint;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ThreadId;
@@ -820,12 +819,15 @@ pub(super) fn advance_revision(
 
 pub(super) fn persist_turn(
     runtime: &mut Option<RuntimeActorState>,
+    thread: &Thread<impl Model>,
     started_at_ms: u64,
     prompt: &str,
     result: &crate::RuntimeTurnResult,
     messages: &[Message],
-    checkpoint: &ThreadCheckpoint,
 ) -> Result<(), AppServerError> {
+    let checkpoint = thread
+        .checkpoint()
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
     let Some(state) = runtime.as_mut() else {
         return Ok(());
     };
