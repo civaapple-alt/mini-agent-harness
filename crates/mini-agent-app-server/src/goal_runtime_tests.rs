@@ -47,7 +47,7 @@ fn goal_runtime_supports_pause_and_resume() {
     let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());
     let state = store.set_goal("pause and resume", None).unwrap();
     let (events, _) = broadcast::channel(4);
-    let mut runtime = super::GoalService::with_notifications(store, events, None, None);
+    let mut runtime = super::GoalRuntimeHandle::with_notifications(store, events, None, None);
 
     let paused = runtime
         .set_goal(None, Some(ThreadGoalStatus::Paused), None)

@@ -9,7 +9,7 @@ use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::goal_runtime::GoalRuntimeEvent;
-use crate::goal_runtime::GoalService;
+use crate::goal_runtime::GoalRuntimeHandle;
 use crate::goal_service::ThreadGoalRequestProcessor;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeCommand;
@@ -36,7 +36,7 @@ use tokio::sync::oneshot;
 
 pub(crate) struct RuntimeActorState {
     pub(crate) management: RuntimeManagementState,
-    pub(crate) goal_runtime_handle: GoalService,
+    pub(crate) goal_runtime_handle: GoalRuntimeHandle,
     pub(crate) commands: mpsc::Sender<Command>,
     pub(crate) approval: ApprovalController,
     pub(crate) builtin_tools: mini_agent_host::BuiltinToolSelection,
@@ -167,7 +167,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .map_err(|error| error.to_string())?
             .map(|_| store.goal_dir());
         approval.set_goal_dir(goal_dir);
-        let goal_service = GoalService::with_notifications(
+        let goal_service = GoalRuntimeHandle::with_notifications(
             store,
             goal_notifications.clone(),
             verifier_config.clone(),
