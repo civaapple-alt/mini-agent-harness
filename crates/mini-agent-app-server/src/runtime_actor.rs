@@ -445,21 +445,9 @@ pub(super) fn goal_turn_started(
     goal_id: &str,
     turn_id: &mini_agent_protocol::TurnId,
 ) -> Result<bool, AppServerError> {
-    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
-    let updated = state
-        .goal_runtime_handle
-        .mark_turn_started(goal_id, turn_id)
-        .map_err(workflow_error)?;
-    if let Some(goal) = updated {
-        state.goal_runtime_handle.notify_updated(
-            state.management.thread_id(),
-            Some(turn_id.clone()),
-            goal,
-        );
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    update_goal_turn(runtime, turn_id, |handle| {
+        handle.mark_turn_started(goal_id, turn_id)
+    })
 }
 
 pub(super) fn goal_turn_settled(
@@ -467,21 +455,9 @@ pub(super) fn goal_turn_settled(
     goal_id: &str,
     turn_id: &mini_agent_protocol::TurnId,
 ) -> Result<bool, AppServerError> {
-    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
-    let updated = state
-        .goal_runtime_handle
-        .mark_turn_settled(goal_id, turn_id)
-        .map_err(workflow_error)?;
-    if let Some(goal) = updated {
-        state.goal_runtime_handle.notify_updated(
-            state.management.thread_id(),
-            Some(turn_id.clone()),
-            goal,
-        );
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    update_goal_turn(runtime, turn_id, |handle| {
+        handle.mark_turn_settled(goal_id, turn_id)
+    })
 }
 
 pub(super) fn goal_turn_limited(
@@ -491,21 +467,9 @@ pub(super) fn goal_turn_limited(
     status: mini_agent_host::GoalStatus,
     reason: &str,
 ) -> Result<bool, AppServerError> {
-    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
-    let updated = state
-        .goal_runtime_handle
-        .limit_turn(goal_id, turn_id, status, reason)
-        .map_err(workflow_error)?;
-    if let Some(goal) = updated {
-        state.goal_runtime_handle.notify_updated(
-            state.management.thread_id(),
-            Some(turn_id.clone()),
-            goal,
-        );
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    update_goal_turn(runtime, turn_id, |handle| {
+        handle.limit_turn(goal_id, turn_id, status, reason)
+    })
 }
 
 pub(super) fn goal_turn_usage(
@@ -519,14 +483,39 @@ pub(super) fn goal_turn_usage(
         .goal_runtime_handle
         .record_turn_usage(goal_id, turn_id, tokens)
         .map_err(workflow_error)?;
-    if let Some(goal) = updated.as_ref() {
-        state.goal_runtime_handle.notify_updated(
-            state.management.thread_id(),
-            Some(turn_id.clone()),
-            goal.clone(),
-        );
-    }
+    notify_goal_update(state, turn_id, updated.clone());
     Ok(updated)
+}
+
+fn update_goal_turn<F>(
+    runtime: &mut Option<RuntimeActorState>,
+    turn_id: &mini_agent_protocol::TurnId,
+    update: F,
+) -> Result<bool, AppServerError>
+where
+    F: FnOnce(
+        &mut crate::goal_runtime::GoalRuntimeHandle,
+    ) -> std::io::Result<Option<crate::goal_service::GoalState>>,
+{
+    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    let updated = update(&mut state.goal_runtime_handle).map_err(workflow_error)?;
+    Ok(notify_goal_update(state, turn_id, updated))
+}
+
+fn notify_goal_update(
+    state: &RuntimeActorState,
+    turn_id: &mini_agent_protocol::TurnId,
+    goal: Option<crate::goal_service::GoalState>,
+) -> bool {
+    let Some(goal) = goal else {
+        return false;
+    };
+    state.goal_runtime_handle.notify_updated(
+        state.management.thread_id(),
+        Some(turn_id.clone()),
+        goal,
+    );
+    true
 }
 
 pub(super) fn prepare_goal_verification<M>(
