@@ -88,7 +88,7 @@ impl LocalRuntimeLaunch {
     ) -> Result<AppServerRuntime, String> {
         AppServerRuntime::start(RuntimeStartOptions {
             runtime_config: self.runtime_config,
-            approval: approval.into_capability(),
+            approval,
             harness_config: self.harness_config,
             session_request: self.session_request,
             control,

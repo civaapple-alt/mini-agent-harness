@@ -8,6 +8,7 @@ pub use mini_agent_app_server_protocol::CapabilityManifest;
 pub use mini_agent_app_server_protocol::CollaborationMode;
 pub use mini_agent_app_server_protocol::CollaborationModeKind;
 pub use mini_agent_app_server_protocol::ThreadSettingsUpdateResult;
+pub use mini_agent_capabilities::ApprovalController;
 pub use mini_agent_capabilities::ApprovalController as CapabilityApprovalController;
 pub use mini_agent_capabilities::ApprovalMode;
 pub use mini_agent_capabilities::SandboxKind;
@@ -24,54 +25,6 @@ pub use mini_agent_protocol::ToolError;
 pub use mini_agent_protocol::TurnInput;
 pub use mini_agent_protocol::TurnInputMode;
 pub use mini_agent_protocol::TurnStatus;
-
-/// App Server owned frontend handle for approval policy and interaction.
-///
-/// The underlying capability controller remains private to App Server and
-/// Host composition. Frontends can configure and inspect approval state, but
-/// cannot depend on the capability crate's concrete type in their API.
-#[derive(Clone)]
-pub struct ApprovalController(CapabilityApprovalController);
-
-impl ApprovalController {
-    pub fn new(mode: ApprovalMode) -> Self {
-        Self(CapabilityApprovalController::new(mode))
-    }
-
-    pub fn with_preset(mode: ApprovalMode, preset: SecurityPreset) -> Self {
-        Self(CapabilityApprovalController::with_preset(mode, preset))
-    }
-
-    pub fn with_policy_and_callback(
-        mode: ApprovalMode,
-        policy: SecurityPolicy,
-        callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,
-    ) -> Self {
-        Self(CapabilityApprovalController::with_policy_and_callback(
-            mode, policy, callback,
-        ))
-    }
-
-    pub(crate) fn into_capability(self) -> CapabilityApprovalController {
-        self.0
-    }
-
-    pub fn mode(&self) -> ApprovalMode {
-        self.0.mode()
-    }
-
-    pub fn set_mode(&self, mode: ApprovalMode) {
-        self.0.set_mode(mode);
-    }
-
-    pub fn set_living_plan(&self, path: Option<std::path::PathBuf>) {
-        self.0.set_living_plan(path);
-    }
-
-    pub fn set_goal_dir(&self, path: Option<std::path::PathBuf>) {
-        self.0.set_goal_dir(path);
-    }
-}
 
 pub mod skills {
     pub use mini_agent_capabilities::Discovery;

@@ -79,20 +79,7 @@ impl ApprovalController {
         policy: SecurityPolicy,
         callback: impl Fn(&str) -> Result<bool, ToolError> + Send + Sync + 'static,
     ) -> Self {
-        Self {
-            automatic: Arc::new(AtomicBool::new(matches!(mode, ApprovalMode::Automatic))),
-            policy: Arc::new(RwLock::new(policy)),
-            store: ApprovalStore::new(),
-            callback: Arc::new(callback),
-            context_callback: None,
-            living_plan: Arc::new(Mutex::new(None)),
-            plan_scratch: Arc::new(Mutex::new(None)),
-            read_only_agent: Arc::new(AtomicBool::new(false)),
-            goal_dir: Arc::new(Mutex::new(None)),
-            session_dir: Arc::new(Mutex::new(None)),
-            approval_scope: Arc::new(RwLock::new(ApprovalScope::PerAction)),
-            approval_binding: Arc::new(RwLock::new(ApprovalBinding::default())),
-        }
+        Self::with_callbacks(mode, policy, Arc::new(callback), None)
     }
 
     pub fn with_policy_and_context_callback(
@@ -100,12 +87,26 @@ impl ApprovalController {
         policy: SecurityPolicy,
         callback: impl Fn(&ToolApprovalRequest) -> Result<bool, ToolError> + Send + Sync + 'static,
     ) -> Self {
+        Self::with_callbacks(
+            mode,
+            policy,
+            Arc::new(terminal_approval),
+            Some(Arc::new(callback)),
+        )
+    }
+
+    fn with_callbacks(
+        mode: ApprovalMode,
+        policy: SecurityPolicy,
+        callback: Arc<ApprovalCallback>,
+        context_callback: Option<Arc<ContextualApprovalCallback>>,
+    ) -> Self {
         Self {
             automatic: Arc::new(AtomicBool::new(matches!(mode, ApprovalMode::Automatic))),
             policy: Arc::new(RwLock::new(policy)),
             store: ApprovalStore::new(),
-            callback: Arc::new(terminal_approval),
-            context_callback: Some(Arc::new(callback)),
+            callback,
+            context_callback,
             living_plan: Arc::new(Mutex::new(None)),
             plan_scratch: Arc::new(Mutex::new(None)),
             read_only_agent: Arc::new(AtomicBool::new(false)),
