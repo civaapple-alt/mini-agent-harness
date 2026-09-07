@@ -99,6 +99,7 @@ graph LR
 ### Implemented
 
 - [Line Gate: Control Plane Statistics and Delta Gate](implemented/process/2026-09-07-line-gate-control-plane-and-delta.md)
+- [Control Plane Boundary Evidence](implemented/testing/2026-09-07-control-plane-boundary-evidence.md)
 - [Multi-Directory Workspace Context Perception](implemented/feature/2026-09-07-multi-directory-workspace-context.md)
 - [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md)
 - [Hard Limits System](implemented/architecture/2026-08-24-hard-limits-system.md)
