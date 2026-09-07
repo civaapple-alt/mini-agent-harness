@@ -190,9 +190,6 @@ fn normalize_action(action: &str) -> (Option<&str>, String) {
     if let Some(cmd) = trimmed.strip_prefix("shell:") {
         return (Some("shell"), cmd.to_string());
     }
-    if let Some(path) = trimmed.strip_prefix("edit ") {
-        return (Some("file"), path.replace('\\', "/"));
-    }
     if let Some(path) = trimmed.strip_prefix("write ") {
         let path = if let Some(idx) = path.rfind(" (")
             && path.ends_with(" bytes)")
@@ -203,26 +200,22 @@ fn normalize_action(action: &str) -> (Option<&str>, String) {
         };
         return (Some("file"), path.replace('\\', "/"));
     }
-    if let Some(path) = trimmed.strip_prefix("read ") {
-        return (Some("file"), path.replace('\\', "/"));
+    for prefix in [
+        "edit ",
+        "read ",
+        "file:write:",
+        "file:edit:",
+        "file:read:",
+        "file:",
+    ] {
+        if let Some(path) = trimmed.strip_prefix(prefix) {
+            return (Some("file"), path.replace('\\', "/"));
+        }
     }
-    if let Some(path) = trimmed.strip_prefix("file:write:") {
-        return (Some("file"), path.replace('\\', "/"));
-    }
-    if let Some(path) = trimmed.strip_prefix("file:edit:") {
-        return (Some("file"), path.replace('\\', "/"));
-    }
-    if let Some(path) = trimmed.strip_prefix("file:read:") {
-        return (Some("file"), path.replace('\\', "/"));
-    }
-    if let Some(path) = trimmed.strip_prefix("file:") {
-        return (Some("file"), path.replace('\\', "/"));
-    }
-    if let Some(mcp) = trimmed.strip_prefix("mcp tool ") {
-        return (Some("mcp"), mcp.to_string());
-    }
-    if let Some(mcp) = trimmed.strip_prefix("mcp:") {
-        return (Some("mcp"), mcp.to_string());
+    for prefix in ["mcp tool ", "mcp:"] {
+        if let Some(mcp) = trimmed.strip_prefix(prefix) {
+            return (Some("mcp"), mcp.to_string());
+        }
     }
     (None, trimmed.replace('\\', "/"))
 }
