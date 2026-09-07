@@ -466,7 +466,7 @@ where
         control: Arc<RunControl>,
     ) -> Self {
         thread.set_id(start.thread_id.clone());
-        Self::with_threads_and_control(start, vec![thread], None, control)
+        Self::with_threads_and_factory(start, vec![thread], None, control)
     }
 
     /// Starts a service over several preconfigured Threads.
@@ -476,21 +476,7 @@ where
     /// the service worker, while lifecycle and checkpoint operations remain
     /// addressed by thread identity.
     pub fn with_threads(start: ThreadStart, threads: Vec<Thread<M>>) -> Self {
-        Self::with_threads_and_control(start, threads, None, Arc::new(RunControl::new()))
-    }
-
-    fn with_threads_and_control(
-        start: ThreadStart,
-        mut threads: Vec<Thread<M>>,
-        factory: Option<Arc<dyn ThreadFactory<M>>>,
-        control: Arc<RunControl>,
-    ) -> Self {
-        assert!(
-            !threads.is_empty(),
-            "app-server requires at least one thread"
-        );
-        threads[0].set_id(start.thread_id.clone());
-        Self::with_threads_and_factory(start, threads, factory, control)
+        Self::with_threads_and_factory(start, threads, None, Arc::new(RunControl::new()))
     }
 
     pub fn with_thread_factory<F>(start: ThreadStart, threads: Vec<Thread<M>>, factory: F) -> Self
