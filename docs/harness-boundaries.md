@@ -72,6 +72,8 @@ box。机械检查只验证填写完整，架构判断仍由 review 完成。
 Core 在安全检查点先检查 cancel，再检查 steer。deadline 触发后，App Server
 发送 interrupt，等待 `TurnFinished` 和 durable checkpoint，再返回 timeout，
 不继续 drain 竞争中的 steer；普通已 settle batch 才按 steer 优先于 follow-up。
+恢复 settled history 或开始下一轮时，会清理旧版本可能留下的未完成
+assistant/tool group，避免把不可重放的工具调用再次交给 provider。
 修改这个顺序前必须增加 deterministic race scenario。
 
 ### Approval 与 sandbox denial

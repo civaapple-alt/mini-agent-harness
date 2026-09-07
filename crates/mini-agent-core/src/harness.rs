@@ -165,7 +165,7 @@ impl<M: Model> Harness<M> {
         self.restore_session(SessionState::from_messages(messages))
     }
 
-    pub fn restore_session(&mut self, session: SessionState) -> Result<(), LimitExceeded> {
+    pub fn restore_session(&mut self, mut session: SessionState) -> Result<(), LimitExceeded> {
         let messages = session.messages();
         for message in messages {
             match message {
@@ -218,6 +218,8 @@ impl<M: Model> Harness<M> {
                 _ => {}
             }
         }
+        session.repair_incomplete_tool_groups();
+        let messages = session.messages();
         let tool_specs = self.tools.specs();
         let actual = context_bytes_for(&self.config.system_prompt, messages, &tool_specs);
         if actual > self.config.max_context_bytes {
@@ -283,6 +285,9 @@ impl<M: Model> Harness<M> {
         steering_mode: SteeringMode,
         tool_context: Option<ToolExecutionContext>,
     ) -> Result<RunOutcome, HarnessError<M::Error>> {
+        // Recover histories produced by the pre-fix steering boundary before
+        // appending another user message or making a provider request.
+        self.session.repair_incomplete_tool_groups();
         let prompt = prompt.into();
         if prompt.len() > self.config.max_user_input_bytes {
             return Err(fail_limit(
@@ -401,13 +406,18 @@ impl<M: Model> Harness<M> {
                 tool_calls: response.tool_calls.clone(),
             });
 
-            match self.control_action(&mut final_text, step, control, steering_mode, observer)? {
-                ControlAction::Proceed => {}
-                ControlAction::ContinueTurn => continue,
-                ControlAction::Finish(outcome) => return Ok(outcome),
-            }
-
             if response.tool_calls.is_empty() {
+                match self.control_action(
+                    &mut final_text,
+                    step,
+                    control,
+                    steering_mode,
+                    observer,
+                )? {
+                    ControlAction::Proceed => {}
+                    ControlAction::ContinueTurn => continue,
+                    ControlAction::Finish(outcome) => return Ok(outcome),
+                }
                 return Ok(finish(
                     final_text,
                     self.session.messages().to_vec(),

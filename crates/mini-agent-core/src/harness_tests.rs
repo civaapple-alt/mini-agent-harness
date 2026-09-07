@@ -97,6 +97,32 @@ fn tool_response(call_id: &str, name: &str, arguments: Value) -> ModelResponse {
     }
 }
 
+struct SubmitSteerBeforeToolBatch {
+    control: RunControl,
+}
+
+impl Model for SubmitSteerBeforeToolBatch {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        _request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        self.control
+            .submit(TurnInput::new(
+                TurnInputMode::Steer,
+                "focus after the pending tool call",
+            ))
+            .unwrap();
+        Ok(tool_response(
+            "call-before-steer",
+            "request_steer",
+            json!({}),
+        ))
+    }
+}
+
 struct Uppercase;
 
 impl ToolHandler for Uppercase {
@@ -244,6 +270,61 @@ async fn steering_stops_after_a_complete_tool_batch() {
         outcome.messages.last(),
         Some(Message::Tool { .. })
     ));
+}
+
+#[tokio::test]
+async fn steering_after_model_tool_call_keeps_history_complete() {
+    let control = RunControl::new();
+    let model = SubmitSteerBeforeToolBatch {
+        control: control.clone(),
+    };
+    let tools = ToolRouter::new(vec![Box::new(RequestSteer(control.clone()))]);
+    let mut harness = Harness::new(model, tools, HarnessConfig::default());
+
+    let outcome = harness
+        .run_with_control("inspect the project", &mut (), &control)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Steered);
+    assert!(matches!(
+        outcome.messages.last(),
+        Some(Message::Tool {
+            call_id,
+            outcome: Some(ToolExecutionStatus::Completed),
+            ..
+        }) if call_id == "call-before-steer"
+    ));
+}
+
+#[tokio::test]
+async fn repairs_legacy_tool_history_before_an_in_memory_retry() {
+    let model = ScriptedModel {
+        responses: VecDeque::from([text_response("recovered")]),
+    };
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
+    harness.session.push(Message::User {
+        text: "inspect".to_string(),
+    });
+    harness.session.push(Message::Assistant {
+        reasoning: String::new(),
+        text: String::new(),
+        tool_calls: vec![ToolCall {
+            id: "call-legacy-orphan".to_string(),
+            name: "shell".to_string(),
+            arguments: json!({}),
+        }],
+    });
+
+    let outcome = harness.run("retry", &mut ()).await.unwrap();
+
+    assert_eq!(outcome.final_text, "recovered");
+    assert!(harness.messages().iter().all(|message| {
+        !matches!(
+            message,
+            Message::Assistant { tool_calls, .. } if !tool_calls.is_empty()
+        )
+    }));
 }
 
 struct SubmitSteerDuringSampling {

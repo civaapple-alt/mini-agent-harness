@@ -221,6 +221,19 @@ where
             read = reader.read_line(&mut line) => {
                 let read = read?;
                 if read == 0 {
+                    // A peer may close stdin immediately after initialize.
+                    // Flush responses already queued by the inline handshake
+                    // before ending the writer loop.
+                    while let Ok(outgoing) = outgoing_rx.try_recv() {
+                        match outgoing {
+                            OutgoingMessage::Response(response) => {
+                                write_json_line(&mut writer, &response).await?;
+                            }
+                            OutgoingMessage::Notification(notification) => {
+                                write_json_line(&mut writer, &notification).await?;
+                            }
+                        }
+                    }
                     break;
                 }
                 let input = std::mem::take(&mut line);

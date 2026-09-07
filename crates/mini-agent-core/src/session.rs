@@ -2,6 +2,7 @@ use mini_agent_protocol::Message;
 use mini_agent_protocol::ToolSpec;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashSet;
 
 /// Storage-neutral conversation state owned by the execution core.
 ///
@@ -69,6 +70,68 @@ impl SessionState {
         self.context_revision = revision;
         self
     }
+
+    /// Repairs a settled history left by an interrupted tool batch.
+    ///
+    /// A model assistant message with tool calls is only valid when every
+    /// call has a matching tool message before the next conversation message.
+    /// Older runtimes could persist that assistant message before steering
+    /// stopped the turn, leaving the next provider request unreplayable. Drop
+    /// the incomplete assistant/tool group and retain the following user
+    /// input so the caller can retry from a valid boundary.
+    pub(crate) fn repair_incomplete_tool_groups(&mut self) -> usize {
+        let repaired = repair_tool_groups(&self.messages);
+        let removed = self.messages.len().saturating_sub(repaired.len());
+        if removed > 0 {
+            self.replace_messages(repaired);
+        }
+        removed
+    }
+}
+
+fn repair_tool_groups(messages: &[Message]) -> Vec<Message> {
+    let mut repaired = Vec::with_capacity(messages.len());
+    let mut pending_calls = HashSet::new();
+    let mut group_start = None;
+
+    for message in messages {
+        match message {
+            Message::Assistant { tool_calls, .. } if !tool_calls.is_empty() => {
+                if group_start.is_some() {
+                    repaired.truncate(group_start.take().unwrap_or(repaired.len()));
+                    pending_calls.clear();
+                }
+                group_start = Some(repaired.len());
+                pending_calls.extend(tool_calls.iter().map(|call| call.id.clone()));
+                repaired.push(message.clone());
+            }
+            Message::Tool { call_id, .. } if group_start.is_some() => {
+                if pending_calls.remove(call_id) {
+                    repaired.push(message.clone());
+                    if pending_calls.is_empty() {
+                        group_start = None;
+                    }
+                } else {
+                    repaired.truncate(group_start.take().unwrap_or(repaired.len()));
+                    pending_calls.clear();
+                }
+            }
+            Message::Tool { .. } => {
+                repaired.push(message.clone());
+            }
+            _ if group_start.is_some() => {
+                repaired.truncate(group_start.take().unwrap_or(repaired.len()));
+                pending_calls.clear();
+                repaired.push(message.clone());
+            }
+            _ => repaired.push(message.clone()),
+        }
+    }
+
+    if let Some(start) = group_start {
+        repaired.truncate(start);
+    }
+    repaired
 }
 
 pub(crate) fn context_bytes_for(
