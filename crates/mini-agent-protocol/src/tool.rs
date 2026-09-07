@@ -70,7 +70,7 @@ pub struct ToolExecutionContext {
 /// The approval provider assigns its own request ID after receiving this
 /// value. Keeping the model call identity here lets a frontend correlate the
 /// approval lifecycle with the later tool event and settled session record.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ToolApprovalRequest {
     pub action: String,
     pub tool_name: Option<String>,
@@ -88,47 +88,22 @@ impl ToolApprovalRequest {
     pub fn legacy(action: impl Into<String>) -> Self {
         Self {
             action: action.into(),
-            tool_name: None,
-            call_id: None,
-            thread_id: None,
-            turn_id: None,
-            project_id: None,
-            workspace_id: None,
-            workspace_revision: None,
-            session_id: None,
-            action_class: None,
+            ..Self::default()
         }
     }
 
     pub fn from_execution(action: impl Into<String>, request: &ToolExecutionRequest) -> Self {
+        let context = request.context.as_ref();
         Self {
             action: action.into(),
             tool_name: Some(request.name.clone()),
             call_id: Some(request.call_id.clone()),
-            thread_id: request
-                .context
-                .as_ref()
-                .map(|context| context.thread_id.clone()),
-            turn_id: request
-                .context
-                .as_ref()
-                .map(|context| context.turn_id.clone()),
-            project_id: request
-                .context
-                .as_ref()
-                .and_then(|context| context.project_id.clone()),
-            workspace_id: request
-                .context
-                .as_ref()
-                .and_then(|context| context.workspace_id.clone()),
-            workspace_revision: request
-                .context
-                .as_ref()
-                .and_then(|context| context.workspace_revision),
-            session_id: request
-                .context
-                .as_ref()
-                .and_then(|context| context.session_id.clone()),
+            thread_id: context.map(|context| context.thread_id.clone()),
+            turn_id: context.map(|context| context.turn_id.clone()),
+            project_id: context.and_then(|context| context.project_id.clone()),
+            workspace_id: context.and_then(|context| context.workspace_id.clone()),
+            workspace_revision: context.and_then(|context| context.workspace_revision),
+            session_id: context.and_then(|context| context.session_id.clone()),
             action_class: Some(request.name.clone()),
         }
     }
@@ -209,6 +184,13 @@ pub trait ToolHandler: Send + Sync {
     }
 }
 
+fn classify_execution(result: Result<String, ToolError>) -> ToolExecutionOutcome {
+    match result {
+        Ok(content) => ToolExecutionOutcome::completed(content),
+        Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+    }
+}
+
 /// Executes a resolved tool after its handler has completed admission.
 ///
 /// Implementations own the concrete side effect, while the host orchestrator
@@ -220,20 +202,14 @@ pub trait ToolRuntime: Send + Sync {
     /// Implementations returning `ApprovalRequired` must override this method
     /// so the legacy approval path is not invoked a second time.
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
-        match self.execute(&request.arguments) {
-            Ok(content) => ToolExecutionOutcome::completed(content),
-            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
-        }
+        classify_execution(self.execute(&request.arguments))
     }
 
     /// Returns a structured result while preserving the legacy `execute` API.
     /// Host tools may override this to report approval, deferral, or retryable
     /// failures without encoding policy in a plain error string.
     fn execute_outcome(&self, arguments: &Value) -> ToolExecutionOutcome {
-        match self.execute(arguments) {
-            Ok(content) => ToolExecutionOutcome::completed(content),
-            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
-        }
+        classify_execution(self.execute(arguments))
     }
 }
 
