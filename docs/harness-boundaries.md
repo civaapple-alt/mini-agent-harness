@@ -89,6 +89,16 @@ fail-closed 行为，再增加政策和跨平台边界测试。
 fail-fast；只有第二个真实 provider 或明确的 bounded retry policy 出现后，才建立
 provider matrix 和 retry/backoff，且不调用付费 provider、不另起执行循环。
 
+### Cargo dependency direction
+
+当前 workspace 依赖保持单向 DAG：`Protocol → Core → Capabilities → Host → App
+Server → CLI`，`App Server Protocol` 只依赖 `Protocol`。`App Server → Capabilities`
+是已知的 review edge：App Server runtime assembly 需要 provider/session seam，但
+Host 仍拥有 tool、policy、world 和 workflow composition；line gate 的路径统计不改变
+Cargo 所有权。只有发现重复 authority、反向/循环依赖，或可删除而非新增胶水层的稳定
+boundary seam 时，才另立 Cargo 重构提案。依赖方向由
+`python scripts/cargo_boundary.py --json` 检查。
+
 ## 自动化顺序与非目标
 
 先固定两个 line ceiling 和六项准入，再完善 bounded scenario/eval；只有存在

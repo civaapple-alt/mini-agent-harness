@@ -46,7 +46,7 @@ REVIEW_EDGES: dict[tuple[str, str], str] = {
     (
         "mini-agent-app-server",
         "mini-agent-capabilities",
-    ): "App Server directly consumes provider/control-plane APIs; keep this edge under review before extracting or moving ownership.",
+    ): "App Server runtime assembly consumes provider/session APIs; Host still owns tool, policy, world, and workflow composition. Keep this edge visible before extracting or moving ownership.",
 }
 
 
