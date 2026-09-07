@@ -1,7 +1,7 @@
 # Line Gate：Control Plane 统计与增量门禁
 
 * **日期**: 2026-09-07
-* **状态**: 部分实现
+* **状态**: implemented
 * **Class**: process
 * **范围**: `scripts/line_budget.py`、维护脚本测试、CI、PR 准入模板、`AGENTS.md`
 
@@ -77,18 +77,37 @@ Capabilities 控制面文件通过显式路径清单识别，并与 Provider 桶
 
 本轮没有修改 Rust 代码、Cargo manifest、模型提示词、公共协议或持久化格式。
 
-## 6. 评审结果与未决边界
+## 6. 验证与落地结果
 
-**结论：本轮统计和增量门禁可以合并，但提案仍保持“部分实现”。**
+**结论：本提案的 line gate 统计和增量门禁已落地。**
 
 1. 当前分类确认了 Capabilities 中约 4,801 行属于控制面边界，Control Plane
-   汇总约 20,290 行；这个数字用于暴露复杂度，不自动成为新的硬上限。
-2. `mini-agent-app-server` 仍直接依赖 `mini-agent-capabilities`。这是需要单独做
-   所有权审查的结构信号，但不能仅因统计分类就移动 crate。
-3. Web/SDK/Studio 尚未纳入跨语言 LOC 总量；下一轮应增加契约、公共 API、状态权威
-   和 scenario/eval 门禁，而不是制造跨语言总行数。
-4. Audit 没有被虚构成一个新模块；应继续按事件、receipt、持久化的实际权威层统计，
-   直到重复实现的证据足以支持模块调整。
+   汇总约 20,290 行；该数字用于暴露复杂度，不作为新的硬上限。
+2. `line_budget.py` 支持 `--base`、`--check-delta` 和 `--json`，能够读取 Git
+   基线并对 Runtime/Release 执行增量门禁；未分类 Rust 源码会 fail closed。
+3. CI quality job 在 Pull Request 上执行基线增量检查；PR 模板、`AGENTS.md` 和
+   提案质量指南已同步运行预算、Red 区间和 Control Plane 统计规则。
+4. 本轮没有修改 Rust、Cargo 依赖、模型提示词、公共协议或持久化格式；因此没有
+   为统计目的引入新的 Cargo 胶水层。
+
+验证记录：
+
+```text
+python -m unittest scripts/test_line_budget.py scripts/test_pr_admission.py scripts/test_package_release.py
+20 tests passed
+
+python scripts/line_budget.py
+runtime: 19,887/20,000
+release Rust: 29,997/30,000
+Control Plane: 20,290 lines
+
+python scripts/line_budget.py --base HEAD --check-delta --json
+runtime delta: +0
+release delta: +0
+
+python scripts/line_budget.py --base d7d2477 --check-delta --json
+positive growth in the red band: rejected
+```
 
 ## 7. 六项变更准入回答
 
@@ -106,12 +125,12 @@ Capabilities 控制面文件通过显式路径清单识别，并与 Provider 桶
    增量和失败反例；使用 `python scripts/line_budget.py --json` 验证当前统计；使用
    `--base <merge-base> --check-delta --json` 验证 PR 门禁。
 
-## 8. 后续计划
+## 8. 后续计划（不阻塞本提案）
 
-- 先通过一轮删除旧适配、重复状态和重复测试，将 Release Rust 恢复到 `≤29,000`、
-  Runtime 恢复到 `≤19,000` 的 Green operating budget；
+- 通过独立的简化批次删除旧适配、重复状态和重复测试，将 Release Rust 恢复到
+  `≤29,000`、Runtime 恢复到 `≤19,000` 的 Green operating budget；
 - 增加 Cargo 依赖方向检查，但只针对已确认的职责泄漏，不因 line gate 单独拆包；
 - 为 Permission、Sandbox、Recovery、Audit 增加 bounded scenario/eval 和失败反例；
 - 经过 10–20 个 PR 观察真实 delta 后，再校准 Green/Amber/Red 阈值；
-- 只有当控制面契约、恢复证据和跨层所有权稳定后，才考虑把本提案状态晋级为
-  `已验证`。
+- 若后续发现 Cargo 所有权或跨仓契约需要独立改造，另立提案，不回写本记录的已实现
+  事实。
