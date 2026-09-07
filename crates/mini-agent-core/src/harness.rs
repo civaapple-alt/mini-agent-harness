@@ -65,6 +65,16 @@ impl Default for HarnessConfig {
     }
 }
 
+impl HarnessConfig {
+    /// Select the long-running loop semantics used by an explicit Goal/
+    /// Auto-Copilot workflow. Approval policy remains a separate Host concern.
+    pub fn with_copilot_loop(mut self) -> Self {
+        self.max_steps = 0;
+        self.context_limit_behavior = ContextLimitBehavior::Compact;
+        self
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunOutcome {
     pub final_text: String,
@@ -324,7 +334,7 @@ impl<M: Model> Harness<M> {
                 ControlAction::Finish(outcome) => return Ok(outcome),
             }
             step = step.saturating_add(1);
-            if step > self.config.max_steps {
+            if self.config.max_steps != 0 && step > self.config.max_steps {
                 return Ok(finish(
                     final_text,
                     self.session.messages().to_vec(),

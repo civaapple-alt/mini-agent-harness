@@ -525,6 +525,32 @@ async fn stops_at_step_limit() {
 }
 
 #[tokio::test]
+async fn zero_step_limit_means_unlimited() {
+    let model = ScriptedModel {
+        responses: VecDeque::from([text_response("done")]),
+    };
+    let config = HarnessConfig {
+        max_steps: 0,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(model, ToolRouter::default(), config);
+
+    let outcome = harness.run("finish this", &mut ()).await.unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Completed);
+    assert_eq!(outcome.steps, 1);
+    assert_eq!(outcome.final_text, "done");
+}
+
+#[test]
+fn copilot_loop_uses_compaction_and_unlimited_default() {
+    let config = HarnessConfig::default().with_copilot_loop();
+
+    assert_eq!(config.max_steps, 0);
+    assert_eq!(config.context_limit_behavior, ContextLimitBehavior::Compact);
+}
+
+#[tokio::test]
 async fn preserves_history_across_runs_and_can_clear_it() {
     let model = ScriptedModel {
         responses: VecDeque::from([

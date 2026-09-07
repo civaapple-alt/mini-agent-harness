@@ -309,12 +309,10 @@ pub(super) async fn worker_loop<M>(
                     };
                     let original_config = thread.harness().config().clone();
                     if let Some(goal) = goal_state.as_ref() {
-                        let mut config = original_config.clone();
-                        config.max_steps = if goal.milestone_step_budget == 0 {
-                            usize::MAX
-                        } else {
-                            goal.milestone_step_budget
-                        };
+                        let mut config = original_config.clone().with_copilot_loop();
+                        if goal.milestone_step_budget != 0 {
+                            config.max_steps = goal.milestone_step_budget;
+                        }
                         thread.harness_mut().replace_config(config);
                     }
                     let started_at_ms = timestamp_ms();

@@ -28,6 +28,7 @@ const SESSION_LOCK_NAME: &str = "session";
 pub const SUMMARY_FILE_NAME: &str = "summary.json";
 pub const SIGNALS_FILE_NAME: &str = "signals.json";
 pub const PROMPT_CONTEXT_FILE_NAME: &str = "prompt_context.json";
+pub const THREAD_INDEX_FILE_NAME: &str = "thread_index.json";
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 pub enum SessionRequest {
@@ -142,6 +143,7 @@ impl SessionStore {
     }
 
     pub fn start_thread(&mut self) -> Result<(), String> {
+        let previous_thread_id = self.thread_id.clone();
         let thread_id = new_id("t");
         self.append_records(vec![json!({
             "kind": "thread_started",
@@ -150,6 +152,7 @@ impl SessionStore {
         })])?;
         self.thread_id = thread_id;
         self.thread_turn_count = 0;
+        let _ = self.update_thread_index(Some(&previous_thread_id));
         Ok(())
     }
 
@@ -198,6 +201,7 @@ impl SessionStore {
             "turn_id": turn_id,
             "timestamp_ms": timestamp_ms(),
             "status": turn.status.name(),
+            "stop_reason": turn.status.stop_reason(),
             "steps": turn.steps,
             "error": turn.error,
         }));
@@ -207,13 +211,20 @@ impl SessionStore {
         self.checkpoint_seq = self.next_seq.saturating_sub(1);
         self.turn_count = self.turn_count.saturating_add(1);
         self.thread_turn_count = self.thread_turn_count.saturating_add(1);
-        self.update_summary_and_signals(turn.prompt, turn.steps, turn.error);
+        self.update_summary_and_signals(turn.prompt, turn.steps, turn.status, turn.error);
         Ok(())
     }
 
-    fn update_summary_and_signals(&self, last_prompt: &str, steps: usize, error: Option<&str>) {
+    fn update_summary_and_signals(
+        &self,
+        last_prompt: &str,
+        steps: usize,
+        status: TurnStatus,
+        _error: Option<&str>,
+    ) {
         let now = timestamp_ms();
         let summary_path = self.session_dir.join(SUMMARY_FILE_NAME);
+        let stop_reason = status.stop_reason();
         let summary_val = json!({
             "id": self.session_id,
             "created_at_ms": self.created_at_ms,
@@ -221,7 +232,10 @@ impl SessionStore {
             "turn_count": self.turn_count,
             "bytes": self.bytes,
             "last_prompt": last_prompt,
-            "last_status": if error.is_some() { "error" } else { "completed" },
+            "last_status": status.name(),
+            "last_stop_reason": stop_reason,
+            "last_steps": steps,
+            "result_complete": matches!(status, TurnStatus::Completed),
         });
         let _ = write_json_atomic(&summary_path, &summary_val);
 
@@ -385,6 +399,7 @@ impl SessionStore {
             append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
         };
+        let _ = store.update_thread_index(None);
         Ok(OpenedSession {
             store,
             state: SessionState::from_messages(loaded.messages),
@@ -500,8 +515,50 @@ impl SessionStore {
         ])?;
         store.checkpoint_seq = store.next_seq.saturating_sub(1);
         write_prompt_context(&store.session_dir, workspace, session_id);
-        store.update_summary_and_signals("", 0, None);
+        store.update_summary_and_signals("", 0, TurnStatus::Completed, None);
+        let _ = store.update_thread_index(None);
         Ok(store)
+    }
+
+    fn update_thread_index(&self, previous_thread_id: Option<&str>) -> Result<(), String> {
+        let base_dir = self
+            .session_dir
+            .parent()
+            .ok_or_else(|| "session directory has no workspace parent".to_string())?;
+        fs::create_dir_all(base_dir)
+            .map_err(|error| format!("cannot create thread index directory: {error}"))?;
+        let _lock = acquire_lock(base_dir, "thread-index")?;
+        let index_path = base_dir.join(THREAD_INDEX_FILE_NAME);
+        let mut threads = fs::read_to_string(&index_path)
+            .ok()
+            .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
+            .and_then(|value| value.get("threads").cloned())
+            .and_then(|value| serde_json::from_value::<HashMap<String, Value>>(value).ok())
+            .unwrap_or_default();
+        if let Some(previous_thread_id) = previous_thread_id {
+            let owned_by_this_session = threads
+                .get(previous_thread_id)
+                .and_then(|value| value.get("session_id"))
+                .and_then(Value::as_str)
+                == Some(self.session_id.as_str());
+            if owned_by_this_session {
+                threads.remove(previous_thread_id);
+            }
+        }
+        threads.insert(
+            self.thread_id.clone(),
+            json!({
+                "session_id": self.session_id.clone(),
+                "updated_at_ms": timestamp_ms(),
+            }),
+        );
+        write_json_atomic(
+            &index_path,
+            &json!({
+                "version": 1,
+                "threads": threads,
+            }),
+        )
     }
 
     fn item_record(&self, turn_id: Option<&str>, message: &Message) -> Value {
@@ -614,6 +671,16 @@ impl TurnStatus {
             Self::Failed => "failed",
         }
     }
+
+    fn stop_reason(self) -> Option<&'static str> {
+        match self {
+            Self::Completed => None,
+            Self::StepLimit => Some("step_limit"),
+            Self::Steered => Some("steered"),
+            Self::Cancelled => Some("cancelled"),
+            Self::Failed => Some("failed"),
+        }
+    }
 }
 
 fn message_kind(message: &Message) -> &'static str {
@@ -686,6 +753,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(opened.store.items().len(), 2);
+        let index_path = opened
+            .store
+            .path()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(THREAD_INDEX_FILE_NAME);
+        let index = fs::read_to_string(index_path).unwrap();
+        assert!(index.contains(opened.store.thread_id()));
         drop(opened);
 
         let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
