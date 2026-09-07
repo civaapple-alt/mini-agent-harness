@@ -13,82 +13,28 @@ use crate::action::ActionResponse;
 use crate::goal_runtime::GoalRuntimeEvent;
 use crate::management::SettingsRuntimeEvent;
 use crate::notification::RuntimeNotification;
-use mini_agent_app_server_protocol::ApprovalRequestNotification;
-use mini_agent_app_server_protocol::ApprovalResolvedNotification;
-use mini_agent_app_server_protocol::ApprovalRespondParams;
-use mini_agent_app_server_protocol::CapabilityManifest;
-use mini_agent_app_server_protocol::CollaborationMode;
-use mini_agent_app_server_protocol::CollaborationModeKind;
-use mini_agent_app_server_protocol::DisabledCapability;
-use mini_agent_app_server_protocol::InitializeParams;
-use mini_agent_app_server_protocol::InitializeResult;
-use mini_agent_app_server_protocol::ItemCompletedNotification;
-use mini_agent_app_server_protocol::ItemStartedNotification;
-use mini_agent_app_server_protocol::JsonRpcError;
-use mini_agent_app_server_protocol::JsonRpcRequest;
-use mini_agent_app_server_protocol::JsonRpcResponse;
-use mini_agent_app_server_protocol::METHOD_APPROVAL_RESPOND;
-use mini_agent_app_server_protocol::METHOD_INITIALIZE;
-use mini_agent_app_server_protocol::METHOD_INITIALIZED;
-use mini_agent_app_server_protocol::METHOD_MCP_RETRY;
-use mini_agent_app_server_protocol::METHOD_MCP_STATUS;
-use mini_agent_app_server_protocol::METHOD_SESSION_INFO;
-use mini_agent_app_server_protocol::METHOD_THREAD_CLOSE;
-use mini_agent_app_server_protocol::METHOD_THREAD_FORK;
-use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_CLEAR;
-use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_GET;
-use mini_agent_app_server_protocol::METHOD_THREAD_GOAL_SET;
-use mini_agent_app_server_protocol::METHOD_THREAD_ITEMS_LIST;
-use mini_agent_app_server_protocol::METHOD_THREAD_LIST;
-use mini_agent_app_server_protocol::METHOD_THREAD_READ;
-use mini_agent_app_server_protocol::METHOD_THREAD_RESUME;
-use mini_agent_app_server_protocol::METHOD_THREAD_SETTINGS_UPDATE;
-use mini_agent_app_server_protocol::METHOD_THREAD_START;
-use mini_agent_app_server_protocol::METHOD_TURN_EVENT;
-use mini_agent_app_server_protocol::METHOD_TURN_INTERRUPT;
-use mini_agent_app_server_protocol::METHOD_TURN_READ;
-use mini_agent_app_server_protocol::METHOD_TURN_START;
-use mini_agent_app_server_protocol::METHOD_TURN_STEER;
-use mini_agent_app_server_protocol::METHOD_WORLD_REFRESH;
-use mini_agent_app_server_protocol::METHOD_WORLD_SET_EXECUTION;
-use mini_agent_app_server_protocol::METHOD_WORLD_STATE;
-use mini_agent_app_server_protocol::McpRetryResult as ProtocolMcpRetryResult;
-use mini_agent_app_server_protocol::McpStatusResult;
-use mini_agent_app_server_protocol::PROTOCOL_VERSION;
-use mini_agent_app_server_protocol::ServerCapabilities;
-use mini_agent_app_server_protocol::SessionInfoResult;
-use mini_agent_app_server_protocol::ThreadCloseParams;
-use mini_agent_app_server_protocol::ThreadForkParams;
-use mini_agent_app_server_protocol::ThreadForkResult;
-use mini_agent_app_server_protocol::ThreadGoalClearParams;
-use mini_agent_app_server_protocol::ThreadGoalClearResponse;
-use mini_agent_app_server_protocol::ThreadGoalClearedNotification;
-use mini_agent_app_server_protocol::ThreadGoalGetParams;
-use mini_agent_app_server_protocol::ThreadGoalGetResponse;
-use mini_agent_app_server_protocol::ThreadGoalSetParams;
-use mini_agent_app_server_protocol::ThreadGoalSetResponse;
-use mini_agent_app_server_protocol::ThreadGoalUpdatedNotification;
-use mini_agent_app_server_protocol::ThreadItemsListParams;
-use mini_agent_app_server_protocol::ThreadListParams;
-use mini_agent_app_server_protocol::ThreadListResult;
-use mini_agent_app_server_protocol::ThreadReadParams;
-use mini_agent_app_server_protocol::ThreadReadResult;
-use mini_agent_app_server_protocol::ThreadResumeParams;
-use mini_agent_app_server_protocol::ThreadResumeResult;
-use mini_agent_app_server_protocol::ThreadSettingsUpdateParams;
-use mini_agent_app_server_protocol::ThreadSettingsUpdateResult;
-use mini_agent_app_server_protocol::ThreadSettingsUpdatedNotification;
-use mini_agent_app_server_protocol::ThreadStartParams;
-use mini_agent_app_server_protocol::ThreadStartResult;
-use mini_agent_app_server_protocol::TurnEventNotification;
-use mini_agent_app_server_protocol::TurnInterruptParams;
-use mini_agent_app_server_protocol::TurnReadParams;
-use mini_agent_app_server_protocol::TurnStartParams;
-use mini_agent_app_server_protocol::TurnSteerParams;
-use mini_agent_app_server_protocol::WorldRefreshResult;
-use mini_agent_app_server_protocol::WorldSetExecutionParams;
-use mini_agent_app_server_protocol::WorldSetExecutionResult;
-use mini_agent_app_server_protocol::WorldStateResult;
+use mini_agent_app_server_protocol::{
+    ApprovalRequestNotification, ApprovalResolvedNotification, ApprovalRespondParams,
+    CapabilityManifest, CollaborationMode, CollaborationModeKind, DisabledCapability,
+    InitializeParams, InitializeResult, ItemCompletedNotification, ItemStartedNotification,
+    JsonRpcError, JsonRpcRequest, JsonRpcResponse, METHOD_APPROVAL_RESPOND, METHOD_INITIALIZE,
+    METHOD_INITIALIZED, METHOD_MCP_RETRY, METHOD_MCP_STATUS, METHOD_SESSION_INFO,
+    METHOD_THREAD_CLOSE, METHOD_THREAD_FORK, METHOD_THREAD_GOAL_CLEAR, METHOD_THREAD_GOAL_GET,
+    METHOD_THREAD_GOAL_SET, METHOD_THREAD_ITEMS_LIST, METHOD_THREAD_LIST, METHOD_THREAD_READ,
+    METHOD_THREAD_RESUME, METHOD_THREAD_SETTINGS_UPDATE, METHOD_THREAD_START, METHOD_TURN_EVENT,
+    METHOD_TURN_INTERRUPT, METHOD_TURN_READ, METHOD_TURN_START, METHOD_TURN_STEER,
+    METHOD_WORLD_REFRESH, METHOD_WORLD_SET_EXECUTION, METHOD_WORLD_STATE,
+    McpRetryResult as ProtocolMcpRetryResult, McpStatusResult, PROTOCOL_VERSION,
+    ServerCapabilities, SessionInfoResult, ThreadCloseParams, ThreadForkParams, ThreadForkResult,
+    ThreadGoalClearParams, ThreadGoalClearResponse, ThreadGoalClearedNotification,
+    ThreadGoalGetParams, ThreadGoalGetResponse, ThreadGoalSetParams, ThreadGoalSetResponse,
+    ThreadGoalUpdatedNotification, ThreadItemsListParams, ThreadListParams, ThreadListResult,
+    ThreadReadParams, ThreadReadResult, ThreadResumeParams, ThreadResumeResult,
+    ThreadSettingsUpdateParams, ThreadSettingsUpdateResult, ThreadSettingsUpdatedNotification,
+    ThreadStartParams, ThreadStartResult, TurnEventNotification, TurnInterruptParams,
+    TurnReadParams, TurnStartParams, TurnSteerParams, WorldRefreshResult, WorldSetExecutionParams,
+    WorldSetExecutionResult, WorldStateResult,
+};
 use mini_agent_core::SessionState;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::Model;

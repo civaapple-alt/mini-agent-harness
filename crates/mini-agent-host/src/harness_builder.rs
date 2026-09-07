@@ -1,6 +1,7 @@
-use mini_agent_capabilities::CapabilityRegistry;
-use mini_agent_capabilities::ModelProviderSettings;
-use mini_agent_capabilities::OpenAiModel;
+use mini_agent_capabilities::{
+    ApprovalController, CapabilityRegistry, ImageStore, McpLoadResult, McpServerConfig,
+    ModelProviderSettings, OpenAiModel, ResultStore,
+};
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::ToolRouter;
@@ -16,12 +17,6 @@ use crate::{
     CapabilityManifest, ExtensionLoadDepth, ExtensionSelection, RuntimeComposition,
     SourceFingerprint, ToolScope,
 };
-use mini_agent_capabilities::ApprovalController;
-use mini_agent_capabilities::ImageStore;
-use mini_agent_capabilities::McpLoadResult;
-use mini_agent_capabilities::McpServerConfig;
-use mini_agent_capabilities::ResultStore;
-
 pub struct HarnessBuild<M: Model> {
     pub harness: Harness<M>,
     pub images: ImageStore,
@@ -80,30 +75,7 @@ where
     M: Model,
     F: ModelProviderFactory<M>,
 {
-    prepare_harness_with_composition_and_result_store_and_registry(
-        runtime_config,
-        approval,
-        config,
-        composition,
-        results,
-        registry,
-        model_factory,
-    )
-}
-
-fn prepare_harness_with_composition_and_result_store_and_registry<M, F>(
-    runtime_config: &RuntimeConfig,
-    approval: ApprovalController,
-    mut config: HarnessConfig,
-    composition: RuntimeComposition,
-    results: ResultStore,
-    registry: CapabilityRegistry,
-    model_factory: F,
-) -> Result<HarnessBuild<M>, String>
-where
-    M: Model,
-    F: ModelProviderFactory<M>,
-{
+    let mut config = config;
     let policy = registry.build_policy(&composition.policy_provider, composition.security)?;
     approval.set_policy(policy);
     registry.validate(

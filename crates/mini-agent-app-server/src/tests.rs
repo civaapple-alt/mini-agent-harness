@@ -181,10 +181,6 @@ impl ToolRuntime for McpTimeoutFixtureTool {
     fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
         Err(ToolError("MCP tool call timed out".to_string()))
     }
-
-    fn execute_outcome(&self, _arguments: &Value) -> ToolExecutionOutcome {
-        ToolExecutionOutcome::failed("MCP tool call timed out")
-    }
 }
 
 impl Model for BlockingModel {
