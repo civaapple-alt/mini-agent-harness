@@ -202,6 +202,7 @@ pub(super) fn shell_description(approval: ApprovalScope) -> String {
         ApprovalScope::PerAction => "after per-action user approval",
         ApprovalScope::CurrentSession => "after the first user approval in this Session",
         ApprovalScope::CurrentProject => "after the first user approval in this Project",
+        ApprovalScope::Automatic => "automatically in autonomous mode",
     };
     if cfg!(windows) {
         format!(

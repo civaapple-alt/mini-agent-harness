@@ -491,6 +491,7 @@ where
                     "current_project" => {
                         mini_agent_app_server_protocol::ApprovalMode::CurrentProject
                     }
+                    "automatic" | "auto" => mini_agent_app_server_protocol::ApprovalMode::Automatic,
                     _ => return Err(JsonRpcError::invalid_params("unknown approval mode")),
                 },
             },

@@ -24,7 +24,7 @@ struct ApprovalBinding {
 impl ApprovalBinding {
     fn owner(&self, scope: ApprovalScope) -> Option<String> {
         match scope {
-            ApprovalScope::PerAction => None,
+            ApprovalScope::PerAction | ApprovalScope::Automatic => None,
             ApprovalScope::CurrentSession => self.session_id.clone(),
             ApprovalScope::CurrentProject => match (&self.project_id, &self.workspace_id) {
                 (Some(project), Some(workspace)) => Some(format!("{project}\0{workspace}")),
@@ -261,21 +261,28 @@ impl ApprovalController {
             ApprovalMode::Interactive => {}
         }
         let scope = self.approval_scope();
-        let owner = binding.owner(scope).or_else(|| {
-            (scope == ApprovalScope::CurrentSession)
-                .then(|| self.session_dir().map(|path| path.display().to_string()))
-                .flatten()
-        });
-        if scope != ApprovalScope::PerAction && owner.is_none() {
-            return Err(ToolError(
-                "scoped approval requires a trusted Project/Session identity".to_string(),
-            ));
+        if scope == ApprovalScope::Automatic {
+            return Ok(());
         }
         let revision = request.workspace_revision.unwrap_or(0);
-        if scope != ApprovalScope::PerAction
+        let project_owner = binding.owner(ApprovalScope::CurrentProject);
+        let session_owner = binding
+            .owner(ApprovalScope::CurrentSession)
+            .or_else(|| self.session_dir().map(|path| path.display().to_string()));
+        if let Some(owner) = &session_owner
             && self.store.is_approved_for(
-                scope,
-                owner.as_deref().expect("scoped approval owner checked"),
+                ApprovalScope::CurrentSession,
+                owner,
+                revision,
+                &request.action,
+            )
+        {
+            return Ok(());
+        }
+        if let Some(owner) = &project_owner
+            && self.store.is_approved_for(
+                ApprovalScope::CurrentProject,
+                owner,
                 revision,
                 &request.action,
             )
@@ -287,13 +294,17 @@ impl ApprovalController {
             None => (self.callback)(&request.action)?,
         };
         if approved {
-            if scope != ApprovalScope::PerAction {
-                self.store.remember_approval_for(
-                    scope,
-                    owner.as_deref().expect("scoped approval owner checked"),
-                    revision,
-                    &request.action,
-                );
+            let owner = binding.owner(scope).or_else(|| {
+                (scope == ApprovalScope::CurrentSession)
+                    .then(|| self.session_dir().map(|path| path.display().to_string()))
+                    .flatten()
+            });
+            if scope != ApprovalScope::PerAction
+                && scope != ApprovalScope::Automatic
+                && let Some(owner) = owner
+            {
+                self.store
+                    .remember_approval_for(scope, &owner, revision, &request.action);
             }
             Ok(())
         } else {

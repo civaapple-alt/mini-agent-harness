@@ -467,6 +467,8 @@ pub enum ApprovalMode {
     PerAction,
     CurrentSession,
     CurrentProject,
+    #[serde(alias = "auto")]
+    Automatic,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

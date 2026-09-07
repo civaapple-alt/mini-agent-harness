@@ -1,7 +1,7 @@
 # Proposal: 解耦全局审批模式与单次动作授权范围 (Decoupling Approval Policy and Action Grant Scope)
 
 * **日期**: 2026-09-07
-* **状态**: Proposed
+* **状态**: Implemented
 * **范围**: `Capabilities` (`ApprovalController`, `ApprovalStore`), `App Server` (`ApprovalBroker`, Protocol), `SDK`, `Web Gateway / Studio`
 * **关联模块**: `mini-agent-capabilities`, `mini-agent-app-server`, `mini-agent-web`
 

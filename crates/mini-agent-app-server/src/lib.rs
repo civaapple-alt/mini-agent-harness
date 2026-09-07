@@ -150,7 +150,10 @@ impl ApprovalBroker {
     ///
     /// The broker assigns `request_id`; the caller-provided Thread, Turn, and
     /// call IDs remain attached to both request and resolution events.
-    pub fn request_with_context(&self, approval: &ToolApprovalRequest) -> Result<bool, String> {
+    pub fn request_resolution(
+        &self,
+        approval: &ToolApprovalRequest,
+    ) -> Result<ApprovalResolution, String> {
         let request_id = format!("approval-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
         let (sender, receiver) = std::sync::mpsc::channel();
         let execution = *self.execution.read().unwrap();
@@ -191,8 +194,12 @@ impl ApprovalBroker {
         self.notify.notify_one();
         receiver
             .recv()
-            .map(|resolution| resolution.outcome == ApprovalOutcome::Approved)
             .map_err(|_| "approval client disconnected".to_string())
+    }
+
+    pub fn request_with_context(&self, approval: &ToolApprovalRequest) -> Result<bool, String> {
+        self.request_resolution(approval)
+            .map(|resolution| resolution.outcome == ApprovalOutcome::Approved)
     }
 
     pub async fn next_request(&self) -> ApprovalRequest {

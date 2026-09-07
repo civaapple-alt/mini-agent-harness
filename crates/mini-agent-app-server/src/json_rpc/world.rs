@@ -90,6 +90,9 @@ where
             mini_agent_app_server_protocol::ApprovalMode::CurrentProject => {
                 mini_agent_capabilities::ApprovalScope::CurrentProject
             }
+            mini_agent_app_server_protocol::ApprovalMode::Automatic => {
+                mini_agent_capabilities::ApprovalScope::Automatic
+            }
         };
         let management = match self.management_service() {
             Ok(management) => management,

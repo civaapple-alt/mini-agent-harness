@@ -49,6 +49,7 @@ pub enum ApprovalScope {
     PerAction,
     CurrentSession,
     CurrentProject,
+    Automatic,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

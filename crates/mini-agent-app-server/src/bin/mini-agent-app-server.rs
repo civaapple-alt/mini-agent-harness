@@ -205,13 +205,47 @@ fn approval_for(
     security: SecurityPreset,
     scope: ApprovalScope,
 ) -> ApprovalController {
+    let project_owner = format!(
+        "{}\0{}",
+        runtime_config.project_id(),
+        runtime_config.workspace().display()
+    );
+    let revision = runtime_config.workspace_revision();
+    let session_owner = session_id.clone();
+    let cache_store = store.clone();
     let approval = ApprovalController::with_policy_and_context_callback(
         ApprovalMode::Interactive,
         SecurityPolicy::for_preset(security),
         move |request: &ToolApprovalRequest| {
-            broker
-                .request_with_context(request)
-                .map_err(mini_agent_protocol::ToolError)
+            let resolution = broker
+                .request_resolution(request)
+                .map_err(mini_agent_protocol::ToolError)?;
+            let approved =
+                resolution.outcome == mini_agent_app_server_protocol::ApprovalOutcome::Approved;
+            if approved && let Some(mode) = resolution.approval {
+                match mode {
+                    mini_agent_app_server_protocol::ApprovalMode::CurrentSession => {
+                        if let Some(owner) = &session_owner {
+                            cache_store.remember_approval_for(
+                                ApprovalScope::CurrentSession,
+                                owner,
+                                revision,
+                                &request.action,
+                            );
+                        }
+                    }
+                    mini_agent_app_server_protocol::ApprovalMode::CurrentProject => {
+                        cache_store.remember_approval_for(
+                            ApprovalScope::CurrentProject,
+                            &project_owner,
+                            revision,
+                            &request.action,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            Ok(approved)
         },
     )
     .with_approval_store(store);
@@ -241,5 +275,6 @@ fn approval_scope(approval: mini_agent_app_server_protocol::ApprovalMode) -> App
         mini_agent_app_server_protocol::ApprovalMode::CurrentProject => {
             ApprovalScope::CurrentProject
         }
+        mini_agent_app_server_protocol::ApprovalMode::Automatic => ApprovalScope::Automatic,
     }
 }

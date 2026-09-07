@@ -136,6 +136,9 @@ impl WorldState {
             ApprovalScope::CurrentProject => {
                 "An approved action may be reused by matching Sessions in this Project and Workspace revision; denied actions and unsafe effects remain denied."
             }
+            ApprovalScope::Automatic => {
+                "Autonomous mode: non-destructive workspace and tool actions are automatically approved."
+            }
         });
         context.push_str("</execution_guidance></world_state>");
         if context.len() > MAX_WORLD_CONTEXT_BYTES {
@@ -192,6 +195,7 @@ impl WorldState {
             ApprovalScope::PerAction => "per_action",
             ApprovalScope::CurrentSession => "current_session",
             ApprovalScope::CurrentProject => "current_project",
+            ApprovalScope::Automatic => "automatic",
         }
     }
 }
