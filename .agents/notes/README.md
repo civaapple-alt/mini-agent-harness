@@ -89,6 +89,7 @@ graph LR
 
 ### Proposed
 
+- [Decoupling Approval Policy and Action Grant Scope](proposed/architecture/2026-09-07-decoupling-approval-policy-and-action-grant-scope.md)
 - [Result-Oriented Long-Term Bot Agents](proposed/architecture/2026-09-04-result-oriented-long-term-bot-agents.zh.md)
 - [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
 - [CLI Through App Server](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md)
