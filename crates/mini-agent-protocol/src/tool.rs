@@ -70,6 +70,9 @@ pub struct ToolExecutionContext {
 pub enum ApprovalPolicy {
     Interactive,
     Automatic,
+    /// Bypass ordinary bounded workspace approvals while retaining explicit
+    /// approval for high-risk, destructive, or external actions.
+    Trusted,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

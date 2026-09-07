@@ -3,6 +3,7 @@ use crate::action::{ActionReceipt, RuntimeRevision, respond};
 use crate::management::{RuntimeActorState, SettingsRuntimeEvent};
 pub(super) use crate::runtime_command::{RuntimeCommand, RuntimeRequest};
 use crate::thread_manager::ThreadManager;
+use mini_agent_app_server_protocol::ContinuationMode;
 use mini_agent_capabilities::{ApprovalController, McpLoadResult, SecurityPolicy, load_mcp};
 use mini_agent_core::Thread;
 use mini_agent_protocol::{Message, Model, ThreadId, TurnId, TurnInput, TurnInputMode, TurnStart};
@@ -161,22 +162,32 @@ pub(super) fn handle<M>(
         RuntimeCommand::ThreadSettingsUpdate {
             active,
             builtin_tools,
+            continuation_mode,
             reply,
         } => {
-            let result = mutate::<(Vec<String>, bool), _>(runtime, runtime_revision, |state| {
-                let previous_active = state.goal_runtime_handle.plan_active();
-                let previous_tools = state.builtin_tools.names().to_vec();
-                set_collaboration_mode(threads, state, active, builtin_tools).map(|selection| {
-                    let changed = previous_active != active || previous_tools != selection;
-                    ((selection, changed), changed)
-                })
-            });
+            let result = mutate::<(crate::management::ThreadSettingsRuntimeSnapshot, bool), _>(
+                runtime,
+                runtime_revision,
+                |state| {
+                    let previous_active = state.goal_runtime_handle.plan_active();
+                    let previous_tools = state.builtin_tools.names().to_vec();
+                    let previous_continuation = state.continuation_mode;
+                    set_thread_settings(threads, state, active, builtin_tools, continuation_mode)
+                        .map(|settings| {
+                            let changed = previous_active != active
+                                || previous_tools != settings.builtin_tools
+                                || previous_continuation != settings.continuation_mode;
+                            ((settings, changed), changed)
+                        })
+                },
+            );
             let changed = result.as_ref().is_ok_and(|(_, changed)| *changed);
             if changed && let Some(state) = runtime.as_ref() {
                 let event = SettingsRuntimeEvent {
                     thread_id: state.management.thread_id(),
                     active,
                     builtin_tools: state.builtin_tools.names().to_vec(),
+                    continuation_mode: state.continuation_mode,
                     state_revision: state.revision().value(),
                 };
                 let _ = state.settings_notifications.send(event.clone());
@@ -184,7 +195,7 @@ pub(super) fn handle<M>(
                     .notifications
                     .send(crate::RuntimeNotification::Settings(event));
             }
-            respond(reply, receipt, result.map(|(selection, _)| selection));
+            respond(reply, receipt, result.map(|(settings, _)| settings));
         }
         RuntimeCommand::ThreadGoalSet {
             objective,
@@ -325,12 +336,13 @@ fn check_revision(
     }
 }
 
-pub(super) fn set_collaboration_mode<M>(
+pub(super) fn set_thread_settings<M>(
     threads: &mut ThreadManager<M>,
     state: &mut RuntimeActorState,
     active: bool,
     builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
-) -> Result<Vec<String>, AppServerError>
+    continuation_mode: Option<ContinuationMode>,
+) -> Result<crate::management::ThreadSettingsRuntimeSnapshot, AppServerError>
 where
     M: Model + 'static,
 {
@@ -338,6 +350,18 @@ where
     let thread = threads
         .get_mut(thread_id.as_str())
         .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
+    if let Some(mode) = continuation_mode {
+        let config = match mode {
+            ContinuationMode::Manual => state.management.base_harness_config.clone(),
+            ContinuationMode::Continuous => state
+                .management
+                .base_harness_config
+                .clone()
+                .with_copilot_loop(),
+        };
+        thread.harness_mut().replace_config(config);
+        state.continuation_mode = mode;
+    }
     if active {
         let plan_path = state
             .goal_runtime_handle
@@ -371,7 +395,10 @@ where
             .set_hidden_tools(selection.hidden_names());
         state.builtin_tools = selection;
     }
-    Ok(state.builtin_tools.names().to_vec())
+    Ok(crate::management::ThreadSettingsRuntimeSnapshot {
+        builtin_tools: state.builtin_tools.names().to_vec(),
+        continuation_mode: state.continuation_mode,
+    })
 }
 
 fn update_world<M>(

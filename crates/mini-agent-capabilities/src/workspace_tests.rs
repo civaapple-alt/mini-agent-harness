@@ -219,6 +219,37 @@ fn apply_patch_denial_is_explicit_and_has_no_effect() {
 }
 
 #[test]
+fn trusted_policy_directly_admits_non_destructive_patches_but_not_deletes() {
+    let root = test_root();
+    fs::write(root.join("note.txt"), "keep\n").unwrap();
+    let approval = ApprovalController::with_callback(ApprovalPolicy::Trusted, |_| {
+        panic!("trusted non-destructive patch should not request approval")
+    });
+    let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
+    let patch = ApplyPatch(workspace);
+    let update = ToolExecutionRequest::new(
+        "trusted-update",
+        "apply_patch",
+        json!({
+            "patch": "*** Begin Patch\n*** Update File: note.txt\n@@\n-keep\n+changed\n*** End Patch"
+        }),
+    );
+    assert_eq!(patch.admission(&update).unwrap(), ToolAdmission::Allowed);
+
+    let delete = ToolExecutionRequest::new(
+        "trusted-delete",
+        "apply_patch",
+        json!({"patch": "*** Begin Patch\n*** Delete File: note.txt\n*** End Patch"}),
+    );
+    assert!(matches!(
+        patch.admission(&delete).unwrap(),
+        ToolAdmission::ApprovalRequired { .. }
+    ));
+
+    remove_test_root(&root);
+}
+
+#[test]
 fn read_image_uploads_and_rejects_type_mismatch() {
     let root = test_root();
     fs::write(root.join("shot.png"), crate::image::TINY_PNG).unwrap();

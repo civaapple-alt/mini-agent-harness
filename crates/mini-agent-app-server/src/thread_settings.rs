@@ -2,6 +2,7 @@
 
 use crate::action::{ActionFailure, ActionResponse};
 use crate::runtime_command::{RuntimeCommand, RuntimeCommandClient};
+use mini_agent_app_server_protocol::ContinuationMode;
 use mini_agent_host::BuiltinToolSelection;
 
 /// App Server settings boundary for one Thread runtime.
@@ -43,7 +44,9 @@ impl ThreadSettingsService {
         &self,
         active: bool,
         builtin_tools: Option<BuiltinToolSelection>,
-    ) -> Result<ActionResponse<Vec<String>>, ActionFailure> {
+        continuation_mode: Option<ContinuationMode>,
+    ) -> Result<ActionResponse<crate::management::ThreadSettingsRuntimeSnapshot>, ActionFailure>
+    {
         let client = self.client.as_ref().ok_or_else(|| {
             ActionFailure::without_receipt(crate::AppServerError::RuntimeUnavailable)
         })?;
@@ -51,6 +54,7 @@ impl ThreadSettingsService {
             .request_action(|reply| RuntimeCommand::ThreadSettingsUpdate {
                 active,
                 builtin_tools,
+                continuation_mode,
                 reply,
             })
             .await

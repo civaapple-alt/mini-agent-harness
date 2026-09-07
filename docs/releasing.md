@@ -98,8 +98,10 @@ git diff --check
 git status --short
 ```
 
-For the 0.7.0 release, both the 20,000-line runtime budget and the 30,000-line
-release-source total, including tests in supported packages, are hard gates.
+For the 0.7.0 release, both the 20,000-effective-line runtime budget and the
+30,000-effective-line release-source total, including tests in supported
+packages, are hard gates. The budget excludes blank and comment-only lines;
+code-bearing lines with trailing comments count once.
 The experimental CLI/REPL is reported by the budget script but is excluded from
 the release-source gate.
 

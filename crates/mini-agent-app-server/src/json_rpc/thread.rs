@@ -103,10 +103,11 @@ where
         let active = matches!(params.collaboration_mode.mode, CollaborationModeKind::Plan);
         action_response(
             request.id,
-            settings.update_action(active, builtin_tools),
-            |tools| ThreadSettingsUpdateResult {
+            settings.update_action(active, builtin_tools, params.continuation_mode),
+            |settings| ThreadSettingsUpdateResult {
                 collaboration_mode: params.collaboration_mode,
-                builtin_tools: tools.clone(),
+                builtin_tools: settings.builtin_tools.clone(),
+                continuation_mode: settings.continuation_mode,
             },
         )
         .await

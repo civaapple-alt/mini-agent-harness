@@ -43,6 +43,27 @@ class LineBudgetTests(unittest.TestCase):
             self.assertEqual(line_budget.source_counts(dedicated_unit), (2, 0, 2, 0))
             self.assertEqual(line_budget.source_counts(integration), (2, 0, 0, 2))
 
+    def test_source_counts_excludes_blank_and_comment_only_lines(self):
+        text = (
+            "// module comment\n"
+            "\n"
+            "pub fn run() {} // trailing comment still has code\n"
+            "/* block comment\n"
+            " * continuation\n"
+            " */\n"
+            "#[cfg(test)]\n"
+            "mod tests {\n"
+            "    // test comment\n"
+            "    #[test]\n"
+            "    fn check() {}\n"
+            "}\n"
+        )
+
+        self.assertEqual(
+            line_budget.source_counts_for_text("src/lib.rs", text),
+            (6, 1, 5, 0),
+        )
+
     def test_layer_lines_sums_selected_crates(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -160,13 +181,15 @@ class LineBudgetTests(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 self.assertEqual(line_budget.check(root), 0)
             self.assertIn("production 1, unit 0, integration 0", output.getvalue())
-            self.assertIn("Control Plane: 0 lines", output.getvalue())
+            self.assertIn("Control Plane: 0 effective code lines", output.getvalue())
             self.assertIn(
-                "runtime (core + protocol + host + app-server): 1/20000 lines",
+                "runtime (core + protocol + host + app-server): "
+                "1/20000 effective code lines",
                 output.getvalue(),
             )
             self.assertIn(
-                "release Rust source (excluding experimental CLI/REPL): 1/30000 lines",
+                "release Rust source (excluding experimental CLI/REPL): "
+                "1/30000 effective code lines",
                 output.getvalue(),
             )
 
@@ -188,12 +211,13 @@ class LineBudgetTests(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 self.assertEqual(line_budget.check(root), 0)
 
-            self.assertIn("capabilities: 3 lines", output.getvalue())
+            self.assertIn("capabilities: 3 effective code lines", output.getvalue())
             self.assertIn(
-                "category/capability-provider: 3 lines", output.getvalue()
+                "category/capability-provider: 3 effective code lines", output.getvalue()
             )
             self.assertIn(
-                "runtime (core + protocol + host + app-server): 1/20000 lines",
+                "runtime (core + protocol + host + app-server): "
+                "1/20000 effective code lines",
                 output.getvalue(),
             )
 
@@ -211,9 +235,10 @@ class LineBudgetTests(unittest.TestCase):
             with mock.patch.object(line_budget, "PROJECT_LIMIT", 1):
                 with contextlib.redirect_stdout(output):
                     self.assertEqual(line_budget.check(root), 0)
-            self.assertIn("cli: 20 lines", output.getvalue())
+            self.assertIn("cli: 20 effective code lines", output.getvalue())
             self.assertIn(
-                "release Rust source (excluding experimental CLI/REPL): 1/1 lines",
+                "release Rust source (excluding experimental CLI/REPL): "
+                "1/1 effective code lines",
                 output.getvalue(),
             )
 
@@ -230,7 +255,8 @@ class LineBudgetTests(unittest.TestCase):
                     with contextlib.redirect_stderr(io.StringIO()):
                         self.assertEqual(line_budget.check(root), 1)
             self.assertIn(
-                "release Rust source (excluding experimental CLI/REPL): 1/0 lines",
+                "release Rust source (excluding experimental CLI/REPL): "
+                "1/0 effective code lines",
                 output.getvalue(),
             )
 

@@ -243,7 +243,11 @@ impl ApprovalController {
             SecurityDecision::Allow => return Ok(()),
             SecurityDecision::Ask => {}
         }
-        if self.approval_policy() == ApprovalPolicy::Automatic && !is_high_risk(&request) {
+        if matches!(
+            self.approval_policy(),
+            ApprovalPolicy::Automatic | ApprovalPolicy::Trusted
+        ) && !is_high_risk(&request)
+        {
             return Ok(());
         }
         let key = action_grant_key(&request, &self.access_scope.read().unwrap());

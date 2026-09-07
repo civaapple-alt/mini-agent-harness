@@ -58,7 +58,8 @@ pub(super) enum RuntimeCommand {
     ThreadSettingsUpdate {
         active: bool,
         builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
-        reply: oneshot::Sender<ActionResult<Vec<String>>>,
+        continuation_mode: Option<mini_agent_app_server_protocol::ContinuationMode>,
+        reply: oneshot::Sender<ActionResult<crate::management::ThreadSettingsRuntimeSnapshot>>,
     },
     ThreadGoalSet {
         objective: Option<String>,

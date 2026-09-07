@@ -354,6 +354,16 @@ where
         mode: CollaborationModeKind,
         builtin_tools: Option<Vec<String>>,
     ) -> Result<ThreadSettingsUpdateResult, JsonRpcError> {
+        self.update_thread_settings_with_continuation(mode, builtin_tools, None)
+            .await
+    }
+
+    pub async fn update_thread_settings_with_continuation(
+        &mut self,
+        mode: CollaborationModeKind,
+        builtin_tools: Option<Vec<String>>,
+        continuation_mode: Option<mini_agent_app_server_protocol::ContinuationMode>,
+    ) -> Result<ThreadSettingsUpdateResult, JsonRpcError> {
         let thread_id = self.connection.thread_id().await;
         self.call(
             METHOD_THREAD_SETTINGS_UPDATE,
@@ -361,6 +371,7 @@ where
                 thread_id,
                 collaboration_mode: CollaborationMode { mode },
                 builtin_tools,
+                continuation_mode,
             },
         )
         .await
@@ -438,6 +449,7 @@ where
                 policy: match policy.into().as_str() {
                     "interactive" => mini_agent_app_server_protocol::ApprovalPolicy::Interactive,
                     "automatic" => mini_agent_app_server_protocol::ApprovalPolicy::Automatic,
+                    "trusted" => mini_agent_app_server_protocol::ApprovalPolicy::Trusted,
                     _ => return Err(JsonRpcError::invalid_params("unknown approval policy")),
                 },
             },

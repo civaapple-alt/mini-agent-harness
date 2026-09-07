@@ -162,6 +162,7 @@ impl WorldState {
         context.push_str(match self.policy {
             ApprovalPolicy::Interactive => "Sensitive actions pause for an explicit decision; the decision may be remembered only for its returned action grant scope.",
             ApprovalPolicy::Automatic => "Automatic policy runs low-risk actions without interruption; high-risk, denied, or incomplete actions still require explicit approval.",
+            ApprovalPolicy::Trusted => "Trusted policy runs bounded workspace updates without interruption; high-risk, destructive, denied, or external actions still require explicit approval.",
         });
         context.push_str("</execution_guidance></world_state>");
         if context.len() > MAX_WORLD_CONTEXT_BYTES {
@@ -223,6 +224,7 @@ impl WorldState {
         match self.policy {
             ApprovalPolicy::Interactive => "interactive",
             ApprovalPolicy::Automatic => "automatic",
+            ApprovalPolicy::Trusted => "trusted",
         }
     }
 }

@@ -14,7 +14,7 @@ use mini_agent_capabilities::{
     ApprovalController, ApprovalPolicy, McpServerConfig, OpenedSession, SecurityPreset,
     SessionItem, TurnCommit,
 };
-use mini_agent_core::ThreadCheckpoint;
+use mini_agent_core::{HarnessConfig, ThreadCheckpoint};
 use mini_agent_host::WorldState;
 use mini_agent_protocol::{Message, Model, ThreadId, TurnStatus};
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -25,6 +25,7 @@ pub(crate) struct RuntimeActorState {
     pub(crate) commands: mpsc::Sender<Command>,
     pub(crate) approval: ApprovalController,
     pub(crate) builtin_tools: mini_agent_host::BuiltinToolSelection,
+    pub(crate) continuation_mode: mini_agent_app_server_protocol::ContinuationMode,
     pub(crate) stable_system_prompt: Option<String>,
     pub(crate) settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
     pub(crate) notifications: broadcast::Sender<RuntimeNotification>,
@@ -36,7 +37,14 @@ pub(crate) struct SettingsRuntimeEvent {
     pub(crate) thread_id: ThreadId,
     pub(crate) active: bool,
     pub(crate) builtin_tools: Vec<String>,
+    pub(crate) continuation_mode: mini_agent_app_server_protocol::ContinuationMode,
     pub(crate) state_revision: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ThreadSettingsRuntimeSnapshot {
+    pub(crate) builtin_tools: Vec<String>,
+    pub(crate) continuation_mode: mini_agent_app_server_protocol::ContinuationMode,
 }
 
 pub(crate) struct RuntimeManagementState {
@@ -45,6 +53,7 @@ pub(crate) struct RuntimeManagementState {
     world: WorldState,
     mcp: McpRuntimeState,
     local_checkpoint_seq: u64,
+    pub(crate) base_harness_config: HarnessConfig,
 }
 
 struct McpRuntimeState {
@@ -101,6 +110,29 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         retry_mcp_servers: Vec<McpServerConfig>,
         approval: ApprovalController,
     ) -> Self {
+        Self::new_with_harness_config(
+            server,
+            session,
+            world,
+            enabled_mcp_servers,
+            mcp_tool_count,
+            retry_mcp_servers,
+            approval,
+            HarnessConfig::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_harness_config(
+        server: AppServer<M>,
+        session: Option<OpenedSession>,
+        world: WorldState,
+        enabled_mcp_servers: Vec<String>,
+        mcp_tool_count: usize,
+        retry_mcp_servers: Vec<McpServerConfig>,
+        approval: ApprovalController,
+        base_harness_config: HarnessConfig,
+    ) -> Self {
         let active_thread_id = server.thread_id().clone();
         let local_checkpoint_seq = 0;
         let (goal_notifications, _) = broadcast::channel(64);
@@ -121,6 +153,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                     retry_servers: retry_mcp_servers,
                 },
                 local_checkpoint_seq,
+                base_harness_config,
             }),
             approval,
             goal_notifications,
@@ -166,6 +199,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 commands,
                 approval: approval.clone(),
                 builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
+                continuation_mode: mini_agent_app_server_protocol::ContinuationMode::Manual,
                 stable_system_prompt: stable_system_prompt.clone(),
                 settings_notifications: settings_notifications.clone(),
                 notifications: notifications.clone(),

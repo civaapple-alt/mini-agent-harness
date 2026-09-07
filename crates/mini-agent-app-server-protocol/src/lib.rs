@@ -294,6 +294,17 @@ pub enum CollaborationModeKind {
     Plan,
 }
 
+/// Thread-owned continuation policy. Goal Runtime is deliberately not a
+/// selectable value here: an active Goal temporarily owns its own milestone
+/// loop and limits.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContinuationMode {
+    #[default]
+    Manual,
+    Continuous,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSettingsUpdateParams {
@@ -302,6 +313,9 @@ pub struct ThreadSettingsUpdateParams {
     /// Optional replacement for the model-visible Builtin tool selection.
     /// Omission keeps the current Thread selection unchanged.
     pub builtin_tools: Option<Vec<String>>,
+    /// Optional Thread loop setting. Omission preserves the current value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation_mode: Option<ContinuationMode>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -309,6 +323,7 @@ pub struct ThreadSettingsUpdateParams {
 pub struct ThreadSettingsUpdateResult {
     pub collaboration_mode: CollaborationMode,
     pub builtin_tools: Vec<String>,
+    pub continuation_mode: ContinuationMode,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -317,6 +332,7 @@ pub struct ThreadSettingsUpdatedNotification {
     pub thread_id: ThreadId,
     pub collaboration_mode: CollaborationMode,
     pub builtin_tools: Vec<String>,
+    pub continuation_mode: ContinuationMode,
     pub state_revision: u64,
 }
 

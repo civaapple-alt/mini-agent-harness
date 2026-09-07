@@ -19,8 +19,11 @@ impl ToolHandler for Shell {
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let command = self.validated_command(&request.arguments)?;
         self.ensure_allowed(command)?;
-        if self.0.approval.approval_policy() == mini_agent_protocol::ApprovalPolicy::Automatic
-            && self.0.is_bounded_read_only_shell_command(command)
+        if matches!(
+            self.0.approval.approval_policy(),
+            mini_agent_protocol::ApprovalPolicy::Automatic
+                | mini_agent_protocol::ApprovalPolicy::Trusted
+        ) && self.0.is_bounded_read_only_shell_command(command)
         {
             let action = format!("shell command `{command}`");
             self.0.approval.ensure_not_denied(&action)?;
@@ -210,6 +213,9 @@ pub(super) fn shell_description(policy: mini_agent_protocol::ApprovalPolicy) -> 
         mini_agent_protocol::ApprovalPolicy::Interactive => "after user approval when required",
         mini_agent_protocol::ApprovalPolicy::Automatic => {
             "automatically for bounded read-only inspection; other shell actions after approval"
+        }
+        mini_agent_protocol::ApprovalPolicy::Trusted => {
+            "automatically for bounded read-only inspection; shell mutations still require approval"
         }
     };
     if cfg!(windows) {

@@ -505,6 +505,7 @@ pub(super) fn settings_notification_request(event: SettingsRuntimeEvent) -> Json
                     },
                 },
                 builtin_tools: event.builtin_tools,
+                continuation_mode: event.continuation_mode,
                 state_revision: event.state_revision,
             })
             .expect("settings update notification is serializable"),

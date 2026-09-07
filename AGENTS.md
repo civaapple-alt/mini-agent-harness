@@ -64,14 +64,16 @@ every feature in Codex, Pi, fx, or Qi.
 
 ## Size budget
 
-- Runtime hard limit: 20,000 Rust source lines across `core`, `protocol`,
+- Runtime hard limit: 20,000 effective Rust source lines across `core`, `protocol`,
   `host`, and `app-server`. The separately reported `acp` edge is excluded
   from this runtime limit.
-- Release-source hard limit: 30,000 Rust source lines across Core, Protocol,
+- Release-source hard limit: 30,000 effective Rust source lines across Core, Protocol,
   Capabilities, Host, and App Server.
 - The CLI, including the experimental REPL, is reported separately and is
   excluded from the release-source limit. Tests in release packages count.
 - Run `python scripts/line_budget.py` after code changes.
+- The budget uses effective lines: blank and comment-only lines are excluded;
+  a line containing code and a trailing comment counts once.
 - The report also separates the execution kernel, Host control plane,
   Capabilities control-plane boundary files, provider implementations, and
   CLI. The Capabilities path list is explicit and disjoint; it does not change

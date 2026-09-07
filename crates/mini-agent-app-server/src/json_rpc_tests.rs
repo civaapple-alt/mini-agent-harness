@@ -475,7 +475,8 @@ async fn broadcasts_thread_settings_updates_with_action_revision() {
         serde_json::json!({
             "threadId": "thread-1",
             "collaborationMode": {"mode": "plan"},
-            "builtinTools": ["shell", "read_file"]
+            "builtinTools": ["shell", "read_file"],
+            "continuationMode": "continuous"
         }),
     )
     .await;
@@ -494,6 +495,7 @@ async fn broadcasts_thread_settings_updates_with_action_revision() {
         params["builtinTools"],
         serde_json::json!(["shell", "read_file"])
     );
+    assert_eq!(params["continuationMode"], "continuous");
     assert_eq!(params["stateRevision"], response_revision);
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -173,7 +173,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         } = prepare_harness_with_model_factory(
             &runtime_config,
             approval.clone(),
-            harness_config,
+            harness_config.clone(),
             composition,
             results,
             registry,
@@ -188,6 +188,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
                     .map_err(|error| format!("cannot restore session: {error}"))?;
             }
         }
+        let base_harness_config = harness.config().clone();
         let thread_id = session
             .as_ref()
             .map(|opened| ThreadId::new(opened.store.thread_id().to_string()))
@@ -211,7 +212,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             goal_limits,
         )
         .with_verifier_config(runtime_config.clone());
-        let management = RuntimeManagementService::new(
+        let management = RuntimeManagementService::new_with_harness_config(
             server.clone(),
             session,
             world,
@@ -219,6 +220,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             mcp_tool_count,
             retry_mcp_servers,
             approval.clone(),
+            base_harness_config,
         );
         let services = RuntimeServices::new(management, thread_settings, goals)
             .map_err(|error| format!("cannot bind runtime services: {error}"))?;

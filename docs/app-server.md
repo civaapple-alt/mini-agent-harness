@@ -81,8 +81,9 @@ notifications use the same ordered runtime stream as `turn/event`.
 
 Thread settings and Goal control use the canonical Thread boundary:
 
-- `thread/settings/update` changes the typed `collaborationMode` and optional
-  bounded `builtinTools` selection. A changed setting emits one
+- `thread/settings/update` changes the typed `collaborationMode`, optional
+  bounded `builtinTools` selection, and optional `continuationMode` (`manual`
+  or `continuous`). A changed setting emits one
   `thread/settings/updated` notification with the effective values and the same
   `stateRevision` as the action response.
 - `thread/goal/set`, `thread/goal/get`, and `thread/goal/clear` are the only
@@ -193,7 +194,7 @@ force an immediate stop before the runtime reaches a cancellation boundary.
 
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
-| `thread/settings/update` | `threadId`, `collaborationMode: {mode}`, optional `builtinTools: [name]` | Updates the Thread's `default` or `plan` mode and optional bounded Builtin tool selection. Emits `thread/settings/updated`. |
+| `thread/settings/update` | `threadId`, `collaborationMode: {mode}`, optional `builtinTools: [name]`, optional `continuationMode` | Updates the Thread's `default` or `plan` mode, optional bounded Builtin tool selection, and explicit `manual`/`continuous` loop mode. Emits `thread/settings/updated`; Goal Runtime owns its own loop while a Goal is active. |
 | `thread/goal/set` | `threadId`; optional `objective`, `status`, `tokenBudget` | Sets or replaces a Goal subject to lifecycle checks; returns the public Goal projection and emits `thread/goal/updated`. A running Goal must be cleared before replacement. |
 | `thread/goal/get` | `threadId` | Returns `{goal}` where `goal` may be `null`. |
 | `thread/goal/clear` | `threadId` | Clears the Goal and returns `{cleared: true|false}`; emits `thread/goal/cleared` when applicable. |
@@ -209,7 +210,7 @@ submit verifier verdicts or advance milestones directly.
 | --- | --- | --- |
 | `world/state` | No parameters | Returns the current workspace, structured status, status lines, and bounded model context. |
 | `world/refresh` | No parameters | Refreshes the world and returns `{changed, state}`. |
-| `world/set_execution` | `access`, `policy` | Sets execution scope and returns `{changed, state}`. `access` is `project` or `full_machine`; `policy` is `interactive` or `automatic`. |
+| `world/set_execution` | `access`, `policy` | Sets execution scope and returns `{changed, state}`. `access` is `project` or `full_machine`; `policy` is `interactive`, `automatic`, or `trusted`. `trusted` only bypasses bounded non-destructive workspace patch approval. |
 | `mcp/status` | No parameters | Returns enabled/inactive servers, tool count, and whether retry is available. |
 | `mcp/retry` | No parameters | Retries MCP setup and returns enabled/inactive servers, diagnostics, and tool count. |
 
@@ -244,7 +245,7 @@ emitted on one ordered runtime stream.
 | `item/completed` | `threadId`, `turnId`, `item`, `completedAtMs` | Authoritative final projection for that item. |
 | `approval/request` | Request identity, project/workspace/revision, action class, summary, structured action key, access, policy, allowed grant scopes | Requests a user decision for a sensitive action. |
 | `approval/resolved` | Request identity, `outcome`, selected `grantScope`, and optional `reason` | Reports the settled approval result without creating a second authority. |
-| `thread/settings/updated` | `threadId`, effective mode, Builtin tools, `stateRevision` | Projects a settings change. |
+| `thread/settings/updated` | `threadId`, effective mode, Builtin tools, continuation mode, `stateRevision` | Projects a settings change. |
 | `thread/goal/updated` | `threadId`, optional `turnId`, Goal projection | Projects Goal creation, update, or runtime progress. |
 | `thread/goal/cleared` | `threadId` | Projects Goal removal. |
 

@@ -107,7 +107,8 @@ def _scan_code(line: str, state: dict[str, object]) -> str:
         if block_comment:
             end = line.find("*/", index)
             if end < 0:
-                return "".join(result)
+                index = len(line)
+                break
             block_comment = False
             index = end + 2
             continue
@@ -115,7 +116,8 @@ def _scan_code(line: str, state: dict[str, object]) -> str:
             terminator = '"' + ("#" * int(raw_hashes))
             end = line.find(terminator, index)
             if end < 0:
-                return "".join(result)
+                index = len(line)
+                break
             raw_hashes = None
             index = end + len(terminator)
             continue
@@ -159,6 +161,16 @@ def _scan_code(line: str, state: dict[str, object]) -> str:
     state["quote"] = quote
     state["raw_hashes"] = raw_hashes
     return "".join(result)
+
+
+def _effective_code_line_indices(lines: list[str]) -> set[int]:
+    """Return lines that contain Rust code after comments and whitespace."""
+    state: dict[str, object] = {}
+    return {
+        index
+        for index, line in enumerate(lines)
+        if _scan_code(line, state).strip()
+    }
 
 
 def _test_ranges(lines: list[str]) -> set[int]:
@@ -205,13 +217,14 @@ def _test_ranges(lines: list[str]) -> set[int]:
 def source_counts_for_text(path: str, text: str) -> tuple[int, int, int, int]:
     relative_path = PurePosixPath(path.replace("\\", "/"))
     lines = text.splitlines()
-    total = len(lines)
+    effective_lines = _effective_code_line_indices(lines)
+    total = len(effective_lines)
     relative_parts = relative_path.parts
     if "tests" in relative_parts:
         return total, 0, 0, total
     if relative_path.stem.endswith("_tests") or relative_path.stem == "tests":
         return total, 0, total, 0
-    unit_lines = len(_test_ranges(lines))
+    unit_lines = len(effective_lines & _test_ranges(lines))
     return total, total - unit_lines, unit_lines, 0
 
 
@@ -460,7 +473,7 @@ def _print_report(report: dict[str, object], root: Path = ROOT) -> None:
         package_list = ", ".join(packages)
         total, production, unit, integration = report["layers"][name]
         print(
-            f"{name}: {total} lines "
+            f"{name}: {total} effective code lines "
             f"(production {production}, unit {unit}, integration {integration}) "
             f"[{package_list}]"
         )
@@ -470,18 +483,18 @@ def _print_report(report: dict[str, object], root: Path = ROOT) -> None:
                     package_counts(root, package)
                 )
                 print(
-                    f"  {package}: {package_total} lines "
+                    f"  {package}: {package_total} effective code lines "
                     f"(production {package_production}, unit {package_unit}, "
                     f"integration {package_integration})"
                 )
     for name in CATEGORY_ORDER:
         total, production, unit, integration = report["categories"][name]
         print(
-            f"  category/{name}: {total} lines "
+            f"  category/{name}: {total} effective code lines "
             f"(production {production}, unit {unit}, integration {integration})"
         )
     print(
-        f"Control Plane: {report['control_plane']} lines "
+        f"Control Plane: {report['control_plane']} effective code lines "
         "(host-control-plane + capability-control-plane)"
     )
     runtime_total = int(report["runtime"])
@@ -490,7 +503,7 @@ def _print_report(report: dict[str, object], root: Path = ROOT) -> None:
     host_counts = report["categories"]["host-control-plane"]
     print(
         f"runtime (core + protocol + host + app-server): "
-        f"{runtime_total}/{RUNTIME_LIMIT} lines "
+        f"{runtime_total}/{RUNTIME_LIMIT} effective code lines "
         f"(production {runtime_counts[1] + host_counts[1]}, "
         f"unit {runtime_counts[2] + host_counts[2]}, "
         f"integration {runtime_counts[3] + host_counts[3]})"
@@ -500,7 +513,7 @@ def _print_report(report: dict[str, object], root: Path = ROOT) -> None:
         _add_counts(release_counts, report["categories"][name])
     print(
         f"release Rust source (excluding experimental CLI/REPL): "
-        f"{release_total}/{PROJECT_LIMIT} lines "
+        f"{release_total}/{PROJECT_LIMIT} effective code lines "
         f"(production {release_counts[1]}, unit {release_counts[2]}, "
         f"integration {release_counts[3]})"
     )

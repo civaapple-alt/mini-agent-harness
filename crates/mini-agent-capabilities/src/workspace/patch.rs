@@ -60,6 +60,16 @@ impl ToolHandler for ApplyPatch {
 
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let plan = self.prepare(&request.arguments)?;
+        if self.0.approval.approval_policy() == mini_agent_protocol::ApprovalPolicy::Trusted
+            && plan.effects.iter().all(|effect| effect.after.is_some())
+        {
+            for effect in &plan.effects {
+                self.0
+                    .approval
+                    .ensure_not_denied(&format!("edit {}", effect.path.display()))?;
+            }
+            return Ok(ToolAdmission::Allowed);
+        }
         Ok(ToolAdmission::ApprovalRequired {
             action: "apply_patch".to_string(),
             target_paths: plan.paths,

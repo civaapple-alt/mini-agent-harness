@@ -7,6 +7,7 @@
 pub use mini_agent_app_server_protocol::CapabilityManifest;
 pub use mini_agent_app_server_protocol::CollaborationMode;
 pub use mini_agent_app_server_protocol::CollaborationModeKind;
+pub use mini_agent_app_server_protocol::ContinuationMode;
 pub use mini_agent_app_server_protocol::ThreadSettingsUpdateResult;
 pub use mini_agent_capabilities::ApprovalController;
 pub use mini_agent_capabilities::ApprovalController as CapabilityApprovalController;

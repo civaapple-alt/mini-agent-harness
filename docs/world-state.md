@@ -12,7 +12,7 @@ records:
 
 - operating system, architecture, workspace, and the actual host shell;
 - current access (`project` or `full_machine`), execution policy
-  (`interactive` or `automatic`), and the selected native or Docker process
+  (`interactive`, `automatic`, or `trusted`), and the selected native or Docker process
   sandbox;
 - root project markers for Rust, Maven/Gradle Java, Go, Python, Node, and .NET;
 - availability of a fixed catalog of common navigation, VCS, build, runtime,

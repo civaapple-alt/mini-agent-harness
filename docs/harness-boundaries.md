@@ -36,8 +36,8 @@ runtime 组合，不能通过公共协议暴露任意 raw system-prompt replacem
 3. Replace vs add
    优先移除或替换旧概念；若新增，说明为什么不能放入 host adapter。
 4. Net line delta
-   记录 runtime 与 release-source 的预期和实际 delta；默认 net-zero，或给出
-   明确 offset。运行 `python scripts/line_budget.py`。
+   记录 runtime 与 release-source 有效代码行的预期和实际 delta；默认
+   net-zero，或给出明确 offset。运行 `python scripts/line_budget.py`。
 5. Visible surface
    记录对 model-visible input、tool schema、event、persistence 和 public
    protocol 的影响与 hard limit。

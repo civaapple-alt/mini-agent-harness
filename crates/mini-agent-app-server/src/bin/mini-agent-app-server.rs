@@ -128,7 +128,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Ok(Thread::new(thread_id, runtime.harness))
             },
         );
-        let management = RuntimeManagementService::new(
+        let management = RuntimeManagementService::new_with_harness_config(
             server.clone(),
             session,
             world,
@@ -136,6 +136,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             mcp_tool_count,
             retry_mcp_servers,
             management_approval,
+            HarnessConfig::default(),
         );
         let thread_settings = mini_agent_app_server::ThreadSettingsService::new()
             .with_stable_system_prompt(stable_system_prompt);

@@ -191,6 +191,11 @@ the core REPL remains focused on turn execution and run control:
   Server Runtime Actor to the settled Thread, approval controller, and bounded
   Host-composed prompt; arbitrary raw system-prompt replacement is not accepted.
   Planning state is persisted in `plan_mode.json`.
+- **Thread continuation (`thread/settings/update`)**: Set the optional
+  `continuationMode` to `manual` for the default bounded 8-step Chat turn or
+  `continuous` for an explicit uncapped ordinary Chat loop. This is independent
+  of access and approval policy. An active Goal temporarily uses Goal Runtime's
+  milestone loop and does not inherit this setting.
 - **Autonomous Goal Mode (`thread/goal/set|get|clear`)**: Materializes a
   dedicated `goal/` workspace containing `state.json` (milestone progress, loop
   counts, verifier scores) and `plan.md` (acceptance criteria). Each ordinary

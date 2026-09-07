@@ -3,6 +3,12 @@
 Every value sent to or accepted from a model has a direct hard bound. The
 defaults are part of the harness rather than terminal flags.
 
+The Rust line-budget report from `python scripts/line_budget.py` uses effective
+code lines: blank lines and comment-only lines, including documentation and
+multi-line block comments, are excluded. A line containing code and a trailing
+comment still counts once. Production, unit-test, and integration-test totals
+use the same effective-line rule.
+
 | Boundary | Default | Behavior at limit |
 | --- | ---: | --- |
 | one host context item | 8 KiB | reject before retaining the item |
@@ -40,11 +46,13 @@ command: exit it and start `mini-agent` without `--session-id` to create a new
 conversation, or use `resume` to continue a settled Session.
 
 Core keeps an internal runaway-loop guard and may compact context when the
-runtime composition allows it. `max_steps` and `step_limit` are not Web Studio
-controls or Goal progress semantics. Goal's long-running behavior is owned by
-the Goal Runtime; its Auto Copilot composition is `Goal + Full access
-(machine-wide) + automatic policy`, while each grant is still bounded by its
-action key and selected scope. Before a normal sampling request,
+runtime composition allows it. `max_steps` and `step_limit` are not direct
+Goal progress semantics. Web Studio exposes them through the explicit Thread
+`continuationMode`: `manual` keeps the default 8-step bound, while `continuous`
+sets `max_steps=0` for ordinary Chat. Goal's long-running behavior is owned by
+the Goal Runtime and temporarily uses its own milestone budget; Auto Copilot is
+the explicit `trusted + continuous` Web Studio preset, while each grant is still
+bounded by its action key and selected scope. Before a normal sampling request,
 settled history at or above half of the 1 MiB ceiling
 is compacted. The newest context item and a bounded recent tail stay verbatim:
 the last two model-step groups (each an assistant message plus its following
