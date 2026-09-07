@@ -33,15 +33,6 @@ pub struct WorldState {
 }
 
 impl WorldState {
-    pub fn detect(
-        workspace: &Path,
-        access: SecurityPreset,
-        approval: ApprovalScope,
-        sandbox: SandboxKind,
-    ) -> Self {
-        Self::detect_with_roots(workspace, Vec::new(), access, approval, sandbox)
-    }
-
     pub fn detect_with_roots(
         workspace: &Path,
         extra_roots: Vec<PathBuf>,

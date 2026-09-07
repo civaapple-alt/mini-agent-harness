@@ -222,8 +222,9 @@ fn managed_connection_at<M: Model + Send + 'static>(
     let management = RuntimeManagementService::new(
         server.clone(),
         None,
-        mini_agent_host::WorldState::detect(
+        mini_agent_host::WorldState::detect_with_roots(
             &root,
+            Vec::new(),
             SecurityPreset::Default,
             ApprovalScope::CurrentSession,
             SandboxKind::Native,
@@ -950,8 +951,9 @@ async fn binds_active_goal_workspace_to_approval_controller() {
     let management = RuntimeManagementService::new(
         server.clone(),
         None,
-        mini_agent_host::WorldState::detect(
+        mini_agent_host::WorldState::detect_with_roots(
             &root,
+            Vec::new(),
             SecurityPreset::Default,
             ApprovalScope::CurrentSession,
             SandboxKind::Native,
