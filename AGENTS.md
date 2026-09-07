@@ -47,6 +47,20 @@ every feature in Codex, Pi, fx, or Qi.
   two useful behaviors must coexist.
 - Never make model-visible input unbounded. New message, tool, or event shapes
   must fit an existing hard limit or introduce one directly.
+- Architectural invariants are non-negotiable; never compromise them for local
+  line budgets, shortcuts, or implementation convenience:
+  - Orthogonal concepts stay orthogonal: never flatten multidimensional states
+    into a single enum (e.g. global approval policy vs action grant scope).
+  - Single source of truth: authorization and execution authority strictly
+    belongs to Host/Capabilities; never introduce shadow caches in gateways
+    or frontends.
+  - Security identity is structured: authorization matches must rely on
+    canonical `ActionGrantKey`, never on human-facing display strings or
+    unnormalized paths.
+  - End-to-end fidelity: never drop structured resolution intent or downgrade
+    to booleans across RPC boundaries.
+  - Line budget pressure must be solved by removing obsolete concepts, dead code,
+    and redundant branches—never by degrading architectural boundaries.
 
 ## Size budget
 
