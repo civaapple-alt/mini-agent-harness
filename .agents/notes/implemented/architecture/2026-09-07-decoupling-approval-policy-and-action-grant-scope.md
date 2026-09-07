@@ -1,7 +1,8 @@
-# Proposal: 解耦全局审批模式与单次动作授权范围 (Decoupling Approval Policy and Action Grant Scope)
+# Decoupling Approval Policy and Action Grant Scope (解耦全局审批模式与单次动作授权范围)
 
 * **日期**: 2026-09-07
-* **状态**: Implemented
+* **状态**: implemented
+* **Class**: architecture
 * **范围**: `Capabilities` (`ApprovalController`, `ApprovalStore`), `App Server` (`ApprovalBroker`, Protocol), `SDK`, `Web Gateway / Studio`
 * **关联模块**: `mini-agent-capabilities`, `mini-agent-app-server`, `mini-agent-web`
 
@@ -197,15 +198,20 @@
 
 ---
 
-## 5. 实施与分批计划 (Implementation Plan)
+## 5. 验证与落地结果 (Verification & Evidence)
 
-- **Stage 1 (底层就绪 - mini-codex)**：
-  - 调整 `mini-agent-capabilities`，解耦 `ApprovalPolicy` 与 `ActionGrantScope`；
-  - 完善 `ApprovalBroker::respond` 通道，支持动态作用域落盘；
-  - 补充 capabilities 与 app-server 单元测试。
-- **Stage 2 (网关与 SDK - mini-agent-web)**：
-  - 更新 Python SDK 的 `set_world_execution` 与 `respond_approval`；
-  - 健全 `SessionManager` 的会话级授权缓存与策略传递。
-- **Stage 3 (前端与体验 - Web Studio)**：
-  - 优化输入栏的“全局策略”与弹窗 Dock 的“单次记忆范围”按钮组件；
-  - 更新使用文档与说明。
+1. **底层能力与 App Server (`mini-codex`)**:
+   - `mini-agent-capabilities`：解耦 `ApprovalPolicy` 与 `ActionGrantScope`，实现 `ApprovalStore` 分层管理；
+   - `mini-agent-app-server`：`ApprovalBroker` 支持 `request_resolution` 返回包含 `outcome` 与具体 `approval` 作用域的结构；
+   - 自动化测试：
+     - `cargo test -p mini-agent-capabilities`：67 passed, 0 failed
+     - `cargo test -p mini-agent-app-server`：48 passed, 0 failed
+   - Commit: `d7d2477 feat(security): decouple global approval policy and action grant scope`
+2. **网关与 SDK (`mini-agent-web`)**:
+   - Python SDK `set_world_execution` 与 `respond_approval` 对齐 `automatic` 模式与多作用域动作决议；
+   - `SessionManager` 实现独立的 `_session_approval_grants` 集合管理会话级授权生命周期；
+   - `uv run pytest -q`：66 passed, 0 failed
+3. **Web Studio 前端交互**:
+   - 输入栏全局策略切换为 `交互把关` 与 `自动副驾 (Auto Copilot)`；
+   - 待审批弹窗 Dock 明确排布 `[允许本次 (Once)]`、`[会话记住 (Session)]`、`[项目记住 (Project)]` 与 `[拒绝 (Deny)]`；
+   - Commit: `95d5410 feat(security): align automatic approval mode and multi-scope action grant UI`
