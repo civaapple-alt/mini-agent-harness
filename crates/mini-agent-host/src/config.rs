@@ -7,6 +7,7 @@ use std::env;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const VERIFIER_OPENAI_API_KEY: &str = "VERIFIER_OPENAI_API_KEY";
@@ -59,19 +60,19 @@ impl RuntimeConfig {
         let verifier_base_url = resolve_value(VERIFIER_OPENAI_BASE_URL, &workspace_env, &user_env)
             .map(|value| value.value);
         let goal_limits = GoalLimits {
-            max_loops: resolve_positive_usize(
+            max_loops: resolve_positive(
                 "MINI_AGENT_GOAL_MAX_LOOPS",
                 &workspace_env,
                 &user_env,
                 GoalLimits::default().max_loops,
             )?,
-            milestone_step_budget: resolve_positive_usize(
+            milestone_step_budget: resolve_positive(
                 "MINI_AGENT_GOAL_STEP_BUDGET",
                 &workspace_env,
                 &user_env,
                 GoalLimits::default().milestone_step_budget,
             )?,
-            milestone_timeout_secs: resolve_positive_u64(
+            milestone_timeout_secs: resolve_positive(
                 "MINI_AGENT_GOAL_TIMEOUT_SECS",
                 &workspace_env,
                 &user_env,
@@ -227,35 +228,21 @@ fn validate_base_url_named(name: &str, base_url: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_positive_usize(
+fn resolve_positive<T>(
     name: &str,
     workspace: &Environment,
     user: &Environment,
-    default: usize,
-) -> Result<usize, String> {
+    default: T,
+) -> Result<T, String>
+where
+    T: Default + FromStr + PartialOrd,
+{
     match resolve_value(name, workspace, user) {
         Some(value) => value
             .value
-            .parse::<usize>()
+            .parse::<T>()
             .ok()
-            .filter(|value| *value > 0)
-            .ok_or_else(|| format!("{name} must be a positive integer")),
-        None => Ok(default),
-    }
-}
-
-fn resolve_positive_u64(
-    name: &str,
-    workspace: &Environment,
-    user: &Environment,
-    default: u64,
-) -> Result<u64, String> {
-    match resolve_value(name, workspace, user) {
-        Some(value) => value
-            .value
-            .parse::<u64>()
-            .ok()
-            .filter(|value| *value > 0)
+            .filter(|value| *value > T::default())
             .ok_or_else(|| format!("{name} must be a positive integer")),
         None => Ok(default),
     }
