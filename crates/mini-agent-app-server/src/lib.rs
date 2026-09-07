@@ -19,6 +19,7 @@ use mini_agent_protocol::TurnStart;
 use mini_agent_protocol::TurnSubmission;
 use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -584,6 +585,16 @@ where
             .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
     }
 
+    async fn request_value<T, F>(&self, action: F) -> Result<T, AppServerError>
+    where
+        F: Future<Output = Result<ActionResponse<T>, ActionFailure>>,
+    {
+        action
+            .await
+            .map(ActionResponse::into_value)
+            .map_err(ActionFailure::into_error)
+    }
+
     pub fn thread_id(&self) -> &ThreadId {
         &self.thread_id
     }
@@ -609,10 +620,7 @@ where
         &self,
         thread_id: ThreadId,
     ) -> Result<ThreadCheckpoint, AppServerError> {
-        self.thread_read_action(thread_id)
-            .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
+        self.request_value(self.thread_read_action(thread_id)).await
     }
 
     pub(crate) async fn thread_read_action(
@@ -627,10 +635,7 @@ where
         &self,
         params: mini_agent_app_server_protocol::ThreadItemsListParams,
     ) -> Result<mini_agent_app_server_protocol::ThreadItemsListResult, AppServerError> {
-        self.thread_items_action(params)
-            .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
+        self.request_value(self.thread_items_action(params)).await
     }
 
     pub(crate) async fn thread_items_action(
@@ -648,10 +653,8 @@ where
         thread_id: ThreadId,
         update: ThreadUpdate,
     ) -> Result<(), AppServerError> {
-        self.thread_update_action(thread_id, update)
+        self.request_value(self.thread_update_action(thread_id, update))
             .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
     }
 
     pub(crate) async fn thread_update_action(
@@ -674,10 +677,8 @@ where
         new_thread_id: ThreadId,
         next_turn_number: u64,
     ) -> Result<ThreadId, AppServerError> {
-        self.thread_reset_action(thread_id, new_thread_id, next_turn_number)
+        self.request_value(self.thread_reset_action(thread_id, new_thread_id, next_turn_number))
             .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
     }
 
     pub(crate) async fn thread_reset_action(
@@ -697,10 +698,8 @@ where
 
     /// Closes a thread after all active work has settled.
     pub async fn thread_close_for(&self, thread_id: ThreadId) -> Result<(), AppServerError> {
-        self.thread_close_action(thread_id)
+        self.request_value(self.thread_close_action(thread_id))
             .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
     }
 
     pub(crate) async fn thread_close_action(
@@ -712,10 +711,8 @@ where
     }
 
     pub async fn thread_start(&self, thread_id: ThreadId) -> Result<ThreadId, AppServerError> {
-        self.thread_start_action(thread_id)
+        self.request_value(self.thread_start_action(thread_id))
             .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
     }
 
     pub(crate) async fn thread_start_action(
@@ -731,10 +728,8 @@ where
         source_thread_id: ThreadId,
         new_thread_id: ThreadId,
     ) -> Result<ThreadId, AppServerError> {
-        self.thread_fork_action(source_thread_id, new_thread_id)
+        self.request_value(self.thread_fork_action(source_thread_id, new_thread_id))
             .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
     }
 
     pub(crate) async fn thread_fork_action(
@@ -755,10 +750,8 @@ where
         thread_id: ThreadId,
         checkpoint: ThreadCheckpoint,
     ) -> Result<ThreadId, AppServerError> {
-        self.thread_resume_action(thread_id, checkpoint)
+        self.request_value(self.thread_resume_action(thread_id, checkpoint))
             .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
     }
 
     pub(crate) async fn thread_resume_action(
@@ -777,10 +770,8 @@ where
     /// Returns a completed turn result retained by the service.
     pub async fn turn_read(&self, turn_id: TurnId) -> Result<SettledTurn, AppServerError> {
         let missing_id = turn_id.clone();
-        self.turn_read_action(turn_id)
+        self.request_value(self.turn_read_action(turn_id))
             .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
             .and_then(|result| result.ok_or(AppServerError::TurnNotFound(missing_id)))
     }
 
@@ -803,10 +794,8 @@ where
         thread_id: ThreadId,
         request: TurnStart,
     ) -> Result<TurnSubmission, AppServerError> {
-        self.submit_start_action(thread_id, request, None)
+        self.request_value(self.submit_start_action(thread_id, request, None))
             .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
     }
 
     /// Steers the active turn when `turn_id` still identifies that turn.
@@ -816,14 +805,12 @@ where
         turn_id: TurnId,
         text: impl Into<String>,
     ) -> Result<TurnSubmission, AppServerError> {
-        self.submit_start_action(
+        self.request_value(self.submit_start_action(
             thread_id,
             TurnStart::new(TurnInput::new(TurnInputMode::Steer, text)),
             Some(turn_id),
-        )
+        ))
         .await
-        .map(ActionResponse::into_value)
-        .map_err(ActionFailure::into_error)
     }
 
     pub(crate) async fn submit_start_action(
@@ -848,10 +835,8 @@ where
         thread_id: ThreadId,
         request: TurnCancel,
     ) -> Result<(), AppServerError> {
-        self.turn_cancel_action(thread_id, request)
+        self.request_value(self.turn_cancel_action(thread_id, request))
             .await
-            .map(ActionResponse::into_value)
-            .map_err(ActionFailure::into_error)
     }
 
     pub(crate) async fn turn_cancel_action(
