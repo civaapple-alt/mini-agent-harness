@@ -1,10 +1,8 @@
 use super::*;
 use crate::action::ActionEnvelope;
-use crate::action::ActionFailure;
-use crate::action::ActionReceipt;
-use crate::action::ActionResponse;
 use crate::action::ActionResult;
 use crate::action::ActionSequencer;
+use crate::action::respond;
 use crate::management::RuntimeActorState;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeRequest;
@@ -780,27 +778,6 @@ where
         ThreadUpdate::ExtendTools(tools) => thread.harness_mut().extend_tools(tools),
     }
     Ok(())
-}
-
-fn respond<T>(
-    reply: oneshot::Sender<ActionResult<T>>,
-    receipt: ActionReceipt,
-    result: Result<T, AppServerError>,
-) {
-    let state_revision = receipt.current_revision();
-    let _ = reply.send(
-        result
-            .map(|value| ActionResponse {
-                value,
-                receipt: receipt.clone(),
-                state_revision,
-            })
-            .map_err(|error| ActionFailure {
-                error,
-                receipt: Some(receipt),
-                state_revision: Some(state_revision),
-            }),
-    );
 }
 
 fn timestamp_ms() -> u64 {

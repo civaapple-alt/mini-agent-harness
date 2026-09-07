@@ -2,6 +2,7 @@ use crate::AppServerError;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use tokio::sync::oneshot;
 
 /// Identifies one command admitted by the App Server runtime actor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -129,6 +130,27 @@ impl ActionFailure {
 }
 
 pub(super) type ActionResult<T> = Result<ActionResponse<T>, ActionFailure>;
+
+pub(super) fn respond<T>(
+    reply: oneshot::Sender<ActionResult<T>>,
+    receipt: ActionReceipt,
+    result: Result<T, AppServerError>,
+) {
+    let state_revision = receipt.current_revision();
+    let _ = reply.send(
+        result
+            .map(|value| ActionResponse {
+                value,
+                receipt: receipt.clone(),
+                state_revision,
+            })
+            .map_err(|error| ActionFailure {
+                error,
+                receipt: Some(receipt),
+                state_revision: Some(state_revision),
+            }),
+    );
+}
 
 impl ActionReceipt {
     pub(super) fn current_revision(&self) -> RuntimeRevision {
