@@ -43,6 +43,7 @@ use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnStart;
 use serde_json::Value;
+use std::future::Future;
 use tokio::sync::broadcast;
 
 mod thread;
@@ -569,6 +570,25 @@ fn response_action_with<T: serde::Serialize>(
             state_revision: response.metadata().state_revision,
         },
     )
+}
+
+pub(super) async fn action_response<T, U, Fut, F>(
+    id: Option<Value>,
+    action: Fut,
+    project: F,
+) -> Option<JsonRpcResponse>
+where
+    Fut: Future<Output = Result<ActionResponse<T>, ActionFailure>>,
+    U: serde::Serialize,
+    F: FnOnce(&T) -> U,
+{
+    match action.await {
+        Ok(response) => {
+            let value = project(&response.value);
+            response_action_with(id, response, value)
+        }
+        Err(error) => response_error(id, map_action_error(error)),
+    }
 }
 
 fn workflow_error(message: String) -> JsonRpcError {

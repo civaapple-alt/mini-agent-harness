@@ -20,17 +20,14 @@ where
             Ok(goals) => goals,
             Err(error) => return response_error(request.id, error),
         };
-        match goals
-            .set_thread_goal_action(params.objective, params.status, params.token_budget)
-            .await
-        {
-            Ok(response) => {
-                let goal =
-                    crate::goal_runtime::project_goal(params.thread_id, response.value.clone());
-                response_action_with(request.id, response, ThreadGoalSetResponse { goal })
-            }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(
+            request.id,
+            goals.set_thread_goal_action(params.objective, params.status, params.token_budget),
+            |state| ThreadGoalSetResponse {
+                goal: crate::goal_runtime::project_goal(params.thread_id.clone(), state.clone()),
+            },
+        )
+        .await
     }
 
     pub(super) async fn handle_thread_goal_get(
@@ -48,15 +45,14 @@ where
             Ok(goals) => goals,
             Err(error) => return response_error(request.id, error),
         };
-        match goals.get_thread_goal_action().await {
-            Ok(response) => {
-                let goal = response.value.clone().map(|state| {
+        action_response(request.id, goals.get_thread_goal_action(), |state| {
+            ThreadGoalGetResponse {
+                goal: state.clone().map(|state| {
                     crate::goal_runtime::project_goal(params.thread_id.clone(), state)
-                });
-                response_action_with(request.id, response, ThreadGoalGetResponse { goal })
+                }),
             }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        })
+        .await
     }
 
     pub(super) async fn handle_thread_goal_clear(
@@ -74,13 +70,10 @@ where
             Ok(goals) => goals,
             Err(error) => return response_error(request.id, error),
         };
-        match goals.clear_thread_goal_action().await {
-            Ok(response) => {
-                let cleared = response.value;
-                response_action_with(request.id, response, ThreadGoalClearResponse { cleared })
-            }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(request.id, goals.clear_thread_goal_action(), |cleared| {
+            ThreadGoalClearResponse { cleared: *cleared }
+        })
+        .await
     }
 
     pub(super) async fn handle_thread_settings_update(
@@ -108,20 +101,15 @@ where
             None => None,
         };
         let active = matches!(params.collaboration_mode.mode, CollaborationModeKind::Plan);
-        match settings.update_action(active, builtin_tools).await {
-            Ok(response) => {
-                let builtin_tools = response.value.clone();
-                response_action_with(
-                    request.id,
-                    response,
-                    ThreadSettingsUpdateResult {
-                        collaboration_mode: params.collaboration_mode,
-                        builtin_tools,
-                    },
-                )
-            }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(
+            request.id,
+            settings.update_action(active, builtin_tools),
+            |tools| ThreadSettingsUpdateResult {
+                collaboration_mode: params.collaboration_mode,
+                builtin_tools: tools.clone(),
+            },
+        )
+        .await
     }
 
     pub(super) async fn handle_thread_start(
@@ -134,12 +122,12 @@ where
         };
         let thread_id = params.thread_id.unwrap_or(self.thread_id().await);
         if !self.server.has_thread(&thread_id) {
-            return match self.server.thread_start_action(thread_id.clone()).await {
-                Ok(response) => {
-                    response_action_with(request.id, response, ThreadStartResult { thread_id })
-                }
-                Err(error) => response_error(request.id, map_action_error(error)),
-            };
+            return action_response(
+                request.id,
+                self.server.thread_start_action(thread_id.clone()),
+                move |_| ThreadStartResult { thread_id },
+            )
+            .await;
         }
         response_value(request.id, ThreadStartResult { thread_id })
     }
@@ -189,17 +177,15 @@ where
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
-        match self
-            .server
-            .thread_fork_action(params.source_thread_id, params.new_thread_id)
-            .await
-        {
-            Ok(response) => {
-                let thread_id = response.value.clone();
-                response_action_with(request.id, response, ThreadForkResult { thread_id })
-            }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(
+            request.id,
+            self.server
+                .thread_fork_action(params.source_thread_id, params.new_thread_id),
+            |thread_id| ThreadForkResult {
+                thread_id: thread_id.clone(),
+            },
+        )
+        .await
     }
 
     pub(super) async fn handle_thread_resume(
@@ -220,17 +206,15 @@ where
             last_turn_id: checkpoint.last_turn_id,
             next_event_sequence: checkpoint.next_event_sequence,
         };
-        match self
-            .server
-            .thread_resume_action(params.thread_id, core_checkpoint)
-            .await
-        {
-            Ok(response) => {
-                let thread_id = response.value.clone();
-                response_action_with(request.id, response, ThreadResumeResult { thread_id })
-            }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(
+            request.id,
+            self.server
+                .thread_resume_action(params.thread_id, core_checkpoint),
+            |thread_id| ThreadResumeResult {
+                thread_id: thread_id.clone(),
+            },
+        )
+        .await
     }
 
     pub(super) async fn handle_thread_read(
@@ -276,13 +260,12 @@ where
         if let Err(error) = self.check_thread(&params.thread_id) {
             return response_error(request.id, error);
         }
-        match self.server.thread_items_action(params).await {
-            Ok(response) => {
-                let value = response.value.clone();
-                response_action_with(request.id, response, value)
-            }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(
+            request.id,
+            self.server.thread_items_action(params),
+            Clone::clone,
+        )
+        .await
     }
 
     pub(super) async fn handle_thread_close(
@@ -296,11 +279,11 @@ where
         if let Err(error) = self.check_thread(&params.thread_id) {
             return response_error(request.id, error);
         }
-        match self.server.thread_close_action(params.thread_id).await {
-            Ok(response) => {
-                response_action_with(request.id, response, serde_json::json!({ "closed": true }))
-            }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(
+            request.id,
+            self.server.thread_close_action(params.thread_id),
+            |_| serde_json::json!({ "closed": true }),
+        )
+        .await
     }
 }

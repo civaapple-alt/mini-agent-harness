@@ -12,18 +12,15 @@ where
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
-        match management.session_info_action().await {
-            Ok(response) => {
-                let value = response.value.as_ref().map(|info| SessionInfoResult {
-                    session_id: info.session_id.clone(),
-                    thread_id: info.thread_id.clone(),
-                    path: info.path.clone(),
-                    resumed: info.resumed,
-                });
-                response_action_with(request.id, response, value)
-            }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(request.id, management.session_info_action(), |info| {
+            info.as_ref().map(|info| SessionInfoResult {
+                session_id: info.session_id.clone(),
+                thread_id: info.thread_id.clone(),
+                path: info.path.clone(),
+                resumed: info.resumed,
+            })
+        })
+        .await
     }
 
     pub(super) async fn handle_world_state(
@@ -124,22 +121,15 @@ where
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
-        match management.mcp_status_action().await {
-            Ok(response) => {
-                let status = response.value.clone();
-                response_action_with(
-                    request.id,
-                    response,
-                    McpStatusResult {
-                        enabled_servers: status.enabled_servers,
-                        inactive_servers: status.inactive_servers,
-                        tool_count: status.tool_count,
-                        retry_available: status.retry_available,
-                    },
-                )
+        action_response(request.id, management.mcp_status_action(), |status| {
+            McpStatusResult {
+                enabled_servers: status.enabled_servers.clone(),
+                inactive_servers: status.inactive_servers.clone(),
+                tool_count: status.tool_count,
+                retry_available: status.retry_available,
             }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        })
+        .await
     }
 
     pub(super) async fn handle_mcp_retry(
@@ -150,22 +140,15 @@ where
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
-        match management.retry_mcp_action().await {
-            Ok(response) => {
-                let result = response.value.clone();
-                response_action_with(
-                    request.id,
-                    response,
-                    ProtocolMcpRetryResult {
-                        enabled_servers: result.enabled_servers,
-                        inactive_servers: result.inactive_servers,
-                        diagnostics: result.diagnostics,
-                        tool_count: result.tool_count,
-                    },
-                )
+        action_response(request.id, management.retry_mcp_action(), |result| {
+            ProtocolMcpRetryResult {
+                enabled_servers: result.enabled_servers.clone(),
+                inactive_servers: result.inactive_servers.clone(),
+                diagnostics: result.diagnostics.clone(),
+                tool_count: result.tool_count,
             }
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        })
+        .await
     }
 
     pub(super) fn management_service(&self) -> Result<&RuntimeManagementService<M>, JsonRpcError> {

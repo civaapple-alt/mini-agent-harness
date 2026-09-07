@@ -104,17 +104,12 @@ where
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
-        match self
-            .server
-            .turn_cancel_action(params.thread_id, TurnCancel::new(params.turn_id))
-            .await
-        {
-            Ok(response) => response_action_with(
-                request.id,
-                response,
-                serde_json::json!({ "accepted": true }),
-            ),
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(
+            request.id,
+            self.server
+                .turn_cancel_action(params.thread_id, TurnCancel::new(params.turn_id)),
+            |_| serde_json::json!({ "accepted": true }),
+        )
+        .await
     }
 }
