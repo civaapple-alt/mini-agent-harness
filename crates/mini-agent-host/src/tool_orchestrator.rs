@@ -22,6 +22,7 @@ impl ToolExecutionDelegate for ToolOrchestrator {
     fn execute(&self, tool: &dyn Tool, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
         let outcome = match tool.admission(request) {
             Ok(ToolAdmission::Legacy) => tool.execute_outcome(&request.arguments),
+            Ok(ToolAdmission::Allowed) => tool.execute_after_admission(request),
             Ok(ToolAdmission::ApprovalRequired {
                 action,
                 target_paths,

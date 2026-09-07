@@ -102,7 +102,9 @@ not be reused for the new binding.
 `project` and `full_machine` are access scopes. `full_machine` expands the
 candidate path range but is not allow-all: Deny, Plan locks, unavailable tools,
 and high-risk confirmation remain effective. `interactive` and `automatic` are
-execution policies; `once`, `session`, and `project` are action-grant scopes
+execution policies; Automatic directly admits only bounded read-only Shell
+inspection, while writes, dynamic paths, high-risk commands, and outside paths
+still use approval. `once`, `session`, and `project` are action-grant scopes
 selected in an approval response and validated by Host/Capabilities.
 
 ## Session history and switching

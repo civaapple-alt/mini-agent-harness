@@ -110,11 +110,13 @@ process cannot accumulate unbounded captured output or deadlock on a full pipe.
 Large completed results are retained in the process-local result store and
 projected to the model as a bounded preview. On foreground timeout the host
 terminates the shell process tree. Shell execution is still not an isolation
-boundary. Sensitive tools require the typed approval path when policy returns
-`Ask`; Automatic only bypasses clearly low-risk Ask actions, and a runtime
-access scope never becomes a global allow-all switch. `FullMachine`
-widens file path scope but does not override hard Deny, Plan locks, unavailable
-tools, or shell confirmation.
+boundary. Under Automatic policy, explicitly read-only shell inspection is
+admitted without approval only when referenced paths stay inside the workspace
+or configured read roots; dynamic paths, writes, high-risk commands, and
+outside paths retain the typed approval path. A runtime access scope never
+becomes a global allow-all switch. `FullMachine` widens file path scope but does
+not override hard Deny, Plan locks, unavailable tools, or high-risk shell
+confirmation.
 
 Project extension discovery scans only immediate children at fixed locations
 and at most 128 directory entries per location. Installed skills, plugins, and

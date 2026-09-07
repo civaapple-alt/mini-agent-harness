@@ -208,9 +208,12 @@ impl ToolExecutionOutcome {
 /// `Legacy` preserves the existing tool-owned lifecycle during incremental
 /// migration. `ApprovalRequired` moves the approval decision to the host
 /// execution delegate while leaving tool-specific validation with the tool.
+/// `Allowed` means the tool has completed bounded admission and the host may
+/// execute it without an approval round-trip.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToolAdmission {
     Legacy,
+    Allowed,
     ApprovalRequired {
         action: String,
         target_paths: Vec<String>,

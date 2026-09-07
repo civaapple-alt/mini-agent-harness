@@ -317,6 +317,59 @@ impl Workspace {
         self.root.clone()
     }
 
+    fn is_bounded_read_only_shell_command(&self, command: &str) -> bool {
+        shell::is_read_only_shell_command(command)
+            && command.split([';', '|']).all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .split_whitespace()
+                        .all(|token| self.is_bounded_shell_token(token))
+            })
+    }
+
+    fn is_bounded_shell_token(&self, token: &str) -> bool {
+        let token = token.trim_matches(['\'', '"']);
+        if token.is_empty()
+            || token.contains(['$', '%'])
+            || token.starts_with('~')
+            || token.contains("://")
+            || token.contains('=')
+        {
+            return false;
+        }
+        !shell_token_looks_like_path(token) || self.is_readable_shell_path(token)
+    }
+
+    fn is_readable_shell_path(&self, token: &str) -> bool {
+        let token = token.trim_matches(['\'', '"']);
+        if token.contains(':')
+            && !(cfg!(windows)
+                && token.len() > 2
+                && token.as_bytes()[1] == b':'
+                && matches!(token.as_bytes()[2], b'/' | b'\\'))
+        {
+            return false;
+        }
+        if Path::new(token)
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+        {
+            return false;
+        }
+        let Ok(path) = self
+            .candidate(&json!({"path": token}))
+            .map(|path| crate::path_policy::normalize_path(&path))
+        else {
+            return false;
+        };
+        (path.starts_with(&self.root)
+            || self
+                .extra_read_roots
+                .iter()
+                .any(|root| path.starts_with(root)))
+            && self.ensure_readable(path).is_ok()
+    }
+
     fn ensure_plan_mode_unlocked(&self) -> Result<(), ToolError> {
         self.approval.ensure_plan_mode_unlocked()
     }
@@ -376,6 +429,13 @@ fn has_git_component(path: &Path) -> bool {
             Component::Normal(name) if name.to_string_lossy().eq_ignore_ascii_case(".git")
         )
     })
+}
+
+fn shell_token_looks_like_path(token: &str) -> bool {
+    token.starts_with(['.', '~'])
+        || token
+            .bytes()
+            .any(|byte| matches!(byte, b'/' | b'\\' | b':'))
 }
 
 pub(crate) fn string_arg<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, ToolError> {

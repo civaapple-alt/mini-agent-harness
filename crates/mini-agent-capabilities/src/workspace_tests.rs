@@ -504,13 +504,7 @@ fn plan_mode_allows_read_only_shell_inspection() {
     let request =
         ToolExecutionRequest::new("call-shell-read-only", "shell", json!({"command": command}));
 
-    assert_eq!(
-        shell.admission(&request).unwrap(),
-        ToolAdmission::ApprovalRequired {
-            action: format!("shell command `{command}`"),
-            target_paths: Vec::new(),
-        }
-    );
+    assert_eq!(shell.admission(&request).unwrap(), ToolAdmission::Allowed);
     let output = shell.execute(&request.arguments).unwrap();
     assert!(output.contains("note.txt") || output.contains(root.to_string_lossy().as_ref()));
 
@@ -523,6 +517,45 @@ fn plan_mode_allows_read_only_shell_inspection() {
     assert!(shell.execute(&json!({"command": "git ls-files"})).is_ok());
 
     remove_test_root(&session);
+    remove_test_root(&root);
+}
+
+#[test]
+fn automatic_shell_admission_requires_workspace_bounded_paths() {
+    let root = test_root();
+    let approval = ApprovalController::with_callback(ApprovalPolicy::Automatic, |_| {
+        panic!("bounded read-only shell inspection should not request approval")
+    });
+    let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
+    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+
+    let inside = if cfg!(windows) {
+        format!(
+            "Get-ChildItem {} -Recurse | Select-Object Name",
+            root.display()
+        )
+    } else {
+        format!("rg --files {}", root.display())
+    };
+    let inside_request =
+        ToolExecutionRequest::new("bounded-shell-read", "shell", json!({"command": inside}));
+    assert_eq!(
+        shell.admission(&inside_request).unwrap(),
+        ToolAdmission::Allowed
+    );
+
+    let outside = if cfg!(windows) {
+        "Get-Content ..\\secret.txt"
+    } else {
+        "rg --files ../secret"
+    };
+    let outside_request =
+        ToolExecutionRequest::new("outside-shell-read", "shell", json!({"command": outside}));
+    assert!(matches!(
+        shell.admission(&outside_request).unwrap(),
+        ToolAdmission::ApprovalRequired { .. }
+    ));
+
     remove_test_root(&root);
 }
 

@@ -115,6 +115,13 @@ impl ApprovalController {
         *self.policy.write().unwrap() = policy;
     }
 
+    pub fn ensure_not_denied(&self, action: &str) -> Result<(), ToolError> {
+        if self.policy.read().unwrap().evaluate(action) == SecurityDecision::Deny {
+            return Err(ToolError(format!("forbidden by security policy: {action}")));
+        }
+        Ok(())
+    }
+
     pub fn approval_policy(&self) -> ApprovalPolicy {
         *self.approval_policy.read().unwrap()
     }
