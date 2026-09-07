@@ -318,7 +318,6 @@ mod worker;
 use action::ActionFailure;
 use action::ActionResponse;
 use action::ActionResult;
-use action::RuntimeRevision;
 use management::RuntimeActorState;
 use worker::{Command, worker_loop};
 
@@ -556,10 +555,6 @@ where
 
     pub(crate) fn notifications(&self) -> broadcast::Sender<RuntimeNotification> {
         self.notifications.clone()
-    }
-
-    pub(crate) fn runtime_revision(&self) -> RuntimeRevision {
-        self.runtime_revision.load(Ordering::SeqCst).into()
     }
 
     pub(crate) fn runtime_revision_handle(&self) -> Arc<AtomicU64> {

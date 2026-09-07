@@ -13,7 +13,6 @@ use crate::goal_runtime::GoalService;
 use crate::goal_service::ThreadGoalRequestProcessor;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeCommand;
-use crate::runtime_actor::RuntimeRequest;
 use crate::runtime_command::RuntimeCommandClient;
 use crate::thread_settings::ThreadSettingsService;
 use crate::worker::Command;
@@ -83,6 +82,7 @@ pub(crate) struct McpRuntimeSnapshot {
 /// after RuntimeServices binds this handle to a workflow store.
 pub struct RuntimeManagementService<M> {
     pub(crate) server: AppServer<M>,
+    client: RuntimeCommandClient,
     state: Option<RuntimeManagementState>,
     approval: ApprovalController,
     goal_notifications: broadcast::Sender<GoalRuntimeEvent>,
@@ -95,6 +95,7 @@ impl<M> Clone for RuntimeManagementService<M> {
         debug_assert!(self.state.is_none());
         Self {
             server: self.server.clone(),
+            client: self.client.clone(),
             state: None,
             approval: self.approval.clone(),
             goal_notifications: self.goal_notifications.clone(),
@@ -120,8 +121,11 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         let (goal_notifications, _) = broadcast::channel(64);
         let (settings_notifications, _) = broadcast::channel(64);
         let notifications = server.notifications();
+        let client =
+            RuntimeCommandClient::new(server.command_sender(), server.runtime_revision_handle());
         Self {
             server,
+            client,
             state: Some(RuntimeManagementState {
                 session,
                 active_thread_id,
@@ -147,6 +151,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     ) -> Result<(Self, ThreadSettingsService, ThreadGoalRequestProcessor), String> {
         let Self {
             server,
+            client,
             state,
             approval,
             goal_notifications,
@@ -182,13 +187,12 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 revision: crate::action::RuntimeRevision::default(),
             })
             .map_err(|error| error.to_string())?;
-        let client =
-            RuntimeCommandClient::new(server.command_sender(), server.runtime_revision_handle());
         let settings = ThreadSettingsService::bound(client.clone(), stable_system_prompt);
-        let goals = ThreadGoalRequestProcessor::bound(client, verifier_config);
+        let goals = ThreadGoalRequestProcessor::bound(client.clone(), verifier_config);
         Ok((
             Self {
                 server,
+                client,
                 state: None,
                 approval,
                 goal_notifications,
@@ -203,7 +207,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     pub(crate) async fn session_info_action(
         &self,
     ) -> Result<ActionResponse<Option<RuntimeSessionInfo>>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::SessionInfo { reply })
+        self.client
+            .request_action(|reply| RuntimeCommand::SessionInfo { reply })
             .await
     }
 
@@ -226,12 +231,14 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     }
 
     pub(crate) async fn world_action(&self) -> Result<ActionResponse<WorldState>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::World { reply })
+        self.client
+            .request_action(|reply| RuntimeCommand::World { reply })
             .await
     }
 
     pub(crate) async fn refresh_world_action(&self) -> Result<ActionResponse<bool>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::RefreshWorld { reply })
+        self.client
+            .request_action(|reply| RuntimeCommand::RefreshWorld { reply })
             .await
     }
 
@@ -240,18 +247,20 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         access: SecurityPreset,
         approval: ApprovalScope,
     ) -> Result<ActionResponse<bool>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::SetExecution {
-            access,
-            approval,
-            reply,
-        })
-        .await
+        self.client
+            .request_action(|reply| RuntimeCommand::SetExecution {
+                access,
+                approval,
+                reply,
+            })
+            .await
     }
 
     pub(crate) async fn mcp_status_action(
         &self,
     ) -> Result<ActionResponse<McpRuntimeSnapshot>, ActionFailure> {
-        self.request_action(|reply| RuntimeCommand::McpStatus { reply })
+        self.client
+            .request_action(|reply| RuntimeCommand::McpStatus { reply })
             .await
     }
 
@@ -259,7 +268,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         &self,
     ) -> Result<ActionResponse<McpRetryResult>, ActionFailure> {
         let approval = self.approval.clone();
-        self.request_action(|reply| RuntimeCommand::RetryMcp { approval, reply })
+        self.client
+            .request_action(|reply| RuntimeCommand::RetryMcp { approval, reply })
             .await
     }
 
@@ -282,29 +292,12 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
     where
         F: FnOnce(oneshot::Sender<ActionResult<T>>) -> RuntimeCommand,
     {
-        self.request_action(build)
+        self.client
+            .request_action(build)
             .await
             .map(ActionResponse::into_value)
             .map_err(ActionFailure::into_error)
             .map_err(|error| error.to_string())
-    }
-
-    async fn request_action<T, F>(&self, build: F) -> Result<ActionResponse<T>, ActionFailure>
-    where
-        F: FnOnce(oneshot::Sender<ActionResult<T>>) -> RuntimeCommand,
-    {
-        let (reply, response) = oneshot::channel();
-        self.server
-            .commands
-            .send(Command::Runtime(RuntimeRequest {
-                expected_revision: self.server.runtime_revision(),
-                command: build(reply),
-            }))
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?;
-        response
-            .await
-            .map_err(|_| ActionFailure::without_receipt(AppServerError::Disconnected))?
     }
 }
 
