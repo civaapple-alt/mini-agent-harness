@@ -428,29 +428,19 @@ fn default_capability_manifest() -> CapabilityManifest {
         tool_provider: "unknown".to_string(),
         extension_provider: "unknown".to_string(),
         policy_provider: "unknown".to_string(),
-        enabled: Vec::new(),
         disabled: vec![DisabledCapability {
             name: "host-runtime".to_string(),
             reason: "no host runtime manifest was supplied".to_string(),
         }],
         extension_depth: "unknown".to_string(),
-        selected_extensions: Vec::new(),
-        prompt_sources: Vec::new(),
-        rule_sources: Vec::new(),
-        rule_source_status: Vec::new(),
-        prompt_source_fingerprints: Vec::new(),
-        rule_source_fingerprints: Vec::new(),
-        prompt_rule_precedence: Vec::new(),
         rule_resolution: "unknown".to_string(),
-        rule_conflicts: Vec::new(),
         rule_policy: mini_agent_app_server_protocol::RulePolicy {
-            workspace_write: false,
-            shell_execution: false,
             workflow_scope: "unknown".to_string(),
+            ..Default::default()
         },
-        context_limits: Default::default(),
         sandbox: "unknown".to_string(),
         security: "unknown".to_string(),
+        ..Default::default()
     }
 }
 
