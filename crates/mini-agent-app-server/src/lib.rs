@@ -1,35 +1,18 @@
-use mini_agent_app_server_protocol::AccessScope;
-use mini_agent_app_server_protocol::ApprovalDecision;
-use mini_agent_app_server_protocol::ApprovalMode;
-use mini_agent_app_server_protocol::ApprovalOutcome;
-use mini_agent_app_server_protocol::ApprovalRespondParams;
-use mini_agent_core::RunControl;
-use mini_agent_core::Thread;
-use mini_agent_core::ThreadCheckpoint;
-use mini_agent_protocol::EventEnvelope;
-use mini_agent_protocol::Model;
-use mini_agent_protocol::ThreadId;
-use mini_agent_protocol::ThreadStart;
-use mini_agent_protocol::ToolApprovalRequest;
-use mini_agent_protocol::TurnCancel;
-use mini_agent_protocol::TurnId;
-use mini_agent_protocol::TurnInput;
-use mini_agent_protocol::TurnInputMode;
-use mini_agent_protocol::TurnStart;
-use mini_agent_protocol::TurnSubmission;
+use mini_agent_app_server_protocol::{
+    AccessScope, ApprovalDecision, ApprovalMode, ApprovalOutcome, ApprovalRespondParams,
+};
+use mini_agent_core::{RunControl, Thread, ThreadCheckpoint};
+use mini_agent_protocol::{
+    EventEnvelope, Model, ThreadId, ThreadStart, ToolApprovalRequest, TurnCancel, TurnId,
+    TurnInput, TurnInputMode, TurnStart, TurnSubmission,
+};
 use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::RwLock;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use tokio::sync::Notify;
-use tokio::sync::broadcast;
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, broadcast, mpsc, oneshot};
 
 const EVENT_BUFFER: usize = 256;
 const COMMAND_BUFFER: usize = 32;

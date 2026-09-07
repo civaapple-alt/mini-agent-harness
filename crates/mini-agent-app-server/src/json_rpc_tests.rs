@@ -1,36 +1,18 @@
 use super::*;
-use crate::tests::DoneModel;
-use crate::tests::harness;
-use mini_agent_app_server_protocol::CapabilityProviderSelection;
-use mini_agent_app_server_protocol::ClientCapabilities;
-use mini_agent_capabilities::ApprovalController;
-use mini_agent_capabilities::ApprovalMode;
-use mini_agent_capabilities::ApprovalScope;
-use mini_agent_capabilities::ImageStore;
-use mini_agent_capabilities::ResultStore;
-use mini_agent_capabilities::SandboxKind;
-use mini_agent_capabilities::SecurityPolicy;
-use mini_agent_capabilities::SecurityPreset;
-use mini_agent_capabilities::workspace_tools_with_read_roots_and_results;
-use mini_agent_core::Harness;
-use mini_agent_core::HarnessConfig;
-use mini_agent_core::Thread;
-use mini_agent_core::ToolRouter;
-use mini_agent_protocol::Message;
-use mini_agent_protocol::Model;
-use mini_agent_protocol::ModelEventSink;
-use mini_agent_protocol::ModelRequest;
-use mini_agent_protocol::ModelResponse;
-use mini_agent_protocol::ModelUsage;
-use mini_agent_protocol::ThreadId;
-use mini_agent_protocol::ThreadStart;
-use mini_agent_protocol::ToolCall;
-use mini_agent_protocol::ToolExecutionStatus;
-use mini_agent_protocol::TurnInput;
+use crate::tests::{DoneModel, harness};
+use mini_agent_app_server_protocol::{CapabilityProviderSelection, ClientCapabilities};
+use mini_agent_capabilities::{
+    ApprovalController, ApprovalMode, ApprovalScope, ImageStore, ResultStore, SandboxKind,
+    SecurityPolicy, SecurityPreset, workspace_tools_with_read_roots_and_results,
+};
+use mini_agent_core::{Harness, HarnessConfig, Thread, ToolRouter};
+use mini_agent_protocol::{
+    Message, Model, ModelEventSink, ModelRequest, ModelResponse, ModelUsage, ThreadId, ThreadStart,
+    ToolCall, ToolExecutionStatus, TurnInput,
+};
 use std::convert::Infallible;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;

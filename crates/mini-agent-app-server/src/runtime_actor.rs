@@ -1,25 +1,12 @@
 use crate::AppServerError;
-use crate::action::ActionReceipt;
-use crate::action::RuntimeRevision;
-use crate::action::respond;
-use crate::management::RuntimeActorState;
-use crate::management::SettingsRuntimeEvent;
+use crate::action::{ActionReceipt, RuntimeRevision, respond};
+use crate::management::{RuntimeActorState, SettingsRuntimeEvent};
 pub(super) use crate::runtime_command::{RuntimeCommand, RuntimeRequest};
 use crate::thread_manager::ThreadManager;
-use mini_agent_capabilities::ApprovalController;
-use mini_agent_capabilities::McpLoadResult;
-use mini_agent_capabilities::SecurityPolicy;
-use mini_agent_capabilities::load_mcp;
+use mini_agent_capabilities::{ApprovalController, McpLoadResult, SecurityPolicy, load_mcp};
 use mini_agent_core::Thread;
-use mini_agent_protocol::Message;
-use mini_agent_protocol::Model;
-use mini_agent_protocol::ThreadId;
-use mini_agent_protocol::TurnId;
-use mini_agent_protocol::TurnInput;
-use mini_agent_protocol::TurnInputMode;
-use mini_agent_protocol::TurnStart;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
+use mini_agent_protocol::{Message, Model, ThreadId, TurnId, TurnInput, TurnInputMode, TurnStart};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::oneshot;
 
 pub(super) fn handle_request<M>(

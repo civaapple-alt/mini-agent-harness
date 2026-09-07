@@ -5,38 +5,27 @@
 //! all turn execution goes through the same protocol client used by clients and
 //! the external JSON-RPC transport.
 
-use crate::AppServer;
-use crate::AppServerConnection;
-use crate::LocalAppServerClient;
-use crate::RuntimeManagementService;
-use crate::RuntimeServices;
 use crate::goal_service::ThreadGoalRequestProcessor;
 use crate::thread_settings::ThreadSettingsService;
-use mini_agent_app_server_protocol::CapabilityManifest as ProtocolCapabilityManifest;
-use mini_agent_app_server_protocol::ContextLimits as ProtocolContextLimits;
-use mini_agent_app_server_protocol::DisabledCapability;
-use mini_agent_app_server_protocol::RulePolicy as ProtocolRulePolicy;
-use mini_agent_app_server_protocol::RuleSourceStatus as ProtocolRuleSourceStatus;
-use mini_agent_app_server_protocol::SourceFingerprint as ProtocolSourceFingerprint;
-use mini_agent_app_server_protocol::TurnReadResult;
-use mini_agent_capabilities::ApprovalController;
-use mini_agent_capabilities::CapabilityRegistry;
-use mini_agent_capabilities::ImageStore;
-use mini_agent_capabilities::ModelProviderSettings;
-use mini_agent_capabilities::OpenAiModel;
-use mini_agent_capabilities::SessionStore;
-use mini_agent_capabilities::build_model;
-use mini_agent_core::HarnessConfig;
-use mini_agent_core::RunControl;
-use mini_agent_core::Thread;
-use mini_agent_host::CapabilityManifest;
-use mini_agent_host::ModelProviderFactory;
-use mini_agent_host::RuntimeComposition;
-use mini_agent_host::RuntimeConfig;
-use mini_agent_host::prepare_harness_with_model_factory;
-use mini_agent_protocol::Model;
-use mini_agent_protocol::ThreadId;
-use mini_agent_protocol::ThreadStart;
+use crate::{
+    AppServer, AppServerConnection, LocalAppServerClient, RuntimeManagementService, RuntimeServices,
+};
+use mini_agent_app_server_protocol::{
+    CapabilityManifest as ProtocolCapabilityManifest, ContextLimits as ProtocolContextLimits,
+    DisabledCapability, RulePolicy as ProtocolRulePolicy,
+    RuleSourceStatus as ProtocolRuleSourceStatus, SourceFingerprint as ProtocolSourceFingerprint,
+    TurnReadResult,
+};
+use mini_agent_capabilities::{
+    ApprovalController, CapabilityRegistry, ImageStore, ModelProviderSettings, OpenAiModel,
+    SessionStore, build_model,
+};
+use mini_agent_core::{HarnessConfig, RunControl, Thread};
+use mini_agent_host::{
+    CapabilityManifest, ModelProviderFactory, RuntimeComposition, RuntimeConfig,
+    prepare_harness_with_model_factory,
+};
+use mini_agent_protocol::{Model, ThreadId, ThreadStart};
 use serde::Serialize;
 use std::path::PathBuf;
 

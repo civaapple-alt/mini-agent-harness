@@ -1,26 +1,14 @@
 //! Goal verifier turn orchestration through the App Server boundary.
 
-use crate::AppServer;
-use crate::AppServerConnection;
-use crate::LocalAppServerClient;
+use crate::{AppServer, AppServerConnection, LocalAppServerClient};
 use mini_agent_app_server_protocol::TurnReadResult;
-use mini_agent_capabilities::ImageStore;
-use mini_agent_capabilities::OpenAiModel;
-use mini_agent_core::ContextLimitBehavior;
-use mini_agent_core::Harness;
-use mini_agent_core::HarnessConfig;
-use mini_agent_core::Thread;
-use mini_agent_core::ToolRouter;
+use mini_agent_capabilities::{ImageStore, OpenAiModel};
+use mini_agent_core::{ContextLimitBehavior, Harness, HarnessConfig, Thread, ToolRouter};
 use mini_agent_host::config::RuntimeConfig;
-use mini_agent_protocol::Event;
-use mini_agent_protocol::EventEnvelope;
-use mini_agent_protocol::EventSink;
-use mini_agent_protocol::Message;
-use mini_agent_protocol::StopReason;
-use mini_agent_protocol::ThreadId;
-use mini_agent_protocol::ThreadStart;
-use mini_agent_protocol::TurnInput;
-use mini_agent_protocol::TurnInputMode;
+use mini_agent_protocol::{
+    Event, EventEnvelope, EventSink, Message, StopReason, ThreadId, ThreadStart, TurnInput,
+    TurnInputMode,
+};
 
 const MAX_VERIFIER_HISTORY_MESSAGES: usize = 24;
 

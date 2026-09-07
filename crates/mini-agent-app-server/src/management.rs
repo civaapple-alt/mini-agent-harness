@@ -1,38 +1,23 @@
 //! Runtime management operations shared by local and JSON-RPC clients.
 
-use crate::AppServer;
-use crate::AppServerError;
-use crate::McpRetryResult;
-use crate::RuntimeSessionInfo;
-use crate::RuntimeTurnResult;
-use crate::action::ActionFailure;
-use crate::action::ActionResponse;
-use crate::action::ActionResult;
-use crate::goal_runtime::GoalRuntimeEvent;
-use crate::goal_runtime::GoalRuntimeHandle;
+use crate::action::{ActionFailure, ActionResponse, ActionResult};
+use crate::goal_runtime::{GoalRuntimeEvent, GoalRuntimeHandle};
 use crate::goal_service::ThreadGoalRequestProcessor;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeCommand;
 use crate::runtime_command::RuntimeCommandClient;
 use crate::thread_settings::ThreadSettingsService;
 use crate::worker::Command;
-use mini_agent_capabilities::ApprovalController;
-use mini_agent_capabilities::ApprovalScope;
-use mini_agent_capabilities::McpServerConfig;
-use mini_agent_capabilities::OpenedSession;
-use mini_agent_capabilities::SecurityPreset;
-use mini_agent_capabilities::SessionItem;
-use mini_agent_capabilities::TurnCommit;
+use crate::{AppServer, AppServerError, McpRetryResult, RuntimeSessionInfo, RuntimeTurnResult};
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
+use mini_agent_capabilities::{
+    ApprovalController, ApprovalScope, McpServerConfig, OpenedSession, SecurityPreset, SessionItem,
+    TurnCommit,
+};
 use mini_agent_core::ThreadCheckpoint;
 use mini_agent_host::WorldState;
-use mini_agent_protocol::Message;
-use mini_agent_protocol::Model;
-use mini_agent_protocol::ThreadId;
-use mini_agent_protocol::TurnStatus;
-use tokio::sync::broadcast;
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
+use mini_agent_protocol::{Message, Model, ThreadId, TurnStatus};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 pub(crate) struct RuntimeActorState {
     pub(crate) management: RuntimeManagementState,
