@@ -7,12 +7,12 @@ use crate::action::RuntimeRevision;
 use crate::management::RuntimeActorState;
 use crate::management::SettingsRuntimeEvent;
 pub(super) use crate::runtime_command::{RuntimeCommand, RuntimeRequest};
-use crate::thread_manager::ThreadHandle;
 use crate::thread_manager::ThreadManager;
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::McpLoadResult;
 use mini_agent_capabilities::SecurityPolicy;
 use mini_agent_capabilities::load_mcp;
+use mini_agent_core::Thread;
 use mini_agent_core::ThreadCheckpoint;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
@@ -533,7 +533,7 @@ pub(super) fn goal_turn_usage(
 
 pub(super) fn prepare_goal_verification<M>(
     runtime: &mut Option<RuntimeActorState>,
-    thread: &ThreadHandle<M>,
+    thread: &Thread<M>,
     goal_id: &str,
     turn_id: &mini_agent_protocol::TurnId,
 ) -> Result<Option<crate::goal_runtime::GoalVerificationRequest>, AppServerError>
@@ -564,7 +564,7 @@ where
 
 pub(super) fn prepare_goal_verification_or_fail<M>(
     runtime: &mut Option<RuntimeActorState>,
-    thread: &ThreadHandle<M>,
+    thread: &Thread<M>,
     goal_id: &str,
     turn_id: &mini_agent_protocol::TurnId,
 ) -> Result<Option<crate::goal_runtime::GoalVerificationRequest>, AppServerError>

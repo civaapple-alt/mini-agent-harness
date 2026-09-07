@@ -8,7 +8,6 @@ use crate::action::ActionSequencer;
 use crate::management::RuntimeActorState;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeRequest;
-use crate::thread_manager::ThreadHandle;
 use crate::thread_manager::ThreadManager;
 use mini_agent_app_server_protocol::ItemCompletedNotification;
 use mini_agent_app_server_protocol::ItemSortDirection;
@@ -762,7 +761,7 @@ fn complete_goal_verification(
     }
 }
 pub(super) fn apply_thread_update<M>(
-    thread: &mut ThreadHandle<M>,
+    thread: &mut Thread<M>,
     update: ThreadUpdate,
 ) -> Result<(), AppServerError>
 where
