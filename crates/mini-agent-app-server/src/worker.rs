@@ -1,5 +1,6 @@
 use super::*;
 use crate::action::ActionEnvelope;
+use crate::action::ActionReceipt;
 use crate::action::ActionResult;
 use crate::action::ActionSequencer;
 use crate::action::respond;
@@ -621,10 +622,7 @@ pub(super) async fn worker_loop<M>(
                     .get_mut(thread_id.as_str())
                     .ok_or(AppServerError::ThreadNotFound(thread_id))
                     .and_then(|thread| apply_thread_update(thread, update));
-                if result.is_ok() {
-                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
-                }
-                respond(reply, receipt, result);
+                respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);
             }
             Command::ResetThread {
                 thread_id,
@@ -635,10 +633,7 @@ pub(super) async fn worker_loop<M>(
                 let result = threads
                     .rename(&thread_id, new_thread_id.clone(), next_turn_number)
                     .map(|()| new_thread_id);
-                if result.is_ok() {
-                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
-                }
-                respond(reply, receipt, result);
+                respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);
             }
             Command::CloseThread { thread_id, reply } => {
                 let result = threads
@@ -649,10 +644,7 @@ pub(super) async fn worker_loop<M>(
                             .close()
                             .map_err(|error| AppServerError::Checkpoint(error.to_string()))
                     });
-                if result.is_ok() {
-                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
-                }
-                respond(reply, receipt, result);
+                respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);
             }
             Command::ReadTurn { turn_id, reply } => {
                 respond(
@@ -667,10 +659,7 @@ pub(super) async fn worker_loop<M>(
             }
             Command::CreateThread { thread_id, reply } => {
                 let result = threads.create(thread_id);
-                if result.is_ok() {
-                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
-                }
-                respond(reply, receipt, result);
+                respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);
             }
             Command::ForkThread {
                 source_thread_id,
@@ -678,10 +667,7 @@ pub(super) async fn worker_loop<M>(
                 reply,
             } => {
                 let result = threads.fork(source_thread_id, new_thread_id);
-                if result.is_ok() {
-                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
-                }
-                respond(reply, receipt, result);
+                respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);
             }
             Command::ResumeThread {
                 thread_id,
@@ -778,6 +764,19 @@ where
         ThreadUpdate::ExtendTools(tools) => thread.harness_mut().extend_tools(tools),
     }
     Ok(())
+}
+
+fn respond_after_revision<T>(
+    runtime: &mut Option<RuntimeActorState>,
+    runtime_revision: &AtomicU64,
+    reply: oneshot::Sender<ActionResult<T>>,
+    receipt: ActionReceipt,
+    result: Result<T, AppServerError>,
+) {
+    if result.is_ok() {
+        runtime_actor::advance_revision(runtime, runtime_revision);
+    }
+    respond(reply, receipt, result);
 }
 
 fn timestamp_ms() -> u64 {
