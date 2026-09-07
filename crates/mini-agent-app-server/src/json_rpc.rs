@@ -549,13 +549,6 @@ fn response_error(id: Option<Value>, error: JsonRpcError) -> Option<JsonRpcRespo
     Some(JsonRpcResponse::error(id, error))
 }
 
-fn response_action<T: serde::Serialize>(
-    id: Option<Value>,
-    response: ActionResponse<T>,
-) -> Option<JsonRpcResponse> {
-    response_value(id, response.into_protocol())
-}
-
 fn response_action_with<T: serde::Serialize>(
     id: Option<Value>,
     response: ActionResponse<impl Sized>,

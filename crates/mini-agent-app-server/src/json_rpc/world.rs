@@ -31,10 +31,7 @@ where
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
-        match world_state_result_action(management).await {
-            Ok(response) => response_action(request.id, response),
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(request.id, management.world_action(), world_state_result).await
     }
 
     pub(super) async fn handle_world_refresh(
@@ -164,14 +161,6 @@ async fn world_state_value<M: Model + Send + 'static>(
 ) -> Result<WorldStateResult, String> {
     let world = management.world().await?;
     Ok(world_state_result(&world))
-}
-
-async fn world_state_result_action<M: Model + Send + 'static>(
-    management: &RuntimeManagementService<M>,
-) -> Result<ActionResponse<WorldStateResult>, ActionFailure> {
-    let response = management.world_action().await?;
-    let value = world_state_result(&response.value);
-    Ok(response.map_value(value))
 }
 
 fn world_state_result(world: &mini_agent_host::WorldState) -> WorldStateResult {

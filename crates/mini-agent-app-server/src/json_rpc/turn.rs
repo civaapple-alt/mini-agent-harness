@@ -21,14 +21,13 @@ where
                 JsonRpcError::invalid_params("turn/start requires start or start_if_idle"),
             );
         }
-        match self
-            .server
-            .submit_start_action(params.thread_id, TurnStart::new(params.input), None)
-            .await
-        {
-            Ok(response) => response_action(request.id, response),
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+        action_response(
+            request.id,
+            self.server
+                .submit_start_action(params.thread_id, TurnStart::new(params.input), None),
+            Clone::clone,
+        )
+        .await
     }
 
     pub(super) async fn handle_turn_read(
@@ -82,18 +81,16 @@ where
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
-        match self
-            .server
-            .submit_start_action(
+        action_response(
+            request.id,
+            self.server.submit_start_action(
                 params.thread_id,
                 TurnStart::new(TurnInput::new(TurnInputMode::Steer, params.text)),
                 Some(params.turn_id),
-            )
-            .await
-        {
-            Ok(response) => response_action(request.id, response),
-            Err(error) => response_error(request.id, map_action_error(error)),
-        }
+            ),
+            Clone::clone,
+        )
+        .await
     }
 
     pub(super) async fn handle_turn_interrupt(

@@ -73,28 +73,11 @@ impl<T> ActionResponse<T> {
         self.value
     }
 
-    pub(crate) fn into_protocol(self) -> mini_agent_app_server_protocol::ActionResult<T> {
-        mini_agent_app_server_protocol::ActionResult {
-            value: self.value,
-            action_id: self.receipt.id.0,
-            action_sequence: self.receipt.sequence.0,
-            state_revision: self.state_revision.value(),
-        }
-    }
-
     pub(crate) fn metadata(&self) -> mini_agent_app_server_protocol::ActionMetadata {
         mini_agent_app_server_protocol::ActionMetadata {
             action_id: self.receipt.id.0,
             action_sequence: self.receipt.sequence.0,
             state_revision: self.state_revision.value(),
-        }
-    }
-
-    pub(crate) fn map_value<U>(self, value: U) -> ActionResponse<U> {
-        ActionResponse {
-            value,
-            receipt: self.receipt,
-            state_revision: self.state_revision,
         }
     }
 }
