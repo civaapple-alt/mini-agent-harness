@@ -404,9 +404,7 @@ pub fn init_plan_mode_with_prompt(session_dir: &Path, prompt: Option<&str>) -> i
         updated_at_ms: current_time_ms(),
     };
 
-    let state_json = serde_json::to_vec_pretty(&plan_state)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    fs::write(session_dir.join("plan_mode.json"), state_json)?;
+    write_json(session_dir.join("plan_mode.json"), &plan_state)?;
 
     Ok(plan_path)
 }
@@ -425,9 +423,7 @@ pub fn disable_plan_mode(session_dir: &Path) -> io::Result<()> {
             cleanup_pending: cleanup_result.is_err(),
             updated_at_ms: current_time_ms(),
         };
-        let state_json = serde_json::to_vec_pretty(&plan_state)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        state_result = fs::write(state_file, state_json);
+        state_result = write_json(state_file, &plan_state);
     }
     match (cleanup_result, state_result) {
         (Err(error), _) => Err(error),
@@ -522,14 +518,12 @@ fn write_plan_cleanup_manifest(
         updated_at_ms: current_time_ms(),
         error: error.map(|value| value.chars().take(MAX_GOAL_ERROR_CHARS).collect()),
     };
-    let content = serde_json::to_vec_pretty(&manifest)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     fs::create_dir_all(
         plan_cleanup_path(session_dir)
             .parent()
             .expect("plan directory"),
     )?;
-    fs::write(plan_cleanup_path(session_dir), content)?;
+    write_json(plan_cleanup_path(session_dir), &manifest)?;
     Ok(manifest)
 }
 
@@ -625,9 +619,13 @@ pub fn load_goal_state(session_dir: &Path) -> io::Result<Option<GoalState>> {
 }
 
 fn write_goal_state(session_dir: &Path, state: &GoalState) -> io::Result<()> {
-    let state_json = serde_json::to_vec_pretty(state)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    fs::write(session_dir.join("goal").join("state.json"), state_json)
+    write_json(session_dir.join("goal").join("state.json"), state)
+}
+
+fn write_json<T: Serialize>(path: impl AsRef<Path>, value: &T) -> io::Result<()> {
+    let content = serde_json::to_vec_pretty(value)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    fs::write(path, content)
 }
 
 fn update_goal_state<F>(session_dir: &Path, update: F) -> io::Result<Option<GoalState>>
@@ -691,9 +689,7 @@ pub fn limit_goal_with_reason(
     state.status = status;
     state.last_error = reason.map(|reason| reason.chars().take(MAX_GOAL_ERROR_CHARS).collect());
     state.updated_at_ms = current_time_ms();
-    let state_json = serde_json::to_vec_pretty(&state)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    fs::write(state_file, state_json)?;
+    write_json(state_file, &state)?;
     Ok(state)
 }
 
@@ -778,9 +774,7 @@ pub fn advance_goal_milestone(
     state.active_turn_id = None;
     state.active_turn_settled = false;
     state.last_error = None;
-    let state_json = serde_json::to_vec_pretty(&state)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    fs::write(state_file, state_json)?;
+    write_json(state_file, &state)?;
 
     Ok(state)
 }
