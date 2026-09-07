@@ -25,7 +25,7 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test maintenance scripts
-        run: python3 -m unittest scripts/test_package_release.py scripts/test_line_budget.py scripts/test_pr_admission.py
+        run: python3 -m unittest scripts/test_package_release.py scripts/test_line_budget.py scripts/test_pr_admission.py scripts/test_cargo_boundary.py
       - name: Enforce line budget
         run: python3 scripts/line_budget.py
       - name: Enforce line-budget delta on pull requests
@@ -35,6 +35,8 @@ jobs:
           --base "${{ github.event.pull_request.base.sha }}"
           --check-delta
           --json
+      - name: Check Cargo dependency direction
+        run: python3 scripts/cargo_boundary.py --json
       - name: Validate Cargo packages
         run: cargo package --workspace --locked --no-verify
 

@@ -62,6 +62,11 @@ every feature in Codex, Pi, fx, or Qi.
   Capabilities control-plane boundary files, provider implementations, and
   CLI. The Capabilities path list is explicit and disjoint; it does not change
   Cargo ownership by itself.
+- Run `python scripts/cargo_boundary.py --json` after Cargo manifest changes or
+  package-boundary refactors. The check admits only the current workspace
+  dependency directions and reports the existing App Server to Capabilities
+  edge as a review finding; it does not require a crate split merely to satisfy
+  the line gate.
 - Runtime `19,000` and release Rust `29,000` are the operating budgets;
   `19,500` and `29,500` are the red-band thresholds. In the amber/red band,
   pull requests must not grow the affected total unless the same batch deletes
