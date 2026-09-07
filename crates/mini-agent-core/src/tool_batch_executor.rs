@@ -5,11 +5,11 @@ use mini_agent_protocol::ToolExecutionContext;
 use mini_agent_protocol::ToolExecutionRequest;
 
 use crate::SessionState;
-use crate::ToolRegistry;
+use crate::ToolRouter;
 
 /// Executes one complete tool batch and records its bounded outputs.
 pub(super) fn execute_tool_batch<O: Observer>(
-    tools: &ToolRegistry,
+    tools: &ToolRouter,
     calls: Vec<ToolCall>,
     max_output_bytes: usize,
     session: &mut SessionState,

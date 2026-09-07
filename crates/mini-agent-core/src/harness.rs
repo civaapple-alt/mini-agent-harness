@@ -1,4 +1,4 @@
-use crate::ToolRegistry;
+use crate::ToolRouter;
 use mini_agent_protocol::Event;
 use mini_agent_protocol::LimitExceeded;
 use mini_agent_protocol::LimitKind;
@@ -96,13 +96,13 @@ impl<E: Error + 'static> Error for HarnessError<E> {}
 
 pub struct Harness<M> {
     model: M,
-    tools: ToolRegistry,
+    tools: ToolRouter,
     config: HarnessConfig,
     session: SessionState,
 }
 
 impl<M: Model> Harness<M> {
-    pub fn new(model: M, tools: ToolRegistry, config: HarnessConfig) -> Self {
+    pub fn new(model: M, tools: ToolRouter, config: HarnessConfig) -> Self {
         Self {
             model,
             tools,

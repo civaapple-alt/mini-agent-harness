@@ -1,7 +1,7 @@
 use crate::Harness;
 use crate::HarnessConfig;
 use crate::HarnessError;
-use crate::ToolRegistry;
+use crate::ToolRouter;
 use mini_agent_protocol::Event;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
@@ -165,7 +165,7 @@ async fn missing_required_tool_argument_is_projected_for_model_recovery() {
     ]);
     let mut harness = Harness::new(
         model,
-        ToolRegistry::new(vec![Box::new(RequiredStringTool)]),
+        ToolRouter::new(vec![Box::new(RequiredStringTool)]),
         HarnessConfig::default(),
     );
     let mut events = EventRecorder::default();
@@ -199,7 +199,7 @@ async fn missing_required_tool_argument_is_projected_for_model_recovery() {
 #[tokio::test]
 async fn partial_model_stream_is_failed_without_fabricating_completion() {
     let model = FaultInjectionModel::new([FaultStep::PartialStream]);
-    let mut harness = Harness::new(model, ToolRegistry::default(), HarnessConfig::default());
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
     let mut events = EventRecorder::default();
 
     let error = harness
@@ -237,7 +237,7 @@ async fn retryable_tool_result_is_preserved_until_model_recovers() {
     ]);
     let mut harness = Harness::new(
         model,
-        ToolRegistry::new(vec![Box::new(RetryableTool)]),
+        ToolRouter::new(vec![Box::new(RetryableTool)]),
         HarnessConfig::default(),
     );
     let mut events = EventRecorder::default();

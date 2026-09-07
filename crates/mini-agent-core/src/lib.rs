@@ -25,7 +25,6 @@ pub use thread::Thread;
 pub use thread::ThreadCheckpoint;
 pub use thread::ThreadError;
 pub use thread::TurnResult;
-pub use tool::ToolRegistry;
 pub use tool::ToolRouter;
 
 #[cfg(test)]

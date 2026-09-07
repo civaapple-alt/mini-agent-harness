@@ -10,7 +10,7 @@ use mini_agent_core::ContextLimitBehavior;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
-use mini_agent_core::ToolRegistry;
+use mini_agent_core::ToolRouter;
 use mini_agent_host::config::RuntimeConfig;
 use mini_agent_protocol::Event;
 use mini_agent_protocol::EventEnvelope;
@@ -67,11 +67,7 @@ pub async fn verify_goal_checkpoint(
         context_limit_behavior: ContextLimitBehavior::Reject,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(
-        model,
-        ToolRegistry::new(Vec::new()),
-        HarnessConfig::default(),
-    );
+    let mut harness = Harness::new(model, ToolRouter::new(Vec::new()), HarnessConfig::default());
     harness
         .restore_history(bounded_verifier_history(messages))
         .map_err(|error| format!("cannot restore goal verifier source: {error}"))?;

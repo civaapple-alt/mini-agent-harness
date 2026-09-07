@@ -14,7 +14,7 @@ use mini_agent_capabilities::workspace_tools_with_read_roots_and_results;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
-use mini_agent_core::ToolRegistry;
+use mini_agent_core::ToolRouter;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
 use mini_agent_protocol::ModelEventSink;
@@ -1052,7 +1052,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         ResultStore::default(),
     )
     .unwrap();
-    let registry = ToolRegistry::with_executor(
+    let registry = ToolRouter::with_executor(
         tools,
         Arc::new(mini_agent_host::ToolOrchestrator::new(approval)),
     );
@@ -1287,14 +1287,14 @@ async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
 
 #[tokio::test]
 async fn exposes_factory_backed_thread_lifecycle_methods() {
-    let harness = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let harness = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
     let server = AppServer::with_thread_factory(
         ThreadStart::new(ThreadId::new("thread-1")),
         vec![Thread::new(ThreadId::new("initial"), harness)],
         |id| {
             Ok(Thread::new(
                 id,
-                Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default()),
+                Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default()),
             ))
         },
     );

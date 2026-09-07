@@ -175,7 +175,7 @@ async fn runs_model_tool_model_path() {
             },
         ]),
     };
-    let tools = ToolRegistry::new(vec![Box::new(Uppercase)]);
+    let tools = ToolRouter::new(vec![Box::new(Uppercase)]);
     let mut harness = Harness::new(model, tools, HarnessConfig::default());
     let mut events = Vec::new();
 
@@ -230,7 +230,7 @@ async fn steering_stops_after_a_complete_tool_batch() {
     let model = ScriptedModel {
         responses: VecDeque::from([tool_response("call-1", "request_steer", json!({}))]),
     };
-    let tools = ToolRegistry::new(vec![Box::new(RequestSteer(control.clone()))]);
+    let tools = ToolRouter::new(vec![Box::new(RequestSteer(control.clone()))]);
     let mut harness = Harness::new(model, tools, HarnessConfig::default());
 
     let outcome = harness
@@ -285,7 +285,7 @@ async fn same_turn_steering_consumes_input_after_sampling() {
         control: control.clone(),
         calls: 0,
     };
-    let mut harness = Harness::new(model, ToolRegistry::default(), HarnessConfig::default());
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
 
     let outcome = harness
         .run_with_control_mode(
@@ -318,7 +318,7 @@ async fn returns_unknown_tool_failure_to_model() {
             text_response("I could not run that tool."),
         ]),
     };
-    let mut harness = Harness::new(model, ToolRegistry::default(), HarnessConfig::default());
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
 
     let outcome = harness.run("try it", &mut ()).await.unwrap();
 
@@ -344,7 +344,7 @@ async fn preserves_structured_tool_policy_outcome_in_events() {
     };
     let mut harness = Harness::new(
         model,
-        ToolRegistry::new(vec![Box::new(ApprovalTool)]),
+        ToolRouter::new(vec![Box::new(ApprovalTool)]),
         HarnessConfig::default(),
     );
     let mut events = Vec::new();
@@ -391,7 +391,7 @@ async fn records_tool_output_truncation_explicitly() {
         max_tool_output_bytes: 5,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::new(vec![Box::new(Uppercase)]), config);
+    let mut harness = Harness::new(model, ToolRouter::new(vec![Box::new(Uppercase)]), config);
     let mut events = Vec::new();
 
     struct Recorder<'a>(&'a mut Vec<Event>);
@@ -434,7 +434,7 @@ async fn stops_at_step_limit() {
         max_steps: 1,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::default(), config);
+    let mut harness = Harness::new(model, ToolRouter::default(), config);
 
     let outcome = harness.run("continue forever", &mut ()).await.unwrap();
 
@@ -461,7 +461,7 @@ async fn preserves_history_across_runs_and_can_clear_it() {
             },
         ]),
     };
-    let mut harness = Harness::new(model, ToolRegistry::default(), HarnessConfig::default());
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
 
     harness.run("first question", &mut ()).await.unwrap();
     let outcome = harness.run("second question", &mut ()).await.unwrap();
@@ -504,7 +504,7 @@ fn context_items_have_an_independent_hard_limit() {
         ScriptedModel {
             responses: VecDeque::new(),
         },
-        ToolRegistry::default(),
+        ToolRouter::default(),
         config,
     );
 
@@ -527,7 +527,7 @@ fn restores_only_history_that_fits_the_current_harness() {
         ScriptedModel {
             responses: VecDeque::new(),
         },
-        ToolRegistry::default(),
+        ToolRouter::default(),
         HarnessConfig::default(),
     );
     let messages = vec![Message::Context {
@@ -619,7 +619,7 @@ fn verifier_can_restore_tool_history_before_disabling_new_tool_calls() {
         ScriptedModel {
             responses: VecDeque::new(),
         },
-        ToolRegistry::default(),
+        ToolRouter::default(),
         HarnessConfig::default(),
     );
 
@@ -660,7 +660,7 @@ async fn compacts_context_and_continues_the_tool_loop() {
         context_limit_behavior: ContextLimitBehavior::Compact,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::new(vec![Box::new(Uppercase)]), config);
+    let mut harness = Harness::new(model, ToolRouter::new(vec![Box::new(Uppercase)]), config);
     harness
         .append_context("<world_state>rust,cargo</world_state>")
         .unwrap();
@@ -747,7 +747,7 @@ async fn empty_summary_falls_back_to_mechanical_trim() {
         context_limit_behavior: ContextLimitBehavior::Compact,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::new(vec![Box::new(Uppercase)]), config);
+    let mut harness = Harness::new(model, ToolRouter::new(vec![Box::new(Uppercase)]), config);
     let mut events = RecordingObserver::default();
 
     let outcome = harness
@@ -806,7 +806,7 @@ async fn trims_over_budget_compaction_prefix_and_continues() {
         context_limit_behavior: ContextLimitBehavior::Compact,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::default(), config.clone());
+    let mut harness = Harness::new(model, ToolRouter::default(), config.clone());
     harness.restore_history(history).unwrap();
     let mut events = RecordingObserver::default();
 
@@ -946,7 +946,7 @@ async fn rejects_oversized_user_input_without_retaining_it() {
         max_user_input_bytes: 4,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::default(), config);
+    let mut harness = Harness::new(model, ToolRouter::default(), config);
     let mut events = RecordingObserver::default();
 
     let error = harness.run("12345", &mut events).await.unwrap_err();
@@ -1012,7 +1012,7 @@ async fn rejects_context_before_calling_the_model() {
         max_context_bytes: 1,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::default(), config);
+    let mut harness = Harness::new(model, ToolRouter::default(), config);
 
     let error = harness.run("a", &mut ()).await.unwrap_err();
 
@@ -1046,7 +1046,7 @@ async fn rejects_excess_tool_calls_before_executing_any() {
         max_tool_calls_per_step: 1,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::new(vec![Box::new(Uppercase)]), config);
+    let mut harness = Harness::new(model, ToolRouter::new(vec![Box::new(Uppercase)]), config);
     let mut events = RecordingObserver::default();
 
     let error = harness.run("do both", &mut events).await.unwrap_err();
@@ -1081,7 +1081,7 @@ async fn rejects_oversized_model_response_before_retaining_it() {
         max_model_response_bytes: 5,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRegistry::default(), config);
+    let mut harness = Harness::new(model, ToolRouter::default(), config);
 
     let error = harness.run("answer", &mut ()).await.unwrap_err();
 
@@ -1124,7 +1124,7 @@ async fn repetitive_tool_calls_trigger_loop_warning() {
         }
     }
 
-    let tools = ToolRegistry::new(vec![Box::new(EchoTool)]);
+    let tools = ToolRouter::new(vec![Box::new(EchoTool)]);
 
     let model = ScriptedModel {
         responses: VecDeque::from(vec![

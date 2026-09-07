@@ -56,10 +56,12 @@ fn hidden_tools_are_not_visible_or_resolvable_and_can_be_restored() {
 
     assert!(router.specs().is_empty());
     assert_eq!(
-        router.execute("echo", &serde_json::json!({})),
-        Err(mini_agent_protocol::ToolError(
-            "unknown tool: echo".to_string()
-        ))
+        router.execute_outcome(&ToolExecutionRequest::new(
+            "call-2",
+            "echo",
+            serde_json::json!({}),
+        )),
+        ToolExecutionOutcome::failed("unknown tool: echo")
     );
 
     router.set_hidden_tools(Vec::new());

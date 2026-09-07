@@ -8,7 +8,7 @@ use super::worker::Command;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
-use mini_agent_core::ToolRegistry;
+use mini_agent_core::ToolRouter;
 use mini_agent_protocol::Event;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
@@ -209,7 +209,7 @@ pub(crate) fn server_with_config<M: Model + Send + 'static>(
     model: M,
     config: HarnessConfig,
 ) -> AppServer<M> {
-    let harness = Harness::new(model, ToolRegistry::default(), config);
+    let harness = Harness::new(model, ToolRouter::default(), config);
     AppServer::new(
         ThreadStart::new(ThreadId::new("thread-1")),
         Thread::new(ThreadId::new("initial"), harness),
@@ -341,7 +341,7 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
 async fn projects_structured_approval_denial_through_public_app_server() {
     let harness = Harness::new(
         ApprovalModel,
-        ToolRegistry::new(vec![Box::new(SensitiveFixtureTool)]),
+        ToolRouter::new(vec![Box::new(SensitiveFixtureTool)]),
         HarnessConfig::default(),
     );
     let server = AppServer::new(
@@ -396,7 +396,7 @@ async fn projects_structured_approval_denial_through_public_app_server() {
 async fn projects_mcp_timeout_through_public_app_server() {
     let harness = Harness::new(
         McpTimeoutModel,
-        ToolRegistry::new(vec![Box::new(McpTimeoutFixtureTool)]),
+        ToolRouter::new(vec![Box::new(McpTimeoutFixtureTool)]),
         HarnessConfig::default(),
     );
     let server = AppServer::new(
@@ -619,8 +619,7 @@ async fn rejects_idle_steer_and_cancel_without_starting_a_second_loop() {
 
 #[tokio::test]
 async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
-    let initial_harness =
-        Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let initial_harness = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
     let mut initial = Thread::new(ThreadId::new("thread-1"), initial_harness);
     initial
         .run_turn(
@@ -633,7 +632,7 @@ async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
         .unwrap();
     let checkpoint = initial.checkpoint().unwrap();
 
-    let replacement = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let replacement = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
     let mut restored = Thread::new(ThreadId::new("placeholder"), replacement);
     restored.restore_checkpoint(checkpoint).unwrap();
     let server = AppServer::new(ThreadStart::new(ThreadId::new("thread-1")), restored);
@@ -664,8 +663,8 @@ async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
 
 #[tokio::test]
 async fn routes_multiple_preconfigured_threads_by_identity() {
-    let first = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
-    let second = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let first = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
+    let second = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
     let server = AppServer::with_threads(
         ThreadStart::new(ThreadId::new("thread-1")),
         vec![
@@ -709,14 +708,14 @@ async fn routes_multiple_preconfigured_threads_by_identity() {
 
 #[tokio::test]
 async fn factory_supports_dynamic_start_fork_and_resume() {
-    let initial = Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default());
+    let initial = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
     let server = AppServer::with_thread_factory(
         ThreadStart::new(ThreadId::new("thread-1")),
         vec![Thread::new(ThreadId::new("placeholder"), initial)],
         |id| {
             Ok(Thread::new(
                 id,
-                Harness::new(DoneModel, ToolRegistry::default(), HarnessConfig::default()),
+                Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default()),
             ))
         },
     );

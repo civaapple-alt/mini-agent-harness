@@ -3,7 +3,7 @@ use mini_agent_capabilities::ModelProviderSettings;
 use mini_agent_capabilities::OpenAiModel;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
-use mini_agent_core::ToolRegistry;
+use mini_agent_core::ToolRouter;
 use mini_agent_protocol::Model;
 use std::sync::Arc;
 
@@ -276,7 +276,7 @@ where
     );
     let world_context = world.model_context()?;
     let tool_executor = Arc::new(ToolOrchestrator::new(approval.clone()));
-    let tool_registry = ToolRegistry::with_executor(tools, tool_executor);
+    let tool_registry = ToolRouter::with_executor(tools, tool_executor);
     let mut harness = Harness::new(model, tool_registry, config);
     harness.set_hidden_tools(BuiltinToolSelection::default().hidden_names());
     harness
