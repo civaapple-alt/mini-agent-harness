@@ -1,5 +1,6 @@
 use super::*;
 use crate::tests::DoneModel;
+use crate::tests::harness;
 use mini_agent_app_server_protocol::CapabilityProviderSelection;
 use mini_agent_app_server_protocol::ClientCapabilities;
 use mini_agent_capabilities::ApprovalController;
@@ -1292,16 +1293,11 @@ async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
 
 #[tokio::test]
 async fn exposes_factory_backed_thread_lifecycle_methods() {
-    let harness = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
+    let initial_harness = harness(DoneModel);
     let server = AppServer::with_thread_factory(
         ThreadStart::new(ThreadId::new("thread-1")),
-        vec![Thread::new(ThreadId::new("initial"), harness)],
-        |id| {
-            Ok(Thread::new(
-                id,
-                Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default()),
-            ))
-        },
+        vec![Thread::new(ThreadId::new("initial"), initial_harness)],
+        |id| Ok(Thread::new(id, harness(DoneModel))),
     );
     let mut connection = AppServerConnection::new(server);
     let _ = connection

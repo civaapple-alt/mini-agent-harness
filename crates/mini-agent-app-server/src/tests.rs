@@ -201,6 +201,14 @@ impl Model for BlockingModel {
     }
 }
 
+pub(crate) fn harness<M: Model>(model: M) -> Harness<M> {
+    Harness::new(model, ToolRouter::default(), HarnessConfig::default())
+}
+
+pub(crate) fn thread<M: Model>(thread_id: ThreadId, model: M) -> Thread<M> {
+    Thread::new(thread_id, harness(model))
+}
+
 pub(crate) fn server_with_config<M: Model + Send + 'static>(
     model: M,
     config: HarnessConfig,
@@ -615,8 +623,7 @@ async fn rejects_idle_steer_and_cancel_without_starting_a_second_loop() {
 
 #[tokio::test]
 async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
-    let initial_harness = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
-    let mut initial = Thread::new(ThreadId::new("thread-1"), initial_harness);
+    let mut initial = thread(ThreadId::new("thread-1"), DoneModel);
     initial
         .run_turn(
             TurnInput::new(TurnInputMode::Start, "first"),
@@ -628,8 +635,7 @@ async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
         .unwrap();
     let checkpoint = initial.checkpoint().unwrap();
 
-    let replacement = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
-    let mut restored = Thread::new(ThreadId::new("placeholder"), replacement);
+    let mut restored = thread(ThreadId::new("placeholder"), DoneModel);
     restored.restore_checkpoint(checkpoint).unwrap();
     let server = AppServer::new(ThreadStart::new(ThreadId::new("thread-1")), restored);
     let mut events = server.subscribe();
@@ -659,8 +665,8 @@ async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
 
 #[tokio::test]
 async fn routes_multiple_preconfigured_threads_by_identity() {
-    let first = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
-    let second = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
+    let first = harness(DoneModel);
+    let second = harness(DoneModel);
     let server = AppServer::with_threads(
         ThreadStart::new(ThreadId::new("thread-1")),
         vec![
@@ -704,16 +710,11 @@ async fn routes_multiple_preconfigured_threads_by_identity() {
 
 #[tokio::test]
 async fn factory_supports_dynamic_start_fork_and_resume() {
-    let initial = Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default());
+    let initial = harness(DoneModel);
     let server = AppServer::with_thread_factory(
         ThreadStart::new(ThreadId::new("thread-1")),
         vec![Thread::new(ThreadId::new("placeholder"), initial)],
-        |id| {
-            Ok(Thread::new(
-                id,
-                Harness::new(DoneModel, ToolRouter::default(), HarnessConfig::default()),
-            ))
-        },
+        |id| Ok(Thread::new(id, harness(DoneModel))),
     );
     assert_eq!(
         server
