@@ -291,13 +291,7 @@ fn user_env_path() -> Option<PathBuf> {
 fn home_dir() -> Option<PathBuf> {
     let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     env::var_os(key)
-        .or_else(|| {
-            if cfg!(windows) {
-                env::var_os("HOME")
-            } else {
-                None
-            }
-        })
+        .or_else(|| (cfg!(windows)).then(|| env::var_os("HOME")).flatten())
         .map(PathBuf::from)
 }
 

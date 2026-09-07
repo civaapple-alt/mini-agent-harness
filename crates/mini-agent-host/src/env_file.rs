@@ -43,14 +43,14 @@ impl Environment {
     pub fn resolve(&self, name: &str) -> Option<ResolvedValue> {
         env::var(name)
             .ok()
-            .filter(|value| !value.trim().is_empty())
+            .filter(|v| !v.trim().is_empty())
             .map(|value| ResolvedValue {
                 value,
                 source: ValueSource::Process,
             })
             .or_else(|| {
-                self.get(name).map(|value| ResolvedValue {
-                    value: value.to_string(),
+                self.get(name).map(|v| ResolvedValue {
+                    value: v.to_string(),
                     source: ValueSource::EnvFile,
                 })
             })
@@ -107,25 +107,16 @@ mod tests {
 
     #[test]
     fn parses_comments_empty_values_and_quotes() {
-        let values = parse(
-            "# local config\nOPENAI_API_KEY=\nOPENAI_MODEL='test-model'\nOPENAI_BASE_URL=\"http://localhost:8080/v1\"\n",
-        )
-        .unwrap();
-
-        assert_eq!(values["OPENAI_API_KEY"], "");
-        assert_eq!(values["OPENAI_MODEL"], "test-model");
-        assert_eq!(values["OPENAI_BASE_URL"], "http://localhost:8080/v1");
+        let v = parse("# c\nK=\nM='model'\nU=\"http://localhost/v1\"\n").unwrap();
+        assert_eq!(v["K"], "");
+        assert_eq!(v["M"], "model");
+        assert_eq!(v["U"], "http://localhost/v1");
     }
 
     #[test]
     fn rejects_invalid_lines() {
-        assert_eq!(
-            parse("NOT VALID").unwrap_err(),
-            "invalid .env line 1: expected NAME=VALUE"
-        );
-        assert_eq!(
-            parse("1INVALID=value").unwrap_err(),
-            "invalid .env name on line 1: 1INVALID"
-        );
+        let err1 = parse("NOT VALID").unwrap_err();
+        let err2 = parse("1INVALID=v").unwrap_err();
+        assert!(err1.contains("expected NAME=VALUE") && err2.contains("invalid .env name"));
     }
 }

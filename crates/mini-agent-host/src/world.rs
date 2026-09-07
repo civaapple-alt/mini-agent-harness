@@ -19,6 +19,7 @@ const COMMANDS: &[&str] = &[
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldState {
     workspace: PathBuf,
+    extra_roots: Vec<PathBuf>,
     os: &'static str,
     arch: &'static str,
     shell: &'static str,
@@ -38,6 +39,16 @@ impl WorldState {
         approval: ApprovalScope,
         sandbox: SandboxKind,
     ) -> Self {
+        Self::detect_with_roots(workspace, Vec::new(), access, approval, sandbox)
+    }
+
+    pub fn detect_with_roots(
+        workspace: &Path,
+        extra_roots: Vec<PathBuf>,
+        access: SecurityPreset,
+        approval: ApprovalScope,
+        sandbox: SandboxKind,
+    ) -> Self {
         let search_paths = env::var_os("PATH")
             .map(|path| env::split_paths(&path).collect::<Vec<_>>())
             .unwrap_or_default();
@@ -50,8 +61,13 @@ impl WorldState {
             .into_iter()
             .filter(|name| workspace_command_available(workspace, name))
             .collect();
+        let mut project_kinds = detect_project_kinds(workspace);
+        project_kinds.extend(extra_roots.iter().flat_map(|r| detect_project_kinds(r)));
+        project_kinds.sort();
+        project_kinds.dedup();
         Self {
             workspace: workspace.to_path_buf(),
+            extra_roots,
             os: env::consts::OS,
             arch: env::consts::ARCH,
             shell: if cfg!(windows) { "pwsh" } else { "sh" },
@@ -61,7 +77,7 @@ impl WorldState {
             available_commands,
             unavailable_commands,
             workspace_commands,
-            project_kinds: detect_project_kinds(workspace),
+            project_kinds,
         }
     }
 
@@ -94,6 +110,10 @@ impl WorldState {
         &self.workspace
     }
 
+    pub fn extra_roots(&self) -> &[PathBuf] {
+        &self.extra_roots
+    }
+
     pub fn model_context(&self) -> Result<String, String> {
         let mut context = String::from("<world_state>");
         context.push_str("<environment os=\"");
@@ -117,28 +137,42 @@ impl WorldState {
         context.push_str("\" command_sandbox=\"");
         context.push_str(self.sandbox.name());
         context.push_str("\" direct_file_scope=\"workspace\" />");
-        push_list_element(&mut context, "project_kinds", &self.project_kinds);
-        push_list_element(&mut context, "available_commands", &self.available_commands);
-        push_list_element(
-            &mut context,
-            "unavailable_commands",
-            &self.unavailable_commands,
-        );
-        push_list_element(&mut context, "workspace_commands", &self.workspace_commands);
+        if !self.extra_roots.is_empty() {
+            context.push_str("<workspace_roots>");
+            let push_root = |buf: &mut String, path: &Path, primary: bool| {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                buf.push_str("<root name=\"");
+                push_xml_escaped(buf, name);
+                buf.push_str("\" path=\"");
+                push_xml_escaped(buf, &path.to_string_lossy());
+                let pri = if primary { "true" } else { "false" };
+                buf.push_str("\" primary=\"");
+                buf.push_str(pri);
+                buf.push_str("\" />");
+            };
+            push_root(&mut context, &self.workspace, true);
+            for root in &self.extra_roots {
+                push_root(&mut context, root, false);
+            }
+            context.push_str("</workspace_roots>");
+        }
+        for (tag, list) in [
+            ("project_kinds", &self.project_kinds),
+            ("available_commands", &self.available_commands),
+            ("unavailable_commands", &self.unavailable_commands),
+            ("workspace_commands", &self.workspace_commands),
+        ] {
+            push_list_element(&mut context, tag, list);
+        }
         context.push_str("<execution_guidance>");
+        if !self.extra_roots.is_empty() {
+            context.push_str("Multiple workspace directories configured. All roots in <workspace_roots> are part of this project; inspect and modify files across these roots using absolute paths or paths relative to cwd. ");
+        }
         context.push_str(match self.approval {
-            ApprovalScope::PerAction => {
-                "Sensitive writes, shell commands, MCP connections, and MCP calls require per-action user approval."
-            }
-            ApprovalScope::CurrentSession => {
-                "An approved action may be reused within this Session; Project or machine scope still requires a new decision."
-            }
-            ApprovalScope::CurrentProject => {
-                "An approved action may be reused by matching Sessions in this Project and Workspace revision; denied actions and unsafe effects remain denied."
-            }
-            ApprovalScope::Automatic => {
-                "Autonomous mode: non-destructive workspace and tool actions are automatically approved."
-            }
+            ApprovalScope::PerAction => "Sensitive writes, shell commands, MCP connections, and MCP calls require per-action user approval.",
+            ApprovalScope::CurrentSession => "An approved action may be reused within this Session; Project or machine scope still requires a new decision.",
+            ApprovalScope::CurrentProject => "An approved action may be reused by matching Sessions in this Project and Workspace revision; denied actions and unsafe effects remain denied.",
+            ApprovalScope::Automatic => "Autonomous mode: non-destructive workspace and tool actions are automatically approved.",
         });
         context.push_str("</execution_guidance></world_state>");
         if context.len() > MAX_WORLD_CONTEXT_BYTES {
@@ -151,6 +185,15 @@ impl WorldState {
     }
 
     pub fn status_json(&self) -> Value {
+        let entry = |p: &Path, primary: bool| {
+            json!({
+                "name": p.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+                "path": p.to_string_lossy(),
+                "primary": primary,
+            })
+        };
+        let mut roots = vec![entry(&self.workspace, true)];
+        roots.extend(self.extra_roots.iter().map(|r| entry(r, false)));
         json!({
             "os": self.os,
             "arch": self.arch,
@@ -160,6 +203,7 @@ impl WorldState {
             "approval": self.approval_name(),
             "command_sandbox": self.sandbox.name(),
             "direct_file_scope": "workspace",
+            "workspace_roots": roots,
             "project_kinds": self.project_kinds,
             "available_commands": self.available_commands,
             "unavailable_commands": self.unavailable_commands,
@@ -168,26 +212,22 @@ impl WorldState {
     }
 
     pub fn status_lines(&self) -> Vec<String> {
-        vec![
+        let mut lines = vec![
             format!("world_os: {} {}", self.os, self.arch),
             format!("world_shell: {}", self.shell),
             "mode: chat".to_string(),
             format!("access: {}", self.access.name()),
             format!("approval: {}", self.approval_name()),
-            format!("project_kinds: {}", display_list(&self.project_kinds)),
-            format!(
-                "commands_available: {}",
-                display_list(&self.available_commands)
-            ),
-            format!(
-                "commands_unavailable: {}",
-                display_list(&self.unavailable_commands)
-            ),
-            format!(
-                "workspace_commands: {}",
-                display_list(&self.workspace_commands)
-            ),
-        ]
+        ];
+        for (k, v) in [
+            ("project_kinds", &self.project_kinds),
+            ("commands_available", &self.available_commands),
+            ("commands_unavailable", &self.unavailable_commands),
+            ("workspace_commands", &self.workspace_commands),
+        ] {
+            lines.push(format!("{k}: {}", display_list(v)));
+        }
+        lines
     }
 
     fn approval_name(&self) -> &'static str {
@@ -201,28 +241,25 @@ impl WorldState {
 }
 
 fn detect_project_kinds(workspace: &Path) -> Vec<&'static str> {
-    let markers = [
-        ("rust", ["Cargo.toml"].as_slice()),
-        ("java_maven", ["pom.xml"].as_slice()),
-        (
-            "java_gradle",
-            ["build.gradle", "build.gradle.kts"].as_slice(),
-        ),
-        ("go", ["go.mod"].as_slice()),
+    const MARKERS: &[(&str, &[&str])] = &[
+        ("rust", &["Cargo.toml"]),
+        ("java_maven", &["pom.xml"]),
+        ("java_gradle", &["build.gradle", "build.gradle.kts"]),
+        ("go", &["go.mod"]),
         (
             "python",
-            ["pyproject.toml", "requirements.txt", "setup.py"].as_slice(),
+            &["pyproject.toml", "requirements.txt", "setup.py"],
         ),
-        ("node", ["package.json"].as_slice()),
-        ("dotnet", ["global.json"].as_slice()),
+        ("node", &["package.json"]),
+        ("dotnet", &["global.json"]),
     ];
-    markers
-        .into_iter()
-        .filter_map(|(kind, names)| {
+    MARKERS
+        .iter()
+        .filter_map(|(k, names)| {
             names
                 .iter()
-                .any(|name| workspace.join(name).is_file())
-                .then_some(kind)
+                .any(|n| workspace.join(n).is_file())
+                .then_some(*k)
         })
         .collect()
 }
@@ -230,20 +267,12 @@ fn detect_project_kinds(workspace: &Path) -> Vec<&'static str> {
 fn executable_extensions() -> Vec<String> {
     if cfg!(windows) {
         env::var_os("PATHEXT")
-            .map(|value| {
-                value
-                    .to_string_lossy()
-                    .split(';')
-                    .filter(|extension| !extension.is_empty())
-                    .map(str::to_ascii_lowercase)
-                    .collect::<Vec<String>>()
-            })
-            .unwrap_or_else(|| {
-                [".com", ".exe", ".bat", ".cmd"]
-                    .into_iter()
-                    .map(str::to_string)
+            .map(|v| {
+                env::split_paths(&v)
+                    .filter_map(|p| p.to_str().map(str::to_ascii_lowercase))
                     .collect()
             })
+            .unwrap_or_else(|| vec![".com".into(), ".exe".into(), ".bat".into(), ".cmd".into()])
     } else {
         vec![String::new()]
     }
@@ -258,34 +287,27 @@ fn command_available(name: &str, search_paths: &[PathBuf], extensions: &[String]
 }
 
 fn workspace_command_available(workspace: &Path, name: &str) -> bool {
-    let candidates = if cfg!(windows) {
-        vec![
-            workspace.join(format!("{name}.cmd")),
-            workspace.join(format!("{name}.bat")),
-            workspace.join(name),
-        ]
+    let exts: &[&str] = if cfg!(windows) {
+        &[".cmd", ".bat", ""]
     } else {
-        vec![workspace.join(name)]
+        &[""]
     };
-    candidates.iter().any(|path| executable_file(path))
+    exts.iter()
+        .any(|ext| executable_file(&workspace.join(format!("{name}{ext}"))))
 }
 
 fn executable_file(path: &Path) -> bool {
-    let Ok(metadata) = fs::metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
+    fs::metadata(path).is_ok_and(|m| {
+        m.is_file() && {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                m.permissions().mode() & 0o111 != 0
+            }
+            #[cfg(not(unix))]
+            true
+        }
+    })
 }
 
 fn push_list_element(output: &mut String, name: &str, values: &[&str]) {
@@ -295,14 +317,14 @@ fn push_list_element(output: &mut String, name: &str, values: &[&str]) {
 }
 
 fn push_xml_escaped(output: &mut String, value: &str) {
-    for character in value.chars() {
-        match character {
+    for c in value.chars() {
+        match c {
             '&' => output.push_str("&amp;"),
             '<' => output.push_str("&lt;"),
             '>' => output.push_str("&gt;"),
-            '\"' => output.push_str("&quot;"),
+            '"' => output.push_str("&quot;"),
             '\'' => output.push_str("&apos;"),
-            _ => output.push(character),
+            _ => output.push(c),
         }
     }
 }
@@ -324,5 +346,36 @@ fn display_list(values: &[&str]) -> String {
         "none".to_string()
     } else {
         values.join(", ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::test_root;
+
+    #[test]
+    fn detect_with_roots_includes_workspace_roots_and_guidance() {
+        let (root1, root2) = (test_root(), test_root());
+        fs::write(root1.join("Cargo.toml"), "").unwrap();
+        fs::write(root2.join("pyproject.toml"), "").unwrap();
+        let world = WorldState::detect_with_roots(
+            &root1,
+            vec![root2.clone()],
+            SecurityPreset::Default,
+            ApprovalScope::PerAction,
+            SandboxKind::Native,
+        );
+        assert_eq!(world.extra_roots(), &[root2]);
+        assert!(world.project_kinds.contains(&"rust") && world.project_kinds.contains(&"python"));
+        let ctx = world.model_context().unwrap();
+        assert!(
+            ctx.contains("<workspace_roots>") && ctx.contains("Multiple workspace directories")
+        );
+        let roots = world.status_json()["workspace_roots"]
+            .as_array()
+            .unwrap()
+            .len();
+        assert_eq!(roots, 2);
     }
 }

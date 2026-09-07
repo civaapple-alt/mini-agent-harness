@@ -99,8 +99,9 @@ pub(super) fn handle<M>(
         RuntimeCommand::RefreshWorld { reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 let current = state.management.world();
-                let refreshed = mini_agent_host::WorldState::detect(
+                let refreshed = mini_agent_host::WorldState::detect_with_roots(
                     current.workspace(),
+                    current.extra_roots().to_vec(),
                     current.access(),
                     current.approval(),
                     current.sandbox(),

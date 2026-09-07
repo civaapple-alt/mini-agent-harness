@@ -263,8 +263,13 @@ where
         })
         .collect();
     let stable_system_prompt = config.system_prompt.clone();
-    let world = WorldState::detect(
+    let mut extra_roots = runtime_config.extra_write_roots();
+    extra_roots.extend(runtime_config.extra_read_roots());
+    extra_roots.sort();
+    extra_roots.dedup();
+    let world = WorldState::detect_with_roots(
         &workspace,
+        extra_roots,
         composition.security,
         approval.approval_scope(),
         composition.sandbox,

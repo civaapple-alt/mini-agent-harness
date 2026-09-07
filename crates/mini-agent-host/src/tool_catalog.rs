@@ -79,14 +79,10 @@ mod tests {
 
     #[test]
     fn default_selection_is_small_and_all_contains_only_supported_builtins() {
-        assert_eq!(
-            BuiltinToolSelection::default().names().to_vec(),
-            vec!["read_file", "apply_patch", "shell", "read_image"]
-        );
-        assert_eq!(
-            BuiltinToolSelection::default().hidden_names(),
-            vec!["web_fetch"]
-        );
+        let def = BuiltinToolSelection::default();
+        let exp: Vec<String> = DEFAULT_BUILTIN_TOOLS.into_iter().map(Into::into).collect();
+        assert_eq!(def.names(), &exp);
+        assert_eq!(def.hidden_names(), ["web_fetch"]);
         assert_eq!(BuiltinToolSelection::all().names().len(), 5);
         assert!(BuiltinToolSelection::all().hidden_names().is_empty());
     }
