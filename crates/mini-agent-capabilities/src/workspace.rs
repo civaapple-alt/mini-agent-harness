@@ -129,10 +129,7 @@ impl Workspace {
     }
 
     fn read_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
-        let candidate = self.candidate(value)?;
-        let resolved = candidate
-            .canonicalize()
-            .map_err(|error| ToolError(format!("cannot resolve path: {error}")))?;
+        let resolved = self.existing_path(value)?;
         if self.is_session_artifact(&resolved) {
             return Ok(resolved);
         }
@@ -148,10 +145,7 @@ impl Workspace {
     }
 
     fn local_file_path_with_admission(&self, value: &Value) -> Result<(PathBuf, bool), ToolError> {
-        let candidate = self.candidate(value)?;
-        let resolved = candidate
-            .canonicalize()
-            .map_err(|error| ToolError(format!("cannot resolve path: {error}")))?;
+        let resolved = self.existing_path(value)?;
         if self.is_session_artifact(&resolved) {
             return Ok((resolved, false));
         }
@@ -171,15 +165,18 @@ impl Workspace {
     }
 
     fn mutate_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
-        let candidate = self.candidate(value)?;
-        let resolved = candidate
-            .canonicalize()
-            .map_err(|error| ToolError(format!("cannot resolve path: {error}")))?;
+        let resolved = self.existing_path(value)?;
         if self.is_session_artifact(&resolved) {
             return Ok(resolved);
         }
         self.ensure_plan_mode_unlocked()?;
         self.ensure_inside(resolved)
+    }
+
+    fn existing_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
+        self.candidate(value)?
+            .canonicalize()
+            .map_err(|error| ToolError(format!("cannot resolve path: {error}")))
     }
 
     fn allows_outside_paths(&self) -> bool {

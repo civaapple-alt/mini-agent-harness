@@ -53,6 +53,16 @@ impl AgentKind {
     pub fn is_read_only(self) -> bool {
         matches!(self, Self::Explore | Self::Plan)
     }
+
+    pub(crate) fn prompt_template(self) -> Option<&'static str> {
+        match self {
+            Self::Explore => {
+                Some(mini_agent_capabilities::AgentPromptKind::Explore.prompt_template())
+            }
+            Self::Plan => Some(mini_agent_capabilities::AgentPromptKind::Plan.prompt_template()),
+            Self::General => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -62,6 +72,23 @@ pub enum PersonaKind {
     Reviewer,
     Implementer,
     Researcher,
+}
+
+impl PersonaKind {
+    pub(crate) fn prompt_template(self) -> Option<&'static str> {
+        match self {
+            Self::Reviewer => {
+                Some(mini_agent_capabilities::PersonaPromptKind::Reviewer.prompt_template())
+            }
+            Self::Implementer => {
+                Some(mini_agent_capabilities::PersonaPromptKind::Implementer.prompt_template())
+            }
+            Self::Researcher => {
+                Some(mini_agent_capabilities::PersonaPromptKind::Researcher.prompt_template())
+            }
+            Self::None => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -179,22 +206,11 @@ impl RuntimeComposition {
     /// selected foundations and personas add their bounded contract once.
     pub fn prompt_overlay(&self) -> String {
         let mut sections = Vec::new();
-        if self.agent != AgentKind::General {
-            let agent = match self.agent {
-                AgentKind::Explore => mini_agent_capabilities::AgentPromptKind::Explore,
-                AgentKind::Plan => mini_agent_capabilities::AgentPromptKind::Plan,
-                AgentKind::General => unreachable!(),
-            };
-            sections.push(agent.prompt_template().to_string());
+        if let Some(prompt) = self.agent.prompt_template() {
+            sections.push(prompt.to_string());
         }
-        if self.persona != PersonaKind::None {
-            let persona = match self.persona {
-                PersonaKind::Reviewer => mini_agent_capabilities::PersonaPromptKind::Reviewer,
-                PersonaKind::Implementer => mini_agent_capabilities::PersonaPromptKind::Implementer,
-                PersonaKind::Researcher => mini_agent_capabilities::PersonaPromptKind::Researcher,
-                PersonaKind::None => unreachable!(),
-            };
-            sections.push(persona.prompt_template().to_string());
+        if let Some(prompt) = self.persona.prompt_template() {
+            sections.push(prompt.to_string());
         }
         sections.join("\n\n")
     }

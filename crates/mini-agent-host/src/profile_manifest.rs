@@ -2,9 +2,7 @@ use mini_agent_core::HarnessConfig;
 use serde::Serialize;
 
 use super::WorkflowScope;
-use super::{
-    AgentKind, ExtensionLoadDepth, ExtensionSelection, PersonaKind, RuntimeComposition, ToolScope,
-};
+use super::{ExtensionLoadDepth, ExtensionSelection, PersonaKind, RuntimeComposition, ToolScope};
 use mini_agent_capabilities::SecurityPreset;
 
 const PROMPT_RULE_PRECEDENCE: [&str; 7] = [
@@ -214,32 +212,13 @@ impl RuntimeComposition {
             },
         });
         let mut prompt_source_fingerprints = Vec::new();
-        if self.agent != AgentKind::General {
-            let agent_prompt = match self.agent {
-                AgentKind::Explore => {
-                    mini_agent_capabilities::AgentPromptKind::Explore.prompt_template()
-                }
-                AgentKind::Plan => mini_agent_capabilities::AgentPromptKind::Plan.prompt_template(),
-                AgentKind::General => unreachable!(),
-            };
+        if let Some(agent_prompt) = self.agent.prompt_template() {
             prompt_source_fingerprints.push(SourceFingerprint {
                 source: "agent".to_string(),
                 fingerprint: stable_fingerprint(agent_prompt.as_bytes()),
             });
         }
-        if self.persona != PersonaKind::None {
-            let persona_prompt = match self.persona {
-                PersonaKind::Reviewer => {
-                    mini_agent_capabilities::PersonaPromptKind::Reviewer.prompt_template()
-                }
-                PersonaKind::Implementer => {
-                    mini_agent_capabilities::PersonaPromptKind::Implementer.prompt_template()
-                }
-                PersonaKind::Researcher => {
-                    mini_agent_capabilities::PersonaPromptKind::Researcher.prompt_template()
-                }
-                PersonaKind::None => unreachable!(),
-            };
+        if let Some(persona_prompt) = self.persona.prompt_template() {
             prompt_source_fingerprints.push(SourceFingerprint {
                 source: "persona".to_string(),
                 fingerprint: stable_fingerprint(persona_prompt.as_bytes()),

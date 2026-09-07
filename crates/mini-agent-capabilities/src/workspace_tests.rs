@@ -21,6 +21,15 @@ fn workspace(
     )
 }
 
+fn automatic_workspace(root: PathBuf) -> Arc<Workspace> {
+    workspace(
+        root,
+        ApprovalController::new(ApprovalMode::Automatic),
+        Vec::new(),
+        SandboxKind::Native,
+    )
+}
+
 #[test]
 fn policy_replacement_uses_full_machine_file_allowance() {
     let approval = ApprovalController::with_callback(ApprovalMode::Interactive, |_| {
@@ -36,12 +45,7 @@ fn policy_replacement_uses_full_machine_file_allowance() {
 fn reads_and_patches_inside_workspace() {
     let root = test_root();
     fs::write(root.join("note.txt"), "hello world").unwrap();
-    let workspace = workspace(
-        root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
-        Vec::new(),
-        SandboxKind::Native,
-    );
+    let workspace = automatic_workspace(root.clone());
     let read = ReadFile(Arc::clone(&workspace));
     let patch = ApplyPatch(workspace);
 
@@ -73,12 +77,7 @@ fn read_file_paginates_large_sources_without_shell_fallback() {
         .collect::<Vec<_>>()
         .join("\n");
     fs::write(root.join("large.txt"), content).unwrap();
-    let workspace = workspace(
-        root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
-        Vec::new(),
-        SandboxKind::Native,
-    );
+    let workspace = automatic_workspace(root.clone());
     let read = ReadFile(workspace);
 
     let first = read
@@ -108,12 +107,7 @@ fn read_file_can_seek_past_the_legacy_128_kibibyte_limit() {
         .join("\n");
     assert!(content.len() > 128 * 1024);
     fs::write(root.join("generated.rs"), content).unwrap();
-    let workspace = workspace(
-        root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
-        Vec::new(),
-        SandboxKind::Native,
-    );
+    let workspace = automatic_workspace(root.clone());
 
     let output = ReadFile(workspace)
         .execute(&json!({
@@ -132,12 +126,7 @@ fn apply_patch_updates_adds_and_deletes_as_one_validated_change() {
     let root = test_root();
     fs::write(root.join("old.txt"), "one\ntwo\nthree\n").unwrap();
     fs::write(root.join("remove.txt"), "remove me\n").unwrap();
-    let workspace = workspace(
-        root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
-        Vec::new(),
-        SandboxKind::Native,
-    );
+    let workspace = automatic_workspace(root.clone());
     let patch = ApplyPatch(workspace);
 
     patch
@@ -175,12 +164,7 @@ fn apply_patch_validates_every_file_before_writing_any_file() {
     let root = test_root();
     fs::write(root.join("first.txt"), "first\n").unwrap();
     fs::write(root.join("second.txt"), "second\n").unwrap();
-    let workspace = workspace(
-        root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
-        Vec::new(),
-        SandboxKind::Native,
-    );
+    let workspace = automatic_workspace(root.clone());
     let patch = ApplyPatch(workspace);
 
     let error = patch
@@ -238,12 +222,7 @@ fn read_image_uploads_and_rejects_type_mismatch() {
     let root = test_root();
     fs::write(root.join("shot.png"), crate::image::TINY_PNG).unwrap();
     fs::write(root.join("shot.jpg"), crate::image::TINY_PNG).unwrap();
-    let workspace = workspace(
-        root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
-        Vec::new(),
-        SandboxKind::Native,
-    );
+    let workspace = automatic_workspace(root.clone());
     let ok = ReadImage {
         workspace: Arc::clone(&workspace),
         store: crate::image::ImageStore::with_uploader(Arc::new(StubFiles("file-api-test"))),
@@ -265,12 +244,7 @@ fn read_image_accepts_absolute_path_outside_workspace_after_approval() {
     let pictures = test_root();
     fs::write(pictures.join("outside.png"), crate::image::TINY_PNG).unwrap();
     let abs = pictures.join("outside.png").canonicalize().unwrap();
-    let workspace = workspace(
-        root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
-        Vec::new(),
-        SandboxKind::Native,
-    );
+    let workspace = automatic_workspace(root.clone());
     let tool = ReadImage {
         workspace: Arc::clone(&workspace),
         store: crate::image::ImageStore::with_uploader(Arc::new(StubFiles("file-api-outside"))),
@@ -348,12 +322,7 @@ fn rejects_escape_and_git_paths() {
     fs::write(other.join("secret.txt"), "secret data").unwrap();
     let outside_abs = other.join("secret.txt").to_string_lossy().to_string();
 
-    let workspace = workspace(
-        root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
-        Vec::new(),
-        SandboxKind::Native,
-    );
+    let workspace = automatic_workspace(root.clone());
 
     assert!(workspace.candidate(&json!({"path": "../secret"})).is_err());
     assert!(
@@ -707,12 +676,7 @@ fn shell_preserves_utf8_from_workspace_files() {
 #[test]
 fn large_shell_output_is_retained_as_bounded_artifact() {
     let root = test_root();
-    let workspace = workspace(
-        root.clone(),
-        ApprovalController::new(ApprovalMode::Automatic),
-        Vec::new(),
-        SandboxKind::Native,
-    );
+    let workspace = automatic_workspace(root.clone());
     let results = ResultStore::default();
     let shell = Shell(workspace, results.clone());
     let command = if cfg!(windows) {

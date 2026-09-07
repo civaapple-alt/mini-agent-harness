@@ -74,27 +74,13 @@ impl ThreadItem {
                 text,
                 tool_calls,
                 ..
-            } => {
-                let mut items = Vec::with_capacity(tool_calls.len() + 2);
-                if !reasoning.is_empty() {
-                    items.push(Self::Reasoning {
-                        id: format!("{turn_prefix}:reasoning:{}", event.sequence),
-                        text: bound_text(reasoning),
-                    });
-                }
-                if !text.is_empty() {
-                    items.push(Self::AgentMessage {
-                        id: format!("{turn_prefix}:agent:{}", event.sequence),
-                        text: bound_text(text),
-                    });
-                }
-                items.extend(
-                    tool_calls
-                        .iter()
-                        .map(|call| tool_item(call, ItemStatus::InProgress, None)),
-                );
-                items
-            }
+            } => assistant_items(
+                &format!("{turn_prefix}:{}", event.sequence),
+                reasoning,
+                text,
+                tool_calls,
+                ItemStatus::InProgress,
+            ),
             Event::ToolStarted { call } => {
                 vec![tool_item(call, ItemStatus::InProgress, None)]
             }
@@ -180,27 +166,7 @@ impl ThreadItem {
                 reasoning,
                 text,
                 tool_calls,
-            } => {
-                let mut items = Vec::with_capacity(tool_calls.len() + 2);
-                if !reasoning.is_empty() {
-                    items.push(Self::Reasoning {
-                        id: format!("{id}:reasoning"),
-                        text: bound_text(reasoning),
-                    });
-                }
-                if !text.is_empty() {
-                    items.push(Self::AgentMessage {
-                        id: format!("{id}:agent"),
-                        text: bound_text(text),
-                    });
-                }
-                items.extend(
-                    tool_calls
-                        .iter()
-                        .map(|call| tool_item(call, ItemStatus::Completed, None)),
-                );
-                items
-            }
+            } => assistant_items(&id, reasoning, text, tool_calls, ItemStatus::Completed),
             Message::Tool {
                 call_id,
                 name,
@@ -245,6 +211,34 @@ fn tool_item(call: &ModelToolCall, status: ItemStatus, output: Option<String>) -
         status,
         output,
     }
+}
+
+fn assistant_items(
+    id: &str,
+    reasoning: &str,
+    text: &str,
+    tool_calls: &[ModelToolCall],
+    tool_status: ItemStatus,
+) -> Vec<ThreadItem> {
+    let mut items = Vec::with_capacity(tool_calls.len() + 2);
+    if !reasoning.is_empty() {
+        items.push(ThreadItem::Reasoning {
+            id: format!("{id}:reasoning"),
+            text: bound_text(reasoning),
+        });
+    }
+    if !text.is_empty() {
+        items.push(ThreadItem::AgentMessage {
+            id: format!("{id}:agent"),
+            text: bound_text(text),
+        });
+    }
+    items.extend(
+        tool_calls
+            .iter()
+            .map(|call| tool_item(call, tool_status, None)),
+    );
+    items
 }
 
 fn project_arguments(arguments: &Value) -> Value {
@@ -308,25 +302,20 @@ fn is_sensitive_key(key: &str) -> bool {
 }
 
 fn bound_argument_text(text: &str) -> String {
-    if text.len() <= MAX_ARGUMENT_TEXT_BYTES {
-        return text.to_string();
-    }
-    let end = text
-        .char_indices()
-        .take_while(|(index, _)| *index < MAX_ARGUMENT_TEXT_BYTES - 3)
-        .map(|(index, character)| index + character.len_utf8())
-        .last()
-        .unwrap_or(0);
-    format!("{}...", &text[..end])
+    bound_text_to(text, MAX_ARGUMENT_TEXT_BYTES)
 }
 
 fn bound_text(text: &str) -> String {
-    if text.len() <= MAX_ITEM_TEXT_BYTES {
+    bound_text_to(text, MAX_ITEM_TEXT_BYTES)
+}
+
+fn bound_text_to(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
         return text.to_string();
     }
     let end = text
         .char_indices()
-        .take_while(|(index, _)| *index < MAX_ITEM_TEXT_BYTES - 3)
+        .take_while(|(index, _)| *index < limit - 3)
         .map(|(index, character)| index + character.len_utf8())
         .last()
         .unwrap_or(0);
