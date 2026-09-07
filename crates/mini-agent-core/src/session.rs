@@ -1,4 +1,3 @@
-use crate::Context;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::ToolSpec;
 use serde::Deserialize;
@@ -10,7 +9,7 @@ use serde::Serialize;
 /// only exchanges this value and never opens files or replays external effects.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct SessionState {
-    context: Context,
+    messages: Vec<Message>,
     context_revision: u64,
 }
 
@@ -25,39 +24,39 @@ impl SessionState {
 
     pub fn from_messages(messages: Vec<Message>) -> Self {
         Self {
-            context: Context::from_messages(messages),
+            messages,
             context_revision: 0,
         }
     }
 
     pub fn messages(&self) -> &[Message] {
-        self.context.messages()
+        &self.messages
     }
 
     pub fn replace_messages(&mut self, messages: Vec<Message>) {
-        self.context.replace(messages);
+        self.messages = messages;
         self.context_revision = self.context_revision.saturating_add(1);
     }
 
     pub fn truncate_messages(&mut self, len: usize) {
-        if len < self.context.messages().len() {
-            self.context.truncate(len);
+        if len < self.messages.len() {
+            self.messages.truncate(len);
             self.context_revision = self.context_revision.saturating_add(1);
         }
     }
 
     pub fn clear(&mut self) {
-        self.context.clear();
+        self.messages.clear();
         self.context_revision = self.context_revision.saturating_add(1);
     }
 
     pub fn push(&mut self, message: Message) {
-        self.context.push(message);
+        self.messages.push(message);
         self.context_revision = self.context_revision.saturating_add(1);
     }
 
     pub(crate) fn context_bytes(&self, system_prompt: &str, tool_specs: &[ToolSpec]) -> usize {
-        self.context.bytes(system_prompt, tool_specs)
+        context_bytes_for(system_prompt, &self.messages, tool_specs)
     }
 
     pub fn context_revision(&self) -> u64 {
@@ -70,4 +69,33 @@ impl SessionState {
         self.context_revision = revision;
         self
     }
+}
+
+pub(crate) fn context_bytes_for(
+    system_prompt: &str,
+    messages: &[Message],
+    tool_specs: &[ToolSpec],
+) -> usize {
+    system_prompt.len()
+        + serde_json::to_vec(messages)
+            .expect("messages must serialize")
+            .len()
+        + serde_json::to_vec(tool_specs)
+            .expect("tool specs must serialize")
+            .len()
+}
+
+pub(crate) fn model_input_digest(
+    system_prompt: &str,
+    messages: &[Message],
+    tool_specs: &[ToolSpec],
+) -> String {
+    let input = serde_json::to_vec(&(system_prompt, messages, tool_specs))
+        .expect("model input must serialize");
+    mini_agent_protocol::stable_digest(&input)
+}
+
+pub(crate) fn tool_manifest_digest(tool_specs: &[ToolSpec]) -> String {
+    let manifest = serde_json::to_vec(tool_specs).expect("tool manifest must serialize");
+    mini_agent_protocol::stable_digest(&manifest)
 }

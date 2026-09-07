@@ -1,6 +1,6 @@
 use mini_agent_protocol::Message;
 
-use crate::context::context_bytes_for;
+use crate::session::context_bytes_for;
 use crate::tool_batch_executor::truncate_utf8;
 
 pub(super) const LOOP_WARNING_PREFIX: &str = "[Loop warning:";

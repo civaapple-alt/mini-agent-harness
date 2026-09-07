@@ -1,4 +1,3 @@
-mod context;
 mod context_controller;
 mod harness;
 mod input;
@@ -9,7 +8,6 @@ mod tool;
 mod tool_batch_executor;
 mod turn_engine;
 
-pub use context::Context;
 pub use harness::ContextLimitBehavior;
 pub use harness::Harness;
 pub use harness::HarnessConfig;
