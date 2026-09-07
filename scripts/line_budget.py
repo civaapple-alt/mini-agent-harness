@@ -1,6 +1,10 @@
+import argparse
+import json
 import re
+import subprocess
 import sys
 from pathlib import Path
+from pathlib import PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,6 +13,16 @@ RUNTIME_LIMIT = 20_000
 # runtime packages. The experimental CLI/REPL is reported separately and is not
 # part of this hard release gate.
 PROJECT_LIMIT = 30_000
+
+# The hard ceilings remain the emergency release boundary. Operating limits
+# leave room for ordinary maintenance; the delta gate below freezes growth when
+# the checkout is already in the amber/red band.
+RUNTIME_OPERATING_LIMIT = 19_000
+PROJECT_OPERATING_LIMIT = 29_000
+RUNTIME_RED_LIMIT = 19_500
+PROJECT_RED_LIMIT = 29_500
+RUNTIME_GREEN_DELTA_LIMIT = 100
+PROJECT_GREEN_DELTA_LIMIT = 150
 
 # Keep the report aligned with the conceptual runtime layers. Capabilities are
 # reported separately because they are provider implementations behind Host;
@@ -44,6 +58,41 @@ RUNTIME_PACKAGES = (
 # Keep provider implementations outside the runtime gate even though they are
 # included in the release-source total and shown as their own layer.
 # The experimental CLI/REPL is intentionally outside both enforced totals.
+
+KERNEL_PACKAGES = ("mini-agent-core", "mini-agent-protocol")
+HOST_CONTROL_PLANE_PACKAGES = (
+    "mini-agent-host",
+    "mini-agent-app-server",
+    "mini-agent-app-server-protocol",
+)
+
+# These are the Capabilities files whose responsibility is a stable control
+# boundary rather than a concrete provider. The list is intentionally explicit
+# and disjoint from the provider bucket so a file cannot be counted twice.
+CAPABILITY_CONTROL_PLANE_PATHS = frozenset(
+    {
+        "crates/mini-agent-capabilities/src/path_policy.rs",
+        "crates/mini-agent-capabilities/src/result_store.rs",
+        "crates/mini-agent-capabilities/src/sandbox.rs",
+        "crates/mini-agent-capabilities/src/security.rs",
+        "crates/mini-agent-capabilities/src/session.rs",
+        "crates/mini-agent-capabilities/src/session/storage.rs",
+        "crates/mini-agent-capabilities/src/workspace.rs",
+        "crates/mini-agent-capabilities/src/workspace/approval.rs",
+        "crates/mini-agent-capabilities/src/workspace/files.rs",
+        "crates/mini-agent-capabilities/src/workspace/patch.rs",
+        "crates/mini-agent-capabilities/src/workspace/shell.rs",
+        "crates/mini-agent-capabilities/src/workspace_tests.rs",
+    }
+)
+
+CATEGORY_ORDER = (
+    "execution-kernel",
+    "host-control-plane",
+    "capability-control-plane",
+    "capability-provider",
+    "cli",
+)
 
 
 def _scan_code(line: str, state: dict[str, object]) -> str:
@@ -153,16 +202,67 @@ def _test_ranges(lines: list[str]) -> set[int]:
     return ranges
 
 
-def source_counts(path: Path) -> tuple[int, int, int, int]:
-    lines = path.read_text(encoding="utf-8").splitlines()
+def source_counts_for_text(path: str, text: str) -> tuple[int, int, int, int]:
+    relative_path = PurePosixPath(path.replace("\\", "/"))
+    lines = text.splitlines()
     total = len(lines)
-    relative_parts = path.parts
+    relative_parts = relative_path.parts
     if "tests" in relative_parts:
         return total, 0, 0, total
-    if path.stem.endswith("_tests") or path.stem == "tests":
+    if relative_path.stem.endswith("_tests") or relative_path.stem == "tests":
         return total, 0, total, 0
     unit_lines = len(_test_ranges(lines))
     return total, total - unit_lines, unit_lines, 0
+
+
+def source_counts(path: Path) -> tuple[int, int, int, int]:
+    return source_counts_for_text(path.as_posix(), path.read_text(encoding="utf-8"))
+
+
+def source_category(relative_path: str) -> str | None:
+    """Return the disjoint architectural bucket for one Rust source path."""
+    path = PurePosixPath(relative_path.replace("\\", "/"))
+    try:
+        crates_index = path.parts.index("crates")
+        package = path.parts[crates_index + 1]
+    except (ValueError, IndexError):
+        return None
+
+    if package in KERNEL_PACKAGES:
+        return "execution-kernel"
+    if package in HOST_CONTROL_PLANE_PACKAGES:
+        return "host-control-plane"
+    if package == "mini-agent-capabilities":
+        normalized = "/".join(path.parts)
+        if normalized in CAPABILITY_CONTROL_PLANE_PATHS:
+            return "capability-control-plane"
+        return "capability-provider"
+    if package == "mini-agent-cli":
+        return "cli"
+    return None
+
+
+def _add_counts(
+    target: list[int], value: tuple[int, int, int, int]
+) -> None:
+    for index, item in enumerate(value):
+        target[index] += item
+
+
+def category_counts(root: Path) -> dict[str, tuple[int, int, int, int]]:
+    counts = {name: [0, 0, 0, 0] for name in CATEGORY_ORDER}
+    unclassified = []
+    for source in (root / "crates").rglob("*.rs"):
+        relative_path = source.relative_to(root).as_posix()
+        category = source_category(relative_path)
+        if category is None:
+            unclassified.append(relative_path)
+            continue
+        _add_counts(counts[category], source_counts(source))
+    if unclassified:
+        paths = ", ".join(sorted(unclassified))
+        raise RuntimeError(f"unclassified Rust source paths: {paths}")
+    return {name: tuple(counts[name]) for name in CATEGORY_ORDER}
 
 
 def package_counts(root: Path, package: str) -> tuple[int, int, int, int]:
@@ -185,12 +285,184 @@ def layer_lines(root: Path, packages: tuple[str, ...]) -> int:
     return layer_counts(root, packages)[0]
 
 
-def check(root: Path = ROOT) -> int:
-    release_lines = layer_lines(root, RELEASE_PACKAGES)
+def _report_from_categories(
+    categories: dict[str, tuple[int, int, int, int]],
+) -> dict[str, object]:
+    runtime = categories["execution-kernel"][0] + categories[
+        "host-control-plane"
+    ][0]
+    release = runtime + categories["capability-control-plane"][0] + categories[
+        "capability-provider"
+    ][0]
+    control_plane = categories["host-control-plane"][0] + categories[
+        "capability-control-plane"
+    ][0]
+    return {
+        "categories": categories,
+        "runtime": runtime,
+        "release": release,
+        "control_plane": control_plane,
+    }
 
+
+def build_report(root: Path = ROOT) -> dict[str, object]:
+    layers = {}
+    for name, packages in LAYERS:
+        layers[name] = layer_counts(root, packages)
+    categories = category_counts(root)
+    report = _report_from_categories(categories)
+    report["layers"] = layers
+    expected_release = layer_lines(root, RELEASE_PACKAGES)
+    expected_runtime = layer_lines(root, RUNTIME_PACKAGES)
+    assert report["release"] == expected_release
+    assert report["runtime"] == expected_runtime
+    return report
+
+
+def _git_source_texts(root: Path, ref: str):
+    listing = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", ref, "--", "crates"],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if listing.returncode != 0:
+        raise RuntimeError(listing.stderr.strip() or f"cannot read git ref {ref}")
+    for relative_path in listing.stdout.splitlines():
+        if not relative_path.endswith(".rs"):
+            continue
+        if source_category(relative_path) is None:
+            continue
+        source = subprocess.run(
+            ["git", "show", f"{ref}:{relative_path}"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        if source.returncode != 0:
+            raise RuntimeError(
+                source.stderr.strip() or f"cannot read {relative_path} at {ref}"
+            )
+        yield relative_path, source.stdout
+
+
+def build_git_report(root: Path, ref: str) -> dict[str, object]:
+    counts = {name: [0, 0, 0, 0] for name in CATEGORY_ORDER}
+    for relative_path, text in _git_source_texts(root, ref):
+        category = source_category(relative_path)
+        assert category is not None
+        _add_counts(counts[category], source_counts_for_text(relative_path, text))
+    return _report_from_categories(
+        {name: tuple(counts[name]) for name in CATEGORY_ORDER}
+    )
+
+
+def _budget_band(total: int, operating: int, red: int, hard: int) -> str:
+    if total > hard:
+        return "fail"
+    if total > red:
+        return "red"
+    if total > operating:
+        return "amber"
+    return "green"
+
+
+def _status(report: dict[str, object]) -> dict[str, str]:
+    return {
+        "runtime": _budget_band(
+            int(report["runtime"]),
+            RUNTIME_OPERATING_LIMIT,
+            RUNTIME_RED_LIMIT,
+            RUNTIME_LIMIT,
+        ),
+        "release": _budget_band(
+            int(report["release"]),
+            PROJECT_OPERATING_LIMIT,
+            PROJECT_RED_LIMIT,
+            PROJECT_LIMIT,
+        ),
+    }
+
+
+def _delta_gate_violations(
+    current: dict[str, object], base: dict[str, object]
+) -> tuple[list[str], dict[str, int]]:
+    violations = []
+    deltas = {
+        "runtime": int(current["runtime"]) - int(base["runtime"]),
+        "release": int(current["release"]) - int(base["release"]),
+        "control_plane": int(current["control_plane"])
+        - int(base["control_plane"]),
+    }
+    policies = (
+        (
+            "runtime",
+            RUNTIME_OPERATING_LIMIT,
+            RUNTIME_RED_LIMIT,
+            RUNTIME_LIMIT,
+            RUNTIME_GREEN_DELTA_LIMIT,
+        ),
+        (
+            "release",
+            PROJECT_OPERATING_LIMIT,
+            PROJECT_RED_LIMIT,
+            PROJECT_LIMIT,
+            PROJECT_GREEN_DELTA_LIMIT,
+        ),
+    )
+    for name, operating, red, hard, green_delta in policies:
+        total = int(current[name])
+        delta = deltas[name]
+        if total > hard:
+            violations.append(f"{name} exceeds hard limit ({total}/{hard})")
+        elif total > operating and delta > 0:
+            violations.append(
+                f"{name} is above operating limit and grew by {delta} lines"
+            )
+        elif total <= operating and delta > green_delta:
+            violations.append(
+                f"{name} grew by {delta} lines, above green limit {green_delta}"
+            )
+        if total > red and delta > 0:
+            violations.append(f"{name} is in red band and cannot grow")
+    return violations, deltas
+
+
+def _json_counts(counts: tuple[int, int, int, int]) -> dict[str, int]:
+    total, production, unit, integration = counts
+    return {
+        "total": total,
+        "production": production,
+        "unit": unit,
+        "integration": integration,
+    }
+
+
+def _json_report(report: dict[str, object]) -> dict[str, object]:
+    return {
+        "runtime": report["runtime"],
+        "release": report["release"],
+        "control_plane": report["control_plane"],
+        "categories": {
+            name: _json_counts(report["categories"][name])
+            for name in CATEGORY_ORDER
+        },
+        "layers": {
+            name: _json_counts(counts)
+            for name, counts in report.get("layers", {}).items()
+        },
+        "status": _status(report),
+    }
+
+
+def _print_report(report: dict[str, object], root: Path = ROOT) -> None:
     for name, packages in LAYERS:
         package_list = ", ".join(packages)
-        total, production, unit, integration = layer_counts(root, packages)
+        total, production, unit, integration = report["layers"][name]
         print(
             f"{name}: {total} lines "
             f"(production {production}, unit {unit}, integration {integration}) "
@@ -206,28 +478,129 @@ def check(root: Path = ROOT) -> int:
                     f"(production {package_production}, unit {package_unit}, "
                     f"integration {package_integration})"
                 )
-    total, production, unit, integration = layer_counts(root, RELEASE_PACKAGES)
-    assert total == release_lines
-    runtime_total, runtime_production, runtime_unit, runtime_integration = (
-        layer_counts(root, RUNTIME_PACKAGES)
+    for name in CATEGORY_ORDER:
+        total, production, unit, integration = report["categories"][name]
+        print(
+            f"  category/{name}: {total} lines "
+            f"(production {production}, unit {unit}, integration {integration})"
+        )
+    print(
+        f"Control Plane: {report['control_plane']} lines "
+        "(host-control-plane + capability-control-plane)"
     )
+    runtime_total = int(report["runtime"])
+    release_total = int(report["release"])
+    runtime_counts = report["categories"]["execution-kernel"]
+    host_counts = report["categories"]["host-control-plane"]
     print(
         f"runtime (core + protocol + host + app-server): "
         f"{runtime_total}/{RUNTIME_LIMIT} lines "
-        f"(production {runtime_production}, unit {runtime_unit}, "
-        f"integration {runtime_integration})"
+        f"(production {runtime_counts[1] + host_counts[1]}, "
+        f"unit {runtime_counts[2] + host_counts[2]}, "
+        f"integration {runtime_counts[3] + host_counts[3]})"
     )
+    release_counts = [0, 0, 0, 0]
+    for name in CATEGORY_ORDER[:-1]:
+        _add_counts(release_counts, report["categories"][name])
     print(
         f"release Rust source (excluding experimental CLI/REPL): "
-        f"{release_lines}/{PROJECT_LIMIT} lines "
-        f"(production {production}, unit {unit}, integration {integration})"
+        f"{release_total}/{PROJECT_LIMIT} lines "
+        f"(production {release_counts[1]}, unit {release_counts[2]}, "
+        f"integration {release_counts[3]})"
+    )
+    statuses = _status(report)
+    print(
+        f"budget band: runtime={statuses['runtime']}, "
+        f"release={statuses['release']}"
     )
 
-    if runtime_total > RUNTIME_LIMIT or release_lines > PROJECT_LIMIT:
-        print("line budget exceeded", file=sys.stderr)
-        return 1
-    return 0
+
+def check(
+    root: Path = ROOT,
+    base: str | None = None,
+    enforce_delta: bool = False,
+    json_output: bool = False,
+) -> int:
+    if enforce_delta and base is None:
+        print("--check-delta requires --base", file=sys.stderr)
+        return 2
+    try:
+        current = build_report(root)
+        baseline = build_git_report(root, base) if base else None
+    except RuntimeError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+    violations = []
+    if int(current["runtime"]) > RUNTIME_LIMIT:
+        violations.append(
+            f"runtime exceeds hard limit ({current['runtime']}/{RUNTIME_LIMIT})"
+        )
+    if int(current["release"]) > PROJECT_LIMIT:
+        violations.append(
+            f"release exceeds hard limit ({current['release']}/{PROJECT_LIMIT})"
+        )
+    deltas = None
+    if baseline is not None:
+        delta_violations, deltas = _delta_gate_violations(current, baseline)
+        if enforce_delta:
+            violations.extend(delta_violations)
+
+    if json_output:
+        payload = {
+            "limits": {
+                "runtime_hard": RUNTIME_LIMIT,
+                "release_hard": PROJECT_LIMIT,
+                "runtime_operating": RUNTIME_OPERATING_LIMIT,
+                "release_operating": PROJECT_OPERATING_LIMIT,
+                "runtime_red": RUNTIME_RED_LIMIT,
+                "release_red": PROJECT_RED_LIMIT,
+                "runtime_green_delta": RUNTIME_GREEN_DELTA_LIMIT,
+                "release_green_delta": PROJECT_GREEN_DELTA_LIMIT,
+            },
+            "current": _json_report(current),
+            "base": _json_report(baseline) if baseline else None,
+            "delta": deltas,
+            "delta_enforced": enforce_delta,
+            "violations": violations,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        _print_report(current, root)
+        if deltas is not None:
+            print(
+                f"delta from {base}: runtime {deltas['runtime']:+d}, "
+                f"release {deltas['release']:+d}, "
+                f"control-plane {deltas['control_plane']:+d}"
+            )
+        if violations:
+            print("line budget gate failed:", file=sys.stderr)
+            for violation in violations:
+                print(f"- {violation}", file=sys.stderr)
+
+    return 1 if violations else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Report and enforce Rust line budgets")
+    parser.add_argument(
+        "--base", help="git revision used as the baseline for delta reporting"
+    )
+    parser.add_argument(
+        "--check-delta",
+        action="store_true",
+        help="enforce the operating-band and per-PR delta policy",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="emit machine-readable JSON"
+    )
+    args = parser.parse_args()
+    return check(
+        base=args.base,
+        enforce_delta=args.check_delta,
+        json_output=args.json,
+    )
 
 
 if __name__ == "__main__":
-    raise SystemExit(check())
+    raise SystemExit(main())

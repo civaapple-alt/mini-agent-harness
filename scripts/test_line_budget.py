@@ -72,6 +72,61 @@ class LineBudgetTests(unittest.TestCase):
             )
             self.assertEqual(line_budget.layer_lines(root, ("mini-agent-cli",)), 2)
 
+    def test_source_categories_keep_control_plane_paths_explicit(self):
+        self.assertEqual(
+            line_budget.source_category(
+                "crates/mini-agent-capabilities/src/security.rs"
+            ),
+            "capability-control-plane",
+        )
+        self.assertEqual(
+            line_budget.source_category(
+                "crates/mini-agent-capabilities/src/mcp.rs"
+            ),
+            "capability-provider",
+        )
+        self.assertEqual(
+            line_budget.source_category("crates/mini-agent-host/src/world.rs"),
+            "host-control-plane",
+        )
+        self.assertEqual(
+            line_budget.source_category("crates/mini-agent-cli/src/main.rs"),
+            "cli",
+        )
+
+    def test_unclassified_rust_source_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "crates" / "mini-agent-new" / "src" / "lib.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text("fn future_crate() {}\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "unclassified Rust source"):
+                line_budget.category_counts(root)
+
+    def test_delta_gate_freezes_growth_in_amber_and_red_bands(self):
+        current = {"runtime": 19_501, "release": 29_997, "control_plane": 1}
+        base = {"runtime": 19_500, "release": 29_996, "control_plane": 1}
+
+        violations, deltas = line_budget._delta_gate_violations(current, base)
+
+        self.assertEqual(
+            deltas, {"runtime": 1, "release": 1, "control_plane": 0}
+        )
+        self.assertIn("runtime is in red band and cannot grow", violations)
+        self.assertIn("release is in red band and cannot grow", violations)
+
+    def test_delta_gate_allows_zero_growth_when_checkout_is_red(self):
+        current = {"runtime": 19_887, "release": 29_997, "control_plane": 1}
+        base = {"runtime": 19_887, "release": 29_997, "control_plane": 1}
+
+        violations, deltas = line_budget._delta_gate_violations(current, base)
+
+        self.assertEqual(
+            deltas, {"runtime": 0, "release": 0, "control_plane": 0}
+        )
+        self.assertEqual(violations, [])
+
     def test_check_reports_success_for_a_small_workspace(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -82,6 +137,7 @@ class LineBudgetTests(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 self.assertEqual(line_budget.check(root), 0)
             self.assertIn("production 1, unit 0, integration 0", output.getvalue())
+            self.assertIn("Control Plane: 0 lines", output.getvalue())
             self.assertIn(
                 "runtime (core + protocol + host + app-server): 1/20000 lines",
                 output.getvalue(),
@@ -110,6 +166,9 @@ class LineBudgetTests(unittest.TestCase):
                 self.assertEqual(line_budget.check(root), 0)
 
             self.assertIn("capabilities: 3 lines", output.getvalue())
+            self.assertIn(
+                "category/capability-provider: 3 lines", output.getvalue()
+            )
             self.assertIn(
                 "runtime (core + protocol + host + app-server): 1/20000 lines",
                 output.getvalue(),

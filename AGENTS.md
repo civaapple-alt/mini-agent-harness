@@ -58,6 +58,16 @@ every feature in Codex, Pi, fx, or Qi.
 - The CLI, including the experimental REPL, is reported separately and is
   excluded from the release-source limit. Tests in release packages count.
 - Run `python scripts/line_budget.py` after code changes.
+- The report also separates the execution kernel, Host control plane,
+  Capabilities control-plane boundary files, provider implementations, and
+  CLI. The Capabilities path list is explicit and disjoint; it does not change
+  Cargo ownership by itself.
+- Runtime `19,000` and release Rust `29,000` are the operating budgets;
+  `19,500` and `29,500` are the red-band thresholds. In the amber/red band,
+  pull requests must not grow the affected total unless the same batch deletes
+  or replaces an equivalent amount. Use
+  `python scripts/line_budget.py --base <merge-base> --check-delta --json`
+  for the incremental check.
 
 The limit is a ceiling, not a target. Removing a concept is better than fitting
 it behind a shorter abstraction.

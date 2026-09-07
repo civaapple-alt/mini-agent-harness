@@ -316,6 +316,11 @@ actual:   runtime before -> after (delta)
 ```
 
 门禁为绿不代表可以继续堆代码。余量、复杂度和新增公共面都应进入完成判断。
+当前 line gate 另外采用 runtime `19,000`、release Rust `29,000` 的运行预算，以及
+`19,500`、`29,500` 的红区阈值；红区内 PR 必须净零或净减少。PR 应使用
+`python scripts/line_budget.py --base <merge-base> --check-delta --json` 记录增量，
+并同时检查 Control Plane 的路径统计。该统计只改变复杂度视图，不授权为了指标
+移动 Cargo 模块或制造新的兼容层。
 
 ### 6.3 一个批次一个结论
 

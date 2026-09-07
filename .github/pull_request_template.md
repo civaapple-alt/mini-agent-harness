@@ -25,6 +25,13 @@
    ```text
    runtime:       before -> after (delta)
    all Rust:      before -> after (delta)
+   control-plane: before -> after (delta)
+   ```
+
+   PR 分支还应记录：
+
+   ```text
+   python scripts/line_budget.py --base <merge-base> --check-delta --json
    ```
 
 5. **可见面变化**：是否增加模型可见输入、事件、持久化内容或公共协议面？若是，列出上限、兼容性和证据。
@@ -40,11 +47,13 @@
    cargo clippy ...
    cargo fmt --all --check
    python scripts/line_budget.py
+   python scripts/line_budget.py --base <merge-base> --check-delta --json
    ```
 
 ### 准入确认
 
 - [ ] 我已确认 runtime 不超过 `20,000` 行，全 Rust 不超过 `30,000` 行。
+- [ ] 我已确认当前预算区间和 PR 增量门禁没有触发冻结规则，或已列出同批次删除抵消。
 - [ ] 新增代码默认满足净零增长，或已列出明确抵扣项/预算取舍。
 - [ ] 我没有为了行数删除 Core 核心测试、Actor/CAS/Session 单一权威或公共协议行为。
 - [ ] 若触及模型上下文、事件、持久化或协议，我已补充对应架构说明和集成证据。
