@@ -1138,6 +1138,171 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
 }
 
 #[tokio::test]
+async fn serves_approval_response_while_turn_steer_is_pending() {
+    let root = rpc_root("shell-approval-steer-transport");
+    let broker = ApprovalBroker::new();
+    let approval_broker = broker.clone();
+    let approval = ApprovalController::with_policy_and_callback(
+        ApprovalPolicy::Interactive,
+        SecurityPolicy::for_preset(SecurityPreset::Default),
+        move |request| {
+            approval_broker
+                .request_resolution(request)
+                .map(|resolution| mini_agent_protocol::ToolApprovalResolution {
+                    outcome: resolution.outcome,
+                    grant_scope: resolution
+                        .grant_scope
+                        .unwrap_or(mini_agent_protocol::ActionGrantScope::Once),
+                    reason: resolution.reason,
+                })
+                .map_err(mini_agent_protocol::ToolError)
+        },
+    );
+    let tools = workspace_tools_with_read_roots_and_results(
+        root.clone(),
+        approval.clone(),
+        Vec::new(),
+        Vec::new(),
+        SandboxKind::Native,
+        ImageStore::memory_only(),
+        ResultStore::default(),
+    )
+    .unwrap();
+    let registry = ToolRouter::with_executor(
+        tools,
+        Arc::new(mini_agent_host::ToolOrchestrator::new(approval)),
+    );
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(
+            ThreadId::new("initial"),
+            Harness::new(
+                ScenarioModel::ShellApproval,
+                registry,
+                HarnessConfig::default(),
+            ),
+        ),
+    );
+    let (mut input, server_input) = tokio::io::duplex(16 * 1024);
+    let (server_output, output) = tokio::io::duplex(16 * 1024);
+    let task = tokio::spawn(serve_stdio_with_approval_and_manifest(
+        server,
+        broker.clone(),
+        default_capability_manifest(),
+        tokio::io::BufReader::new(server_input),
+        server_output,
+    ));
+    let mut output = tokio::io::BufReader::new(output);
+
+    input
+        .write_all(
+            format!(
+                "{}\n",
+                serde_json::to_string(&initialize_request(1, "transport-steer-test")).unwrap()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut line = String::new();
+    output.read_line(&mut line).await.unwrap();
+    let initialize: Value = serde_json::from_str(line.trim()).unwrap();
+    assert_eq!(initialize["id"], 1);
+
+    input
+        .write_all(
+            format!(
+                "{}\n{}\n",
+                serde_json::to_string(&JsonRpcRequest::notification(METHOD_INITIALIZED, None,))
+                    .unwrap(),
+                serde_json::to_string(&turn_start_request(2, "run shell")).unwrap(),
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let mut approval_request = None;
+    let mut turn_started = false;
+    while approval_request.is_none() || !turn_started {
+        line.clear();
+        output.read_line(&mut line).await.unwrap();
+        let message: Value = serde_json::from_str(line.trim()).unwrap();
+        if message["id"] == 2 {
+            turn_started = true;
+        }
+        if message["method"] == mini_agent_app_server_protocol::METHOD_APPROVAL_REQUEST {
+            approval_request = message["params"]["requestId"].as_str().map(str::to_owned);
+        }
+    }
+    let request_id = approval_request.unwrap();
+    let steer = JsonRpcRequest::request(
+        3,
+        METHOD_TURN_STEER,
+        serde_json::to_value(TurnSteerParams {
+            thread_id: ThreadId::new("thread-1"),
+            turn_id: mini_agent_protocol::TurnId::new("turn-1"),
+            text: "continue after approval".to_string(),
+        })
+        .unwrap(),
+    );
+    let approval_response = JsonRpcRequest::request(
+        4,
+        METHOD_APPROVAL_RESPOND,
+        serde_json::to_value(ApprovalRespondParams {
+            request_id,
+            decision: mini_agent_app_server_protocol::ApprovalDecision::Approve,
+            grant_scope: Some(mini_agent_app_server_protocol::ActionGrantScope::Once),
+            reason: None,
+        })
+        .unwrap(),
+    );
+    input
+        .write_all(
+            format!(
+                "{}\n{}\n",
+                serde_json::to_string(&steer).unwrap(),
+                serde_json::to_string(&approval_response).unwrap(),
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let approval_ack = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            line.clear();
+            output.read_line(&mut line).await.unwrap();
+            let message: Value = serde_json::from_str(line.trim()).unwrap();
+            if message["id"] == 4 {
+                break message;
+            }
+        }
+    })
+    .await
+    .expect("approval response must not wait behind turn/steer");
+    assert_eq!(approval_ack["result"]["accepted"], true);
+
+    let steer_response = tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            line.clear();
+            output.read_line(&mut line).await.unwrap();
+            let message: Value = serde_json::from_str(line.trim()).unwrap();
+            if message["id"] == 3 {
+                break message;
+            }
+        }
+    })
+    .await
+    .expect("turn/steer should settle after approval");
+    assert_eq!(steer_response["id"], 3);
+
+    input.shutdown().await.unwrap();
+    task.await.unwrap().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn local_client_uses_the_same_service_contract() {
     let connection = connection();
     let server = connection.server.clone();

@@ -44,6 +44,8 @@ use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnStart;
 use serde_json::Value;
 use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::broadcast;
 
 mod thread;
@@ -63,7 +65,7 @@ pub struct AppServerConnection<M> {
     server: AppServer<M>,
     events: broadcast::Receiver<EventEnvelope>,
     notifications: Option<broadcast::Receiver<RuntimeNotification>>,
-    initialized: bool,
+    initialized: Arc<AtomicBool>,
     approval: ApprovalBroker,
     approval_enabled: bool,
     capability_manifest: CapabilityManifest,
@@ -154,7 +156,7 @@ where
             server,
             events,
             notifications: None,
-            initialized: false,
+            initialized: Arc::new(AtomicBool::new(false)),
             approval,
             approval_enabled,
             capability_manifest,
@@ -170,7 +172,7 @@ where
     }
 
     pub fn initialized(&self) -> bool {
-        self.initialized
+        self.initialized.load(Ordering::Acquire)
     }
 
     pub async fn next_approval_request(&self) -> ApprovalRequest {
@@ -206,10 +208,10 @@ where
             return self.handle_initialize(request).await;
         }
         if request.method == METHOD_INITIALIZED {
-            self.initialized = true;
+            self.initialized.store(true, Ordering::Release);
             return None;
         }
-        if !self.initialized {
+        if !self.initialized() {
             return response_error(
                 id,
                 JsonRpcError::server_error("connection is not initialized"),
@@ -257,7 +259,7 @@ where
     }
 
     async fn handle_initialize(&mut self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
-        if self.initialized {
+        if self.initialized() {
             return response_error(
                 request.id,
                 JsonRpcError::server_error("already initialized"),
@@ -335,16 +337,34 @@ where
             },
             capability_manifest: self.capability_manifest.clone(),
         };
-        self.initialized = true;
+        self.initialized.store(true, Ordering::Release);
         response_value(request.id, result)
     }
 
     async fn handle_approval_response(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        Self::handle_approval_response_with_broker(&self.approval, request)
+    }
+
+    pub(super) fn approval_response_fast_path(
+        approval: &ApprovalBroker,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        Self::handle_approval_response_with_broker(approval, request)
+    }
+
+    pub(super) fn initialized_flag(&self) -> Arc<AtomicBool> {
+        self.initialized.clone()
+    }
+
+    fn handle_approval_response_with_broker(
+        approval: &ApprovalBroker,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
         let params = match request.decode_params::<ApprovalRespondParams>() {
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
-        match self.approval_response(params) {
+        match approval.respond(params) {
             Ok(()) => response_value(request.id, serde_json::json!({ "accepted": true })),
             Err(error) => response_error(request.id, JsonRpcError::invalid_params(error)),
         }

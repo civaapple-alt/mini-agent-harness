@@ -3,6 +3,8 @@ use tokio::io::AsyncBufRead;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::{Mutex, mpsc};
+use tokio::task::JoinSet;
 
 /// Serves stdio with a host-resolved capability manifest.
 pub async fn serve_stdio_with_approval_and_manifest<M, R, W>(
@@ -17,12 +19,12 @@ where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut connection = AppServerConnection::with_approval_broker_and_capability_manifest(
+    let connection = AppServerConnection::with_approval_broker_and_capability_manifest(
         server.clone(),
         approval.clone(),
         capability_manifest,
     );
-    serve_connection(&mut connection, approval, reader, writer).await
+    serve_connection(connection, approval, reader, writer).await
 }
 
 /// Serves stdio after startup while attaching optional runtime services to the
@@ -111,11 +113,11 @@ where
     if let Some(response) = connection.handle_request(request).await {
         write_json_line(&mut writer, &response).await?;
     }
-    serve_connection(&mut connection, approval, reader, writer).await
+    serve_connection(connection, approval, reader, writer).await
 }
 
 async fn serve_connection<M, R, W>(
-    connection: &mut AppServerConnection<M>,
+    connection: AppServerConnection<M>,
     approval: ApprovalBroker,
     mut reader: R,
     mut writer: W,
@@ -128,16 +130,35 @@ where
     let server = connection.server.clone();
     let mut runtime_events = connection.subscribe_notifications();
     let mut events = (runtime_events.is_none()).then(|| server.subscribe());
+    let initialized = connection.initialized_flag();
+    let connection = std::sync::Arc::new(Mutex::new(connection));
+    let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel();
+    let mut request_tasks = JoinSet::new();
     let mut line = String::new();
     loop {
         tokio::select! {
+            outgoing = outgoing_rx.recv() => {
+                let Some(outgoing) = outgoing else {
+                    break;
+                };
+                match outgoing {
+                    OutgoingMessage::Response(response) => {
+                        write_json_line(&mut writer, &response).await?;
+                    }
+                    OutgoingMessage::Notification(notification) => {
+                        write_json_line(&mut writer, &notification).await?;
+                    }
+                }
+            }
             event = next_event_notification_optional(&mut events) => {
                 let notification = match event {
                     Ok(notification) => notification,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
-                write_json_line(&mut writer, &notification).await?;
+                outgoing_tx
+                    .send(OutgoingMessage::Notification(notification))
+                    .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
             }
             event = next_runtime_notification(&mut runtime_events) => {
                 let notification = match event {
@@ -145,7 +166,9 @@ where
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => continue,
                 };
-                write_json_line(&mut writer, &notification).await?;
+                outgoing_tx
+                    .send(OutgoingMessage::Notification(notification))
+                    .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
             }
             event = approval.next_event() => {
                 let (method, params) = match event {
@@ -191,7 +214,9 @@ where
                     ),
                 };
                 let notification = JsonRpcRequest::notification(method, Some(params));
-                write_json_line(&mut writer, &notification).await?;
+                outgoing_tx
+                    .send(OutgoingMessage::Notification(notification))
+                    .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
             }
             read = reader.read_line(&mut line) => {
                 let read = read?;
@@ -199,17 +224,72 @@ where
                     break;
                 }
                 let input = std::mem::take(&mut line);
-                let response = match serde_json::from_str::<JsonRpcRequest>(input.trim()) {
-                    Ok(request) => connection.handle_request(request).await,
-                    Err(error) => response_error(None, JsonRpcError::parse_error(error.to_string())),
+                let request = match serde_json::from_str::<JsonRpcRequest>(input.trim()) {
+                    Ok(request) => request,
+                    Err(error) => {
+                        outgoing_tx
+                            .send(OutgoingMessage::Response(response_error(
+                                None,
+                                JsonRpcError::parse_error(error.to_string()),
+                            ).expect("parse errors always have a response")))
+                            .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                        continue;
+                    }
                 };
-                if let Some(response) = response {
-                    write_json_line(&mut writer, &response).await?;
+
+                // Initialization is deliberately ordered before any spawned
+                // request. This preserves the JSON-RPC handshake even when
+                // the peer closes stdin immediately after receiving its
+                // initialize response.
+                if request.method == METHOD_INITIALIZE
+                    || !initialized.load(std::sync::atomic::Ordering::Acquire)
+                {
+                    let response = connection.lock().await.handle_request(request).await;
+                    if let Some(response) = response {
+                        outgoing_tx
+                            .send(OutgoingMessage::Response(response))
+                            .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                    }
+                    continue;
                 }
+
+                // Approval resolution is a control-plane fast path. A normal
+                // request task may be waiting for a turn command to settle,
+                // so it must not hold the connection mutex in front of the
+                // response that unblocks that turn.
+                if request.method == METHOD_APPROVAL_RESPOND
+                    && initialized.load(std::sync::atomic::Ordering::Acquire)
+                {
+                    let notification = request.id.is_none();
+                    if let Some(response) =
+                        AppServerConnection::<M>::approval_response_fast_path(&approval, request)
+                            .filter(|_| !notification)
+                    {
+                        outgoing_tx
+                            .send(OutgoingMessage::Response(response))
+                            .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                    }
+                    continue;
+                }
+
+                let connection = connection.clone();
+                let outgoing_tx = outgoing_tx.clone();
+                request_tasks.spawn(async move {
+                    let response = connection.lock().await.handle_request(request).await;
+                    if let Some(response) = response {
+                        let _ = outgoing_tx.send(OutgoingMessage::Response(response));
+                    }
+                });
             }
         }
     }
+    request_tasks.abort_all();
     Ok(())
+}
+
+enum OutgoingMessage {
+    Response(JsonRpcResponse),
+    Notification(JsonRpcRequest),
 }
 
 fn approval_path_scope(

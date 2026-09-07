@@ -67,8 +67,11 @@ inferring approval from `tool/finished` content. `full_machine` means
 machine-wide path scope, not allow-all; security Deny, Plan locks, tool
 availability, and high-risk confirmation remain independent gates.
 The App Server worker runs on a dedicated runtime thread, so a synchronous host
-approval callback does not block the connection's async transport. The worker
-still serializes one Thread at a time while that approval is pending.
+approval callback does not block the connection's async transport. The JSON-RPC
+transport multiplexes request handling and resolves `approval/respond` through
+a control-plane fast path even when a `turn/steer` request is waiting for the
+worker. The worker still serializes one Thread at a time while that approval is
+pending; other runtime actions remain ordered behind it.
 
 `item/started` and `item/completed` carry one bounded `ThreadItem` with
 `threadId`, `turnId`, and its lifecycle timestamp. The completed notification
