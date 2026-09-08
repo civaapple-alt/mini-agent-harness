@@ -346,6 +346,16 @@ pub(super) fn set_thread_settings<M>(
 where
     M: Model + 'static,
 {
+    if continuation_mode.is_some()
+        && state
+            .goal_runtime_handle
+            .load_goal_state()
+            .map_err(workflow_error)?
+            .is_some_and(|goal| goal.status == mini_agent_host::GoalStatus::Running)
+    {
+        return Err(AppServerError::GoalOwnsContinuationMode);
+    }
+
     let thread_id = state.management.thread_id();
     let thread = threads
         .get_mut(thread_id.as_str())

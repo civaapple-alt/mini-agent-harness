@@ -27,6 +27,20 @@ Outcome / Goal / Boundary / Invariant
 
 第一阶段不会新增 Planner、Scheduler、Memory、Plugin 或 Policy Framework，也不会把这些概念塞进 Core。优先使用现有的 `Thread`、`Turn`、`Goal`、`Session`、`ThreadItem`、Approval、World 和 observation events，验证这些边界是否足以支撑可交付结果。
 
+## 实施进度（2026-09-08）
+
+Batch 1 已完成第一条控制面不变量切片：active Goal 的 Loop 配置只由 Goal
+Runtime 持有。App Server 公共 `thread/settings/update` 在 Goal 为
+`Running` 时拒绝 `continuationMode` 改写；Gateway 启动恢复会延后已保存的
+`continuous` 偏好，并在 Goal 结束后恢复，普通工具设置不会再把该偏好覆盖成
+`manual`。新增 Rust 公共 JSON-RPC 场景和 Gateway 单测，现有 50 个 App Server
+库测试全部通过，新增切片使 runtime/release Rust 基线从 `17,674/27,094`
+增至 `17,736/27,156`（`+62/+62`，仍为 green）。
+
+这不是 Batch 1 的全部故障矩阵；approval denial、timeout、MCP refusal、Goal
+恢复和 revision 的既有证据仍需在同一报告中统一记录，partial tool batch 与
+跨进程锁的组合场景仍是后续工作。
+
 ## 背景与当前证据
 
 当前 `mini-agent` 已经形成了一个适合验证 Harness 假设的最小闭环：
@@ -151,7 +165,7 @@ Recovery state:             running | paused | settled | failed | blocked
 | --- | --- | --- | --- | --- |
 | E-01 | `ContinuationMode` 从 `mini-agent-app-server-protocol` 经 Runtime、SDK、Gateway 到 Studio；`Trusted` 在 Protocol/Capabilities 中参与工具准入 | 一个 UI 字段可能改变 loop、权限和恢复行为 | 继续使用现有跨层契约矩阵，不新增 Core 依赖 | 若字段只影响展示且不会改变任何运行结果，可退回 UI-only 方案 |
 | E-02 | Cargo boundary 通过，但标记 `App Server → Capabilities` review edge | runtime assembly 的具体能力仍暴露在 App Server | 仅在出现重复 authority 或具体迁移实验时下沉到 Host | 若 App Server 不再直接构造 Provider/Session/Approval，可进入依赖收敛批次 |
-| E-03 | Web Gateway 记录 Thread continuation，并在启动时重新发送设置 | 可能出现网关缓存与 App Server 状态分歧 | 优先寻找 App Server canonical persistence；否则保留适配并加一致性检测 | 若 App Server 已可靠保存该设置且重启自动返回，则缓存可删除 |
+| E-03 | Web Gateway 记录 Thread continuation，并在启动时重新发送设置；App Server 当前只持有运行时设置，未将其写入 Thread checkpoint | 可能出现网关偏好与 App Server effective state 分歧，尤其是 active Goal 恢复 | 保留为有界启动适配；active Goal 期间不发送改写，Goal settle 后恢复，并禁止无关设置覆盖偏好；若未来 App Server 能 canonical 持久化，再删除 Gateway 缓存 | 若 App Server 已可靠保存该设置且重启自动返回，则缓存可删除 |
 | E-04 | 当前 runtime 仅剩约 1,326 行 operating budget，release Rust 仅剩约 1,906 行 operating budget | Control Plane 很容易用新抽象掩盖复杂度增长 | 新增概念默认必须有删除项或净零抵消 | 若批次可以删除旧状态、兼容分支或重复测试并形成净减少，可放宽 |
 | E-05 | 现有边界已有 Approval、Goal、Session、lock、timeout 和事件测试，但跨故障组合仍需形成统一 scenario | 单元测试通过不等于跨层可交付 | 建立 bounded Scenario/Eval 矩阵，不调用付费 Provider | 若既有公共场景已区分所有目标结果和失败反例，则不新增重复 scenario |
 
@@ -243,4 +257,3 @@ Recovery state:             running | paused | settled | failed | blocked
 4. Gateway continuation 状态是否为重复 authority 已经决定并验证；
 5. Cargo boundary、受影响包测试、lint、line budget 和跨层协议证据全部通过；
 6. 文档、协议、SDK、Gateway、Studio 与实际行为一致，且剩余风险被明确记录。
-

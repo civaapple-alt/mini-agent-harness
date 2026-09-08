@@ -194,7 +194,7 @@ force an immediate stop before the runtime reaches a cancellation boundary.
 
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
-| `thread/settings/update` | `threadId`, `collaborationMode: {mode}`, optional `builtinTools: [name]`, optional `continuationMode` | Updates the Thread's `default` or `plan` mode, optional bounded Builtin tool selection, and explicit `manual`/`continuous` loop mode. Emits `thread/settings/updated`; Goal Runtime owns its own loop while a Goal is active. |
+| `thread/settings/update` | `threadId`, `collaborationMode: {mode}`, optional `builtinTools: [name]`, optional `continuationMode` | Updates the Thread's `default` or `plan` mode, optional bounded Builtin tool selection, and explicit `manual`/`continuous` loop mode. Emits `thread/settings/updated`; Goal Runtime owns its own loop while a Goal is active, so continuation updates are rejected until that Goal is paused or settled. |
 | `thread/goal/set` | `threadId`; optional `objective`, `status`, `tokenBudget` | Sets or replaces a Goal subject to lifecycle checks; returns the public Goal projection and emits `thread/goal/updated`. A running Goal must be cleared before replacement. |
 | `thread/goal/get` | `threadId` | Returns `{goal}` where `goal` may be `null`. |
 | `thread/goal/clear` | `threadId` | Clears the Goal and returns `{cleared: true|false}`; emits `thread/goal/cleared` when applicable. |

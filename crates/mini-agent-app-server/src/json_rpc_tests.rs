@@ -501,6 +501,58 @@ async fn broadcasts_thread_settings_updates_with_action_revision() {
 }
 
 #[tokio::test]
+async fn rejects_thread_continuation_updates_while_goal_runtime_is_active() {
+    let (mut connection, root) = managed_connection("goal-owns-continuation");
+    initialize_connection(&mut connection, "goal-continuation-test").await;
+    mini_agent_host::HostWorkflowStore::new(
+        root.clone(),
+        crate::goal_service::GoalLimits::default(),
+    )
+    .set_goal("preserve Goal loop ownership", None)
+    .unwrap();
+
+    let response = connection
+        .handle_request(JsonRpcRequest::request(
+            2,
+            METHOD_THREAD_SETTINGS_UPDATE,
+            serde_json::json!({
+                "threadId": "thread-1",
+                "collaborationMode": {"mode": "default"},
+                "continuationMode": "continuous"
+            }),
+        ))
+        .await
+        .unwrap();
+    let error = response.error.expect("active Goal must own continuation");
+    assert_eq!(error.code, -32000);
+    assert!(
+        error
+            .message
+            .contains("Goal Runtime owns continuation mode")
+    );
+
+    mini_agent_host::HostWorkflowStore::new(
+        root.clone(),
+        crate::goal_service::GoalLimits::default(),
+    )
+    .clear_goal()
+    .unwrap();
+    let resumed_settings = rpc_call(
+        &mut connection,
+        3,
+        METHOD_THREAD_SETTINGS_UPDATE,
+        serde_json::json!({
+            "threadId": "thread-1",
+            "collaborationMode": {"mode": "default"},
+            "continuationMode": "continuous"
+        }),
+    )
+    .await;
+    assert_eq!(resumed_settings["value"]["continuationMode"], "continuous");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn preserves_cross_stream_notification_order() {
     let (mut connection, root) = managed_connection("cross-stream-order");
     initialize_connection(&mut connection, "cross-stream-test").await;

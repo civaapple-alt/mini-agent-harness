@@ -329,6 +329,7 @@ pub enum AppServerError {
     ThreadAlreadyExists(ThreadId),
     ThreadFactoryUnavailable,
     RuntimeUnavailable,
+    GoalOwnsContinuationMode,
 }
 
 /// A host-side update applied to a settled Thread by the App Server worker.
@@ -387,6 +388,9 @@ impl fmt::Display for AppServerError {
             }
             Self::ThreadFactoryUnavailable => formatter.write_str("thread factory is unavailable"),
             Self::RuntimeUnavailable => formatter.write_str("runtime state is unavailable"),
+            Self::GoalOwnsContinuationMode => formatter.write_str(
+                "active Goal Runtime owns continuation mode; pause or finish the Goal before changing it",
+            ),
         }
     }
 }

@@ -52,10 +52,12 @@ line gate 的后续计划要求 Permission、Sandbox、Recovery、Audit 不能�
 | Sandbox | Native guard；Docker workspace mount 与 ephemeral `/tmp` | Shell timeout；只读 Shell 拒绝副作用参数 | covered with platform/daemon caveat |
 | Recovery | Goal pause/resume；恢复 checkpoint 不重放首轮 | Goal 清除后忽略旧 verifier；checkpoint 改变后忽略旧结果；拒绝/失败 verdict | covered |
 | Audit | bounded、redacted trace；round metadata 与输出记录 | unbounded trace id；artifact 总量超限；diagnostic metadata 不进入 wire event | covered |
+| Loop ownership | active Goal 临时拥有 milestone loop；settle 后可恢复 Thread 的 continuous 偏好 | public settings 覆盖 Goal loop；普通工具设置把持久偏好误写成 manual | covered: App Server RPC + Gateway tests |
 
 可复现命令和逐项测试名见
 [`2026-09-07-control-plane-boundary-evidence.md`](../.agents/notes/implemented/testing/2026-09-07-control-plane-boundary-evidence.md)。
-本轮共 44 个确定性测试通过。Docker 不可用时按既有契约显式跳过；本次 Windows
+本轮共 44 个确定性测试通过；2026-09-08 新增 Goal loop ownership 的 App Server
+与 Gateway 场景证据。Docker 不可用时按既有契约显式跳过；本次 Windows
 运行实际通过了挂载和容器临时目录断言。未覆盖恶意内核、跨平台隔离、崩溃后的审计
 完整性和真实 Provider 质量。
 
