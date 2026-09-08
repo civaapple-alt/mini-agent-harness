@@ -251,6 +251,75 @@ async fn runs_model_tool_model_path() {
 }
 
 #[tokio::test]
+async fn recovers_after_partial_tool_batch_without_erasing_completed_action() {
+    let model = ScriptedModel {
+        responses: VecDeque::from([
+            ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![
+                    ToolCall {
+                        id: "call-completed".to_string(),
+                        name: "uppercase".to_string(),
+                        arguments: json!({"text": "kept"}),
+                    },
+                    ToolCall {
+                        id: "call-failed".to_string(),
+                        name: "uppercase".to_string(),
+                        arguments: json!({}),
+                    },
+                ],
+                usage: None,
+            },
+            text_response("recovered after partial batch"),
+        ]),
+    };
+    let mut harness = Harness::new(
+        model,
+        ToolRouter::new(vec![Box::new(Uppercase)]),
+        HarnessConfig::default(),
+    );
+    let mut events = RecordingObserver::default();
+
+    let outcome = harness
+        .run("complete the bounded batch", &mut events)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Completed);
+    assert_eq!(outcome.steps, 2);
+    assert_eq!(outcome.final_text, "recovered after partial batch");
+    assert!(matches!(
+        outcome.messages.get(2),
+        Some(Message::Tool {
+            call_id,
+            content,
+            is_error: false,
+            outcome: Some(ToolExecutionStatus::Completed),
+            ..
+        }) if call_id == "call-completed" && content == "KEPT"
+    ));
+    assert!(matches!(
+        outcome.messages.get(3),
+        Some(Message::Tool {
+            call_id,
+            is_error: true,
+            outcome: Some(ToolExecutionStatus::Failed),
+            ..
+        }) if call_id == "call-failed"
+    ));
+    assert!(events.0.iter().any(|event| matches!(
+        event,
+        Event::ToolFinished {
+            call_id,
+            outcome: Some(ToolExecutionStatus::Failed),
+            is_error: true,
+            ..
+        } if call_id == "call-failed"
+    )));
+}
+
+#[tokio::test]
 async fn steering_stops_after_a_complete_tool_batch() {
     let control = RunControl::new();
     let model = ScriptedModel {

@@ -24,6 +24,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   cancel/timeout-settlement path that permits a subsequent shutdown.
 - **Revision evidence:** verify two App Server connection subscribers observe the
   same `thread/settings/updated` `stateRevision`.
+- **Partial tool-batch evidence:** cover ordered persistence of a completed action
+  and a failed action in one batch, followed by bounded model recovery.
 
 - **Harness documentation:** move current framework, evidence, boundary, and tool
   surface guidance into self-contained `docs/` files; keep `.agents/notes/` for
