@@ -66,12 +66,12 @@ Runtime 持有。App Server 公共 `thread/settings/update` 在 Goal 为
 ```text
 Core:              3,251 effective lines
 Protocol:            769 effective lines
-Capabilities:      9,420 effective lines
+Capabilities:      9,430 effective lines
 Host:              3,012 effective lines
-App Server:       10,642 effective lines
-Control Plane:    18,196 effective lines
-Runtime:           17,674 / 20,000
-Release Rust:     27,094 / 30,000
+App Server:       10,704 effective lines
+Control Plane:    18,268 effective lines
+Runtime:           17,736 / 20,000
+Release Rust:     27,166 / 30,000
 ```
 
 `python scripts/cargo_boundary.py --json` 当前通过；唯一显式 review edge 是 `mini-agent-app-server → mini-agent-capabilities`，原因是 App Server 仍参与 Provider、Session 和 Approval 的 runtime assembly。两个相关提交没有修改 Cargo manifest，因此本提案不会为了减少文件数而改变依赖方向。
@@ -246,7 +246,7 @@ Recovery state:             running | paused | settled | failed | blocked
 1. **所属层**：本提案属于跨层架构，但执行面仍由 Core 保持最小；控制面由 App Server、Host 和 Capabilities 按现有所有权承载，SDK/Gateway/Web 只做协议和交互适配。
 2. **重复职责**：已有 `Thread`、`Turn`、`Goal`、`SessionStore`、`ApprovalStore`、`ToolOrchestrator`、checkpoint、events 和 `JsonlTrace` 已覆盖大部分责任；实施前必须检索并证明新类型不能替代旧类型。
 3. **替换优先**：优先删除 Gateway shadow state、隐式总开关、模型自报完成路径和重复兼容分支；只有 Scenario 证明现有边界无法表达时才新增概念。
-4. **净行数**：当前 runtime 为 `17,674/20,000`，release Rust 为 `27,094/30,000`。Core 预期净增为 `0`；每个实现批次默认 runtime/release 净零或提供明确删除抵消，进入 red band 即停止扩张。
+4. **净行数**：当前 runtime 为 `17,736/20,000`，release Rust 为 `27,166/30,000`。Core 预期净增为 `0`；每个实现批次默认 runtime/release 净零或提供明确删除抵消，进入 red band 即停止扩张。
 5. **可见表面**：新增的 Goal/Boundary/Invariant、控制字段、事件和结果投影都必须有 hard limit；未知权限输入 fail closed；不得把 raw prompt、凭证或无界工具结果写入模型上下文、事件或持久化。
 6. **边界证据**：使用 Core/Capabilities/App Server 的单测与协议 fixture，再用 Mock Provider 的 bounded Scenario 覆盖拒绝、Plan lock、超时、取消、锁竞争、部分副作用、恢复、验证失败和审计脱敏；跨仓验证 SDK、Gateway 和 Studio 收敛到同一 revision。
 
