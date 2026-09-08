@@ -66,8 +66,9 @@ revision helper 的确定性测试均通过。该证据覆盖了 AC-06 的控制
 Gateway 的显式 Project attach 选择也已补证：在没有现有本地绑定时，canonical
 Session lookup、resume 参数和返回的 Project ID 保持一致；已有 live binding 的
 同 ID 冲突现在 fail closed 为 `409`，不会静默复用错误 workspace。未授权的跨
-Project 隐式猜测、fork/并发组合和 Goal/恢复事件的跨协议 revision 收敛继续留在
-后续矩阵中。
+Project 隐式猜测已被拒绝；fork 现在携带 source Project binding，目标 live ID
+冲突也 fail closed 为 `409`，并新增跨 Project fork 回归证据。剩余的是 fork 与
+并发 attach 的组合，以及 Goal/恢复事件的跨协议 revision 收敛。
 
 随后补充的 active-turn shutdown guard 与双 subscriber revision 场景相对
 `2327e8f` 增加 runtime/release `+26/+26`；当前累计基线为
