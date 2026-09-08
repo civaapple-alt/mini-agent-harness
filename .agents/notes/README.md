@@ -102,6 +102,7 @@ graph LR
 - [Line Gate: Control Plane Statistics and Delta Gate](implemented/process/2026-09-07-line-gate-control-plane-and-delta.md)
 - [Control Plane Boundary Evidence](implemented/testing/2026-09-07-control-plane-boundary-evidence.md)
 - [Goal Revision 与 Web 重连游标证据](implemented/testing/2026-09-08-goal-revision-and-web-reconnect.md)
+- [Fork 与并发 Attach 组合证据](implemented/testing/2026-09-08-fork-attach-composition.md)
 - [Goal Runtime Loop Ownership](implemented/bug-fix/2026-09-08-goal-loop-ownership.md)
 - [Cargo Boundary Audit](implemented/architecture/2026-09-07-cargo-boundary-audit.md)
 - [Multi-Directory Workspace Context Perception](implemented/feature/2026-09-07-multi-directory-workspace-context.md)
