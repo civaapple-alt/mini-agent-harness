@@ -68,6 +68,7 @@ Session lookup、resume 参数和返回的 Project ID 保持一致；已有 live
 同 ID 冲突现在 fail closed 为 `409`，不会静默复用错误 workspace。未授权的跨
 Project 隐式猜测已被拒绝；fork 现在携带 source Project binding，目标 live ID
 冲突也 fail closed 为 `409`，并新增跨 Project fork 回归证据。剩余的是 fork 与
+并发 attach 已通过 SessionManager 的单临界区创建回归验证；仍需覆盖 fork 与
 并发 attach 的组合，以及 Goal/恢复事件的跨协议 revision 收敛。
 
 随后补充的 active-turn shutdown guard 与双 subscriber revision 场景相对

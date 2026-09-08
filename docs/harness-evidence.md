@@ -55,6 +55,7 @@ line gate 的后续计划要求 Permission、Sandbox、Recovery、Audit 不能�
 | Loop ownership | active Goal 临时拥有 milestone loop；settle 后可恢复 Thread 的 continuous 偏好 | public settings 覆盖 Goal loop；普通工具设置把持久偏好误写成 manual | covered: App Server RPC + Gateway tests |
 | Revision / admission | `runtime_mutations_reject_stale_revision_tokens` 保留 actor/CAS 顺序 | stale mutation 在 runtime owner 变化后被拒绝，不进入 settings 或 execution | covered |
 | Cross-client revision projection | App Server `stateRevision` 经 Python SDK、Gateway route 和 Web Studio settings notification 到达所有客户端；各客户端按 Thread 单调消费 | stale SDK notification 或 Web notification 覆盖较新的 Plan/continuation state | covered for Thread settings; Goal/recovery event revision and post-restart cursor reconstruction remain |
+| Concurrent Thread attach | SessionManager serializes client creation and rechecks the canonical/live binding inside one critical section | two concurrent attach/start calls create two clients or claim one Session twice | covered by `test_concurrent_thread_attach_creates_one_client`; fork+attach composition remains |
 
 可复现命令和逐项测试名见
 [`2026-09-07-control-plane-boundary-evidence.md`](../.agents/notes/implemented/testing/2026-09-07-control-plane-boundary-evidence.md)。
