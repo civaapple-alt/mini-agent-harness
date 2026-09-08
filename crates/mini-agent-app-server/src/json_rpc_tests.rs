@@ -1020,11 +1020,16 @@ async fn enforces_goal_timeout_with_cooperative_cancellation() {
             break;
         }
     }
+    assert!(matches!(
+        connection.shutdown().await,
+        Err(AppServerError::Busy)
+    ));
     tokio::time::sleep(Duration::from_millis(1_100)).await;
     release.notify_one();
 
     let notification = wait_for_goal_status(&mut connection, "usageLimited").await;
     assert_eq!(notification["goal"]["tokensUsed"], 0);
+    connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 

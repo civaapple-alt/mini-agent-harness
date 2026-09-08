@@ -53,8 +53,8 @@ ownership 与普通设置不覆盖偏好的测试均通过。为完成这条证�
 `+98/+98`，没有修改 Cargo manifest，预算仍为 green。
 
 这不是 Batch 1 的全部故障矩阵；approval denial、timeout、MCP refusal、Goal
-恢复和 revision 的既有证据仍需在同一报告中统一记录，partial tool batch 与
-跨进程锁的组合场景仍是后续工作。
+恢复和 revision 的既有证据仍需在同一报告中统一记录，partial tool batch、跨客户端
+revision 收敛与跨 Project/Thread attach 仍是后续工作。
 
 ## 背景与当前证据
 

@@ -20,6 +20,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **Embedded App Server lifecycle:** add an explicit idle-only `shutdown()` seam
   so in-process callers can release RuntimeActor-owned SessionStore locks and
   prove a clean restart without adding a JSON-RPC lifecycle method.
+- **Lifecycle evidence:** cover the active-turn `Busy` guard and the
+  cancel/timeout-settlement path that permits a subsequent shutdown.
 
 - **Harness documentation:** move current framework, evidence, boundary, and tool
   surface guidance into self-contained `docs/` files; keep `.agents/notes/` for
