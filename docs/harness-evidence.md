@@ -53,6 +53,7 @@ line gate 的后续计划要求 Permission、Sandbox、Recovery、Audit 不能�
 | Recovery | Goal pause/resume；恢复 checkpoint 不重放首轮 | Goal 清除后忽略旧 verifier；checkpoint 改变后忽略旧结果；拒绝/失败 verdict | covered |
 | Audit | bounded、redacted trace；round metadata 与输出记录 | unbounded trace id；artifact 总量超限；diagnostic metadata 不进入 wire event | covered |
 | Loop ownership | active Goal 临时拥有 milestone loop；settle 后可恢复 Thread 的 continuous 偏好 | public settings 覆盖 Goal loop；普通工具设置把持久偏好误写成 manual | covered: App Server RPC + Gateway tests |
+| Revision / admission | `runtime_mutations_reject_stale_revision_tokens` 保留 actor/CAS 顺序 | stale mutation 在 runtime owner 变化后被拒绝，不进入 settings 或 execution | covered |
 
 可复现命令和逐项测试名见
 [`2026-09-07-control-plane-boundary-evidence.md`](../.agents/notes/implemented/testing/2026-09-07-control-plane-boundary-evidence.md)。
@@ -100,6 +101,7 @@ Known gap: <what this scenario does not prove>
 | MCP call timeout | Capabilities controlled slow call、App Server public projection | boundary covered | CLI actual MCP transport deferred |
 | MCP circuit breaker | Capabilities `circuit_breaker_trips_after_failures_and_recovers` | unit-only | 真实失败到 model round 的公共路径未覆盖 |
 | Docker sandbox | availability、mount、ephemeral filesystem probe | host runtime covered | 更强隔离仍需 policy 和跨平台证据 |
+| Goal-owned continuation | `json_rpc::tests::rejects_thread_continuation_updates_while_goal_runtime_is_active`、Gateway preference/settlement tests | active Goal 不接受 Thread continuation 改写；settlement 后恢复显式偏好 | covered |
 
 ## 不变量与证据门槛
 

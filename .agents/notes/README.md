@@ -101,6 +101,7 @@ graph LR
 - [Decoupling Approval Policy and Action Grant Scope](implemented/architecture/2026-09-07-decoupling-approval-policy-and-action-grant-scope.md)
 - [Line Gate: Control Plane Statistics and Delta Gate](implemented/process/2026-09-07-line-gate-control-plane-and-delta.md)
 - [Control Plane Boundary Evidence](implemented/testing/2026-09-07-control-plane-boundary-evidence.md)
+- [Goal Runtime Loop Ownership](implemented/bug-fix/2026-09-08-goal-loop-ownership.md)
 - [Cargo Boundary Audit](implemented/architecture/2026-09-07-cargo-boundary-audit.md)
 - [Multi-Directory Workspace Context Perception](implemented/feature/2026-09-07-multi-directory-workspace-context.md)
 - [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md)
