@@ -54,6 +54,13 @@ impl AgentKind {
         matches!(self, Self::Explore | Self::Plan)
     }
 
+    /// Plan keeps source-file mutation tools read-only, while Shell remains
+    /// governed by the selected approval policy. Explore is the stricter
+    /// catalog-only profile and does not expose Shell.
+    pub fn permits_shell(self) -> bool {
+        !matches!(self, Self::Explore)
+    }
+
     pub(crate) fn prompt_template(self) -> Option<&'static str> {
         match self {
             Self::Explore => {

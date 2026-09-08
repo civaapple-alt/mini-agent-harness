@@ -18,7 +18,6 @@ impl ToolHandler for Shell {
 
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let command = self.validated_command(&request.arguments)?;
-        self.ensure_allowed(command)?;
         if matches!(
             self.0.approval.approval_policy(),
             mini_agent_protocol::ApprovalPolicy::Automatic
@@ -39,7 +38,6 @@ impl ToolHandler for Shell {
 impl ToolRuntime for Shell {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let command = self.validated_command(arguments)?;
-        self.ensure_allowed(command)?;
         self.0.approve(&format!("shell command `{command}`"))?;
         self.run_command(command)
     }
@@ -47,29 +45,12 @@ impl ToolRuntime for Shell {
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
         let result = self
             .validated_command(&request.arguments)
-            .and_then(|command| {
-                self.ensure_allowed(command)
-                    .and_then(|_| self.run_command(command))
-            });
+            .and_then(|command| self.run_command(command));
         crate::into_tool_outcome(result)
     }
 }
 
 impl Shell {
-    fn ensure_allowed(&self, command: &str) -> Result<(), ToolError> {
-        if is_read_only_shell_command(command)
-            || (self.0.approval.living_plan().is_some() && self.0.is_plan_scratch_command(command))
-        {
-            Ok(())
-        } else if self.0.approval.living_plan().is_some() {
-            Err(ToolError(
-                "workspace mutations locked in Plan Mode; Shell command is not in the bounded read-only inspection subset".to_string(),
-            ))
-        } else {
-            self.0.approval.ensure_plan_mode_unlocked()
-        }
-    }
-
     fn validated_command<'a>(&self, arguments: &'a Value) -> Result<&'a str, ToolError> {
         let command = string_arg(arguments, "command")?;
         if command.is_empty() || command.len() > MAX_COMMAND_BYTES {
@@ -220,11 +201,11 @@ pub(super) fn shell_description(policy: mini_agent_protocol::ApprovalPolicy) -> 
     };
     if cfg!(windows) {
         format!(
-            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Plan Mode permits bounded read-only inspection and a Python/Node script stored under plan/scratch; formal Project mutations remain locked. Scratch scripts run from the Session-owned scratch directory and are cleaned after the turn. Do not use script blocks, variables, subexpressions, redirection, or process/build commands outside that bounded scratch script path."
+            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Plan Mode keeps source-file mutation tools read-only; Shell is governed by the selected approval policy."
         )
     } else {
         format!(
-            "Run one POSIX sh command in the workspace {approval}, with a 120-second deadline. Plan Mode permits bounded read-only inspection and a Python/Node script stored under plan/scratch; formal Project mutations remain locked. Scratch scripts are cleaned after the turn."
+            "Run one POSIX sh command in the workspace {approval}, with a 120-second deadline. Plan Mode keeps source-file mutation tools read-only; Shell is governed by the selected approval policy."
         )
     }
 }

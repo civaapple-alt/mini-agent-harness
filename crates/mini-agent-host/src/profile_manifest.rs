@@ -64,7 +64,7 @@ impl RuntimeComposition {
         let read_only = self.agent.is_read_only();
         RulePolicy {
             workspace_write: self.tools == ToolScope::All && !read_only,
-            shell_execution: self.tools == ToolScope::All && !read_only,
+            shell_execution: self.tools == ToolScope::All && self.agent.permits_shell(),
             workflow_scope: self.workflows,
         }
     }
@@ -77,13 +77,17 @@ impl RuntimeComposition {
             enabled.push("web".to_string());
             enabled.push("image".to_string());
             if self.agent.is_read_only() {
-                disabled.push(("shell".to_string(), "agent scope: read-only".to_string()));
                 disabled.push((
                     "workspace-write".to_string(),
                     "agent scope: read-only".to_string(),
                 ));
-            } else {
+            }
+            if self.agent.permits_shell() {
                 enabled.push("shell".to_string());
+            } else {
+                disabled.push(("shell".to_string(), "agent scope: read-only".to_string()));
+            }
+            if !self.agent.is_read_only() {
                 enabled.push("workspace-write".to_string());
             }
         } else {

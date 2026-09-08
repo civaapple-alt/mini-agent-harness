@@ -55,6 +55,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Fixed
 
+- **Plan/Shell policy separation:** keep Plan source mutations read-only while
+  allowing Shell to use the active approval policy, including explicit approval
+  for commands outside automatic/trusted bounded inspection.
+
 - **Persisted Shell observability:** carry bounded, redacted tool arguments from
   the lifecycle event projection into SessionStore item records, restore them
   through `thread/items/list`, and retain the canonical tool settlement output.

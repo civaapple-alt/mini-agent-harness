@@ -343,6 +343,7 @@ fn one_line(text: &str) -> String {
 const LIVING_PLAN_RIDER: &str = "\
 === LIVING PLAN MODE ===
 This session is Plan Mode. Keep the software-architect planning discipline.
+Keep project/source files read-only; Shell remains available under the selected approval policy.
 Write the living plan to plan.md with apply_patch. Relative path plan.md maps to the Session-owned plan file.
 For bounded exploration, write scripts and outputs under plan/scratch/; they are disposable and cleaned after the turn.
 Do not produce the final deliverable in reasoning or the assistant message: no complete HTML/CSS/JS pages, full source files, or finished documents.

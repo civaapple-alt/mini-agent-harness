@@ -479,20 +479,15 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
     } else {
         format!("printf blocked > '{marker_text}'")
     };
-    let locked_shell = shell.execute(&json!({"command": command})).unwrap_err();
-    assert!(
-        locked_shell
-            .0
-            .contains("workspace mutations locked in Plan Mode")
-    );
-    assert!(!marker.exists());
+    assert!(shell.execute(&json!({"command": command})).is_ok());
+    assert_eq!(fs::read_to_string(marker).unwrap().trim(), "blocked");
 
     remove_test_root(&session);
     remove_test_root(&root);
 }
 
 #[test]
-fn plan_mode_admits_only_scripts_in_session_scratch() {
+fn plan_mode_routes_shell_commands_to_approval_admission() {
     let root = test_root();
     let session = test_root();
     let plan = session.join("plan").join("plan.md");
@@ -518,8 +513,10 @@ fn plan_mode_admits_only_scripts_in_session_scratch() {
         "shell",
         json!({"command": "python ../note.py"}),
     );
-    let error = shell.admission(&blocked).unwrap_err();
-    assert!(error.0.contains("workspace mutations locked in Plan Mode"));
+    assert!(matches!(
+        shell.admission(&blocked),
+        Ok(ToolAdmission::ApprovalRequired { .. })
+    ));
 
     remove_test_root(&session);
     remove_test_root(&root);
@@ -557,6 +554,38 @@ fn plan_mode_allows_read_only_shell_inspection() {
     };
     assert!(shell.execute(&json!({"command": chained})).is_ok());
     assert!(shell.execute(&json!({"command": "git ls-files"})).is_ok());
+
+    remove_test_root(&session);
+    remove_test_root(&root);
+}
+
+#[test]
+fn plan_mode_routes_shell_mutations_through_approval_policy() {
+    let root = test_root();
+    let session = test_root();
+    let plan = session.join("plan").join("plan.md");
+    fs::create_dir_all(plan.parent().unwrap()).unwrap();
+    fs::write(&plan, "# Plan\n").unwrap();
+    let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
+    approval.set_living_plan(Some(plan));
+    let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
+    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+    let marker = root.join("approved-by-policy.txt");
+    let marker_text = marker.to_string_lossy();
+    let command = if cfg!(windows) {
+        format!("Set-Content -LiteralPath '{marker_text}' -Value approved")
+    } else {
+        format!("printf approved > '{marker_text}'")
+    };
+    let request =
+        ToolExecutionRequest::new("plan-shell-mutation", "shell", json!({"command": command}));
+
+    assert!(matches!(
+        shell.admission(&request),
+        Ok(ToolAdmission::ApprovalRequired { .. })
+    ));
+    assert!(shell.execute(&request.arguments).is_ok());
+    assert_eq!(fs::read_to_string(marker).unwrap().trim(), "approved");
 
     remove_test_root(&session);
     remove_test_root(&root);

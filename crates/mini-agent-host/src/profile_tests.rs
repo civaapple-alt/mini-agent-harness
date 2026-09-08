@@ -100,7 +100,8 @@ fn explicit_agent_and_persona_composition_renders_one_bounded_overlay() {
             .any(|(name, reason)| name == "workspace-write" && reason.contains("read-only"))
     );
     assert!(!manifest.rule_policy.workspace_write);
-    assert!(!manifest.rule_policy.shell_execution);
+    assert!(manifest.rule_policy.shell_execution);
+    assert!(manifest.enabled.iter().any(|name| name == "shell"));
 }
 
 #[test]
@@ -118,6 +119,7 @@ fn rule_policy_reports_shadowed_sources_and_read_only_security() {
         WorkflowScope::PlanAndGoal
     );
     assert!(!manifest.rule_policy.workspace_write);
+    assert!(manifest.rule_policy.shell_execution);
     assert!(
         manifest
             .rule_conflicts
