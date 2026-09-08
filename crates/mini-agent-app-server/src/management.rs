@@ -6,6 +6,7 @@ use crate::goal_service::ThreadGoalRequestProcessor;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeCommand;
 use crate::runtime_command::RuntimeCommandClient;
+use crate::status::RuntimeStatusHandle;
 use crate::thread_settings::ThreadSettingsService;
 use crate::worker::Command;
 use crate::{AppServer, AppServerError, McpRetryResult, RuntimeSessionInfo, RuntimeTurnResult};
@@ -29,6 +30,7 @@ pub(crate) struct RuntimeActorState {
     pub(crate) stable_system_prompt: Option<String>,
     pub(crate) settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
     pub(crate) notifications: broadcast::Sender<RuntimeNotification>,
+    pub(crate) status: RuntimeStatusHandle,
     revision: crate::action::RuntimeRevision,
 }
 
@@ -82,6 +84,7 @@ pub struct RuntimeManagementService<M> {
     goal_notifications: broadcast::Sender<GoalRuntimeEvent>,
     settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
     notifications: broadcast::Sender<RuntimeNotification>,
+    status: RuntimeStatusHandle,
 }
 
 impl<M> Clone for RuntimeManagementService<M> {
@@ -95,6 +98,7 @@ impl<M> Clone for RuntimeManagementService<M> {
             goal_notifications: self.goal_notifications.clone(),
             settings_notifications: self.settings_notifications.clone(),
             notifications: self.notifications.clone(),
+            status: self.status.clone(),
         }
     }
 }
@@ -138,6 +142,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         let (goal_notifications, _) = broadcast::channel(64);
         let (settings_notifications, _) = broadcast::channel(64);
         let notifications = server.notifications();
+        let status = server.runtime_status_handle();
         let client =
             RuntimeCommandClient::new(server.command_sender(), server.runtime_revision_handle());
         Self {
@@ -159,6 +164,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             goal_notifications,
             settings_notifications,
             notifications,
+            status,
         }
     }
 
@@ -175,6 +181,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             goal_notifications,
             settings_notifications,
             notifications,
+            status,
         } = self;
         let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
         let stable_system_prompt = settings.stable_system_prompt().map(str::to_string);
@@ -212,6 +219,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 stable_system_prompt: stable_system_prompt.clone(),
                 settings_notifications: settings_notifications.clone(),
                 notifications: notifications.clone(),
+                status: status.clone(),
                 revision: crate::action::RuntimeRevision::default(),
             })
             .map_err(|error| error.to_string())?;
@@ -226,6 +234,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 goal_notifications,
                 settings_notifications,
                 notifications,
+                status,
             },
             settings,
             goals,

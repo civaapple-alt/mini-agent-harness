@@ -2,7 +2,22 @@ use crate::goal_runtime::GoalRuntimeEvent;
 use crate::management::SettingsRuntimeEvent;
 use mini_agent_app_server_protocol::ItemCompletedNotification;
 use mini_agent_app_server_protocol::ItemStartedNotification;
+use mini_agent_app_server_protocol::{RuntimeStatus, WorkflowLifecycleNotification};
 use mini_agent_protocol::EventEnvelope;
+
+#[derive(Clone, Debug)]
+pub(crate) enum WorkflowRuntimeEvent {
+    CheckpointCommitted(WorkflowLifecycleNotification),
+    GoalVerificationStarted(WorkflowLifecycleNotification),
+    GoalVerificationCompleted(WorkflowLifecycleNotification),
+    GoalVerificationFailed(WorkflowLifecycleNotification),
+    GoalContinuationQueued(WorkflowLifecycleNotification),
+    GoalContinuationStarted(WorkflowLifecycleNotification),
+    PlanUpdated(WorkflowLifecycleNotification),
+    PlanCleanupStarted(WorkflowLifecycleNotification),
+    PlanCleanupCompleted(WorkflowLifecycleNotification),
+    PlanCleanupFailed(WorkflowLifecycleNotification),
+}
 
 /// One ordered runtime notification stream for the App Server wire adapter.
 ///
@@ -16,4 +31,6 @@ pub(crate) enum RuntimeNotification {
     ItemCompleted(ItemCompletedNotification),
     Goal(GoalRuntimeEvent),
     Settings(SettingsRuntimeEvent),
+    Status(RuntimeStatus),
+    Workflow(WorkflowRuntimeEvent),
 }

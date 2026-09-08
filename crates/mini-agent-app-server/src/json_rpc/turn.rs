@@ -4,6 +4,56 @@ impl<M> AppServerConnection<M>
 where
     M: Model + Send + 'static,
 {
+    pub(super) async fn handle_turn_events(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<TurnEventsParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        let limit = params.limit.unwrap_or(128).clamp(1, 128) as usize;
+        match self
+            .server
+            .replay_events(&params.thread_id, params.after_sequence, limit)
+        {
+            Ok(snapshot) => {
+                let next_cursor = snapshot.events.last().map(|event| event.sequence);
+                response_value(
+                    request.id,
+                    TurnEventsResult {
+                        data: snapshot
+                            .events
+                            .into_iter()
+                            .map(TurnEventNotification::from)
+                            .collect(),
+                        next_cursor,
+                        oldest_sequence: snapshot.oldest_sequence,
+                        has_gap: snapshot.has_gap,
+                    },
+                )
+            }
+            Err(error) => response_error(request.id, map_server_error(error)),
+        }
+    }
+
+    pub(super) async fn handle_runtime_status(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<RuntimeStatusParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        response_value(request.id, self.server.runtime_status())
+    }
+
     pub(super) async fn handle_turn_start(
         &self,
         request: JsonRpcRequest,

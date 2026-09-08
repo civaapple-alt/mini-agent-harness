@@ -12,28 +12,33 @@ use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::goal_runtime::GoalRuntimeEvent;
 use crate::management::SettingsRuntimeEvent;
-use crate::notification::RuntimeNotification;
+use crate::notification::{RuntimeNotification, WorkflowRuntimeEvent};
 use mini_agent_app_server_protocol::{
     ApprovalRequestNotification, ApprovalResolvedNotification, ApprovalRespondParams,
     CapabilityManifest, CollaborationMode, CollaborationModeKind, DisabledCapability,
     InitializeParams, InitializeResult, ItemCompletedNotification, ItemStartedNotification,
-    JsonRpcError, JsonRpcRequest, JsonRpcResponse, METHOD_APPROVAL_RESPOND, METHOD_INITIALIZE,
-    METHOD_INITIALIZED, METHOD_MCP_RETRY, METHOD_MCP_STATUS, METHOD_SESSION_INFO,
-    METHOD_THREAD_CLOSE, METHOD_THREAD_FORK, METHOD_THREAD_GOAL_CLEAR, METHOD_THREAD_GOAL_GET,
-    METHOD_THREAD_GOAL_SET, METHOD_THREAD_ITEMS_LIST, METHOD_THREAD_LIST, METHOD_THREAD_READ,
-    METHOD_THREAD_RESUME, METHOD_THREAD_SETTINGS_UPDATE, METHOD_THREAD_START, METHOD_TURN_EVENT,
+    JsonRpcError, JsonRpcRequest, JsonRpcResponse, METHOD_APPROVAL_RESPOND,
+    METHOD_CHECKPOINT_COMMITTED, METHOD_GOAL_CONTINUATION_QUEUED, METHOD_GOAL_CONTINUATION_STARTED,
+    METHOD_GOAL_VERIFICATION_COMPLETED, METHOD_GOAL_VERIFICATION_FAILED,
+    METHOD_GOAL_VERIFICATION_STARTED, METHOD_INITIALIZE, METHOD_INITIALIZED, METHOD_MCP_RETRY,
+    METHOD_MCP_STATUS, METHOD_PLAN_CLEANUP_COMPLETED, METHOD_PLAN_CLEANUP_FAILED,
+    METHOD_PLAN_CLEANUP_STARTED, METHOD_PLAN_UPDATED, METHOD_RUNTIME_STATUS,
+    METHOD_RUNTIME_STATUS_UPDATED, METHOD_SESSION_INFO, METHOD_THREAD_CLOSE, METHOD_THREAD_FORK,
+    METHOD_THREAD_GOAL_CLEAR, METHOD_THREAD_GOAL_GET, METHOD_THREAD_GOAL_SET,
+    METHOD_THREAD_ITEMS_LIST, METHOD_THREAD_LIST, METHOD_THREAD_READ, METHOD_THREAD_RESUME,
+    METHOD_THREAD_SETTINGS_UPDATE, METHOD_THREAD_START, METHOD_TURN_EVENT, METHOD_TURN_EVENTS,
     METHOD_TURN_INTERRUPT, METHOD_TURN_READ, METHOD_TURN_START, METHOD_TURN_STEER,
     METHOD_WORLD_REFRESH, METHOD_WORLD_SET_EXECUTION, METHOD_WORLD_STATE,
     McpRetryResult as ProtocolMcpRetryResult, McpStatusResult, PROTOCOL_VERSION,
-    ServerCapabilities, SessionInfoResult, ThreadCloseParams, ThreadForkParams, ThreadForkResult,
-    ThreadGoalClearParams, ThreadGoalClearResponse, ThreadGoalClearedNotification,
-    ThreadGoalGetParams, ThreadGoalGetResponse, ThreadGoalSetParams, ThreadGoalSetResponse,
-    ThreadGoalUpdatedNotification, ThreadItemsListParams, ThreadListParams, ThreadListResult,
-    ThreadReadParams, ThreadReadResult, ThreadResumeParams, ThreadResumeResult,
+    RuntimeStatusParams, ServerCapabilities, SessionInfoResult, ThreadCloseParams,
+    ThreadForkParams, ThreadForkResult, ThreadGoalClearParams, ThreadGoalClearResponse,
+    ThreadGoalClearedNotification, ThreadGoalGetParams, ThreadGoalGetResponse, ThreadGoalSetParams,
+    ThreadGoalSetResponse, ThreadGoalUpdatedNotification, ThreadItemsListParams, ThreadListParams,
+    ThreadListResult, ThreadReadParams, ThreadReadResult, ThreadResumeParams, ThreadResumeResult,
     ThreadSettingsUpdateParams, ThreadSettingsUpdateResult, ThreadSettingsUpdatedNotification,
-    ThreadStartParams, ThreadStartResult, TurnEventNotification, TurnInterruptParams,
-    TurnReadParams, TurnStartParams, TurnSteerParams, WorldRefreshResult, WorldSetExecutionParams,
-    WorldSetExecutionResult, WorldStateResult,
+    ThreadStartParams, ThreadStartResult, TurnEventNotification, TurnEventsParams,
+    TurnEventsResult, TurnInterruptParams, TurnReadParams, TurnStartParams, TurnSteerParams,
+    WorldRefreshResult, WorldSetExecutionParams, WorldSetExecutionResult, WorldStateResult,
 };
 use mini_agent_core::SessionState;
 use mini_agent_protocol::EventEnvelope;
@@ -249,6 +254,7 @@ where
             METHOD_THREAD_GOAL_CLEAR => self.handle_thread_goal_clear(request).await,
             METHOD_TURN_START => self.handle_turn_start(request).await,
             METHOD_TURN_READ => self.handle_turn_read(request).await,
+            METHOD_TURN_EVENTS => self.handle_turn_events(request).await,
             METHOD_TURN_STEER => self.handle_turn_steer(request).await,
             METHOD_TURN_INTERRUPT => self.handle_turn_interrupt(request).await,
             METHOD_SESSION_INFO => self.handle_session_info(request).await,
@@ -257,6 +263,7 @@ where
             METHOD_WORLD_SET_EXECUTION => self.handle_world_set_execution(request).await,
             METHOD_MCP_STATUS => self.handle_mcp_status(request).await,
             METHOD_MCP_RETRY => self.handle_mcp_retry(request).await,
+            METHOD_RUNTIME_STATUS => self.handle_runtime_status(request).await,
             _ => response_error(id, JsonRpcError::method_not_found(request.method)),
         }
     }
@@ -348,6 +355,9 @@ where
                 approval_requests: self.approval_enabled,
                 workflows: self.runtime.is_some(),
                 runtime_management: self.runtime.is_some(),
+                runtime_status: true,
+                event_replay: true,
+                workflow_lifecycle_notifications: self.runtime.is_some(),
             },
             capability_manifest: self.capability_manifest.clone(),
         };
@@ -568,7 +578,45 @@ pub(super) fn runtime_notification_request(event: RuntimeNotification) -> JsonRp
         ),
         RuntimeNotification::Goal(event) => goal_notification_request(event),
         RuntimeNotification::Settings(event) => settings_notification_request(event),
+        RuntimeNotification::Status(status) => JsonRpcRequest::notification(
+            METHOD_RUNTIME_STATUS_UPDATED,
+            Some(serde_json::to_value(status).expect("runtime status is serializable")),
+        ),
+        RuntimeNotification::Workflow(event) => workflow_notification_request(event),
     }
+}
+
+fn workflow_notification_request(event: WorkflowRuntimeEvent) -> JsonRpcRequest {
+    let (method, payload) = match event {
+        WorkflowRuntimeEvent::CheckpointCommitted(payload) => {
+            (METHOD_CHECKPOINT_COMMITTED, payload)
+        }
+        WorkflowRuntimeEvent::GoalVerificationStarted(payload) => {
+            (METHOD_GOAL_VERIFICATION_STARTED, payload)
+        }
+        WorkflowRuntimeEvent::GoalVerificationCompleted(payload) => {
+            (METHOD_GOAL_VERIFICATION_COMPLETED, payload)
+        }
+        WorkflowRuntimeEvent::GoalVerificationFailed(payload) => {
+            (METHOD_GOAL_VERIFICATION_FAILED, payload)
+        }
+        WorkflowRuntimeEvent::GoalContinuationQueued(payload) => {
+            (METHOD_GOAL_CONTINUATION_QUEUED, payload)
+        }
+        WorkflowRuntimeEvent::GoalContinuationStarted(payload) => {
+            (METHOD_GOAL_CONTINUATION_STARTED, payload)
+        }
+        WorkflowRuntimeEvent::PlanUpdated(payload) => (METHOD_PLAN_UPDATED, payload),
+        WorkflowRuntimeEvent::PlanCleanupStarted(payload) => (METHOD_PLAN_CLEANUP_STARTED, payload),
+        WorkflowRuntimeEvent::PlanCleanupCompleted(payload) => {
+            (METHOD_PLAN_CLEANUP_COMPLETED, payload)
+        }
+        WorkflowRuntimeEvent::PlanCleanupFailed(payload) => (METHOD_PLAN_CLEANUP_FAILED, payload),
+    };
+    JsonRpcRequest::notification(
+        method,
+        Some(serde_json::to_value(payload).expect("workflow lifecycle is serializable")),
+    )
 }
 
 fn response_value<T: serde::Serialize>(id: Option<Value>, value: T) -> Option<JsonRpcResponse> {

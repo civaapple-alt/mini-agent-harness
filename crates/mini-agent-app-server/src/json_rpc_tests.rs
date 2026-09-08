@@ -483,6 +483,41 @@ async fn requires_initialize_and_handles_turn_start() {
 }
 
 #[tokio::test]
+async fn exposes_runtime_status_and_replays_bounded_turn_events() {
+    let (mut connection, root) = managed_connection("runtime-observability");
+    initialize_connection(&mut connection, "runtime-observability-test").await;
+
+    let status = rpc_call(
+        &mut connection,
+        2,
+        METHOD_RUNTIME_STATUS,
+        serde_json::json!({"threadId": "thread-1"}),
+    )
+    .await;
+    assert_eq!(status["phase"], "idle");
+    assert_eq!(status["threadId"], "thread-1");
+    assert!(status["timestampMs"].as_u64().unwrap() > 0);
+
+    let _ = start_turn(&mut connection, 3, "observe this run").await;
+    wait_for_turn_finished(&mut connection).await;
+    let replay = rpc_call(
+        &mut connection,
+        4,
+        METHOD_TURN_EVENTS,
+        serde_json::json!({
+            "threadId": "thread-1",
+            "afterSequence": 0,
+            "limit": 128
+        }),
+    )
+    .await;
+    assert_eq!(replay["hasGap"], false);
+    assert!(!replay["data"].as_array().unwrap().is_empty());
+    assert!(replay["nextCursor"].as_u64().unwrap() >= 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn rejects_removed_workflow_state_method() {
     let (mut connection, root) = managed_connection("workflow-rpc");
     initialize_connection(&mut connection, "workflow-test").await;
@@ -669,7 +704,19 @@ async fn preserves_cross_stream_notification_order() {
     );
     assert_eq!(
         connection.next_notification().await.unwrap().method,
-        mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED
+        mini_agent_app_server_protocol::METHOD_PLAN_UPDATED
+    );
+    let mut methods = Vec::new();
+    loop {
+        let method = connection.next_notification().await.unwrap().method;
+        methods.push(method.clone());
+        if method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
+            break;
+        }
+    }
+    assert!(
+        methods
+            .contains(&mini_agent_app_server_protocol::METHOD_GOAL_CONTINUATION_QUEUED.to_string())
     );
     wait_for_goal_status(&mut connection, "blocked").await;
     std::fs::remove_dir_all(root).unwrap();
@@ -784,6 +831,7 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     assert_eq!(result["value"]["goal"]["tokenBudget"], 1200);
     assert!(result["value"]["goal"].get("path").is_none());
     let mut active_turn_seen = false;
+    let mut verification_failed_seen = false;
     let notification = loop {
         let notification =
             tokio::time::timeout(Duration::from_secs(3), connection.next_notification())
@@ -799,9 +847,24 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
                 assert!(params["stateRevision"].as_u64().unwrap() >= set_revision);
                 break params;
             }
+        } else if notification.method
+            == mini_agent_app_server_protocol::METHOD_GOAL_VERIFICATION_FAILED
+        {
+            verification_failed_seen = true;
+            assert!(notification.params.unwrap()["error"].is_string());
         }
     };
     assert!(active_turn_seen);
+    assert!(verification_failed_seen);
+    let runtime_status = rpc_call(
+        &mut connection,
+        50,
+        METHOD_RUNTIME_STATUS,
+        serde_json::json!({"threadId": "thread-1"}),
+    )
+    .await;
+    assert_eq!(runtime_status["phase"], "failed");
+    assert!(runtime_status["error"].is_string());
     assert_eq!(notification["goal"]["objective"], "ship the next iteration");
     assert_eq!(notification["turnId"], "turn-1");
 

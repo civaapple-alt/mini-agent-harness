@@ -4,16 +4,21 @@ use crate::management::RuntimeActorState;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeRequest;
 use crate::runtime_command::RuntimeCommand;
+use crate::status::{self, RuntimeStatusHandle};
 use crate::thread_manager::ThreadManager;
 use mini_agent_app_server_protocol::{
-    ItemCompletedNotification, ItemSortDirection, ItemStartedNotification, ThreadItem,
-    ThreadItemEntry, ThreadItemsListParams, ThreadItemsListResult, TurnReadResult,
+    ItemCompletedNotification, ItemSortDirection, ItemStartedNotification, RuntimePhase,
+    ThreadItem, ThreadItemEntry, ThreadItemsListParams, ThreadItemsListResult, TurnReadResult,
 };
 use mini_agent_core::{SteeringMode, TurnResult};
 use mini_agent_protocol::{Event, EventEnvelope, EventSink, ModelUsage};
 use std::collections::VecDeque;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
+
+const EVENT_REPLAY_BUFFER: usize = 512;
 
 #[derive(Clone)]
 pub(super) enum TurnOrigin {
@@ -95,6 +100,9 @@ pub(super) enum Command {
 struct ThreadListener {
     events: broadcast::Sender<EventEnvelope>,
     notifications: broadcast::Sender<RuntimeNotification>,
+    event_replay: Arc<Mutex<VecDeque<EventEnvelope>>>,
+    runtime_status: RuntimeStatusHandle,
+    runtime_revision: Arc<AtomicU64>,
     pending_finish: Option<EventEnvelope>,
     tokens_used: u64,
 }
@@ -105,6 +113,13 @@ impl ThreadListener {
     }
 
     fn send_event(&self, event: EventEnvelope) {
+        {
+            let mut replay = self.event_replay.lock().unwrap();
+            if replay.len() == EVENT_REPLAY_BUFFER {
+                replay.pop_front();
+            }
+            replay.push_back(event.clone());
+        }
         let turn_id = event.turn_id.clone();
         if let Some(turn_id) = turn_id.clone() {
             for item in ThreadItem::started_from_event(&event) {
@@ -144,6 +159,67 @@ impl ThreadListener {
                 .saturating_add(usage.output_tokens);
         }
     }
+
+    fn update_status_for_event(&self, event: &EventEnvelope) {
+        let (phase, operation_id) = match &event.event {
+            Event::TurnStarted { .. } => (
+                RuntimePhase::StartingTurn,
+                event
+                    .turn_id
+                    .as_ref()
+                    .map(|turn_id| status::operation("turn", turn_id.as_str())),
+            ),
+            Event::RunStarted { .. } | Event::ModelStarted { .. } => (
+                RuntimePhase::Model,
+                event
+                    .turn_id
+                    .as_ref()
+                    .map(|turn_id| status::operation("turn", turn_id.as_str())),
+            ),
+            Event::ToolStarted { call } => (
+                RuntimePhase::Tool,
+                Some(status::operation("tool", &call.id)),
+            ),
+            Event::ContextCompactionStarted { .. } => (
+                RuntimePhase::Compaction,
+                event
+                    .turn_id
+                    .as_ref()
+                    .map(|turn_id| status::operation("turn", turn_id.as_str())),
+            ),
+            Event::RunFinished { .. } | Event::TurnFinished { .. } => (
+                RuntimePhase::Persisting,
+                event
+                    .turn_id
+                    .as_ref()
+                    .map(|turn_id| status::operation("turn", turn_id.as_str())),
+            ),
+            Event::RunFailed { .. } => (
+                RuntimePhase::Failed,
+                event
+                    .turn_id
+                    .as_ref()
+                    .map(|turn_id| status::operation("turn", turn_id.as_str())),
+            ),
+            Event::AssistantReasoningDelta { .. }
+            | Event::AssistantTextDelta { .. }
+            | Event::ModelResponded { .. }
+            | Event::ToolFinished { .. }
+            | Event::ContextCompactionFinished { .. } => return,
+        };
+        let checkpoint_seq = self.runtime_status.lock().unwrap().checkpoint_seq;
+        status::publish(
+            &self.runtime_status,
+            &self.notifications,
+            event.thread_id.clone(),
+            phase,
+            event.turn_id.clone(),
+            operation_id,
+            checkpoint_seq,
+            &self.runtime_revision,
+            None,
+        );
+    }
 }
 
 struct RunningCommandContext<'a, M> {
@@ -154,6 +230,7 @@ struct RunningCommandContext<'a, M> {
 
 impl EventSink for ThreadListener {
     fn emit(&mut self, event: EventEnvelope) {
+        self.update_status_for_event(&event);
         match &event.event {
             Event::ModelResponded { usage, .. }
             | Event::ContextCompactionFinished { usage, .. } => self.record_usage(*usage),
@@ -167,12 +244,35 @@ impl EventSink for ThreadListener {
     }
 }
 
+fn report_runtime_failure(
+    runtime_status: &RuntimeStatusHandle,
+    notifications: &broadcast::Sender<RuntimeNotification>,
+    runtime_revision: &AtomicU64,
+    operation_id: &str,
+    error: &str,
+) {
+    let current = runtime_status.lock().unwrap().clone();
+    status::publish_at(
+        runtime_status,
+        notifications,
+        current.thread_id,
+        RuntimePhase::Failed,
+        current.turn_id,
+        Some(operation_id.to_string()),
+        current.checkpoint_seq,
+        runtime_revision.load(std::sync::atomic::Ordering::SeqCst),
+        Some(error),
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn worker_loop<M>(
     threads: Vec<Thread<M>>,
     mut commands: mpsc::Receiver<Command>,
     events: broadcast::Sender<EventEnvelope>,
     notifications: broadcast::Sender<RuntimeNotification>,
+    event_replay: Arc<Mutex<VecDeque<EventEnvelope>>>,
+    runtime_status: RuntimeStatusHandle,
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
     runtime_revision: Arc<AtomicU64>,
     factory: Option<Arc<dyn ThreadFactory<M>>>,
@@ -199,6 +299,14 @@ pub(super) async fn worker_loop<M>(
                 && let Err(error) =
                     runtime_actor::set_thread_settings(&mut threads, state, true, None, None)
             {
+                let error_text = error.to_string();
+                report_runtime_failure(
+                    &runtime_status,
+                    &notifications,
+                    &runtime_revision,
+                    "restore-plan",
+                    &error_text,
+                );
                 eprintln!("warning: failed to restore collaboration mode: {error}");
             }
             let command_sender = runtime.as_ref().map(|state| state.commands.clone());
@@ -209,11 +317,29 @@ pub(super) async fn worker_loop<M>(
                     }
                 }
                 Ok(None) => {}
-                Err(error) => eprintln!("warning: failed to resume goal runtime: {error}"),
+                Err(error) => {
+                    let error_text = error.to_string();
+                    report_runtime_failure(
+                        &runtime_status,
+                        &notifications,
+                        &runtime_revision,
+                        "resume-goal",
+                        &error_text,
+                    );
+                    eprintln!("warning: failed to resume goal runtime: {error}");
+                }
             }
             if let Err(error) =
                 runtime_actor::restore_thread_continuation(&mut runtime, &mut threads)
             {
+                let error_text = error.to_string();
+                report_runtime_failure(
+                    &runtime_status,
+                    &notifications,
+                    &runtime_revision,
+                    "restore-continuation",
+                    &error_text,
+                );
                 eprintln!("warning: failed to restore Thread continuation: {error}");
             }
             continue;
@@ -241,6 +367,14 @@ pub(super) async fn worker_loop<M>(
                     && let Err(error) =
                         runtime_actor::restore_thread_continuation(&mut runtime, &mut threads)
                 {
+                    let error_text = error.to_string();
+                    report_runtime_failure(
+                        &runtime_status,
+                        &notifications,
+                        &runtime_revision,
+                        "restore-continuation",
+                        &error_text,
+                    );
                     eprintln!("warning: failed to restore Thread continuation: {error}");
                 }
             }
@@ -329,6 +463,38 @@ pub(super) async fn worker_loop<M>(
                         }
                         _ => None,
                     };
+                    if let (Some(goal_id), Some(goal)) = (goal_id.as_deref(), goal_state.as_ref()) {
+                        let operation_id = status::operation("goal-continuation", goal_id);
+                        let payload = crate::runtime_actor::workflow_payload_for_worker(
+                            &runtime,
+                            Some(turn_id.clone()),
+                            operation_id.clone(),
+                            None,
+                            None,
+                            Some(goal),
+                            None,
+                        );
+                        if let Some(payload) = payload {
+                            let _ = notifications.send(RuntimeNotification::Workflow(
+                                crate::notification::WorkflowRuntimeEvent::GoalContinuationStarted(
+                                    payload,
+                                ),
+                            ));
+                        }
+                        if let Some(state) = runtime.as_ref() {
+                            status::publish_at(
+                                &state.status,
+                                &notifications,
+                                thread_id.clone(),
+                                mini_agent_app_server_protocol::RuntimePhase::StartingTurn,
+                                Some(turn_id.clone()),
+                                Some(operation_id),
+                                Some(state.management.current_checkpoint_seq()),
+                                state.revision().value(),
+                                None,
+                            );
+                        }
+                    }
                     let original_config = thread.harness().config().clone();
                     if let Some(goal) = goal_state.as_ref() {
                         let mut config = original_config.clone().with_copilot_loop();
@@ -354,6 +520,9 @@ pub(super) async fn worker_loop<M>(
                     let mut sink = ThreadListener {
                         events: events.clone(),
                         notifications: notifications.clone(),
+                        event_replay: event_replay.clone(),
+                        runtime_status: runtime_status.clone(),
+                        runtime_revision: runtime_revision.clone(),
                         pending_finish: None,
                         tokens_used: 0,
                     };
@@ -437,6 +606,18 @@ pub(super) async fn worker_loop<M>(
                             )
                             .err()
                             .map(|error| error.to_string());
+                            if persistence_error.is_none()
+                                && let Some(state) = runtime.as_ref()
+                            {
+                                runtime_actor::notify_checkpoint_committed(
+                                    &runtime,
+                                    result.id.clone(),
+                                    state.management.current_checkpoint_seq(),
+                                );
+                                if state.goal_runtime_handle.plan_active() {
+                                    runtime_actor::notify_plan_updated(&runtime, true);
+                                }
+                            }
                             goal_turn_completed = result.status
                                 == mini_agent_protocol::TurnStatus::Completed
                                 && persistence_error.is_none();
@@ -474,6 +655,18 @@ pub(super) async fn worker_loop<M>(
                             .map(|persist_error| {
                                 format!("{error}; session persistence failed: {persist_error}")
                             });
+                            if persistence_error.is_none()
+                                && let Some(state) = runtime.as_ref()
+                            {
+                                runtime_actor::notify_checkpoint_committed(
+                                    &runtime,
+                                    turn_id.clone(),
+                                    state.management.current_checkpoint_seq(),
+                                );
+                                if state.goal_runtime_handle.plan_active() {
+                                    runtime_actor::notify_plan_updated(&runtime, true);
+                                }
+                            }
                             settled_turns.insert(
                                 turn_id.as_str().to_string(),
                                 SettledTurn {
@@ -485,8 +678,33 @@ pub(super) async fn worker_loop<M>(
                             );
                         }
                     }
-                    if let Err(error) = runtime_actor::cleanup_plan_scratch(&mut runtime) {
-                        eprintln!("warning: Plan cleanup_pending: {error}");
+                    if runtime
+                        .as_ref()
+                        .is_some_and(|state| state.goal_runtime_handle.plan_active())
+                    {
+                        runtime_actor::notify_plan_cleanup(
+                            &runtime,
+                            Some(turn_id.clone()),
+                            true,
+                            None,
+                        );
+                        match runtime_actor::cleanup_plan_scratch(&mut runtime) {
+                            Ok(()) => runtime_actor::notify_plan_cleanup(
+                                &runtime,
+                                Some(turn_id.clone()),
+                                false,
+                                None,
+                            ),
+                            Err(error) => {
+                                runtime_actor::notify_plan_cleanup(
+                                    &runtime,
+                                    Some(turn_id.clone()),
+                                    false,
+                                    Some(&error.to_string()),
+                                );
+                                eprintln!("warning: Plan cleanup_pending: {error}");
+                            }
+                        }
                     }
                     if let Some(goal_id) = goal_id.as_deref()
                         && sink.tokens_used > 0
@@ -546,6 +764,38 @@ pub(super) async fn worker_loop<M>(
                         }
                     }
                     runtime_actor::advance_revision(&mut runtime, &runtime_revision);
+                    let current_status = runtime_status.lock().unwrap().clone();
+                    let should_publish_terminal = matches!(
+                        current_status.phase,
+                        RuntimePhase::StartingTurn
+                            | RuntimePhase::Model
+                            | RuntimePhase::Tool
+                            | RuntimePhase::Compaction
+                            | RuntimePhase::Persisting
+                    ) || (current_status.phase
+                        == RuntimePhase::Failed
+                        && current_status.error.is_none());
+                    if should_publish_terminal
+                        && let Some(settled) = settled_turns.get(turn_id.as_str())
+                    {
+                        status::publish(
+                            &runtime_status,
+                            &notifications,
+                            thread_id.clone(),
+                            if settled.status == mini_agent_protocol::TurnStatus::Completed {
+                                RuntimePhase::Completed
+                            } else {
+                                RuntimePhase::Failed
+                            },
+                            Some(turn_id.clone()),
+                            Some(status::operation("turn", turn_id.as_str())),
+                            runtime
+                                .as_ref()
+                                .map(|state| state.management.current_checkpoint_seq()),
+                            &runtime_revision,
+                            settled.error.as_deref(),
+                        );
+                    }
                     next_input = control
                         .take_steer_input()
                         .or_else(|| control.take_follow_up_input());
@@ -581,6 +831,14 @@ pub(super) async fn worker_loop<M>(
                     && let Err(error) =
                         runtime_actor::restore_thread_continuation(&mut runtime, &mut threads)
                 {
+                    let error_text = error.to_string();
+                    report_runtime_failure(
+                        &runtime_status,
+                        &notifications,
+                        &runtime_revision,
+                        "restore-continuation",
+                        &error_text,
+                    );
                     eprintln!("warning: failed to restore Thread continuation: {error}");
                 }
             }
@@ -603,6 +861,14 @@ pub(super) async fn worker_loop<M>(
                 if let Err(error) =
                     runtime_actor::restore_thread_continuation(&mut runtime, &mut threads)
                 {
+                    let error_text = error.to_string();
+                    report_runtime_failure(
+                        &runtime_status,
+                        &notifications,
+                        &runtime_revision,
+                        "restore-continuation",
+                        &error_text,
+                    );
                     eprintln!("warning: failed to restore Thread continuation: {error}");
                 }
             }
@@ -694,6 +960,14 @@ pub(super) async fn worker_loop<M>(
                         }
                         Ok(None) => {}
                         Err(error) => {
+                            let error_text = error.to_string();
+                            report_runtime_failure(
+                                &runtime_status,
+                                &notifications,
+                                &runtime_revision,
+                                "resume-goal",
+                                &error_text,
+                            );
                             eprintln!("warning: failed to resume goal runtime: {error}")
                         }
                     }
@@ -746,11 +1020,17 @@ fn complete_goal_verification(
         runtime,
         runtime_revision,
         thread_id,
-        goal_id,
-        turn_id,
+        goal_id.clone(),
+        turn_id.clone(),
         checkpoint_seq,
         result,
     ) {
+        runtime_actor::notify_goal_verification_failed(
+            runtime,
+            &goal_id,
+            turn_id,
+            &error.to_string(),
+        );
         eprintln!("warning: Goal verification completion failed: {error}");
     }
 }

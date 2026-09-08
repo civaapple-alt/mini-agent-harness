@@ -1,4 +1,5 @@
 use super::*;
+use mini_agent_protocol::{ThreadId, TurnId};
 use tokio::io::AsyncBufRead;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWrite;
@@ -172,9 +173,17 @@ where
             }
             event = approval.next_event() => {
                 let (method, params) = match event {
-                    ApprovalEvent::Requested(request) => (
-                        mini_agent_app_server_protocol::METHOD_APPROVAL_REQUEST,
-                        serde_json::to_value(ApprovalRequestNotification {
+                    ApprovalEvent::Requested(request) => {
+                        publish_approval_status(
+                            &server,
+                            request.thread_id.clone(),
+                            request.turn_id.clone(),
+                            &request.request_id,
+                            mini_agent_app_server_protocol::RuntimePhase::WaitingApproval,
+                        );
+                        (
+                            mini_agent_app_server_protocol::METHOD_APPROVAL_REQUEST,
+                            serde_json::to_value(ApprovalRequestNotification {
                             request_id: request.request_id,
                             project_id: request.project_id,
                             workspace_id: request.workspace_id,
@@ -191,11 +200,21 @@ where
                             access: request.access,
                             policy: request.policy,
                             allowed_grant_scopes: request.allowed_grant_scopes,
-                        }).expect("approval notification is serializable"),
-                    ),
-                    ApprovalEvent::Resolved(resolution) => (
-                        mini_agent_app_server_protocol::METHOD_APPROVAL_RESOLVED,
-                        serde_json::to_value(ApprovalResolvedNotification {
+                            })
+                            .expect("approval notification is serializable"),
+                        )
+                    }
+                    ApprovalEvent::Resolved(resolution) => {
+                        publish_approval_status(
+                            &server,
+                            resolution.thread_id.clone(),
+                            resolution.turn_id.clone(),
+                            &resolution.request_id,
+                            mini_agent_app_server_protocol::RuntimePhase::Tool,
+                        );
+                        (
+                            mini_agent_app_server_protocol::METHOD_APPROVAL_RESOLVED,
+                            serde_json::to_value(ApprovalResolvedNotification {
                             request_id: resolution.request_id,
                             outcome: resolution.outcome,
                             grant_scope: resolution.grant_scope,
@@ -210,8 +229,10 @@ where
                             tool_name: resolution.tool_name,
                             action_class: resolution.action_class,
                             action_summary: resolution.action,
-                        }).expect("approval resolution is serializable"),
-                    ),
+                            })
+                            .expect("approval resolution is serializable"),
+                        )
+                    }
                 };
                 let notification = JsonRpcRequest::notification(method, Some(params));
                 outgoing_tx
@@ -298,6 +319,30 @@ where
     }
     request_tasks.abort_all();
     Ok(())
+}
+
+fn publish_approval_status<M>(
+    server: &AppServer<M>,
+    thread_id: Option<ThreadId>,
+    turn_id: Option<TurnId>,
+    request_id: &str,
+    phase: mini_agent_app_server_protocol::RuntimePhase,
+) where
+    M: Model + Send + 'static,
+{
+    let status = server.runtime_status();
+    let thread_id = thread_id.unwrap_or_else(|| server.thread_id().clone());
+    crate::status::publish(
+        &server.runtime_status_handle(),
+        &server.notifications(),
+        thread_id,
+        phase,
+        turn_id,
+        Some(crate::status::operation("approval", request_id)),
+        status.checkpoint_seq,
+        &server.runtime_revision_handle(),
+        None,
+    );
 }
 
 enum OutgoingMessage {

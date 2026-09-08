@@ -1,9 +1,12 @@
 use crate::AppServerError;
 use crate::action::{ActionReceipt, RuntimeRevision, respond};
 use crate::management::{RuntimeActorState, SettingsRuntimeEvent};
+use crate::notification::WorkflowRuntimeEvent;
 pub(super) use crate::runtime_command::{RuntimeCommand, RuntimeRequest};
+use crate::status;
 use crate::thread_manager::ThreadManager;
 use mini_agent_app_server_protocol::ContinuationMode;
+use mini_agent_app_server_protocol::{RuntimePhase, WorkflowLifecycleNotification};
 use mini_agent_capabilities::{ApprovalController, McpLoadResult, SecurityPolicy, load_mcp};
 use mini_agent_core::Thread;
 use mini_agent_protocol::{Message, Model, ThreadId, TurnId, TurnInput, TurnInputMode, TurnStart};
@@ -37,6 +40,167 @@ pub(super) fn cleanup_plan_scratch(
         .transpose()
         .map(|_| ())
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))
+}
+
+fn workflow_payload(
+    state: &RuntimeActorState,
+    turn_id: Option<TurnId>,
+    operation_id: String,
+    checkpoint_seq: Option<u64>,
+    error: Option<&str>,
+    goal: Option<&crate::goal_service::GoalState>,
+    plan_active: Option<bool>,
+) -> WorkflowLifecycleNotification {
+    WorkflowLifecycleNotification {
+        thread_id: state.management.thread_id(),
+        turn_id,
+        operation_id,
+        checkpoint_seq,
+        state_revision: state.revision().value(),
+        timestamp_ms: status::timestamp_ms(),
+        error: error.map(|value| value.chars().take(1024).collect()),
+        goal_id: goal.map(|value| value.goal_id.clone()),
+        milestone: goal.map(|value| value.current_milestone),
+        total_milestones: goal.map(|value| value.total_milestones),
+        plan_active,
+    }
+}
+
+pub(super) fn workflow_payload_for_worker(
+    runtime: &Option<RuntimeActorState>,
+    turn_id: Option<TurnId>,
+    operation_id: String,
+    checkpoint_seq: Option<u64>,
+    error: Option<&str>,
+    goal: Option<&crate::goal_service::GoalState>,
+    plan_active: Option<bool>,
+) -> Option<WorkflowLifecycleNotification> {
+    runtime.as_ref().map(|state| {
+        workflow_payload(
+            state,
+            turn_id,
+            operation_id,
+            checkpoint_seq,
+            error,
+            goal,
+            plan_active,
+        )
+    })
+}
+
+fn send_workflow(state: &RuntimeActorState, event: WorkflowRuntimeEvent) {
+    let _ = state
+        .notifications
+        .send(crate::RuntimeNotification::Workflow(event));
+}
+
+pub(super) fn notify_checkpoint_committed(
+    runtime: &Option<RuntimeActorState>,
+    turn_id: TurnId,
+    checkpoint_seq: u64,
+) {
+    let Some(state) = runtime.as_ref() else {
+        return;
+    };
+    send_workflow(
+        state,
+        WorkflowRuntimeEvent::CheckpointCommitted(workflow_payload(
+            state,
+            Some(turn_id.clone()),
+            status::operation("turn", turn_id.as_str()),
+            Some(checkpoint_seq),
+            None,
+            None,
+            None,
+        )),
+    );
+    status::publish_at(
+        &state.status,
+        &state.notifications,
+        state.management.thread_id(),
+        RuntimePhase::Persisting,
+        Some(turn_id.clone()),
+        Some(status::operation("turn", turn_id.as_str())),
+        Some(checkpoint_seq),
+        state.revision().value(),
+        None,
+    );
+}
+
+pub(super) fn notify_plan_updated(runtime: &Option<RuntimeActorState>, active: bool) {
+    let Some(state) = runtime.as_ref() else {
+        return;
+    };
+    let operation_id = status::operation("plan", state.revision().value());
+    send_workflow(
+        state,
+        WorkflowRuntimeEvent::PlanUpdated(workflow_payload(
+            state,
+            None,
+            operation_id,
+            Some(state.management.current_checkpoint_seq()),
+            None,
+            None,
+            Some(active),
+        )),
+    );
+}
+
+pub(super) fn notify_plan_cleanup(
+    runtime: &Option<RuntimeActorState>,
+    turn_id: Option<TurnId>,
+    started: bool,
+    error: Option<&str>,
+) {
+    let Some(state) = runtime.as_ref() else {
+        return;
+    };
+    notify_plan_cleanup_state(state, turn_id, started, error);
+}
+
+pub(super) fn notify_plan_cleanup_state(
+    state: &RuntimeActorState,
+    turn_id: Option<TurnId>,
+    started: bool,
+    error: Option<&str>,
+) {
+    let operation_id = status::operation(
+        "plan-cleanup",
+        turn_id.as_ref().map_or_else(|| "settings", TurnId::as_str),
+    );
+    let payload = workflow_payload(
+        state,
+        turn_id,
+        operation_id,
+        Some(state.management.current_checkpoint_seq()),
+        error,
+        None,
+        Some(started),
+    );
+    let status_turn_id = payload.turn_id.clone();
+    let status_operation_id = payload.operation_id.clone();
+    let status_checkpoint_seq = payload.checkpoint_seq;
+    send_workflow(
+        state,
+        match (started, error.is_some()) {
+            (true, _) => WorkflowRuntimeEvent::PlanCleanupStarted(payload),
+            (false, true) => WorkflowRuntimeEvent::PlanCleanupFailed(payload),
+            (false, false) => WorkflowRuntimeEvent::PlanCleanupCompleted(payload),
+        },
+    );
+    if !started && let Some(error) = error {
+        status::publish_at(
+            &state.status,
+            &state.notifications,
+            state.management.thread_id(),
+            RuntimePhase::Failed,
+            status_turn_id,
+            Some(status_operation_id),
+            status_checkpoint_seq,
+            state.revision().value(),
+            Some(error),
+        );
+    }
 }
 
 pub(super) fn handle<M>(
@@ -194,6 +358,7 @@ pub(super) fn handle<M>(
                 let _ = state
                     .notifications
                     .send(crate::RuntimeNotification::Settings(event));
+                notify_plan_updated(runtime, active);
             }
             respond(reply, receipt, result.map(|(settings, _)| settings));
         }
@@ -366,6 +531,7 @@ where
     let thread = threads
         .get_mut(thread_id.as_str())
         .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
+    let was_plan_active = state.goal_runtime_handle.plan_active();
     if let Some(mode) = continuation_mode {
         state.management.persist_continuation_mode(mode)?;
         let config = match mode {
@@ -397,10 +563,20 @@ where
             .harness_mut()
             .set_system_prompt(mini_agent_host::with_plan_mode_overlay(&base_prompt));
     } else {
-        state
-            .goal_runtime_handle
-            .disable_plan_mode()
-            .map_err(workflow_error)?;
+        if was_plan_active {
+            notify_plan_cleanup_state(state, None, true, None);
+        }
+        let cleanup_result = state.goal_runtime_handle.disable_plan_mode();
+        if was_plan_active {
+            match cleanup_result.as_ref() {
+                Ok(()) => notify_plan_cleanup_state(state, None, false, None),
+                Err(error) => {
+                    let error_text = error.to_string();
+                    notify_plan_cleanup_state(state, None, false, Some(&error_text));
+                }
+            }
+        }
+        cleanup_result.map_err(workflow_error)?;
         state.approval.set_living_plan(None);
         if let Some(prompt) = state.stable_system_prompt.as_deref() {
             thread.harness_mut().set_system_prompt(prompt);
@@ -499,6 +675,28 @@ fn schedule_goal_turn(
         state.goal_runtime_handle.release_turn(&goal.goal_id);
         return Err(AppServerError::Disconnected);
     }
+    let operation_id = status::operation("goal-continuation", &goal.goal_id);
+    let payload = workflow_payload(
+        state,
+        None,
+        operation_id.clone(),
+        Some(state.management.current_checkpoint_seq()),
+        None,
+        Some(goal),
+        None,
+    );
+    send_workflow(state, WorkflowRuntimeEvent::GoalContinuationQueued(payload));
+    status::publish_at(
+        &state.status,
+        &state.notifications,
+        state.management.thread_id(),
+        RuntimePhase::GoalContinuationQueued,
+        None,
+        Some(operation_id),
+        Some(state.management.current_checkpoint_seq()),
+        state.revision().value(),
+        None,
+    );
     Ok(())
 }
 
@@ -616,6 +814,34 @@ where
             .load_goal_state()
             .map_err(workflow_error)?
     {
+        let operation_id = status::operation(
+            "goal-verification",
+            format!("{}:{}", request.goal_id, request.checkpoint_seq),
+        );
+        let payload = workflow_payload(
+            state,
+            Some(request.turn_id.clone()),
+            operation_id.clone(),
+            Some(request.checkpoint_seq),
+            None,
+            Some(&goal),
+            None,
+        );
+        send_workflow(
+            state,
+            WorkflowRuntimeEvent::GoalVerificationStarted(payload),
+        );
+        status::publish_at(
+            &state.status,
+            &state.notifications,
+            state.management.thread_id(),
+            RuntimePhase::GoalVerification,
+            Some(request.turn_id.clone()),
+            Some(operation_id),
+            Some(request.checkpoint_seq),
+            state.revision().value(),
+            None,
+        );
         notify_goal_update(state, &request.turn_id, Some(goal));
     }
     Ok(request)
@@ -634,6 +860,7 @@ where
         Ok(request) => Ok(request),
         Err(error) => {
             let reason = format!("goal verifier preparation failed: {error}");
+            notify_goal_verification_failed(runtime, goal_id, turn_id.clone(), &reason);
             goal_turn_limited(
                 runtime,
                 goal_id,
@@ -644,6 +871,42 @@ where
             Ok(None)
         }
     }
+}
+
+pub(super) fn notify_goal_verification_failed(
+    runtime: &Option<RuntimeActorState>,
+    goal_id: &str,
+    turn_id: TurnId,
+    error: &str,
+) {
+    let Some(state) = runtime.as_ref() else {
+        return;
+    };
+    let checkpoint_seq = state.management.current_checkpoint_seq();
+    let operation_id =
+        status::operation("goal-verification", format!("{goal_id}:{checkpoint_seq}"));
+    let mut payload = workflow_payload(
+        state,
+        Some(turn_id.clone()),
+        operation_id.clone(),
+        Some(checkpoint_seq),
+        Some(error),
+        None,
+        None,
+    );
+    payload.goal_id = Some(goal_id.to_string());
+    send_workflow(state, WorkflowRuntimeEvent::GoalVerificationFailed(payload));
+    status::publish_at(
+        &state.status,
+        &state.notifications,
+        state.management.thread_id(),
+        RuntimePhase::Failed,
+        Some(turn_id),
+        Some(operation_id),
+        Some(checkpoint_seq),
+        state.revision().value(),
+        Some(error),
+    );
 }
 
 pub(super) fn complete_goal_verification(
@@ -657,6 +920,7 @@ pub(super) fn complete_goal_verification(
 ) -> Result<(), AppServerError> {
     let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
     let current_checkpoint_seq = state.management.current_checkpoint_seq();
+    let verification_error = result.as_ref().err().cloned();
     let Some(goal) = state
         .goal_runtime_handle
         .complete_verification(
@@ -670,6 +934,27 @@ pub(super) fn complete_goal_verification(
     else {
         return Ok(());
     };
+    let operation_id = status::operation(
+        "goal-verification",
+        format!("{}:{}", goal_id, checkpoint_seq),
+    );
+    let payload = workflow_payload(
+        state,
+        Some(turn_id.clone()),
+        operation_id,
+        Some(checkpoint_seq),
+        verification_error.as_deref(),
+        Some(&goal),
+        None,
+    );
+    send_workflow(
+        state,
+        if verification_error.is_some() {
+            WorkflowRuntimeEvent::GoalVerificationFailed(payload)
+        } else {
+            WorkflowRuntimeEvent::GoalVerificationCompleted(payload)
+        },
+    );
     let goal = if goal.status == mini_agent_host::GoalStatus::Running {
         match schedule_goal_turn(state, &goal) {
             Ok(()) => goal,
@@ -682,13 +967,30 @@ pub(super) fn complete_goal_verification(
         goal
     };
     state.goal_runtime_handle.notify_updated(
-        thread_id,
-        Some(turn_id),
-        goal,
+        thread_id.clone(),
+        Some(turn_id.clone()),
+        goal.clone(),
         state.revision().next().value(),
     );
     let revision = state.advance_revision();
     runtime_revision.store(revision.value(), Ordering::SeqCst);
+    if goal.status != mini_agent_host::GoalStatus::Running {
+        status::publish_at(
+            &state.status,
+            &state.notifications,
+            thread_id,
+            if goal.status == mini_agent_host::GoalStatus::Converged {
+                RuntimePhase::Completed
+            } else {
+                RuntimePhase::Failed
+            },
+            None,
+            None,
+            Some(current_checkpoint_seq),
+            revision.value(),
+            goal.last_error.as_deref(),
+        );
+    }
     Ok(())
 }
 

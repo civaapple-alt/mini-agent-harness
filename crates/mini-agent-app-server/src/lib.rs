@@ -9,6 +9,7 @@ use mini_agent_protocol::{
     TurnInput, TurnInputMode, TurnStart, TurnSubmission,
 };
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,6 +18,7 @@ use std::thread;
 use tokio::sync::{Notify, broadcast, mpsc, oneshot};
 
 const EVENT_BUFFER: usize = 256;
+const EVENT_REPLAY_BUFFER: usize = 512;
 const COMMAND_BUFFER: usize = 32;
 
 #[derive(Clone)]
@@ -304,6 +306,7 @@ pub use runtime::{
 pub use thread_settings::ThreadSettingsService;
 pub use trace::{JsonlTrace, TraceRecord};
 
+mod status;
 mod worker;
 use action::ActionFailure;
 use action::ActionResponse;
@@ -351,6 +354,13 @@ pub struct SettledTurn {
     pub status: mini_agent_protocol::TurnStatus,
     pub outcome: Option<mini_agent_core::RunOutcome>,
     pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct EventReplaySnapshot {
+    pub(crate) events: Vec<EventEnvelope>,
+    pub(crate) oldest_sequence: Option<u64>,
+    pub(crate) has_gap: bool,
 }
 
 #[cfg(test)]
@@ -406,6 +416,8 @@ pub struct AppServer<M> {
     commands: mpsc::Sender<Command>,
     events: broadcast::Sender<EventEnvelope>,
     notifications: broadcast::Sender<RuntimeNotification>,
+    event_replay: Arc<Mutex<VecDeque<EventEnvelope>>>,
+    runtime_status: Arc<Mutex<mini_agent_app_server_protocol::RuntimeStatus>>,
     control: Arc<RunControl>,
     thread_id: ThreadId,
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
@@ -420,6 +432,8 @@ impl<M> Clone for AppServer<M> {
             commands: self.commands.clone(),
             events: self.events.clone(),
             notifications: self.notifications.clone(),
+            event_replay: self.event_replay.clone(),
+            runtime_status: self.runtime_status.clone(),
             control: self.control.clone(),
             thread_id: self.thread_id.clone(),
             thread_ids: self.thread_ids.clone(),
@@ -505,8 +519,21 @@ where
         let (commands, command_receiver) = mpsc::channel(COMMAND_BUFFER);
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let (notifications, _) = broadcast::channel(EVENT_BUFFER);
+        let event_replay = Arc::new(Mutex::new(VecDeque::with_capacity(EVENT_REPLAY_BUFFER)));
+        let runtime_status = Arc::new(Mutex::new(mini_agent_app_server_protocol::RuntimeStatus {
+            phase: mini_agent_app_server_protocol::RuntimePhase::Idle,
+            thread_id: start.thread_id.clone(),
+            turn_id: None,
+            operation_id: None,
+            checkpoint_seq: None,
+            state_revision: 0,
+            timestamp_ms: crate::status::timestamp_ms(),
+            error: None,
+        }));
         let worker_events = events.clone();
         let worker_notifications = notifications.clone();
+        let worker_event_replay = event_replay.clone();
+        let worker_runtime_status = runtime_status.clone();
         let worker_thread_ids = thread_ids.clone();
         let worker_revision = runtime_revision.clone();
         let worker_factory = factory.clone();
@@ -523,6 +550,8 @@ where
                     command_receiver,
                     worker_events,
                     worker_notifications,
+                    worker_event_replay,
+                    worker_runtime_status,
                     worker_thread_ids,
                     worker_revision,
                     worker_factory,
@@ -534,6 +563,8 @@ where
             commands,
             events,
             notifications,
+            event_replay,
+            runtime_status,
             control,
             thread_id: start.thread_id,
             thread_ids,
@@ -545,6 +576,10 @@ where
 
     pub(crate) fn command_sender(&self) -> mpsc::Sender<Command> {
         self.commands.clone()
+    }
+
+    pub(crate) fn runtime_status_handle(&self) -> crate::status::RuntimeStatusHandle {
+        self.runtime_status.clone()
     }
 
     /// Stops the worker after all earlier commands have settled.
@@ -798,6 +833,41 @@ where
     /// Subscribes to the ordered event stream emitted by the core Thread.
     pub fn subscribe(&self) -> broadcast::Receiver<EventEnvelope> {
         self.events.subscribe()
+    }
+
+    pub(crate) fn replay_events(
+        &self,
+        thread_id: &ThreadId,
+        after_sequence: Option<u64>,
+        limit: usize,
+    ) -> Result<crate::EventReplaySnapshot, AppServerError> {
+        if !self.has_thread(thread_id) {
+            return Err(AppServerError::ThreadNotFound(thread_id.clone()));
+        }
+        let after_sequence = after_sequence.unwrap_or_default();
+        let replay = self.event_replay.lock().unwrap();
+        let oldest_sequence = replay
+            .iter()
+            .filter(|event| event.thread_id == *thread_id)
+            .map(|event| event.sequence)
+            .min();
+        let has_gap =
+            oldest_sequence.is_some_and(|oldest| after_sequence.saturating_add(1) < oldest);
+        let events = replay
+            .iter()
+            .filter(|event| event.thread_id == *thread_id && event.sequence > after_sequence)
+            .take(limit)
+            .cloned()
+            .collect();
+        Ok(crate::EventReplaySnapshot {
+            events,
+            oldest_sequence,
+            has_gap,
+        })
+    }
+
+    pub(crate) fn runtime_status(&self) -> mini_agent_app_server_protocol::RuntimeStatus {
+        self.runtime_status.lock().unwrap().clone()
     }
 
     /// Starts, steers, or queues a turn according to the typed input mode.

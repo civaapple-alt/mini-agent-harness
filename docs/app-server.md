@@ -45,8 +45,9 @@ JSON-RPC error's `data`; requests rejected before admission do not claim an
 action. The protocol negotiation and thread index responses remain structural
 responses rather than action results.
 
-The service emits `turn/event`, Item, Goal, and settings notifications from one
-ordered runtime stream. Core `turn/event` notifications contain the event type,
+The service emits `turn/event`, Item, Goal, settings, runtime-status, and
+workflow-lifecycle notifications from one ordered runtime stream. Core
+`turn/event` notifications contain the event type,
 thread/turn identity, and `sequence` number; that sequence belongs to the Core
 Thread event stream and is intentionally distinct from `actionSequence`. The
 single runtime stream prevents a ready Goal/settings notification from racing
@@ -200,6 +201,7 @@ projection for a read-only session listing, but mutation remains an App Server
 | --- | --- | --- |
 | `turn/start` | `threadId`, `input: {mode, text}` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. |
 | `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, and optional error. |
+| `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of ordered `turn/event` notifications with `nextCursor`, `oldestSequence`, and `hasGap`. |
 | `turn/steer` | `threadId`, `turnId`, `text` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. |
 | `turn/interrupt` | `threadId`, `turnId` | Requests cooperative cancellation and returns `{accepted: true}` when admitted. |
 
@@ -207,6 +209,12 @@ projection for a read-only session listing, but mutation remains an App Server
 notifications while the turn is running, then use `turn/read` for the settled
 result. Steering and interruption are requests to the runtime; they do not
 force an immediate stop before the runtime reaches a cancellation boundary.
+
+`turn/events` is a reconnect aid, not a second history store. The App Server
+keeps a bounded in-memory window of Core events per process. `afterSequence` is
+exclusive; when the requested cursor is older than the retained window,
+`hasGap` is true and the client must reconcile with `thread/read` and
+`thread/items/list` before accepting the replay as complete.
 
 #### Thread settings, Plan, and Goal
 
@@ -221,6 +229,18 @@ Goal status values are `active`, `paused`, `blocked`, `usageLimited`,
 `budgetLimited`, and `complete`. Goal continuation, verification, pause,
 resume, and checkpoint association belong to GoalRuntime; clients do not
 submit verifier verdicts or advance milestones directly.
+
+#### Runtime observation
+
+| Method | Parameters | Result / effect |
+| --- | --- | --- |
+| `runtime/status` | `threadId` | Returns a non-blocking bounded snapshot: `phase`, `threadId`, optional `turnId`/`operationId`/`checkpointSeq`, `stateRevision`, `timestampMs`, and optional `error`. |
+
+`phase` distinguishes `starting_turn`, `model`, `tool`, `waiting_approval`,
+`compaction`, `persisting`, `goal_verification`, `goal_continuation_queued`,
+`completed`, and `failed` (as well as `idle`, `resuming`). The snapshot is
+control-plane telemetry; it does not replace `turn/read` or the canonical
+Goal/Thread projections.
 
 #### Runtime management
 
@@ -266,6 +286,12 @@ emitted on one ordered runtime stream.
 | `thread/settings/updated` | `threadId`, effective mode, Builtin tools, continuation mode, `stateRevision` | Projects a settings change. |
 | `thread/goal/updated` | `threadId`, optional `turnId`, Goal projection, `stateRevision` | Projects Goal creation, update, or runtime progress. |
 | `thread/goal/cleared` | `threadId`, `stateRevision` | Projects Goal removal. |
+| `runtime/status/updated` | Runtime status snapshot | Reports phase transitions without waiting for a turn to settle. |
+| `checkpoint/committed` | `threadId`, `turnId`, `checkpointSeq`, `stateRevision`, `operationId` | Confirms a settled turn checkpoint was persisted. |
+| `goal/verification_started\|completed\|failed` | Goal/turn/checkpoint identity, milestone fields, optional `error` | Exposes the verifier boundary and result. |
+| `goal/continuation_queued\|started` | Goal/turn identity, checkpoint and milestone fields | Exposes scheduling and actual start of the next Goal turn. |
+| `plan/updated` | `planActive`, checkpoint and `stateRevision` | Reports Plan projection changes. |
+| `plan/cleanup_started\|completed\|failed` | Operation/checkpoint identity, optional `error` | Reports cleanup of Plan scratch state, including failures. |
 
 `sequence` is the Core Thread event sequence. `actionSequence` in an action
 response is the App Server admission order; they are different counters and

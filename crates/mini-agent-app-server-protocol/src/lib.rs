@@ -42,6 +42,7 @@ pub const METHOD_TURN_READ: &str = "turn/read";
 pub const METHOD_TURN_STEER: &str = "turn/steer";
 pub const METHOD_TURN_INTERRUPT: &str = "turn/interrupt";
 pub const METHOD_TURN_EVENT: &str = "turn/event";
+pub const METHOD_TURN_EVENTS: &str = "turn/events";
 pub const METHOD_ITEM_STARTED: &str = "item/started";
 pub const METHOD_ITEM_COMPLETED: &str = "item/completed";
 pub const METHOD_THREAD_ITEMS_LIST: &str = "thread/items/list";
@@ -59,6 +60,18 @@ pub const METHOD_WORLD_REFRESH: &str = "world/refresh";
 pub const METHOD_WORLD_SET_EXECUTION: &str = "world/set_execution";
 pub const METHOD_MCP_STATUS: &str = "mcp/status";
 pub const METHOD_MCP_RETRY: &str = "mcp/retry";
+pub const METHOD_RUNTIME_STATUS: &str = "runtime/status";
+pub const METHOD_RUNTIME_STATUS_UPDATED: &str = "runtime/status/updated";
+pub const METHOD_CHECKPOINT_COMMITTED: &str = "checkpoint/committed";
+pub const METHOD_GOAL_VERIFICATION_STARTED: &str = "goal/verification_started";
+pub const METHOD_GOAL_VERIFICATION_COMPLETED: &str = "goal/verification_completed";
+pub const METHOD_GOAL_VERIFICATION_FAILED: &str = "goal/verification_failed";
+pub const METHOD_GOAL_CONTINUATION_QUEUED: &str = "goal/continuation_queued";
+pub const METHOD_GOAL_CONTINUATION_STARTED: &str = "goal/continuation_started";
+pub const METHOD_PLAN_UPDATED: &str = "plan/updated";
+pub const METHOD_PLAN_CLEANUP_STARTED: &str = "plan/cleanup_started";
+pub const METHOD_PLAN_CLEANUP_COMPLETED: &str = "plan/cleanup_completed";
+pub const METHOD_PLAN_CLEANUP_FAILED: &str = "plan/cleanup_failed";
 
 /// A JSON-RPC request or notification received by the app-server.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -161,6 +174,83 @@ pub struct ActionResult<T> {
     pub state_revision: u64,
 }
 
+/// The bounded phase of the App Server's currently observable operation.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimePhase {
+    #[default]
+    Idle,
+    StartingTurn,
+    Model,
+    Tool,
+    WaitingApproval,
+    Compaction,
+    Persisting,
+    GoalVerification,
+    GoalContinuationQueued,
+    Resuming,
+    Completed,
+    Failed,
+}
+
+/// A live, bounded snapshot of one App Server runtime operation.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatus {
+    pub phase: RuntimePhase,
+    pub thread_id: ThreadId,
+    pub turn_id: Option<TurnId>,
+    pub operation_id: Option<String>,
+    pub checkpoint_seq: Option<u64>,
+    pub state_revision: u64,
+    pub timestamp_ms: u64,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatusParams {
+    pub thread_id: ThreadId,
+}
+
+/// A bounded workflow lifecycle record. The method name identifies the
+/// transition; optional fields carry only the correlation data needed to
+/// reconcile a live client with the canonical runtime.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowLifecycleNotification {
+    pub thread_id: ThreadId,
+    pub turn_id: Option<TurnId>,
+    pub operation_id: String,
+    pub checkpoint_seq: Option<u64>,
+    pub state_revision: u64,
+    pub timestamp_ms: u64,
+    pub error: Option<String>,
+    pub goal_id: Option<String>,
+    pub milestone: Option<usize>,
+    pub total_milestones: Option<usize>,
+    pub plan_active: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnEventsParams {
+    pub thread_id: ThreadId,
+    #[serde(default)]
+    pub after_sequence: Option<u64>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnEventsResult {
+    pub data: Vec<TurnEventNotification>,
+    pub next_cursor: Option<u64>,
+    pub oldest_sequence: Option<u64>,
+    pub has_gap: bool,
+}
+
 impl JsonRpcError {
     pub fn parse_error(message: impl Into<String>) -> Self {
         Self::new(-32700, message)
@@ -261,6 +351,12 @@ pub struct ServerCapabilities {
     pub workflows: bool,
     #[serde(default)]
     pub runtime_management: bool,
+    #[serde(default)]
+    pub runtime_status: bool,
+    #[serde(default)]
+    pub event_replay: bool,
+    #[serde(default)]
+    pub workflow_lifecycle_notifications: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
