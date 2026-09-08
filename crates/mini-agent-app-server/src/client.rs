@@ -63,6 +63,11 @@ where
         }
     }
 
+    /// Stops the in-process App Server worker after its queued work settles.
+    pub async fn shutdown(&self) -> Result<(), crate::AppServerError> {
+        self.connection.shutdown().await
+    }
+
     pub async fn initialize(
         &mut self,
         client_name: impl Into<String>,

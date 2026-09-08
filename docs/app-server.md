@@ -73,6 +73,12 @@ a control-plane fast path even when a `turn/steer` request is waiting for the
 worker. The worker still serializes one Thread at a time while that approval is
 pending; other runtime actions remain ordered behind it.
 
+Embedded callers should call the local client's or connection's explicit
+`shutdown()` after an idle runtime when they need to release a SessionStore lock
+for an in-process restart. Shutdown is not a public JSON-RPC method: an active
+turn returns `Busy`, while an idle worker acknowledges shutdown and drops its
+runtime-owned SessionStore before the next process can resume it.
+
 `item/started` and `item/completed` carry one bounded `ThreadItem` with
 `threadId`, `turnId`, and its lifecycle timestamp. The completed notification
 is the authoritative final projection for that item; the same tool `callId` is

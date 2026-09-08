@@ -46,10 +46,11 @@ Batch 3 已完成 canonical continuation persistence 的第一条切片：Sessio
 以带 `thread_id` 的原子 `thread_settings.json` sidecar 保存显式
 `manual`/`continuous` 偏好，App Server 在 runtime bind 时恢复它；Gateway 的
 continuation shadow cache 已删除，SessionCatalog 只读该 bounded projection。
-Capabilities resume、Gateway catalog、Goal ownership 与普通设置不覆盖偏好的
-测试均通过。当前还没有把“释放 App Server worker 后再启动另一个进程”的证据
-写成完成项：现有 worker 的 RuntimeActor 持有 self-sender，连接对象释放并不等于
-worker 停止，完整 process shutdown/restart 仍是后续生命周期切片。
+Capabilities resume、App Server idle shutdown/restart、Gateway catalog、Goal
+ownership 与普通设置不覆盖偏好的测试均通过。为完成这条证据，App Server
+增加了显式 idle-only `shutdown()` seam；活动 turn 不允许直接 shutdown，必须先
+按既有 cancel/settlement 路径收敛。本切片相对 `24ae42e` 增加 runtime/release
+`+98/+98`，没有修改 Cargo manifest，预算仍为 green。
 
 这不是 Batch 1 的全部故障矩阵；approval denial、timeout、MCP refusal、Goal
 恢复和 revision 的既有证据仍需在同一报告中统一记录，partial tool batch 与
@@ -77,10 +78,10 @@ Core:              3,251 effective lines
 Protocol:            769 effective lines
 Capabilities:      9,484 effective lines
 Host:              3,012 effective lines
-App Server:       10,786 effective lines
-Control Plane:    18,403 effective lines
-Runtime:           17,818 / 20,000
-Release Rust:     27,302 / 30,000
+App Server:       10,884 effective lines
+Control Plane:    18,501 effective lines
+Runtime:           17,916 / 20,000
+Release Rust:     27,400 / 30,000
 ```
 
 `python scripts/cargo_boundary.py --json` 当前通过；唯一显式 review edge 是 `mini-agent-app-server → mini-agent-capabilities`，原因是 App Server 仍参与 Provider、Session 和 Approval 的 runtime assembly。两个相关提交没有修改 Cargo manifest，因此本提案不会为了减少文件数而改变依赖方向。
@@ -171,7 +172,11 @@ Recovery state:             running | paused | settled | failed | blocked
 | 进程连接、JSON-RPC、类型解析 | Python SDK | Gateway 转 REST/WebSocket | SDK 重新解释运行时语义 |
 | Project 清单和页面交互状态 | Gateway/Web | 发起控制请求、展示事件 | 伪造 Session、Approval 或 Recovery authority |
 
-特别需要验证 `mini-agent-web/server/session_manager.py` 中 Thread continuation 缓存与 App Server canonical state 的关系。如果 App Server 能持久化并恢复该设置，应删除 Gateway 的重复缓存；如果暂时不能，应明确它只是启动适配缓存，并增加重启后与 App Server 返回值不一致时的失败测试，不能静默覆盖 canonical state。
+本提案已验证 `mini-agent-web/server/session_manager.py` 中 Thread continuation
+与 App Server canonical state 的关系：偏好由 SessionStore sidecar 持久化，Gateway
+只读 SessionCatalog 投影并在受控时机发起恢复请求，重复缓存和写入路径已删除。
+后续重点转为跨客户端 revision 收敛、跨 Project/Thread attach，以及 active turn
+取消后再 shutdown 的生命周期组合；任何新适配都不能静默覆盖 canonical state。
 
 ## 证据化问题清单
 
@@ -179,8 +184,8 @@ Recovery state:             running | paused | settled | failed | blocked
 | --- | --- | --- | --- | --- |
 | E-01 | `ContinuationMode` 从 `mini-agent-app-server-protocol` 经 Runtime、SDK、Gateway 到 Studio；`Trusted` 在 Protocol/Capabilities 中参与工具准入 | 一个 UI 字段可能改变 loop、权限和恢复行为 | 继续使用现有跨层契约矩阵，不新增 Core 依赖 | 若字段只影响展示且不会改变任何运行结果，可退回 UI-only 方案 |
 | E-02 | Cargo boundary 通过，但标记 `App Server → Capabilities` review edge | runtime assembly 的具体能力仍暴露在 App Server | 仅在出现重复 authority 或具体迁移实验时下沉到 Host | 若 App Server 不再直接构造 Provider/Session/Approval，可进入依赖收敛批次 |
-| E-03 | Batch 3 已将 Thread continuation 写入 SessionStore 的带 `thread_id` sidecar，Gateway 可从 SessionCatalog 只读投影；App Server startup bind 负责恢复 | 进程生命周期尚未提供“连接释放即 worker 停止”的公共证据，不能把 sidecar resume 单测等同于完整 process restart | 保留 App Server 为唯一写 authority；Gateway cache 已删除；下一切片补显式 worker shutdown/restart seam，再验证跨进程 lock 与 effective settings | 若 shutdown/restart 场景证明新进程返回相同 mode 且旧 worker 已释放 lock，E-03 完成 |
-| E-04 | 当前 runtime 仅剩约 1,182 行 operating budget，release Rust 仅剩约 1,698 行 operating budget | Control Plane 很容易用新抽象掩盖复杂度增长 | 新增概念默认必须有删除项或净零抵消 | 若批次可以删除旧状态、兼容分支或重复测试并形成净减少，可放宽 |
+| E-03 | Batch 3 已将 Thread continuation 写入 SessionStore 的带 `thread_id` sidecar，Gateway 可从 SessionCatalog 只读投影；App Server startup bind 负责恢复 | worker 生命周期必须先显式 idle shutdown，活动 turn 不能绕过 settlement 释放 lock | App Server 是唯一写 authority；Gateway cache 已删除；继续沿用 shutdown/restart 与跨 Thread/Project 场景验证 | 已有 App Server shutdown/restart 场景证明新 worker 返回相同 mode 且旧 worker 已释放 lock，E-03 covered |
+| E-04 | 当前 runtime 仅剩约 1,084 行 operating budget，release Rust 仅剩约 1,600 行 operating budget | Control Plane 很容易用新抽象掩盖复杂度增长 | 新增概念默认必须有删除项或净零抵消 | 若批次可以删除旧状态、兼容分支或重复测试并形成净减少，可放宽 |
 | E-05 | 现有边界已有 Approval、Goal、Session、lock、timeout 和事件测试，但跨故障组合仍需形成统一 scenario | 单元测试通过不等于跨层可交付 | 建立 bounded Scenario/Eval 矩阵，不调用付费 Provider | 若既有公共场景已区分所有目标结果和失败反例，则不新增重复 scenario |
 
 ## 分批实施方案
@@ -255,7 +260,7 @@ Recovery state:             running | paused | settled | failed | blocked
 1. **所属层**：本提案属于跨层架构，但执行面仍由 Core 保持最小；控制面由 App Server、Host 和 Capabilities 按现有所有权承载，SDK/Gateway/Web 只做协议和交互适配。
 2. **重复职责**：已有 `Thread`、`Turn`、`Goal`、`SessionStore`、`ApprovalStore`、`ToolOrchestrator`、checkpoint、events 和 `JsonlTrace` 已覆盖大部分责任；实施前必须检索并证明新类型不能替代旧类型。
 3. **替换优先**：优先删除 Gateway shadow state、隐式总开关、模型自报完成路径和重复兼容分支；只有 Scenario 证明现有边界无法表达时才新增概念。
-4. **净行数**：当前 runtime 为 `17,818/20,000`，release Rust 为 `27,302/30,000`；相对 `cea7a04` 本切片为 `+82/+136`，仍低于 operating/red-band 门槛。Core 预期净增为 `0`；每个实现批次默认 runtime/release 净零或提供明确删除抵消，进入 red band 即停止扩张。
+4. **净行数**：当前 runtime 为 `17,916/20,000`，release Rust 为 `27,400/30,000`；相对 `cea7a04` 累计为 `+180/+234`，相对上一提交本生命周期切片为 `+98/+98`，仍低于 operating/red-band 门槛。Core 预期净增为 `0`；每个实现批次默认 runtime/release 净零或提供明确删除抵消，进入 red band 即停止扩张。
 5. **可见表面**：新增的 Goal/Boundary/Invariant、控制字段、事件和结果投影都必须有 hard limit；未知权限输入 fail closed；不得把 raw prompt、凭证或无界工具结果写入模型上下文、事件或持久化。
 6. **边界证据**：使用 Core/Capabilities/App Server 的单测与协议 fixture，再用 Mock Provider 的 bounded Scenario 覆盖拒绝、Plan lock、超时、取消、锁竞争、部分副作用、恢复、验证失败和审计脱敏；跨仓验证 SDK、Gateway 和 Studio 收敛到同一 revision。
 

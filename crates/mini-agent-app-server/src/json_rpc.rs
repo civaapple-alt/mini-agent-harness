@@ -175,6 +175,10 @@ where
         self.initialized.load(Ordering::Acquire)
     }
 
+    pub async fn shutdown(&self) -> Result<(), AppServerError> {
+        self.server.shutdown().await
+    }
+
     pub async fn next_approval_request(&self) -> ApprovalRequest {
         self.approval.next_request().await
     }

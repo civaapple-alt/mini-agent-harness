@@ -3,7 +3,8 @@ use crate::tests::{DoneModel, harness};
 use mini_agent_app_server_protocol::{CapabilityProviderSelection, ClientCapabilities};
 use mini_agent_capabilities::{
     ApprovalController, ApprovalPolicy, ImageStore, ResultStore, SandboxKind, SecurityPolicy,
-    SecurityPreset, workspace_tools_with_read_roots_and_results,
+    SecurityPreset, SessionRequest as SessionStoreRequest, SessionStore,
+    workspace_tools_with_read_roots_and_results,
 };
 use mini_agent_core::{Harness, HarnessConfig, Thread, ToolRouter};
 use mini_agent_protocol::{
@@ -299,6 +300,41 @@ fn managed_connection_at<M: Model + Send + 'static>(
     )
 }
 
+fn managed_connection_with_session<M: Model + Send + 'static>(
+    model: M,
+    root: std::path::PathBuf,
+    opened: mini_agent_capabilities::OpenedSession,
+) -> AppServerConnection<M> {
+    let thread_id = ThreadId::new(opened.store.thread_id().to_string());
+    let server = AppServer::new(
+        ThreadStart::new(thread_id.clone()),
+        Thread::new(
+            thread_id,
+            Harness::new(model, ToolRouter::default(), HarnessConfig::default()),
+        ),
+    );
+    let thread_settings = ThreadSettingsService::new();
+    let goals =
+        ThreadGoalRequestProcessor::new(root.clone(), crate::goal_service::GoalLimits::default());
+    let management = RuntimeManagementService::new(
+        server.clone(),
+        Some(opened),
+        mini_agent_host::WorldState::detect_with_roots(
+            &root,
+            Vec::new(),
+            SecurityPreset::Default,
+            ApprovalPolicy::Automatic,
+            SandboxKind::Native,
+        ),
+        Vec::new(),
+        0,
+        Vec::new(),
+        ApprovalController::with_preset(ApprovalPolicy::Automatic, Default::default()),
+    );
+    AppServerConnection::new(server)
+        .with_runtime_services(RuntimeServices::new(management, thread_settings, goals).unwrap())
+}
+
 async fn wait_for_goal_status<M: Model + Send + 'static>(
     connection: &mut AppServerConnection<M>,
     status: &str,
@@ -497,6 +533,46 @@ async fn broadcasts_thread_settings_updates_with_action_revision() {
     );
     assert_eq!(params["continuationMode"], "continuous");
     assert_eq!(params["stateRevision"], response_revision);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn persists_and_restores_thread_continuation_through_app_server_restart() {
+    let root = rpc_root("thread-settings-session");
+    let mut opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let session_id = opened.store.session_id().to_string();
+    let thread_id = opened.store.thread_id().to_string();
+    opened.store.set_continuation_mode("continuous").unwrap();
+
+    let mut connection = managed_connection_with_session(DoneModel, root.clone(), opened);
+    initialize_connection(&mut connection, "thread-settings-session-test").await;
+
+    connection.shutdown().await.unwrap();
+    let resumed = loop {
+        match SessionStore::open(&root, SessionStoreRequest::Resume(session_id.clone())) {
+            Ok(opened) => break opened,
+            Err(error) if error.contains("locked") => {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(error) => panic!("unexpected session error: {error}"),
+        }
+    };
+    assert_eq!(resumed.store.continuation_mode(), Some("continuous"));
+
+    let mut restarted = managed_connection_with_session(DoneModel, root.clone(), resumed);
+    initialize_connection(&mut restarted, "thread-settings-session-restart-test").await;
+    let response = rpc_call(
+        &mut restarted,
+        2,
+        METHOD_THREAD_SETTINGS_UPDATE,
+        serde_json::json!({
+            "threadId": thread_id,
+            "collaborationMode": {"mode": "default"}
+        }),
+    )
+    .await;
+    assert_eq!(response["value"]["continuationMode"], "continuous");
+    restarted.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 

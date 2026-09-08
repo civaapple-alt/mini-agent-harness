@@ -547,6 +547,20 @@ where
         self.commands.clone()
     }
 
+    /// Stops the worker after all earlier commands have settled.
+    ///
+    /// An active turn rejects shutdown with `Busy`; callers must first
+    /// interrupt and wait for its settled result. The explicit seam is also
+    /// what releases a SessionStore lock for an in-process restart.
+    pub async fn shutdown(&self) -> Result<(), AppServerError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(Command::Shutdown { reply })
+            .await
+            .map_err(|_| AppServerError::Disconnected)?;
+        response.await.map_err(|_| AppServerError::Disconnected)?
+    }
+
     pub(crate) fn notifications(&self) -> broadcast::Sender<RuntimeNotification> {
         self.notifications.clone()
     }

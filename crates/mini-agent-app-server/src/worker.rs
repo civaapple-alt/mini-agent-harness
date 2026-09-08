@@ -22,6 +22,9 @@ pub(super) enum TurnOrigin {
 }
 
 pub(super) enum Command {
+    Shutdown {
+        reply: oneshot::Sender<Result<(), AppServerError>>,
+    },
     InstallRuntime {
         state: Box<RuntimeActorState>,
     },
@@ -183,6 +186,10 @@ pub(super) async fn worker_loop<M>(
     let mut settled_turns = HashMap::new();
     let mut deferred_goal_verifications = VecDeque::new();
     while let Some(command) = commands.recv().await {
+        if let Command::Shutdown { reply } = command {
+            let _ = reply.send(Ok(()));
+            break;
+        }
         if let Command::InstallRuntime { state } = command {
             runtime = Some(*state);
             if runtime
@@ -696,6 +703,9 @@ pub(super) async fn worker_loop<M>(
             Command::InstallRuntime { .. } => {
                 unreachable!("runtime installation is handled before action admission")
             }
+            Command::Shutdown { .. } => {
+                unreachable!("worker shutdown is handled before action admission")
+            }
         }
     }
 }
@@ -898,6 +908,9 @@ fn handle_running_command<M>(
             deferred_goal_verifications.push_back(command);
         }
         Command::InstallRuntime { .. } => {}
+        Command::Shutdown { reply } => {
+            let _ = reply.send(Err(AppServerError::Busy));
+        }
         Command::Runtime(request) => runtime_actor::handle_running(
             request,
             receipt,
