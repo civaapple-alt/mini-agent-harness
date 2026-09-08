@@ -213,18 +213,22 @@ pub(super) fn handle<M>(
                 state
                     .approval
                     .set_goal_dir(Some(state.goal_runtime_handle.goal_dir()));
-                if changed {
-                    let thread_id = state.management.thread_id();
-                    if goal.status == mini_agent_host::GoalStatus::Running {
-                        schedule_goal_turn(state, &goal)?;
-                    }
-                    state
-                        .goal_runtime_handle
-                        .notify_updated(thread_id, None, goal.clone());
+                if changed && goal.status == mini_agent_host::GoalStatus::Running {
+                    schedule_goal_turn(state, &goal)?;
                 }
-                Ok((goal, changed))
+                Ok(((goal, changed), changed))
             });
-            respond(reply, receipt, result);
+            if let Ok((goal, true)) = &result
+                && let Some(state) = runtime.as_ref()
+            {
+                state.goal_runtime_handle.notify_updated(
+                    state.management.thread_id(),
+                    None,
+                    goal.clone(),
+                    state.revision().value(),
+                );
+            }
+            respond(reply, receipt, result.map(|(goal, _)| goal));
         }
         RuntimeCommand::ThreadGoalGet { reply } => respond(
             reply,
@@ -246,13 +250,15 @@ pub(super) fn handle<M>(
                     .clear_goal()
                     .map_err(workflow_error)?;
                 state.approval.set_goal_dir(None);
-                if cleared {
-                    state
-                        .goal_runtime_handle
-                        .notify_cleared(state.management.thread_id());
-                }
                 Ok((cleared, cleared))
             });
+            if let Ok(true) = &result
+                && let Some(state) = runtime.as_ref()
+            {
+                state
+                    .goal_runtime_handle
+                    .notify_cleared(state.management.thread_id(), state.revision().value());
+            }
             respond(reply, receipt, result);
         }
     }
@@ -570,6 +576,7 @@ fn notify_goal_update(
         state.management.thread_id(),
         Some(turn_id.clone()),
         goal,
+        state.revision().next().value(),
     );
     true
 }
@@ -665,9 +672,12 @@ pub(super) fn complete_goal_verification(
     } else {
         goal
     };
-    state
-        .goal_runtime_handle
-        .notify_updated(thread_id, Some(turn_id), goal);
+    state.goal_runtime_handle.notify_updated(
+        thread_id,
+        Some(turn_id),
+        goal,
+        state.revision().next().value(),
+    );
     let revision = state.advance_revision();
     runtime_revision.store(revision.value(), Ordering::SeqCst);
     Ok(())

@@ -484,6 +484,7 @@ pub(super) fn goal_notification_request(event: GoalRuntimeEvent) -> JsonRpcReque
             thread_id,
             turn_id,
             state,
+            state_revision,
         } => JsonRpcRequest::notification(
             mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED,
             Some(
@@ -491,15 +492,22 @@ pub(super) fn goal_notification_request(event: GoalRuntimeEvent) -> JsonRpcReque
                     goal: crate::goal_runtime::project_goal(thread_id.clone(), *state),
                     thread_id,
                     turn_id,
+                    state_revision,
                 })
                 .expect("goal update notification is serializable"),
             ),
         ),
-        GoalRuntimeEvent::Cleared { thread_id } => JsonRpcRequest::notification(
+        GoalRuntimeEvent::Cleared {
+            thread_id,
+            state_revision,
+        } => JsonRpcRequest::notification(
             mini_agent_app_server_protocol::METHOD_THREAD_GOAL_CLEARED,
             Some(
-                serde_json::to_value(ThreadGoalClearedNotification { thread_id })
-                    .expect("goal cleared notification is serializable"),
+                serde_json::to_value(ThreadGoalClearedNotification {
+                    thread_id,
+                    state_revision,
+                })
+                .expect("goal cleared notification is serializable"),
             ),
         ),
     }

@@ -18,9 +18,11 @@ pub(crate) enum GoalRuntimeEvent {
         thread_id: ThreadId,
         turn_id: Option<TurnId>,
         state: Box<GoalState>,
+        state_revision: u64,
     },
     Cleared {
         thread_id: ThreadId,
+        state_revision: u64,
     },
 }
 
@@ -323,24 +325,28 @@ impl GoalRuntimeHandle {
         thread_id: ThreadId,
         turn_id: Option<TurnId>,
         state: GoalState,
+        state_revision: u64,
     ) {
         let _ = self.events.send(GoalRuntimeEvent::Updated {
             thread_id: thread_id.clone(),
             turn_id: turn_id.clone(),
             state: Box::new(state.clone()),
+            state_revision,
         });
         if let Some(notifications) = &self.notifications {
             let _ = notifications.send(RuntimeNotification::Goal(GoalRuntimeEvent::Updated {
                 thread_id,
                 turn_id,
                 state: Box::new(state),
+                state_revision,
             }));
         }
     }
 
-    pub(crate) fn notify_cleared(&self, thread_id: ThreadId) {
+    pub(crate) fn notify_cleared(&self, thread_id: ThreadId, state_revision: u64) {
         let event = GoalRuntimeEvent::Cleared {
             thread_id: thread_id.clone(),
+            state_revision,
         };
         let _ = self.events.send(event.clone());
         if let Some(notifications) = &self.notifications {

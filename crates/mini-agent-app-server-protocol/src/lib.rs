@@ -422,12 +422,14 @@ pub struct ThreadGoalUpdatedNotification {
     pub thread_id: ThreadId,
     pub turn_id: Option<TurnId>,
     pub goal: ThreadGoal,
+    pub state_revision: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadGoalClearedNotification {
     pub thread_id: ThreadId,
+    pub state_revision: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

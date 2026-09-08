@@ -778,6 +778,8 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
         result["value"]["goal"]["objective"],
         "ship the next iteration"
     );
+    let set_revision = result["stateRevision"].as_u64().unwrap();
+    assert!(set_revision > 0);
     assert_eq!(result["value"]["goal"]["status"], "active");
     assert_eq!(result["value"]["goal"]["tokenBudget"], 1200);
     assert!(result["value"]["goal"].get("path").is_none());
@@ -794,6 +796,7 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
                 active_turn_seen = true;
             }
             if params["goal"]["status"] == "blocked" {
+                assert!(params["stateRevision"].as_u64().unwrap() >= set_revision);
                 break params;
             }
         }
@@ -824,9 +827,14 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     )
     .await;
     assert_eq!(result["value"]["cleared"], true);
+    let clear_revision = result["stateRevision"].as_u64().unwrap();
     loop {
         let notification = connection.next_notification().await.unwrap();
         if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_CLEARED {
+            assert_eq!(
+                notification.params.unwrap()["stateRevision"],
+                clear_revision
+            );
             break;
         }
     }
