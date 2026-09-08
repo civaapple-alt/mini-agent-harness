@@ -10,6 +10,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **Control-plane ownership:** reject direct Thread continuation changes while
   an active Goal owns the loop configuration; this keeps Goal milestone limits
   authoritative across public App Server requests.
+- **Trusted admission evidence:** keep ordinary project-scoped patches directly
+  admissible under `trusted`, while deletion and high-risk Shell actions remain
+  approval-gated.
 
 - **Harness documentation:** move current framework, evidence, boundary, and tool
   surface guidance into self-contained `docs/` files; keep `.agents/notes/` for

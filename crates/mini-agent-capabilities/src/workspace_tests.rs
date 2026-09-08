@@ -226,7 +226,7 @@ fn trusted_policy_directly_admits_non_destructive_patches_but_not_deletes() {
         panic!("trusted non-destructive patch should not request approval")
     });
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
-    let patch = ApplyPatch(workspace);
+    let patch = ApplyPatch(Arc::clone(&workspace));
     let update = ToolExecutionRequest::new(
         "trusted-update",
         "apply_patch",
@@ -243,6 +243,17 @@ fn trusted_policy_directly_admits_non_destructive_patches_but_not_deletes() {
     );
     assert!(matches!(
         patch.admission(&delete).unwrap(),
+        ToolAdmission::ApprovalRequired { .. }
+    ));
+
+    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+    let high_risk = ToolExecutionRequest::new(
+        "trusted-shell",
+        "shell",
+        json!({"command": "git reset --hard HEAD"}),
+    );
+    assert!(matches!(
+        shell.admission(&high_risk).unwrap(),
         ToolAdmission::ApprovalRequired { .. }
     ));
 

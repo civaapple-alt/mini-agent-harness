@@ -37,6 +37,11 @@ Runtime 持有。App Server 公共 `thread/settings/update` 在 Goal 为
 库测试全部通过，新增切片使 runtime/release Rust 基线从 `17,674/27,094`
 增至 `17,736/27,156`（`+62/+62`，仍为 green）。
 
+随后补充 AC-02 的高风险反例：Capabilities 测试验证 `trusted + project` 下的
+普通 patch 可以直接准入，但删除操作和 `shell` 的 `git reset --hard HEAD` 仍然
+要求 approval；该证据只增加 `+0/+10` release lines，当前基线为
+`17,736/27,166`，仍为 green。
+
 这不是 Batch 1 的全部故障矩阵；approval denial、timeout、MCP refusal、Goal
 恢复和 revision 的既有证据仍需在同一报告中统一记录，partial tool batch 与
 跨进程锁的组合场景仍是后续工作。
