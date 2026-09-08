@@ -12,6 +12,7 @@ use mini_agent_app_server_protocol::{
 };
 use mini_agent_core::{SteeringMode, TurnResult};
 use mini_agent_protocol::{Event, EventEnvelope, EventSink, ModelUsage};
+use serde_json::Value;
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -104,12 +105,17 @@ struct ThreadListener {
     runtime_status: RuntimeStatusHandle,
     runtime_revision: Arc<AtomicU64>,
     pending_finish: Option<EventEnvelope>,
+    tool_arguments: Vec<(String, Value)>,
     tokens_used: u64,
 }
 
 impl ThreadListener {
     fn take_pending_finish(&mut self) -> Option<EventEnvelope> {
         self.pending_finish.take()
+    }
+
+    fn take_tool_arguments(&mut self) -> Vec<(String, Value)> {
+        std::mem::take(&mut self.tool_arguments)
     }
 
     fn send_event(&self, event: EventEnvelope) {
@@ -231,6 +237,13 @@ struct RunningCommandContext<'a, M> {
 impl EventSink for ThreadListener {
     fn emit(&mut self, event: EventEnvelope) {
         self.update_status_for_event(&event);
+        if matches!(&event.event, Event::ToolStarted { .. }) {
+            for item in ThreadItem::from_event(&event) {
+                if let ThreadItem::ToolCall { id, arguments, .. } = item {
+                    self.tool_arguments.push((id, arguments));
+                }
+            }
+        }
         match &event.event {
             Event::ModelResponded { usage, .. }
             | Event::ContextCompactionFinished { usage, .. } => self.record_usage(*usage),
@@ -524,6 +537,7 @@ pub(super) async fn worker_loop<M>(
                         runtime_status: runtime_status.clone(),
                         runtime_revision: runtime_revision.clone(),
                         pending_finish: None,
+                        tool_arguments: Vec::new(),
                         tokens_used: 0,
                     };
                     let mut turn = Box::pin(thread.run_turn_with_events(
@@ -596,6 +610,7 @@ pub(super) async fn worker_loop<M>(
                                 .messages
                                 .get(previous_message_count..)
                                 .unwrap_or(&projected.messages);
+                            let tool_arguments = sink.take_tool_arguments();
                             let persistence_error = runtime_actor::persist_turn(
                                 &mut runtime,
                                 &thread,
@@ -603,6 +618,7 @@ pub(super) async fn worker_loop<M>(
                                 &prompt,
                                 &projected,
                                 turn_messages,
+                                &tool_arguments,
                             )
                             .err()
                             .map(|error| error.to_string());
@@ -650,6 +666,7 @@ pub(super) async fn worker_loop<M>(
                                 &prompt,
                                 &projected,
                                 &projected.messages,
+                                &[],
                             )
                             .err()
                             .map(|persist_error| {
@@ -1228,12 +1245,16 @@ where
                     let turn_id = record.turn_id.as_ref()?.clone();
                     let turn_id = TurnId::new(turn_id);
                     Some(
-                        ThreadItem::from_message_with_id(&record.message, record.item_id.clone())
-                            .into_iter()
-                            .map(move |item| ThreadItemEntry {
-                                turn_id: turn_id.clone(),
-                                item,
-                            }),
+                        ThreadItem::from_message_with_id_and_arguments(
+                            &record.message,
+                            record.item_id.clone(),
+                            record.arguments.as_ref(),
+                        )
+                        .into_iter()
+                        .map(move |item| ThreadItemEntry {
+                            turn_id: turn_id.clone(),
+                            item,
+                        }),
                     )
                 })
                 .flatten()

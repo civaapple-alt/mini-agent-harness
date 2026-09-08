@@ -156,6 +156,16 @@ impl ThreadItem {
     /// Tool item ids still come from their model `callId`, matching the live
     /// lifecycle projection.
     pub fn from_message_with_id(message: &Message, id: impl Into<String>) -> Vec<Self> {
+        Self::from_message_with_id_and_arguments(message, id, None)
+    }
+
+    /// Projects one persisted message and an optional bounded tool argument
+    /// projection captured from the lifecycle event stream.
+    pub fn from_message_with_id_and_arguments(
+        message: &Message,
+        id: impl Into<String>,
+        persisted_arguments: Option<&Value>,
+    ) -> Vec<Self> {
         let id = id.into();
         match message {
             Message::User { text } => vec![Self::UserMessage {
@@ -176,7 +186,9 @@ impl ThreadItem {
             } => vec![Self::ToolCall {
                 id: call_id.clone(),
                 name: name.clone(),
-                arguments: Value::Null,
+                arguments: persisted_arguments
+                    .map(project_arguments)
+                    .unwrap_or(Value::Null),
                 status: if *is_error {
                     ItemStatus::Failed
                 } else {

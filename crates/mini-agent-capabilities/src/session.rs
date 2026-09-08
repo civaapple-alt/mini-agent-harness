@@ -80,6 +80,9 @@ pub struct TurnCommit<'a> {
     pub steps: usize,
     pub error: Option<&'a str>,
     pub messages: &'a [Message],
+    /// Bounded/redacted tool argument projections from the App Server event
+    /// stream, keyed by tool call id. Raw model arguments are not persisted.
+    pub tool_arguments: &'a [(String, Value)],
     pub checkpoint: &'a [Message],
 }
 
@@ -92,6 +95,8 @@ pub struct SessionItem {
     pub thread_id: String,
     pub turn_id: Option<String>,
     pub message: Message,
+    /// Optional bounded/redacted arguments for a persisted tool item.
+    pub arguments: Option<Value>,
 }
 
 struct SessionLock(PathBuf);
@@ -213,12 +218,26 @@ impl SessionStore {
             .iter()
             .map(|message| {
                 let item_id = item_id_for_message(message);
-                records.push(self.item_record_with_id(Some(turn_id), message, &item_id));
+                let arguments = match message {
+                    Message::Tool { call_id, .. } => turn
+                        .tool_arguments
+                        .iter()
+                        .find(|(id, _)| id == call_id)
+                        .map(|(_, arguments)| arguments.clone()),
+                    _ => None,
+                };
+                records.push(self.item_record_with_id(
+                    Some(turn_id),
+                    message,
+                    &item_id,
+                    arguments.as_ref(),
+                ));
                 SessionItem {
                     item_id,
                     thread_id: self.thread_id.clone(),
                     turn_id: Some(turn_id.to_string()),
                     message: message.clone(),
+                    arguments,
                 }
             })
             .collect::<Vec<_>>();
@@ -593,7 +612,7 @@ impl SessionStore {
 
     fn item_record(&self, turn_id: Option<&str>, message: &Message) -> Value {
         let item_id = item_id_for_message(message);
-        self.item_record_with_id(turn_id, message, &item_id)
+        self.item_record_with_id(turn_id, message, &item_id, None)
     }
 
     fn item_record_with_id(
@@ -601,8 +620,9 @@ impl SessionStore {
         turn_id: Option<&str>,
         message: &Message,
         item_id: &str,
+        arguments: Option<&Value>,
     ) -> Value {
-        json!({
+        let mut record = json!({
             "kind": "item",
             "item_id": item_id,
             "thread_id": self.thread_id,
@@ -610,7 +630,13 @@ impl SessionStore {
             "item_kind": message_kind(message),
             "timestamp_ms": timestamp_ms(),
             "message": message,
-        })
+        });
+        if let Some(arguments) = arguments
+            && let Some(object) = record.as_object_mut()
+        {
+            object.insert("arguments".to_string(), arguments.clone());
+        }
+        record
     }
 
     fn checkpoint_record(&self, messages: &[Message]) -> Value {
@@ -796,6 +822,7 @@ mod tests {
                     steps: 1,
                     error: None,
                     messages: &messages,
+                    tool_arguments: &[],
                     checkpoint: &messages,
                 },
             )
@@ -816,6 +843,69 @@ mod tests {
         let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
         assert_eq!(resumed.store.items().len(), 2);
         assert_eq!(resumed.store.items()[0].turn_id.as_deref(), Some("turn-1"));
+        drop(resumed);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn tool_argument_projection_survives_session_resume() {
+        let root = crate::test_support::test_root();
+        let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let messages = vec![
+            Message::User {
+                text: "inspect".to_string(),
+            },
+            Message::Assistant {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![mini_agent_protocol::ToolCall {
+                    id: "call-1".to_string(),
+                    name: "shell".to_string(),
+                    arguments: serde_json::json!({"command": "Get-ChildItem"}),
+                }],
+            },
+            Message::Tool {
+                call_id: "call-1".to_string(),
+                name: "shell".to_string(),
+                content: "exit: 0\nstdout:\nfile.txt\nstderr:\n".to_string(),
+                is_error: false,
+                outcome: Some(mini_agent_protocol::ToolExecutionStatus::Completed),
+            },
+        ];
+        let arguments = vec![(
+            "call-1".to_string(),
+            serde_json::json!({"command": "Get-ChildItem", "token": "[REDACTED]"}),
+        )];
+        opened
+            .store
+            .record_turn_with_id(
+                "turn-1",
+                TurnCommit {
+                    started_at_ms: timestamp_ms(),
+                    prompt: "inspect",
+                    status: TurnStatus::Completed,
+                    steps: 2,
+                    error: None,
+                    messages: &messages,
+                    tool_arguments: &arguments,
+                    checkpoint: &messages,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            opened.store.items()[2].arguments,
+            Some(arguments[0].1.clone())
+        );
+        let session_text = fs::read_to_string(opened.store.path()).unwrap();
+        assert!(session_text.contains("Get-ChildItem"));
+        drop(opened);
+
+        let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        assert_eq!(
+            resumed.store.items()[2].arguments,
+            Some(arguments[0].1.clone())
+        );
         drop(resumed);
         crate::test_support::remove_test_root(&root);
     }

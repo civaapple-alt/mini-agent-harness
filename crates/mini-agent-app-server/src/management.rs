@@ -472,6 +472,7 @@ impl RuntimeManagementState {
         prompt: &str,
         result: &RuntimeTurnResult,
         messages: &[Message],
+        tool_arguments: &[(String, serde_json::Value)],
         checkpoint: &[Message],
     ) -> Result<(), AppServerError> {
         let Some(session) = self.session.as_mut() else {
@@ -496,6 +497,7 @@ impl RuntimeManagementState {
                     steps: result.steps,
                     error: result.error.as_deref(),
                     messages,
+                    tool_arguments,
                     checkpoint,
                 },
             )

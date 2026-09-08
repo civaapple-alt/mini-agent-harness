@@ -160,3 +160,27 @@ fn persisted_projection_preserves_supplied_identity() {
         ]
     );
 }
+
+#[test]
+fn persisted_tool_projection_keeps_supplied_arguments() {
+    let message = mini_agent_protocol::Message::Tool {
+        call_id: "call-1".to_string(),
+        name: "shell".to_string(),
+        content: "exit: 0".to_string(),
+        is_error: false,
+        outcome: Some(mini_agent_protocol::ToolExecutionStatus::Completed),
+    };
+    let arguments = serde_json::json!({"command": "Get-ChildItem"});
+    let items =
+        ThreadItem::from_message_with_id_and_arguments(&message, "message-1", Some(&arguments));
+    assert_eq!(
+        items,
+        vec![ThreadItem::ToolCall {
+            id: "call-1".to_string(),
+            name: "shell".to_string(),
+            arguments,
+            status: ItemStatus::Completed,
+            output: Some("exit: 0".to_string()),
+        }]
+    );
+}

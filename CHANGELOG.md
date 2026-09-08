@@ -55,6 +55,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Fixed
 
+- **Persisted Shell observability:** carry bounded, redacted tool arguments from
+  the lifecycle event projection into SessionStore item records, restore them
+  through `thread/items/list`, and retain the canonical tool settlement output.
+
 - **Plan Mode Shell admission:** allow conservative read-only Shell inspection
   commands, including PowerShell listing pipelines, read-only command sequences,
   and `git ls-files`, while keeping mutations, redirections, script blocks, and

@@ -1202,6 +1202,7 @@ pub(super) fn persist_turn(
     prompt: &str,
     result: &crate::RuntimeTurnResult,
     messages: &[Message],
+    tool_arguments: &[(String, serde_json::Value)],
 ) -> Result<(), AppServerError> {
     let checkpoint = thread
         .checkpoint()
@@ -1214,6 +1215,7 @@ pub(super) fn persist_turn(
         prompt,
         result,
         messages,
+        tool_arguments,
         checkpoint.session.messages(),
     )
 }

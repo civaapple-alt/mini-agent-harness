@@ -130,11 +130,16 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                         .ok_or_else(|| "item is missing message".to_string())?,
                 )
                 .map_err(|error| format!("invalid item message: {error}"))?;
+                let arguments = record
+                    .get("arguments")
+                    .filter(|value| !value.is_null())
+                    .cloned();
                 items.push(SessionItem {
                     item_id,
                     thread_id,
                     turn_id,
                     message,
+                    arguments,
                 });
             }
             Some("checkpoint") if header_seen => {
