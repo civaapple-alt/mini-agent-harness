@@ -360,6 +360,22 @@ pub struct ThreadGoal {
     pub time_used_seconds: i64,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default)]
+    pub current_milestone: usize,
+    #[serde(default)]
+    pub total_milestones: usize,
+    #[serde(default)]
+    pub loop_count: usize,
+    #[serde(default)]
+    pub last_verifier_score: Option<u32>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+    #[serde(default = "default_verification_status")]
+    pub verification_status: String,
+}
+
+fn default_verification_status() -> String {
+    "idle".to_string()
 }
 
 /// Sets or replaces a Thread Goal. A running Goal cannot be replaced

@@ -186,6 +186,11 @@ fn handles_rejected_and_failed_verifier_results() {
         failed.last_error.as_deref(),
         Some("verifier provider timed out")
     );
+    let verifier_artifact =
+        std::fs::read_to_string(session_dir.join("goal").join("verifier_verdict.md")).unwrap();
+    assert!(verifier_artifact.contains("Status: failed"));
+    assert!(verifier_artifact.contains("checkpoint sequence: 2"));
+    assert!(verifier_artifact.contains("verifier provider timed out"));
     assert!(
         runtime
             .complete_verification(

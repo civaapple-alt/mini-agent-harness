@@ -42,6 +42,16 @@ pub enum GoalStatus {
     BudgetLimited,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalVerificationStatus {
+    #[default]
+    Idle,
+    Running,
+    Completed,
+    Failed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GoalState {
     pub schema_version: u32,
@@ -70,6 +80,8 @@ pub struct GoalState {
     pub active_turn_settled: bool,
     #[serde(default)]
     pub last_error: Option<String>,
+    #[serde(default)]
+    pub verification_status: GoalVerificationStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -226,12 +238,31 @@ impl HostWorkflowStore {
         })
     }
 
+    pub fn mark_goal_verification_started(
+        &self,
+        goal_id: &str,
+        turn_id: &str,
+        checkpoint_seq: u64,
+    ) -> io::Result<Option<GoalState>> {
+        let updated = update_running_goal(&self.session_dir, goal_id, Some(turn_id), |state| {
+            state.verification_status = GoalVerificationStatus::Running;
+        })?;
+        if updated.is_some() {
+            write_verifier_progress(&self.session_dir, checkpoint_seq)?;
+        }
+        Ok(updated)
+    }
+
     pub fn verification_criteria(&self) -> io::Result<String> {
         goal_verification_criteria(&self.session_dir)
     }
 
     pub fn record_verifier_verdict(&self, checkpoint_seq: u64, output: &str) -> io::Result<()> {
         record_verifier_verdict(&self.session_dir, checkpoint_seq, output)
+    }
+
+    pub fn record_verifier_failure(&self, checkpoint_seq: u64, error: &str) -> io::Result<()> {
+        record_verifier_failure(&self.session_dir, checkpoint_seq, error)
     }
 
     pub fn advance_goal(&self, verdict: Option<VerifierVerdict>) -> io::Result<GoalState> {
@@ -550,6 +581,7 @@ pub fn init_goal_workspace_with_limits(
         active_turn_id: None,
         active_turn_settled: false,
         last_error: None,
+        verification_status: GoalVerificationStatus::Idle,
     };
 
     write_goal_state(session_dir, &state)?;
@@ -671,6 +703,32 @@ pub fn record_verifier_verdict(
     fs::write(session_dir.join("goal").join("verifier_verdict.md"), record)
 }
 
+fn record_verifier_failure(session_dir: &Path, checkpoint_seq: u64, error: &str) -> io::Result<()> {
+    write_verifier_failure(session_dir, Some(checkpoint_seq), error)
+}
+
+fn write_verifier_failure(
+    session_dir: &Path,
+    checkpoint_seq: Option<u64>,
+    error: &str,
+) -> io::Result<()> {
+    let error: String = error.chars().take(MAX_GOAL_ERROR_CHARS).collect();
+    let checkpoint = checkpoint_seq
+        .map(|seq| seq.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let record = format!(
+        "# Goal Verification\n\n- Status: failed\n- Source checkpoint sequence: {checkpoint}\n\nVerifier error: {error}\n"
+    );
+    fs::write(session_dir.join("goal").join("verifier_verdict.md"), record)
+}
+
+fn write_verifier_progress(session_dir: &Path, checkpoint_seq: u64) -> io::Result<()> {
+    let record = format!(
+        "# Goal Verification\n\n- Status: running\n- Source checkpoint sequence: {checkpoint_seq}\n\nThe independent verifier is evaluating this settled milestone.\n"
+    );
+    fs::write(session_dir.join("goal").join("verifier_verdict.md"), record)
+}
+
 pub fn limit_goal_with_reason(
     session_dir: &Path,
     status: GoalStatus,
@@ -679,10 +737,24 @@ pub fn limit_goal_with_reason(
     let state_file = session_dir.join("goal").join("state.json");
     let mut state = load_goal_state(session_dir)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "goal state not found"))?;
+    let verification_was_running = state.verification_status == GoalVerificationStatus::Running;
     state.status = status;
     state.last_error = reason.map(|reason| reason.chars().take(MAX_GOAL_ERROR_CHARS).collect());
+    if verification_was_running {
+        state.verification_status = GoalVerificationStatus::Failed;
+    }
     state.updated_at_ms = current_time_ms();
     write_json(state_file, &state)?;
+    if verification_was_running {
+        write_verifier_failure(
+            session_dir,
+            None,
+            state
+                .last_error
+                .as_deref()
+                .unwrap_or("goal verifier failed"),
+        )?;
+    }
     Ok(state)
 }
 
@@ -749,6 +821,7 @@ pub fn advance_goal_milestone(
 
     state.loop_count += 1;
     if let Some(ref v) = verdict {
+        state.verification_status = GoalVerificationStatus::Completed;
         state.last_verifier_score = v.score;
         if v.outcome == VerdictOutcome::Approved {
             if state.current_milestone >= state.total_milestones {

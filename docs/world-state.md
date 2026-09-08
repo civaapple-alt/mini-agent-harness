@@ -84,8 +84,11 @@ A Goal verifier is a separately configured model runtime, not a hidden second
 voice inside the primary turn. It reads the latest settled checkpoint. The
 Runtime Actor associates its result with the Goal, source Thread, verifier
 turn, and authoritative checkpoint sequence before applying it. The
-`goal/verifier_verdict.md` artifact stores only the source checkpoint sequence
-and bounded verifier output.
+`goal/verifier_verdict.md` artifact is created with a bounded `running` marker
+as soon as verification starts, then stores the source checkpoint sequence and
+bounded verifier output (or a bounded failure reason). The App Server emits a
+`thread/goal/updated` notification for these lifecycle changes, so clients can
+show verification progress without waiting for the next Goal turn.
 
 The verifier uses a separate harness with an empty tool catalog, a zero
 tool-call limit, and one model step. It cannot edit the primary transcript,

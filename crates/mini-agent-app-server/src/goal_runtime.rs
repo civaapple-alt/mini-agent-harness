@@ -248,6 +248,11 @@ impl GoalRuntimeHandle {
         {
             return Ok(None);
         }
+        self.store.mark_goal_verification_started(
+            &state.goal_id,
+            turn_id.as_str(),
+            checkpoint_seq,
+        )?;
         let Some(runtime_config) = self.verifier_config.clone() else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -315,7 +320,14 @@ impl GoalRuntimeHandle {
                     Err(error) => self.store.fail_goal_with_reason(&error.to_string()),
                 }
             }
-            Err(error) => self.store.fail_goal_with_reason(&error),
+            Err(error) => {
+                let next = self.store.fail_goal_with_reason(&error)?;
+                // `fail_goal_with_reason` also writes a terminal failure marker
+                // for preparation failures. Rewrite it with the authoritative
+                // checkpoint sequence when the verifier itself has returned.
+                let _ = self.store.record_verifier_failure(checkpoint_seq, &error);
+                Ok(next)
+            }
         }?;
         Ok(Some(next))
     }
@@ -401,6 +413,18 @@ pub(crate) fn project_goal(thread_id: ThreadId, state: GoalState) -> ThreadGoal 
         },
         created_at: (state.created_at_ms / 1000) as i64,
         updated_at: (state.updated_at_ms / 1000) as i64,
+        current_milestone: state.current_milestone,
+        total_milestones: state.total_milestones,
+        loop_count: state.loop_count,
+        last_verifier_score: state.last_verifier_score,
+        last_error: state.last_error,
+        verification_status: match state.verification_status {
+            mini_agent_host::GoalVerificationStatus::Idle => "idle",
+            mini_agent_host::GoalVerificationStatus::Running => "running",
+            mini_agent_host::GoalVerificationStatus::Completed => "completed",
+            mini_agent_host::GoalVerificationStatus::Failed => "failed",
+        }
+        .to_string(),
     }
 }
 

@@ -595,7 +595,7 @@ where
         .checkpoint()
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
     let thread_id = state.management.thread_id();
-    state
+    let request = state
         .goal_runtime_handle
         .prepare_verification(
             thread_id.clone(),
@@ -609,7 +609,16 @@ where
                 request.turn_id = turn_id.clone();
                 request
             })
-        })
+        })?;
+    if let Some(request) = request.as_ref()
+        && let Some(goal) = state
+            .goal_runtime_handle
+            .load_goal_state()
+            .map_err(workflow_error)?
+    {
+        notify_goal_update(state, &request.turn_id, Some(goal));
+    }
+    Ok(request)
 }
 
 pub(super) fn prepare_goal_verification_or_fail<M>(

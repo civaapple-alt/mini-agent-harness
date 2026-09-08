@@ -30,6 +30,7 @@ pub use config::RuntimeConfig;
 pub use goal::GoalLimits;
 pub use goal::GoalState;
 pub use goal::GoalStatus;
+pub use goal::GoalVerificationStatus;
 pub use goal::HostWorkflowStore;
 pub use goal::VerdictOutcome;
 pub use goal::VerifierVerdict;

@@ -127,6 +127,40 @@ fn goal_workspace_lifecycle_and_milestones() {
 }
 
 #[test]
+fn verifier_progress_and_failure_are_visible_in_goal_artifact() {
+    let dir = test_dir();
+    let store = HostWorkflowStore::new(&dir, GoalLimits::default());
+    let state = store
+        .set_goal("Verify the current milestone", None)
+        .unwrap();
+
+    store
+        .mark_goal_turn_started(&state.goal_id, "turn-1")
+        .unwrap();
+    store
+        .mark_goal_turn_settled(&state.goal_id, "turn-1")
+        .unwrap();
+    let running = store
+        .mark_goal_verification_started(&state.goal_id, "turn-1", 42)
+        .unwrap()
+        .unwrap();
+    assert_eq!(running.verification_status, GoalVerificationStatus::Running);
+    let progress = fs::read_to_string(dir.join("goal/verifier_verdict.md")).unwrap();
+    assert!(progress.contains("Status: running"));
+    assert!(progress.contains("checkpoint sequence: 42"));
+
+    let failed = store
+        .fail_goal_with_reason("verifier provider is unavailable")
+        .unwrap();
+    assert_eq!(failed.verification_status, GoalVerificationStatus::Failed);
+    let failure = fs::read_to_string(dir.join("goal/verifier_verdict.md")).unwrap();
+    assert!(failure.contains("Status: failed"));
+    assert!(failure.contains("verifier provider is unavailable"));
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn goal_objective_is_bounded_at_creation() {
     let dir = test_dir();
     let objective = "x".repeat(MAX_GOAL_OBJECTIVE_BYTES + 1);

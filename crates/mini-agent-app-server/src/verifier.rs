@@ -55,10 +55,25 @@ pub async fn verify_goal_checkpoint(
         context_limit_behavior: ContextLimitBehavior::Reject,
         ..HarnessConfig::default()
     };
-    let mut harness = Harness::new(model, ToolRouter::new(Vec::new()), config);
+    let mut harness = Harness::new(model, ToolRouter::new(Vec::new()), config.clone());
+    let history = bounded_verifier_history(messages);
+    let restore_tool_limit = history
+        .iter()
+        .filter_map(|message| match message {
+            Message::Assistant { tool_calls, .. } => Some(tool_calls.len()),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    if restore_tool_limit > 0 {
+        let mut restore_config = config.clone();
+        restore_config.max_tool_calls_per_step = restore_tool_limit;
+        harness.replace_config(restore_config);
+    }
     harness
-        .restore_history(bounded_verifier_history(messages))
+        .restore_history(history)
         .map_err(|error| format!("cannot restore goal verifier source: {error}"))?;
+    harness.replace_config(config);
     let prompt = format!(
         "Verify the settled goal milestone against the following acceptance plan.\n\n{criteria}"
     );
