@@ -54,13 +54,13 @@ ownership、partial tool batch 与普通设置不覆盖偏好的测试均通过�
 
 同一 App Server 后端的两个连接 subscriber 也已验证收到同一个
 `thread/settings/updated` `stateRevision`；这证明控制面事件不会因连接投影而
-分叉。跨 SDK/Gateway/Web 的 revision 收敛和跨 Project/Thread attach 仍需单独
-覆盖，不能由单连接测试代替。
+分叉。跨 SDK/Gateway/Web 的端到端 revision 收敛，以及跨 Project/Thread attach
+的 fork/并发组合仍需单独覆盖，不能由单连接测试代替。
 
 Gateway 的显式 Project attach 选择也已补证：在没有现有本地绑定时，canonical
-Session lookup、resume 参数和返回的 Project ID 保持一致；未授权的跨 Project
-隐式猜测仍不允许，已有 live binding 的同 ID 冲突和跨协议 revision 收敛继续留在
-后续矩阵中。
+Session lookup、resume 参数和返回的 Project ID 保持一致；已有 live binding 的
+同 ID 冲突现在 fail closed 为 `409`，不会静默复用错误 workspace。未授权的跨
+Project 隐式猜测、fork/并发组合和跨协议 revision 收敛继续留在后续矩阵中。
 
 随后补充的 active-turn shutdown guard 与双 subscriber revision 场景相对
 `2327e8f` 增加 runtime/release `+26/+26`；当前累计基线为
