@@ -196,7 +196,10 @@ impl ThreadItem {
                 },
                 output: Some(bound_text(content)),
             }],
-            Message::Context { .. } => Vec::new(),
+            Message::Context { .. } => vec![Self::ContextCompaction {
+                id,
+                status: ItemStatus::Completed,
+            }],
         }
     }
 
@@ -205,6 +208,7 @@ impl ThreadItem {
     pub fn from_messages(messages: &[Message]) -> Vec<Self> {
         messages
             .iter()
+            .filter(|message| !matches!(message, Message::Context { .. }))
             .take(MAX_PROJECTED_ITEMS)
             .enumerate()
             .flat_map(|(index, message)| {

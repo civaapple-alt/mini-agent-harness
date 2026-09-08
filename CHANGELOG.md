@@ -7,6 +7,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Compaction item identity:** persist Turn-bound context messages as explicit
+  `context_compaction` items and project their existing `turn_id` through the
+  App Server ThreadItem listing; unbound world-state context remains internal.
+
 - **Control-plane ownership:** reject direct Thread continuation changes while
   an active Goal owns the loop configuration; this keeps Goal milestone limits
   authoritative across public App Server requests.

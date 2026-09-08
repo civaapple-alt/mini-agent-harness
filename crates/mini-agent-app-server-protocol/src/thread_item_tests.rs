@@ -184,3 +184,18 @@ fn persisted_tool_projection_keeps_supplied_arguments() {
         }]
     );
 }
+
+#[test]
+fn persisted_context_projection_is_a_settled_compaction() {
+    let message = mini_agent_protocol::Message::Context {
+        text: "compacted context".to_string(),
+    };
+
+    assert_eq!(
+        ThreadItem::from_message_with_id(&message, "compaction-1"),
+        vec![ThreadItem::ContextCompaction {
+            id: "compaction-1".to_string(),
+            status: ItemStatus::Completed,
+        }]
+    );
+}

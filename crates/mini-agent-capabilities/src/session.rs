@@ -627,7 +627,7 @@ impl SessionStore {
             "item_id": item_id,
             "thread_id": self.thread_id,
             "turn_id": turn_id,
-            "item_kind": message_kind(message),
+            "item_kind": persisted_item_kind(turn_id, message),
             "timestamp_ms": timestamp_ms(),
             "message": message,
         });
@@ -766,6 +766,14 @@ fn message_kind(message: &Message) -> &'static str {
     }
 }
 
+fn persisted_item_kind(turn_id: Option<&str>, message: &Message) -> &'static str {
+    if matches!(message, Message::Context { .. }) && turn_id.is_some() {
+        "context_compaction"
+    } else {
+        message_kind(message)
+    }
+}
+
 fn item_id_for_message(message: &Message) -> String {
     match message {
         Message::Tool { call_id, .. } if !call_id.is_empty() => call_id.clone(),
@@ -844,6 +852,41 @@ mod tests {
         assert_eq!(resumed.store.items().len(), 2);
         assert_eq!(resumed.store.items()[0].turn_id.as_deref(), Some("turn-1"));
         drop(resumed);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn context_in_a_turn_is_persisted_as_a_compaction_with_turn_id() {
+        let root = crate::test_support::test_root();
+        let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let context = Message::Context {
+            text: "compacted context".to_string(),
+        };
+        opened
+            .store
+            .record_turn_with_id(
+                "turn-compaction",
+                TurnCommit {
+                    started_at_ms: timestamp_ms(),
+                    prompt: "continue",
+                    status: TurnStatus::Completed,
+                    steps: 1,
+                    error: None,
+                    messages: std::slice::from_ref(&context),
+                    tool_arguments: &[],
+                    checkpoint: std::slice::from_ref(&context),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            opened.store.items()[0].turn_id.as_deref(),
+            Some("turn-compaction")
+        );
+        let session_text = fs::read_to_string(opened.store.path()).unwrap();
+        assert!(session_text.contains("\"item_kind\":\"context_compaction\""));
+        assert!(session_text.contains("\"turn_id\":\"turn-compaction\""));
+        drop(opened);
         crate::test_support::remove_test_root(&root);
     }
 
