@@ -85,7 +85,10 @@ Thread settings and Goal control use the canonical Thread boundary:
   bounded `builtinTools` selection, and optional `continuationMode` (`manual`
   or `continuous`). A changed setting emits one
   `thread/settings/updated` notification with the effective values and the same
-  `stateRevision` as the action response.
+  `stateRevision` as the action response. When a SessionStore is enabled, an
+  explicit continuation choice is atomically persisted in the session-owned
+  `thread_settings.json` sidecar, tagged with the current `thread_id`; startup
+  restores it before the first client-visible settings read.
 - `thread/goal/set`, `thread/goal/get`, and `thread/goal/clear` are the only
   Goal lifecycle methods. A Goal turn is persisted as a settled checkpoint
   before its isolated tool-free verifier runs; continuation and retry are then
@@ -175,6 +178,12 @@ Thread returned by `thread/start`.
 format. The Session store and App Server remain the authorities for the
 active Thread; clients should use `thread/read` and `thread/items/list` for
 history instead of reading session files directly.
+
+The `thread_settings.json` sidecar is a bounded control-plane projection, not
+conversation history. It contains only a schema version, the owning Thread ID,
+and the explicit continuation mode. Web/Gateway integrations may read this
+projection for a read-only session listing, but mutation remains an App Server
+`thread/settings/update` operation.
 
 #### Turn execution
 

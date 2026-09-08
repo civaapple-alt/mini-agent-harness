@@ -175,8 +175,11 @@ where `<workspace>` is the percent-encoded absolute project path.
 
 Each modular session directory contains fast O(1) metadata index `summary.json`,
 runtime telemetry `signals.json`, frozen environment snapshot `prompt_context.json`,
-and the append-only `session.jsonl` log. Large tool results are recorded as
-`result_stored` entries in that same log so handles survive resume.
+the append-only `session.jsonl` log, and the bounded `thread_settings.json`
+control-plane sidecar. The sidecar stores the current Thread ID and explicit
+`manual`/`continuous` preference with an atomic replacement; it is not part of
+conversation history. Large tool results are recorded as `result_stored` entries
+in the append-only log so handles survive resume.
 
 ## App Server Plan Mode and Autonomous Goal Workspaces
 
@@ -195,7 +198,9 @@ the core REPL remains focused on turn execution and run control:
   `continuationMode` to `manual` for the default bounded 8-step Chat turn or
   `continuous` for an explicit uncapped ordinary Chat loop. This is independent
   of access and approval policy. An active Goal temporarily uses Goal Runtime's
-  milestone loop and does not inherit this setting.
+  milestone loop and does not inherit this setting. With Session persistence,
+  App Server owns the durable preference in `thread_settings.json`; Gateway and
+  Studio consume its projection and do not keep a second continuation cache.
 - **Autonomous Goal Mode (`thread/goal/set|get|clear`)**: Materializes a
   dedicated `goal/` workspace containing `state.json` (milestone progress, loop
   counts, verifier scores) and `plan.md` (acceptance criteria). Each ordinary

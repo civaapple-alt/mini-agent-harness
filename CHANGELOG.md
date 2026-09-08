@@ -13,6 +13,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - **Trusted admission evidence:** keep ordinary project-scoped patches directly
   admissible under `trusted`, while deletion and high-risk Shell actions remain
   approval-gated.
+- **Canonical Thread continuation persistence:** persist explicit `manual` /
+  `continuous` choices in the SessionStore `thread_settings.json` sidecar,
+  restore them at App Server bind, and keep the Web Gateway as a read-only
+  projection instead of a second continuation authority.
 
 - **Harness documentation:** move current framework, evidence, boundary, and tool
   surface guidance into self-contained `docs/` files; keep `.agents/notes/` for

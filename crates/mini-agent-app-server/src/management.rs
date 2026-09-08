@@ -178,6 +178,15 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         } = self;
         let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
         let stable_system_prompt = settings.stable_system_prompt().map(str::to_string);
+        let continuation_mode = management
+            .session
+            .as_ref()
+            .and_then(|opened| opened.store.continuation_mode())
+            .map(|mode| match mode {
+                "continuous" => mini_agent_app_server_protocol::ContinuationMode::Continuous,
+                _ => mini_agent_app_server_protocol::ContinuationMode::Manual,
+            })
+            .unwrap_or_default();
         let verifier_config = goals.verifier_config();
         let store = goals.into_store().map_err(|error| error.to_string())?;
         let goal_dir = store
@@ -199,7 +208,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 commands,
                 approval: approval.clone(),
                 builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
-                continuation_mode: mini_agent_app_server_protocol::ContinuationMode::Manual,
+                continuation_mode,
                 stable_system_prompt: stable_system_prompt.clone(),
                 settings_notifications: settings_notifications.clone(),
                 notifications: notifications.clone(),
@@ -402,6 +411,23 @@ impl RuntimeManagementState {
 
     pub(crate) fn session_mut(&mut self) -> Option<&mut OpenedSession> {
         self.session.as_mut()
+    }
+
+    pub(crate) fn persist_continuation_mode(
+        &mut self,
+        mode: mini_agent_app_server_protocol::ContinuationMode,
+    ) -> Result<(), AppServerError> {
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        let mode = match mode {
+            mini_agent_app_server_protocol::ContinuationMode::Manual => "manual",
+            mini_agent_app_server_protocol::ContinuationMode::Continuous => "continuous",
+        };
+        session
+            .store
+            .set_continuation_mode(mode)
+            .map_err(AppServerError::Checkpoint)
     }
 
     pub(crate) fn session_items(&self) -> Option<&[SessionItem]> {

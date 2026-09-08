@@ -29,6 +29,7 @@ pub const SUMMARY_FILE_NAME: &str = "summary.json";
 pub const SIGNALS_FILE_NAME: &str = "signals.json";
 pub const PROMPT_CONTEXT_FILE_NAME: &str = "prompt_context.json";
 pub const THREAD_INDEX_FILE_NAME: &str = "thread_index.json";
+pub const THREAD_SETTINGS_FILE_NAME: &str = "thread_settings.json";
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 pub enum SessionRequest {
@@ -58,6 +59,7 @@ pub struct SessionStore {
     thread_turn_count: usize,
     items: Vec<SessionItem>,
     created_at_ms: u64,
+    continuation_mode: Option<String>,
     pub(crate) append_lock: Arc<Mutex<()>>,
     _lock: SessionLock,
 }
@@ -135,6 +137,30 @@ impl SessionStore {
         &self.path
     }
 
+    /// Returns the persisted continuation preference for the current Thread.
+    ///
+    /// The value is intentionally represented as a bounded storage string at
+    /// this package boundary. App Server owns the public protocol enum and
+    /// validates the value before applying it to the runtime.
+    pub fn continuation_mode(&self) -> Option<&str> {
+        self.continuation_mode.as_deref()
+    }
+
+    /// Persists one explicit Thread continuation preference atomically.
+    pub fn set_continuation_mode(&mut self, mode: &str) -> Result<(), String> {
+        if !matches!(mode, "manual" | "continuous") {
+            return Err("invalid continuation mode".to_string());
+        }
+        let settings = json!({
+            "version": 1,
+            "thread_id": self.thread_id.as_str(),
+            "continuation_mode": mode,
+        });
+        write_json_atomic(&self.session_dir.join(THREAD_SETTINGS_FILE_NAME), &settings)?;
+        self.continuation_mode = Some(mode.to_string());
+        Ok(())
+    }
+
     pub fn result_store(&self) -> crate::result_store::ResultStore {
         crate::result_store::ResultStore::for_session(
             self.path.clone(),
@@ -152,6 +178,7 @@ impl SessionStore {
         })])?;
         self.thread_id = thread_id;
         self.thread_turn_count = 0;
+        self.continuation_mode = None;
         let _ = self.update_thread_index(Some(&previous_thread_id));
         Ok(())
     }
@@ -372,6 +399,7 @@ impl SessionStore {
         let lock = acquire_lock(&session_dir, SESSION_LOCK_NAME)?;
         let bytes = fs::read(&path).map_err(|error| format!("cannot read session: {error}"))?;
         let loaded = load_records(session_id, &bytes)?;
+        let continuation_mode = load_continuation_mode(&session_dir, &loaded.thread_id);
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -396,6 +424,7 @@ impl SessionStore {
             thread_turn_count: loaded.thread_turn_count,
             items: loaded.items,
             created_at_ms: loaded.created_at_ms,
+            continuation_mode,
             append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
         };
@@ -488,6 +517,7 @@ impl SessionStore {
             thread_turn_count: 0,
             items: Vec::new(),
             created_at_ms: now,
+            continuation_mode: None,
             append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
         };
@@ -661,6 +691,24 @@ impl SessionStore {
     }
 }
 
+fn load_continuation_mode(session_dir: &Path, thread_id: &str) -> Option<String> {
+    let value = fs::read_to_string(session_dir.join(THREAD_SETTINGS_FILE_NAME))
+        .ok()
+        .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())?;
+    if value.get("version").and_then(Value::as_u64) != Some(1)
+        || value.get("thread_id").and_then(Value::as_str) != Some(thread_id)
+    {
+        return None;
+    }
+    match value.get("continuation_mode").and_then(Value::as_str) {
+        Some("manual") | Some("continuous") => value
+            .get("continuation_mode")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        _ => None,
+    }
+}
+
 impl TurnStatus {
     fn name(self) -> &'static str {
         match self {
@@ -768,6 +816,23 @@ mod tests {
         let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
         assert_eq!(resumed.store.items().len(), 2);
         assert_eq!(resumed.store.items()[0].turn_id.as_deref(), Some("turn-1"));
+        drop(resumed);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn continuation_preference_survives_session_resume() {
+        let root = crate::test_support::test_root();
+        let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+
+        assert_eq!(opened.store.continuation_mode(), None);
+        opened.store.set_continuation_mode("continuous").unwrap();
+        assert_eq!(opened.store.continuation_mode(), Some("continuous"));
+        drop(opened);
+
+        let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        assert_eq!(resumed.store.continuation_mode(), Some("continuous"));
         drop(resumed);
         crate::test_support::remove_test_root(&root);
     }

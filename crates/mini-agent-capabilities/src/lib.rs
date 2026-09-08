@@ -48,6 +48,7 @@ pub use session::OpenedSession;
 pub use session::SessionItem;
 pub use session::SessionRequest;
 pub use session::SessionStore;
+pub use session::THREAD_SETTINGS_FILE_NAME;
 pub use session::TurnCommit;
 pub use session::TurnStatus;
 

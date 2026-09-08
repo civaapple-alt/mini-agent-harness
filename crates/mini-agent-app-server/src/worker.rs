@@ -3,6 +3,7 @@ use crate::action::{ActionEnvelope, ActionReceipt, ActionResult, ActionSequencer
 use crate::management::RuntimeActorState;
 use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeRequest;
+use crate::runtime_command::RuntimeCommand;
 use crate::thread_manager::ThreadManager;
 use mini_agent_app_server_protocol::{
     ItemCompletedNotification, ItemSortDirection, ItemStartedNotification, ThreadItem,
@@ -203,6 +204,11 @@ pub(super) async fn worker_loop<M>(
                 Ok(None) => {}
                 Err(error) => eprintln!("warning: failed to resume goal runtime: {error}"),
             }
+            if let Err(error) =
+                runtime_actor::restore_thread_continuation(&mut runtime, &mut threads)
+            {
+                eprintln!("warning: failed to restore Thread continuation: {error}");
+            }
             continue;
         }
         let base_revision = runtime
@@ -214,6 +220,8 @@ pub(super) async fn worker_loop<M>(
         let receipt = action.receipt();
         match action.command {
             Command::Runtime(request) => {
+                let restore_continuation =
+                    matches!(&request.command, RuntimeCommand::ThreadGoalClear { .. });
                 runtime_actor::handle_request(
                     request,
                     receipt,
@@ -222,6 +230,12 @@ pub(super) async fn worker_loop<M>(
                     &mut threads,
                     &runtime_revision,
                 );
+                if restore_continuation
+                    && let Err(error) =
+                        runtime_actor::restore_thread_continuation(&mut runtime, &mut threads)
+                {
+                    eprintln!("warning: failed to restore Thread continuation: {error}");
+                }
             }
             Command::Start {
                 thread_id,
@@ -269,6 +283,7 @@ pub(super) async fn worker_loop<M>(
                 let mut next_input = Some(request.input);
                 let mut initial_reply = Some(reply);
                 let mut origin = origin;
+                let goal_turn = matches!(&origin, TurnOrigin::Goal { .. });
                 loop {
                     let input = next_input
                         .take()
@@ -555,6 +570,12 @@ pub(super) async fn worker_loop<M>(
                     }
                 }
                 threads.insert(thread);
+                if goal_turn
+                    && let Err(error) =
+                        runtime_actor::restore_thread_continuation(&mut runtime, &mut threads)
+                {
+                    eprintln!("warning: failed to restore Thread continuation: {error}");
+                }
             }
             Command::GoalVerificationCompleted {
                 thread_id,
@@ -572,6 +593,11 @@ pub(super) async fn worker_loop<M>(
                     checkpoint_seq,
                     result,
                 );
+                if let Err(error) =
+                    runtime_actor::restore_thread_continuation(&mut runtime, &mut threads)
+                {
+                    eprintln!("warning: failed to restore Thread continuation: {error}");
+                }
             }
             Command::Cancel { reply, .. } => {
                 respond(reply, receipt, Err(AppServerError::NoActiveTurn));

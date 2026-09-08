@@ -361,6 +361,7 @@ where
         .get_mut(thread_id.as_str())
         .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
     if let Some(mode) = continuation_mode {
+        state.management.persist_continuation_mode(mode)?;
         let config = match mode {
             ContinuationMode::Manual => state.management.base_harness_config.clone(),
             ContinuationMode::Continuous => state
@@ -409,6 +410,37 @@ where
         builtin_tools: state.builtin_tools.names().to_vec(),
         continuation_mode: state.continuation_mode,
     })
+}
+
+pub(super) fn restore_thread_continuation<M>(
+    runtime: &mut Option<RuntimeActorState>,
+    threads: &mut ThreadManager<M>,
+) -> Result<(), AppServerError>
+where
+    M: Model + 'static,
+{
+    let Some(state) = runtime.as_ref() else {
+        return Ok(());
+    };
+    if state.continuation_mode != ContinuationMode::Continuous
+        || state
+            .goal_runtime_handle
+            .load_goal_state()
+            .map_err(workflow_error)?
+            .is_some_and(|goal| goal.status == mini_agent_host::GoalStatus::Running)
+    {
+        return Ok(());
+    }
+    let active = state.goal_runtime_handle.plan_active();
+    let state = runtime.as_mut().ok_or(AppServerError::RuntimeUnavailable)?;
+    set_thread_settings(
+        threads,
+        state,
+        active,
+        None,
+        Some(ContinuationMode::Continuous),
+    )
+    .map(|_| ())
 }
 
 fn update_world<M>(
