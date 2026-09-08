@@ -71,14 +71,24 @@ Project 隐式猜测已被拒绝；fork 现在携带 source Project binding，�
 并发 attach 已通过 SessionManager 的单临界区创建回归验证；仍需覆盖 fork 与
 并发 attach 的组合，以及 Goal/恢复事件的跨协议 revision 收敛。
 
+本批继续完成 Goal/恢复事件的 revision 切片：App Server 的
+`thread/goal/updated|cleared` 现在携带同一 `RuntimeRevision`，Goal set/clear
+通知在 mutation 之后投影，正在进行的 Goal turn 使用本轮即将提交的 revision，
+不会再把旧 revision 伪装成当前状态。SDK 的 Goal action result、Gateway 的 Goal
+REST response 和 Web Studio/SidePanel 均保留并单调消费该字段；历史读取不再
+覆盖控制面状态，WebSocket 重连后先重新读取 workflow projection 来重建 cursor。
+App Server 协议、Gateway、SDK 和前端的受影响测试均通过。Runtime revision 仍是
+进程内序列，Gateway 内部重启但浏览器连接未重建时的 generation 信号，以及 fork
+与并发 attach 的组合，仍是后续边界，不在本批宣称已解决。
+
 随后补充的 active-turn shutdown guard 与双 subscriber revision 场景相对
 `2327e8f` 增加 runtime/release `+26/+26`；当前累计基线为
 `17,942/27,426`，仍处于 green。
 
 这不是 Batch 1 的全部故障矩阵；approval denial、timeout、MCP refusal、Goal
-恢复和 revision 的既有证据仍需在同一报告中统一记录；settings 控制项已经完成
-跨客户端收敛，但 Goal/恢复事件和跨 Project/Thread attach 的 fork/并发组合仍是
-后续工作。
+恢复和 revision 的既有证据仍需在同一报告中统一记录。当前跨客户端 settings/Goal
+收敛和浏览器重连后的 cursor 重建已有证据，剩余边界是 Gateway 内部重启时的
+generation 信号，以及跨 Project/Thread attach 的 fork/并发组合。
 
 ## 背景与当前证据
 
@@ -102,10 +112,10 @@ Core:              3,317 effective lines
 Protocol:            769 effective lines
 Capabilities:      9,484 effective lines
 Host:              3,012 effective lines
-App Server:       10,910 effective lines
-Control Plane:    18,527 effective lines
-Runtime:           18,008 / 20,000
-Release Rust:     27,492 / 30,000
+App Server:       10,946 effective lines
+Control Plane:    18,563 effective lines
+Runtime:           18,044 / 20,000
+Release Rust:     27,528 / 30,000
 ```
 
 `python scripts/cargo_boundary.py --json` 当前通过；唯一显式 review edge 是 `mini-agent-app-server → mini-agent-capabilities`，原因是 App Server 仍参与 Provider、Session 和 Approval 的 runtime assembly。两个相关提交没有修改 Cargo manifest，因此本提案不会为了减少文件数而改变依赖方向。
@@ -265,7 +275,7 @@ Recovery state:             running | paused | settled | failed | blocked
 | AC-03 | `continuous` Turn 遇到 cancel、timeout、context limit 或 approval wait | 先按规定顺序观察控制信号，产生可解释 stop reason 和 durable checkpoint | 连续模式无限运行或丢失 pending action | Core/App Server control scenario |
 | AC-04 | Tool batch 中途失败或进程重启 | 已完成副作用、未执行动作和可恢复下一步均可区分，不重放不可重放调用 | 恢复后重复写文件或把部分完成报告成成功 | fault-injection scenario |
 | AC-05 | Goal verifier 对最终结果返回失败 | Goal 进入 paused/blocked/failed 等明确状态，用户看到缺口和下一步 | 模型文本声称完成就结束 | Goal verifier integration test |
-| AC-06 | 两个客户端观察同一 Thread，并在一个客户端更新控制项 | App Server event/revision 是唯一状态源；SDK、Gateway 和 Studio 按 Thread 单调收敛到同一 settings 状态 | 过期 notification 覆盖较新 continuation/Plan 状态，或 Web 各自显示不同状态 | App Server 双 subscriber + SDK stale notification + Gateway route + Studio revision helper tests；Goal/恢复事件仍为后续边界 |
+| AC-06 | 两个客户端观察同一 Thread，并在一个客户端更新控制项 | App Server event/revision 是唯一状态源；SDK、Gateway 和 Studio 按 Thread 单调收敛到同一 settings/Goal 状态，重连可重建 cursor | 过期 notification 覆盖较新 continuation/Plan/Goal 状态，或 Web 各自显示不同状态 | App Server 双 subscriber + Goal notification revision + SDK stale notification + Gateway route + Studio revision/reconnect projection tests；Gateway-internal restart generation signal remains |
 | AC-07 | 审计和 trace 在成功、拒绝、超时、恢复场景中生成 | 只含 bounded metadata、counts、hashes 和状态，不含 raw prompt、secret、完整参数/结果 | 为了排障把敏感上下文写入 trace | trace redaction test |
 | AC-08 | 运行依赖边界检查和预算门禁 | `cargo_boundary.py --json` 无 violation；runtime/release 不进入 red band | 通过新增 facade 或放宽安全规则解决行数/依赖问题 | Cargo boundary + line budget |
 

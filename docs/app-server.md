@@ -98,7 +98,10 @@ Thread settings and Goal control use the canonical Thread boundary:
 - `thread/goal/set`, `thread/goal/get`, and `thread/goal/clear` are the only
   Goal lifecycle methods. A Goal turn is persisted as a settled checkpoint
   before its isolated tool-free verifier runs; continuation and retry are then
-  scheduled by the Runtime Actor through the existing Thread worker.
+  scheduled by the Runtime Actor through the existing Thread worker. Goal action
+  results and `thread/goal/updated|cleared` notifications carry the same
+  `stateRevision` as the Runtime Actor state; Goal updates emitted during a
+  turn use the revision that the turn is about to commit.
 - There is no aggregate `workflow/state` method. Clients read Thread settings
   and Thread Goal independently; the former manual `workflow/goal/*` methods
   are removed, so clients cannot submit an arbitrary verifier verdict or
@@ -261,8 +264,8 @@ emitted on one ordered runtime stream.
 | `approval/request` | Request identity, project/workspace/revision, action class, summary, structured action key, access, policy, allowed grant scopes | Requests a user decision for a sensitive action. |
 | `approval/resolved` | Request identity, `outcome`, selected `grantScope`, and optional `reason` | Reports the settled approval result without creating a second authority. |
 | `thread/settings/updated` | `threadId`, effective mode, Builtin tools, continuation mode, `stateRevision` | Projects a settings change. |
-| `thread/goal/updated` | `threadId`, optional `turnId`, Goal projection | Projects Goal creation, update, or runtime progress. |
-| `thread/goal/cleared` | `threadId` | Projects Goal removal. |
+| `thread/goal/updated` | `threadId`, optional `turnId`, Goal projection, `stateRevision` | Projects Goal creation, update, or runtime progress. |
+| `thread/goal/cleared` | `threadId`, `stateRevision` | Projects Goal removal. |
 
 `sequence` is the Core Thread event sequence. `actionSequence` in an action
 response is the App Server admission order; they are different counters and

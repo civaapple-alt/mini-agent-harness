@@ -177,6 +177,10 @@ Plan and Goal are Thread-owned App Server workflows:
 `/api/workflows/state` is a Gateway-only read-only aggregate convenience
 projection. It is not an App Server authority and must not be used to submit
 verdicts, advance milestones, or create a competing workflow state machine.
+Settings and Goal action responses, together with `thread/settings/updated` and
+`thread/goal/updated|cleared`, expose the canonical App Server `stateRevision`.
+Clients should consume these projections monotonically per Thread and re-read
+`/api/workflows/state` after a WebSocket reconnect before applying new events.
 
 Approval flow:
 
