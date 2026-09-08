@@ -89,7 +89,6 @@ graph LR
 
 ### Proposed
 
-- [Thin Agent Loop, Thick Control Plane：系统工程提案](proposed/architecture/2026-09-08-thin-loop-thick-control-plane-system-engineering.zh.md)
 - [Result-Oriented Long-Term Bot Agents](proposed/architecture/2026-09-04-result-oriented-long-term-bot-agents.zh.md)
 - [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
 - [CLI Through App Server](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md)
@@ -103,6 +102,7 @@ graph LR
 - [Control Plane Boundary Evidence](implemented/testing/2026-09-07-control-plane-boundary-evidence.md)
 - [Goal Revision 与 Web 重连游标证据](implemented/testing/2026-09-08-goal-revision-and-web-reconnect.md)
 - [Fork 与并发 Attach 组合证据](implemented/testing/2026-09-08-fork-attach-composition.md)
+- [Gateway Runtime Generation Recovery 证据](implemented/testing/2026-09-08-runtime-generation-recovery.md)
 - [Goal Runtime Loop Ownership](implemented/bug-fix/2026-09-08-goal-loop-ownership.md)
 - [Cargo Boundary Audit](implemented/architecture/2026-09-07-cargo-boundary-audit.md)
 - [Multi-Directory Workspace Context Perception](implemented/feature/2026-09-07-multi-directory-workspace-context.md)
@@ -116,6 +116,7 @@ graph LR
 - [Codex-Aligned Thread and Goal Runtime](implemented/architecture/2026-09-03-codex-aligned-thread-goal-runtime.md)
 - [Codex-Aligned Agent Control Plane](implemented/architecture/2026-09-03-codex-aligned-agent-control-plane.md)
 - [Codex-Aligned Agent Control Plane（中文）](implemented/architecture/2026-09-03-codex-aligned-agent-control-plane.zh.md)
+- [薄 Agent Loop、厚 Control Plane：系统工程决策](implemented/architecture/2026-09-08-thin-loop-thick-control-plane-system-engineering.zh.md)
 
 ### Process Guides
 

@@ -1,12 +1,12 @@
 # 薄 Agent Loop、厚 Control Plane：把 Harness 做成可交付的系统工程
 
-Status: proposed  
+Status: implemented
 Date: 2026-09-08  
 Scope: `mini-agent` 的 Core、Protocol、Capabilities、Host、App Server，以及通过 Python SDK、FastAPI Gateway 和 Web Studio 使用它们的客户端边界
 
-## 提案摘要
+## 决策摘要
 
-本提案建议把 Agent Harness 明确为一个系统工程问题：模型和模型框架是可替换的执行引擎，真正需要长期稳定的是 Control Plane 对状态、权限与沙箱、恢复、验证和审计的边界。
+本决策把 Agent Harness 明确为一个系统工程问题：模型和模型框架是可替换的执行引擎，真正需要长期稳定的是 Control Plane 对状态、权限与沙箱、恢复、验证和审计的边界。
 
 目标形态是：
 
@@ -25,7 +25,7 @@ Outcome / Goal / Boundary / Invariant
 
 这不是把 Agent 变成更复杂的 Planner，也不是把数据库系统的术语机械搬进代码。它将复用数据库团队已经验证过的工程方法：可重复测试、故障注入、状态验证、检查点、恢复、补偿、审计和明确的失败边界。
 
-第一阶段不会新增 Planner、Scheduler、Memory、Plugin 或 Policy Framework，也不会把这些概念塞进 Core。优先使用现有的 `Thread`、`Turn`、`Goal`、`Session`、`ThreadItem`、Approval、World 和 observation events，验证这些边界是否足以支撑可交付结果。
+实现不新增 Planner、Scheduler、Memory、Plugin 或 Policy Framework，也不把这些概念塞进 Core。实现复用了现有的 `Thread`、`Turn`、`Goal`、`Session`、`ThreadItem`、Approval、World 和 observation events，验证这些边界足以支撑可交付结果。
 
 ## 实施进度（2026-09-08）
 
@@ -59,8 +59,8 @@ ownership、partial tool batch 与普通设置不覆盖偏好的测试均通过�
 settings projection 按 revision 单调更新；Gateway 在 workflow 查询和 settings
 更新响应中返回它；Studio 按 Thread 保存 revision cursor，过期的 settings
 notification 不再覆盖新状态。SDK stale-notification、Gateway route 和 Studio
-revision helper 的确定性测试均通过。该证据覆盖了 AC-06 的控制项收敛路径；Goal
-事件的 revision、跨进程恢复后的 revision 重建，以及 fork/并发组合仍需单独覆盖，
+revision helper 的确定性测试均通过。随后 Goal 事件 revision、runtime generation
+恢复和 fork/并发组合分别由 App Server、Gateway 与 Studio 的公共边界测试补齐，
 不能由 settings notification 测试代替。
 
 Gateway 的显式 Project attach 选择也已补证：在没有现有本地绑定时，canonical
@@ -70,8 +70,8 @@ Project 隐式猜测已被拒绝；fork 现在携带 source Project binding，�
 冲突也 fail closed 为 `409`，并新增跨 Project fork 回归证据。随后将 fork 的
 source client、child metadata 写入和 canonical binding 放入 SessionManager 的
 同一临界区，并用并发回归验证 fork 与 attach 不会创建第二个 client 或抢占
-child binding。Goal/恢复事件的跨协议 revision 收敛也已补齐；剩余的是 Gateway
-内部重启时的 generation 信号。
+child binding。Goal/恢复事件的跨协议 revision 收敛以及 Gateway 内部重启时的
+generation 信号也已补齐。
 
 本批继续完成 Goal/恢复事件的 revision 切片：App Server 的
 `thread/goal/updated|cleared` 现在携带同一 `RuntimeRevision`，Goal set/clear
@@ -80,25 +80,25 @@ child binding。Goal/恢复事件的跨协议 revision 收敛也已补齐；剩�
 REST response 和 Web Studio/SidePanel 均保留并单调消费该字段；历史读取不再
 覆盖控制面状态，WebSocket 重连后先重新读取 workflow projection 来重建 cursor。
 App Server 协议、Gateway、SDK 和前端的受影响测试均通过。Runtime revision 仍是
-进程内序列，Gateway 内部重启但浏览器连接未重建时的 generation 信号，以及 fork
-与并发 attach 的组合，仍是后续边界，不在本批宣称已解决。
+App Server 进程内序列；Gateway 在内部重启并成功重绑后广播有界的
+`gateway/runtime/restarted` generation，Studio 即使保持浏览器连接也会清空旧
+cursor 并重新读取 canonical workflow projection。
 
 后续 Gateway 批次完成 fork/attach 组合切片：`SessionManager.fork_thread()` 在
 一个锁临界区内完成 source client 解析、fork、child metadata 写入和 canonical
 binding；`test_fork_and_concurrent_attach_share_the_forked_binding` 证明并发
 attach 会等待该绑定完成，并复用同一个 App Server client。该修复不改变
-App Server/Cargo 依赖方向，只收紧 Gateway 的本地并发边界。当前仍未解决的是
-Gateway 内部重启而浏览器 WebSocket 保持连接时的跨进程 generation 信号。
+App Server/Cargo 依赖方向，只收紧 Gateway 的本地并发边界。
 
 随后补充的 active-turn shutdown guard 与双 subscriber revision 场景相对
 `2327e8f` 增加 runtime/release `+26/+26`；当前累计基线为
 `18,042/27,526`，仍处于 green。
 
 这不是 Batch 1 的全部故障矩阵；approval denial、timeout、MCP refusal、Goal
-恢复和 revision 的既有证据仍需在同一报告中统一记录。当前跨客户端 settings/Goal
-收敛和浏览器重连后的 cursor 重建已有证据，跨 Project/Thread attach 的
-fork/并发组合也已由 Gateway 回归覆盖；剩余边界是 Gateway 内部重启时的
-generation 信号。
+恢复和 revision 的既有证据已在当前报告中统一记录。当前跨客户端 settings/Goal
+收敛、浏览器重连后的 cursor 重建、Gateway 内部重启 generation、以及跨
+Project/Thread attach 的 fork/并发组合均已有证据；更复杂的跨故障组合仍按
+bounded Scenario/Eval 逐步扩展。
 
 ## 背景与当前证据
 
@@ -128,7 +128,7 @@ Runtime:           18,042 / 20,000
 Release Rust:     27,526 / 30,000
 ```
 
-`python scripts/cargo_boundary.py --json` 当前通过；唯一显式 review edge 是 `mini-agent-app-server → mini-agent-capabilities`，原因是 App Server 仍参与 Provider、Session 和 Approval 的 runtime assembly。两个相关提交没有修改 Cargo manifest，因此本提案不会为了减少文件数而改变依赖方向。
+`python scripts/cargo_boundary.py --json` 当前通过；唯一显式 review edge 是 `mini-agent-app-server → mini-agent-capabilities`，原因是 App Server 仍参与 Provider、Session 和 Approval 的 runtime assembly。两个相关提交没有修改 Cargo manifest，因此本决策不会为了减少文件数而改变依赖方向。
 
 ## Harness 假设
 
@@ -216,11 +216,12 @@ Recovery state:             running | paused | settled | failed | blocked
 | 进程连接、JSON-RPC、类型解析 | Python SDK | Gateway 转 REST/WebSocket | SDK 重新解释运行时语义 |
 | Project 清单和页面交互状态 | Gateway/Web | 发起控制请求、展示事件 | 伪造 Session、Approval 或 Recovery authority |
 
-本提案已验证 `mini-agent-web/server/session_manager.py` 中 Thread continuation
+本决策已验证 `mini-agent-web/server/session_manager.py` 中 Thread continuation
 与 App Server canonical state 的关系：偏好由 SessionStore sidecar 持久化，Gateway
 只读 SessionCatalog 投影并在受控时机发起恢复请求，重复缓存和写入路径已删除。
-后续重点转为跨客户端 revision 收敛、跨 Project/Thread attach，以及 active turn
-取消后再 shutdown 的生命周期组合；任何新适配都不能静默覆盖 canonical state。
+当前实现已覆盖跨客户端 revision 收敛、跨 Project/Thread attach，以及 active
+turn 取消后再 shutdown 的生命周期组合；任何新适配都不能静默覆盖 canonical
+state。
 
 ## 证据化问题清单
 
@@ -230,7 +231,7 @@ Recovery state:             running | paused | settled | failed | blocked
 | E-02 | Cargo boundary 通过，但标记 `App Server → Capabilities` review edge | runtime assembly 的具体能力仍暴露在 App Server | 仅在出现重复 authority 或具体迁移实验时下沉到 Host | 若 App Server 不再直接构造 Provider/Session/Approval，可进入依赖收敛批次 |
 | E-03 | Batch 3 已将 Thread continuation 写入 SessionStore 的带 `thread_id` sidecar，Gateway 可从 SessionCatalog 只读投影；App Server startup bind 负责恢复 | worker 生命周期必须先显式 idle shutdown，活动 turn 不能绕过 settlement 释放 lock | App Server 是唯一写 authority；Gateway cache 已删除；继续沿用 shutdown/restart 与跨 Thread/Project 场景验证 | 已有 App Server shutdown/restart 场景证明新 worker 返回相同 mode 且旧 worker 已释放 lock，E-03 covered |
 | E-04 | 当前 runtime 仅剩约 958 行 operating budget，release Rust 仅剩约 1,474 行 operating budget | Control Plane 很容易用新抽象掩盖复杂度增长 | 新增概念默认必须有删除项或净零抵消 | 若批次可以删除旧状态、兼容分支或重复测试并形成净减少，可放宽 |
-| E-05 | 现有边界已有 Approval、Goal、Session、lock、timeout 和事件测试；settings 控制项已补 SDK/Gateway/Studio revision 收敛证据，但跨故障组合仍需统一 scenario | 单元测试通过不等于跨层可交付 | 建立 bounded Scenario/Eval 矩阵，不调用付费 Provider | 若既有公共场景已区分所有目标结果和失败反例，则不新增重复 scenario |
+| E-05 | 现有边界已有 Approval、Goal、Session、lock、timeout 和事件测试；settings/Goal/restart 控制项已补 SDK/Gateway/Studio revision 收敛证据，复杂跨故障组合仍需持续扩展 | 单元测试通过不等于跨层可交付 | 继续维护 bounded Scenario/Eval 矩阵，不调用付费 Provider | 若既有公共场景已区分所有目标结果和失败反例，则不新增重复 scenario |
 
 ## 分批实施方案
 
@@ -285,7 +286,7 @@ Recovery state:             running | paused | settled | failed | blocked
 | AC-03 | `continuous` Turn 遇到 cancel、timeout、context limit 或 approval wait | 先按规定顺序观察控制信号，产生可解释 stop reason 和 durable checkpoint | 连续模式无限运行或丢失 pending action | Core/App Server control scenario |
 | AC-04 | Tool batch 中途失败或进程重启 | 已完成副作用、未执行动作和可恢复下一步均可区分，不重放不可重放调用 | 恢复后重复写文件或把部分完成报告成成功 | fault-injection scenario |
 | AC-05 | Goal verifier 对最终结果返回失败 | Goal 进入 paused/blocked/failed 等明确状态，用户看到缺口和下一步 | 模型文本声称完成就结束 | Goal verifier integration test |
-| AC-06 | 两个客户端观察同一 Thread，并在一个客户端更新控制项 | App Server event/revision 是唯一状态源；SDK、Gateway 和 Studio 按 Thread 单调收敛到同一 settings/Goal 状态，重连可重建 cursor | 过期 notification 覆盖较新 continuation/Plan/Goal 状态，或 Web 各自显示不同状态 | App Server 双 subscriber + Goal notification revision + SDK stale notification + Gateway route + Studio revision/reconnect projection tests + fork/attach composition test；Gateway-internal restart generation signal remains |
+| AC-06 | 两个客户端观察同一 Thread，并在一个客户端更新控制项 | App Server event/revision 是唯一状态源；SDK、Gateway 和 Studio 按 Thread 单调收敛到同一 settings/Goal 状态，重连或 Gateway runtime generation 后可重建 cursor | 过期 notification 覆盖较新 continuation/Plan/Goal 状态，或 Web 各自显示不同状态 | App Server 双 subscriber + Goal notification revision + SDK stale notification + Gateway route + Studio revision/reconnect projection tests + `test_fork_and_concurrent_attach_share_the_forked_binding` + runtime generation projection test |
 | AC-07 | 审计和 trace 在成功、拒绝、超时、恢复场景中生成 | 只含 bounded metadata、counts、hashes 和状态，不含 raw prompt、secret、完整参数/结果 | 为了排障把敏感上下文写入 trace | trace redaction test |
 | AC-08 | 运行依赖边界检查和预算门禁 | `cargo_boundary.py --json` 无 violation；runtime/release 不进入 red band | 通过新增 facade 或放宽安全规则解决行数/依赖问题 | Cargo boundary + line budget |
 
@@ -301,22 +302,31 @@ Recovery state:             running | paused | settled | failed | blocked
 
 ## 六项变更准入回答
 
-1. **所属层**：本提案属于跨层架构，但执行面仍由 Core 保持最小；控制面由 App Server、Host 和 Capabilities 按现有所有权承载，SDK/Gateway/Web 只做协议和交互适配。
+1. **所属层**：本决策覆盖跨层架构，但执行面仍由 Core 保持最小；控制面由 App Server、Host 和 Capabilities 按现有所有权承载，SDK/Gateway/Web 只做协议和交互适配。
 2. **重复职责**：已有 `Thread`、`Turn`、`Goal`、`SessionStore`、`ApprovalStore`、`ToolOrchestrator`、checkpoint、events 和 `JsonlTrace` 已覆盖大部分责任；实施前必须检索并证明新类型不能替代旧类型。
 3. **替换优先**：优先删除 Gateway shadow state、隐式总开关、模型自报完成路径和重复兼容分支；只有 Scenario 证明现有边界无法表达时才新增概念。
 4. **净行数**：当前 runtime 为 `18,042/20,000`，release Rust 为 `27,526/30,000`；相对 `cea7a04` 累计为 `+306/+360`，仍低于 operating/red-band 门槛。Core production 预期净增为 `0`；本批只增加 bounded fault evidence 测试，未改变 Core production 责任；每个实现批次默认 runtime/release 净零或提供明确删除抵消，进入 red band 即停止扩张。
 5. **可见表面**：新增的 Goal/Boundary/Invariant、控制字段、事件和结果投影都必须有 hard limit；未知权限输入 fail closed；不得把 raw prompt、凭证或无界工具结果写入模型上下文、事件或持久化。
 6. **边界证据**：使用 Core/Capabilities/App Server 的单测与协议 fixture，再用 Mock Provider 的 bounded Scenario 覆盖拒绝、Plan lock、超时、取消、锁竞争、部分副作用、恢复、验证失败和审计脱敏；跨仓验证 SDK、Gateway 和 Studio 收敛到同一 revision。
 
-## 决策请求与完成定义
+## 决策结论与验证
 
-本提案请求评审是否同意“薄 Loop、厚 Control Plane、结果优先、证据驱动”的方向，而不是立即批准新增一套长期 Agent 框架。
+本决策确认“薄 Loop、厚 Control Plane、结果优先、证据驱动”的方向，不批准新增一套长期 Agent 框架。实现保持模型和 Framework 可替换，并把 State、Permission/Sandbox、Recovery、Verification、Audit 的唯一权威留在既有边界内。
 
-提案只有在以下条件全部满足后，才应移入 `implemented/`：
+以下条件已由代码、测试和文档共同验证：
 
-1. 至少一个不依赖固定 Planner 步骤的结果导向 Scenario 通过；
-2. 至少一个故障注入 Scenario 证明拒绝、超时、部分完成和恢复边界；
+1. bounded Harness Scenario 不依赖固定 Planner 步骤，并通过 Goal/tool/verifier 公共路径；
+2. fault matrix 覆盖拒绝、超时、部分完成、重启恢复和并发绑定反例；
 3. State、Permission/Sandbox、Recovery、Verification、Audit 各有唯一权威和反例证据；
-4. Gateway continuation 状态是否为重复 authority 已经决定并验证；
+4. Gateway continuation shadow state 已删除，SessionStore/App Server 是唯一持久化 authority；
 5. Cargo boundary、受影响包测试、lint、line budget 和跨层协议证据全部通过；
-6. 文档、协议、SDK、Gateway、Studio 与实际行为一致，且剩余风险被明确记录。
+6. 文档、协议、SDK、Gateway、Studio 与实际行为一致，剩余风险仅为更复杂的场景组合，不改变既有所有权边界。
+
+## 后续风险
+
+- Runtime revision 是 App Server 进程内序列；Gateway generation 只通知成功的本地
+  runtime 重绑，不提供跨进程事件 replay。
+- 现有 Scenario 使用 Mock Provider 和本地 fixture，不代表真实 Provider 质量、恶意
+  内核隔离或跨平台 Docker 语义。
+- 复杂的 approval、tool timeout、部分副作用和 recovery 组合仍应继续增加 bounded
+  evidence，但不能因此把 Orchestration framework 或第二套状态 authority 引入 Core。
