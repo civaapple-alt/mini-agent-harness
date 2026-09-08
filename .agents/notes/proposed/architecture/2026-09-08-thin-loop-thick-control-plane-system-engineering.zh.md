@@ -54,21 +54,29 @@ ownership、partial tool batch 与普通设置不覆盖偏好的测试均通过�
 
 同一 App Server 后端的两个连接 subscriber 也已验证收到同一个
 `thread/settings/updated` `stateRevision`；这证明控制面事件不会因连接投影而
-分叉。跨 SDK/Gateway/Web 的端到端 revision 收敛，以及跨 Project/Thread attach
-的 fork/并发组合仍需单独覆盖，不能由单连接测试代替。
+分叉。本批进一步把该字段沿 SDK → Gateway → Web Studio 传递：SDK 将
+`ThreadSettingsResult`/`WorkflowState` 的 `state_revision` 建模，并让本地
+settings projection 按 revision 单调更新；Gateway 在 workflow 查询和 settings
+更新响应中返回它；Studio 按 Thread 保存 revision cursor，过期的 settings
+notification 不再覆盖新状态。SDK stale-notification、Gateway route 和 Studio
+revision helper 的确定性测试均通过。该证据覆盖了 AC-06 的控制项收敛路径；Goal
+事件的 revision、跨进程恢复后的 revision 重建，以及 fork/并发组合仍需单独覆盖，
+不能由 settings notification 测试代替。
 
 Gateway 的显式 Project attach 选择也已补证：在没有现有本地绑定时，canonical
 Session lookup、resume 参数和返回的 Project ID 保持一致；已有 live binding 的
 同 ID 冲突现在 fail closed 为 `409`，不会静默复用错误 workspace。未授权的跨
-Project 隐式猜测、fork/并发组合和跨协议 revision 收敛继续留在后续矩阵中。
+Project 隐式猜测、fork/并发组合和 Goal/恢复事件的跨协议 revision 收敛继续留在
+后续矩阵中。
 
 随后补充的 active-turn shutdown guard 与双 subscriber revision 场景相对
 `2327e8f` 增加 runtime/release `+26/+26`；当前累计基线为
 `17,942/27,426`，仍处于 green。
 
 这不是 Batch 1 的全部故障矩阵；approval denial、timeout、MCP refusal、Goal
-恢复和 revision 的既有证据仍需在同一报告中统一记录；跨客户端 revision 收敛与
-跨 Project/Thread attach 仍是后续工作。
+恢复和 revision 的既有证据仍需在同一报告中统一记录；settings 控制项已经完成
+跨客户端收敛，但 Goal/恢复事件和跨 Project/Thread attach 的 fork/并发组合仍是
+后续工作。
 
 ## 背景与当前证据
 
@@ -200,7 +208,7 @@ Recovery state:             running | paused | settled | failed | blocked
 | E-02 | Cargo boundary 通过，但标记 `App Server → Capabilities` review edge | runtime assembly 的具体能力仍暴露在 App Server | 仅在出现重复 authority 或具体迁移实验时下沉到 Host | 若 App Server 不再直接构造 Provider/Session/Approval，可进入依赖收敛批次 |
 | E-03 | Batch 3 已将 Thread continuation 写入 SessionStore 的带 `thread_id` sidecar，Gateway 可从 SessionCatalog 只读投影；App Server startup bind 负责恢复 | worker 生命周期必须先显式 idle shutdown，活动 turn 不能绕过 settlement 释放 lock | App Server 是唯一写 authority；Gateway cache 已删除；继续沿用 shutdown/restart 与跨 Thread/Project 场景验证 | 已有 App Server shutdown/restart 场景证明新 worker 返回相同 mode 且旧 worker 已释放 lock，E-03 covered |
 | E-04 | 当前 runtime 仅剩约 992 行 operating budget，release Rust 仅剩约 1,508 行 operating budget | Control Plane 很容易用新抽象掩盖复杂度增长 | 新增概念默认必须有删除项或净零抵消 | 若批次可以删除旧状态、兼容分支或重复测试并形成净减少，可放宽 |
-| E-05 | 现有边界已有 Approval、Goal、Session、lock、timeout 和事件测试，但跨故障组合仍需形成统一 scenario | 单元测试通过不等于跨层可交付 | 建立 bounded Scenario/Eval 矩阵，不调用付费 Provider | 若既有公共场景已区分所有目标结果和失败反例，则不新增重复 scenario |
+| E-05 | 现有边界已有 Approval、Goal、Session、lock、timeout 和事件测试；settings 控制项已补 SDK/Gateway/Studio revision 收敛证据，但跨故障组合仍需统一 scenario | 单元测试通过不等于跨层可交付 | 建立 bounded Scenario/Eval 矩阵，不调用付费 Provider | 若既有公共场景已区分所有目标结果和失败反例，则不新增重复 scenario |
 
 ## 分批实施方案
 
@@ -255,7 +263,7 @@ Recovery state:             running | paused | settled | failed | blocked
 | AC-03 | `continuous` Turn 遇到 cancel、timeout、context limit 或 approval wait | 先按规定顺序观察控制信号，产生可解释 stop reason 和 durable checkpoint | 连续模式无限运行或丢失 pending action | Core/App Server control scenario |
 | AC-04 | Tool batch 中途失败或进程重启 | 已完成副作用、未执行动作和可恢复下一步均可区分，不重放不可重放调用 | 恢复后重复写文件或把部分完成报告成成功 | fault-injection scenario |
 | AC-05 | Goal verifier 对最终结果返回失败 | Goal 进入 paused/blocked/failed 等明确状态，用户看到缺口和下一步 | 模型文本声称完成就结束 | Goal verifier integration test |
-| AC-06 | 两个客户端观察同一 Thread，并在一个客户端更新控制项 | App Server event/revision 是唯一状态源，另一个客户端最终收敛 | Web 各自显示不同 continuation/approval 状态 | SDK/Gateway/Web integration test |
+| AC-06 | 两个客户端观察同一 Thread，并在一个客户端更新控制项 | App Server event/revision 是唯一状态源；SDK、Gateway 和 Studio 按 Thread 单调收敛到同一 settings 状态 | 过期 notification 覆盖较新 continuation/Plan 状态，或 Web 各自显示不同状态 | App Server 双 subscriber + SDK stale notification + Gateway route + Studio revision helper tests；Goal/恢复事件仍为后续边界 |
 | AC-07 | 审计和 trace 在成功、拒绝、超时、恢复场景中生成 | 只含 bounded metadata、counts、hashes 和状态，不含 raw prompt、secret、完整参数/结果 | 为了排障把敏感上下文写入 trace | trace redaction test |
 | AC-08 | 运行依赖边界检查和预算门禁 | `cargo_boundary.py --json` 无 violation；runtime/release 不进入 red band | 通过新增 facade 或放宽安全规则解决行数/依赖问题 | Cargo boundary + line budget |
 
