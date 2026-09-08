@@ -502,6 +502,8 @@ async fn rejects_removed_workflow_state_method() {
 #[tokio::test]
 async fn broadcasts_thread_settings_updates_with_action_revision() {
     let (mut connection, root) = managed_connection("thread-settings-notification");
+    let mut observer = AppServerConnection::new(connection.server.clone())
+        .with_runtime_services(connection.runtime.as_ref().unwrap().clone());
     initialize_connection(&mut connection, "thread-settings-test").await;
 
     let response = rpc_call(
@@ -533,6 +535,16 @@ async fn broadcasts_thread_settings_updates_with_action_revision() {
     );
     assert_eq!(params["continuationMode"], "continuous");
     assert_eq!(params["stateRevision"], response_revision);
+    let observer_notification = loop {
+        let notification = observer.next_notification().await.unwrap();
+        if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_SETTINGS_UPDATED {
+            break notification;
+        }
+    };
+    assert_eq!(
+        observer_notification.params.unwrap()["stateRevision"],
+        response_revision
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 

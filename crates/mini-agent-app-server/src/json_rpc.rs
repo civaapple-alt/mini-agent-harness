@@ -77,12 +77,22 @@ pub struct AppServerConnection<M> {
 /// Keeping these services together prevents a connection from accidentally
 /// combining workflow state from one runtime with management state from
 /// another runtime.
-#[derive(Clone)]
 pub struct RuntimeServices<M> {
     management: RuntimeManagementService<M>,
     thread_settings: ThreadSettingsService,
     goals: ThreadGoalRequestProcessor,
     notifications: broadcast::Sender<RuntimeNotification>,
+}
+
+impl<M> Clone for RuntimeServices<M> {
+    fn clone(&self) -> Self {
+        Self {
+            management: self.management.clone(),
+            thread_settings: self.thread_settings.clone(),
+            goals: self.goals.clone(),
+            notifications: self.notifications.clone(),
+        }
+    }
 }
 
 impl<M> RuntimeServices<M> {

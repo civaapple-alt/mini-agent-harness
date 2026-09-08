@@ -52,6 +52,15 @@ ownership 与普通设置不覆盖偏好的测试均通过。为完成这条证�
 按既有 cancel/settlement 路径收敛。本切片相对 `24ae42e` 增加 runtime/release
 `+98/+98`，没有修改 Cargo manifest，预算仍为 green。
 
+同一 App Server 后端的两个连接 subscriber 也已验证收到同一个
+`thread/settings/updated` `stateRevision`；这证明控制面事件不会因连接投影而
+分叉。跨 SDK/Gateway/Web 的 revision 收敛和跨 Project/Thread attach 仍需单独
+覆盖，不能由单连接测试代替。
+
+随后补充的 active-turn shutdown guard 与双 subscriber revision 场景相对
+`2327e8f` 增加 runtime/release `+26/+26`；当前累计基线为
+`17,942/27,426`，仍处于 green。
+
 这不是 Batch 1 的全部故障矩阵；approval denial、timeout、MCP refusal、Goal
 恢复和 revision 的既有证据仍需在同一报告中统一记录，partial tool batch、跨客户端
 revision 收敛与跨 Project/Thread attach 仍是后续工作。
@@ -78,10 +87,10 @@ Core:              3,251 effective lines
 Protocol:            769 effective lines
 Capabilities:      9,484 effective lines
 Host:              3,012 effective lines
-App Server:       10,884 effective lines
-Control Plane:    18,501 effective lines
-Runtime:           17,916 / 20,000
-Release Rust:     27,400 / 30,000
+App Server:       10,910 effective lines
+Control Plane:    18,527 effective lines
+Runtime:           17,942 / 20,000
+Release Rust:     27,426 / 30,000
 ```
 
 `python scripts/cargo_boundary.py --json` 当前通过；唯一显式 review edge 是 `mini-agent-app-server → mini-agent-capabilities`，原因是 App Server 仍参与 Provider、Session 和 Approval 的 runtime assembly。两个相关提交没有修改 Cargo manifest，因此本提案不会为了减少文件数而改变依赖方向。
@@ -185,7 +194,7 @@ Recovery state:             running | paused | settled | failed | blocked
 | E-01 | `ContinuationMode` 从 `mini-agent-app-server-protocol` 经 Runtime、SDK、Gateway 到 Studio；`Trusted` 在 Protocol/Capabilities 中参与工具准入 | 一个 UI 字段可能改变 loop、权限和恢复行为 | 继续使用现有跨层契约矩阵，不新增 Core 依赖 | 若字段只影响展示且不会改变任何运行结果，可退回 UI-only 方案 |
 | E-02 | Cargo boundary 通过，但标记 `App Server → Capabilities` review edge | runtime assembly 的具体能力仍暴露在 App Server | 仅在出现重复 authority 或具体迁移实验时下沉到 Host | 若 App Server 不再直接构造 Provider/Session/Approval，可进入依赖收敛批次 |
 | E-03 | Batch 3 已将 Thread continuation 写入 SessionStore 的带 `thread_id` sidecar，Gateway 可从 SessionCatalog 只读投影；App Server startup bind 负责恢复 | worker 生命周期必须先显式 idle shutdown，活动 turn 不能绕过 settlement 释放 lock | App Server 是唯一写 authority；Gateway cache 已删除；继续沿用 shutdown/restart 与跨 Thread/Project 场景验证 | 已有 App Server shutdown/restart 场景证明新 worker 返回相同 mode 且旧 worker 已释放 lock，E-03 covered |
-| E-04 | 当前 runtime 仅剩约 1,084 行 operating budget，release Rust 仅剩约 1,600 行 operating budget | Control Plane 很容易用新抽象掩盖复杂度增长 | 新增概念默认必须有删除项或净零抵消 | 若批次可以删除旧状态、兼容分支或重复测试并形成净减少，可放宽 |
+| E-04 | 当前 runtime 仅剩约 1,058 行 operating budget，release Rust 仅剩约 1,574 行 operating budget | Control Plane 很容易用新抽象掩盖复杂度增长 | 新增概念默认必须有删除项或净零抵消 | 若批次可以删除旧状态、兼容分支或重复测试并形成净减少，可放宽 |
 | E-05 | 现有边界已有 Approval、Goal、Session、lock、timeout 和事件测试，但跨故障组合仍需形成统一 scenario | 单元测试通过不等于跨层可交付 | 建立 bounded Scenario/Eval 矩阵，不调用付费 Provider | 若既有公共场景已区分所有目标结果和失败反例，则不新增重复 scenario |
 
 ## 分批实施方案
@@ -260,7 +269,7 @@ Recovery state:             running | paused | settled | failed | blocked
 1. **所属层**：本提案属于跨层架构，但执行面仍由 Core 保持最小；控制面由 App Server、Host 和 Capabilities 按现有所有权承载，SDK/Gateway/Web 只做协议和交互适配。
 2. **重复职责**：已有 `Thread`、`Turn`、`Goal`、`SessionStore`、`ApprovalStore`、`ToolOrchestrator`、checkpoint、events 和 `JsonlTrace` 已覆盖大部分责任；实施前必须检索并证明新类型不能替代旧类型。
 3. **替换优先**：优先删除 Gateway shadow state、隐式总开关、模型自报完成路径和重复兼容分支；只有 Scenario 证明现有边界无法表达时才新增概念。
-4. **净行数**：当前 runtime 为 `17,916/20,000`，release Rust 为 `27,400/30,000`；相对 `cea7a04` 累计为 `+180/+234`，相对上一提交本生命周期切片为 `+98/+98`，仍低于 operating/red-band 门槛。Core 预期净增为 `0`；每个实现批次默认 runtime/release 净零或提供明确删除抵消，进入 red band 即停止扩张。
+4. **净行数**：当前 runtime 为 `17,942/20,000`，release Rust 为 `27,426/30,000`；相对 `cea7a04` 累计为 `+206/+260`，相对 `2327e8f` 本批为 `+26/+26`，仍低于 operating/red-band 门槛。Core 预期净增为 `0`；每个实现批次默认 runtime/release 净零或提供明确删除抵消，进入 red band 即停止扩张。
 5. **可见表面**：新增的 Goal/Boundary/Invariant、控制字段、事件和结果投影都必须有 hard limit；未知权限输入 fail closed；不得把 raw prompt、凭证或无界工具结果写入模型上下文、事件或持久化。
 6. **边界证据**：使用 Core/Capabilities/App Server 的单测与协议 fixture，再用 Mock Provider 的 bounded Scenario 覆盖拒绝、Plan lock、超时、取消、锁竞争、部分副作用、恢复、验证失败和审计脱敏；跨仓验证 SDK、Gateway 和 Studio 收敛到同一 revision。
 
