@@ -66,7 +66,9 @@ data URLs are a host wire payload, not core history. The returned summary must b
 calls, reduce context size, and fit the existing response and request ceilings.
 If it does not, the harness drops oldest prefix messages until the request is
 under the compact threshold, instead of aborting the run. Compaction emits live
-lifecycle events and does not consume an agent step. A pathological single step
+lifecycle events and does not consume an agent step. Each live compaction
+start/finish pair carries a bounded item identity; Studio may group adjacent
+completed entries as “上下文压缩 ×N” while retaining turn/item detail. A pathological single step
 can still exceed the hard context ceiling and fail rather than sending an
 oversized request.
 
@@ -123,8 +125,10 @@ admitted without approval only when referenced paths stay inside the workspace
 or configured read roots; dynamic paths, writes, high-risk commands, and
 outside paths retain the typed approval path. A runtime access scope never
 becomes a global allow-all switch. `FullMachine` widens file path scope but does
-not override hard Deny, Plan locks, unavailable tools, or high-risk shell
-confirmation.
+not override hard Deny, Plan-mode source-file mutation locks, unavailable tools,
+or high-risk shell confirmation. Shell itself remains governed by the selected
+approval policy in Plan mode; Plan does not add a separate read-only Shell
+restriction.
 
 Project extension discovery scans only immediate children at fixed locations
 and at most 128 directory entries per location. Installed skills, plugins, and

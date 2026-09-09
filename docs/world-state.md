@@ -78,6 +78,11 @@ state explicit before safe/unsafe replay policies are introduced. Compaction
 lineage, branch indexes, and live operation recovery are not
 implemented.
 
+Context-compaction lifecycle items are an exception to that generic lineage
+limitation: their start and finish events use one bounded item identity and
+remain visible in ordered projections. Full operation recovery is still not
+implemented.
+
 ## Goal verifier boundary
 
 A Goal verifier is a separately configured model runtime, not a hidden second

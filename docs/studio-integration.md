@@ -100,12 +100,30 @@ changes when the primary or associated root set changes, and old grants must
 not be reused for the new binding.
 
 `project` and `full_machine` are access scopes. `full_machine` expands the
-candidate path range but is not allow-all: Deny, Plan locks, unavailable tools,
-and high-risk confirmation remain effective. `interactive` and `automatic` are
-execution policies; Automatic directly admits only bounded read-only Shell
-inspection, while writes, dynamic paths, high-risk commands, and outside paths
-still use approval. `once`, `session`, and `project` are action-grant scopes
+candidate path range but is not allow-all: Deny, Plan-mode source-file mutation
+locks, unavailable tools, and high-risk confirmation remain effective.
+`interactive` and `automatic` are execution policies; Automatic directly admits
+only bounded read-only Shell inspection, while writes, dynamic paths, high-risk
+commands, and outside paths still use approval. Plan mode does not add a separate
+Shell restriction. `once`, `session`, and `project` are action-grant scopes
 selected in an approval response and validated by Host/Capabilities.
+
+## Project-qualified requests and stale-response protection
+
+Every Gateway request that can address a Thread, Session, workflow, runtime, or
+workspace includes the selected `project_id`. REST history, runtime, Goal,
+settings, and SidePanel file requests carry it in the query or payload; a
+WebSocket is opened with `?project_id=...`, and each `turn`, `steer`,
+`interrupt`, approval response, and `ping` repeats the same project identity.
+The Gateway filters project-scoped broadcasts before delivery, so two Projects
+may safely contain a Thread with the same display ID such as `default`.
+
+Web Studio assigns a request epoch to the selected Project/Session. Switching,
+creating, forking, or closing a Session cancels old history, workflow, runtime,
+and file requests and atomically clears the old message, Turn, Plan, Goal,
+Runtime, and approval projections before loading canonical state for the new
+selection. A late response from an older epoch is discarded rather than written
+into the current Session view.
 
 ## Session history and switching
 
@@ -132,16 +150,28 @@ Use these endpoints:
 | `PATCH /api/threads/{thread_id}/rename` | Update the Web display title only. |
 
 Session catalog entries expose bounded `session_status`, `runtime_status`,
-`resumable`, `goal_status`, `cleanup_pending`, `active_turn_id`, and
-`checkpoint_seq` fields. The important transitions are:
+`turn_active`, `process_online`, `resumable`, `goal_status`,
+`plan_review_pending`, `cleanup_pending`, `active_turn_id`, `checkpoint_seq`,
+and the last-turn diagnostic fields. The important transitions are:
 
 ```text
 new Thread
-    → locked/running while its App Server owns session.lock
+    → process_online=true, turn_active=true while an active Turn owns session.lock
+    → process_online=true, turn_active=false while the process is idle/standby
     → paused when Goal is user-paused
-    → historical after the process releases the lock
+    → process_online=false after the process releases the lock
     → resumable when a complete settled checkpoint exists
 ```
+
+`turn_active` means that the latest Turn is unsettled and still owned by a live
+process; `process_online` only means that the SessionStore process lock is live.
+An idle online process is therefore “online/standby”, not a running Turn. After
+a crash, an unsettled record can be `process_online=false` and
+`turn_active=false` while retaining `last_turn_status=in_progress` for
+diagnostics; a complete checkpoint makes it recoverable. A completed Plan Turn
+sets the persisted `plan_review_pending` confirmation. It survives reload and
+restore in Session-owned `plan_mode.json`, and selecting implementation clears
+the pending state and returns the Thread to default mode.
 
 If a live process owns the Session lock, `attach` returns a conflict or an
 `attached: false` lock description. The Gateway must not delete the lock or
@@ -154,9 +184,9 @@ history does not itself attach or mutate a Session.
 For normal execution, Web Studio uses `/ws/agent`:
 
 ```json
-{"action":"turn","threadId":"thread-1","mode":"start","prompt":"inspect the workspace"}
-{"action":"steer","threadId":"thread-1","turnId":"turn-1","text":"focus on the failing test"}
-{"action":"interrupt","threadId":"thread-1","turnId":"turn-1"}
+{"action":"turn","project_id":"project-1","threadId":"thread-1","mode":"start","prompt":"inspect the workspace"}
+{"action":"steer","project_id":"project-1","threadId":"thread-1","turnId":"turn-1","text":"focus on the failing test"}
+{"action":"interrupt","project_id":"project-1","threadId":"thread-1","turnId":"turn-1"}
 ```
 
 The Gateway's REST equivalents are `POST /api/agent/turn`,
@@ -181,6 +211,11 @@ Settings and Goal action responses, together with `thread/settings/updated` and
 `thread/goal/updated|cleared`, expose the canonical App Server `stateRevision`.
 Clients should consume these projections monotonically per Thread and re-read
 `/api/workflows/state` after a WebSocket reconnect before applying new events.
+
+The live Compaction start/finish pair has one independent bounded `item_id`,
+which is also retained by the local redacted trace. Web Studio may merge adjacent
+Compaction entries into an expandable “上下文压缩 ×N” card while preserving each
+entry's `turn_id` and `item_id` in the details.
 
 Approval flow:
 
@@ -237,6 +272,11 @@ For an end-to-end check, verify the following sequence in one report:
 5. pause or stop the Session, list it from the canonical catalog, and attach it
    again without creating a second writer;
 6. switch Project or roots and confirm old approvals are not reused.
+7. confirm REST and WebSocket requests are project-qualified, stale responses
+   cannot overwrite a switched Session, and the sidebar distinguishes
+   `turn_active` from `process_online`;
+8. restore a completed Plan turn and verify its review confirmation, then
+   expand grouped Compaction details and check their `turn_id`/`item_id` values.
 
 When a browser shows a blank page, first inspect the browser console and the
 Gateway log, then check `/health`, `/docs`, and the WebSocket connection. A

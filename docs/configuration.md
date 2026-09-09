@@ -190,10 +190,15 @@ the core REPL remains focused on turn execution and run control:
 - **Plan Mode (`thread/settings/update`)**: Set `collaborationMode.mode` to
   `"plan"` to make exploration read-mostly. Bounded scratch scripts and outputs
   may be created in the Session-owned plan area, and `plan.md` is retained;
-  formal Project mutations remain locked. The setting is applied by the App
+  formal Project mutations remain locked. Shell remains available according to
+  the selected approval policy; Plan mode does not add a separate Shell
+  read-only restriction. The setting is applied by the App
   Server Runtime Actor to the settled Thread, approval controller, and bounded
   Host-composed prompt; arbitrary raw system-prompt replacement is not accepted.
-  Planning state is persisted in `plan_mode.json`.
+  Planning state is persisted in `plan_mode.json`; after a completed Plan Turn,
+  bounded `review_pending` state records whether the user still needs to choose
+  “continue planning” or “start implementation”. A new Plan Turn or disabling
+  Plan clears that state so it survives reload without becoming stale.
 - **Thread continuation (`thread/settings/update`)**: Set the optional
   `continuationMode` to `manual` for the default bounded 8-step Chat turn or
   `continuous` for an explicit uncapped ordinary Chat loop. This is independent

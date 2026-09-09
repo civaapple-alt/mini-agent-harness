@@ -70,8 +70,10 @@ Clients can correlate
 `requestId`/`turnId`/`callId` from `approval/request` through
 `approval/respond`, `approval/resolved`, and the matching `turn/event`, without
 inferring approval from `tool/finished` content. `full_machine` means
-machine-wide path scope, not allow-all; security Deny, Plan locks, tool
-availability, and high-risk confirmation remain independent gates.
+machine-wide path scope, not allow-all; security Deny, Plan-mode source-file
+mutation locks, tool availability, and high-risk confirmation remain independent
+gates. Shell is still admitted according to the selected execution policy and
+does not receive a separate Plan-mode read-only restriction.
 The App Server worker runs on a dedicated runtime thread, so a synchronous host
 approval callback does not block the connection's async transport. The JSON-RPC
 transport multiplexes request handling and resolves `approval/respond` through
@@ -95,6 +97,8 @@ Realtime context compaction also carries an independent item identity through
 the `EventEnvelope` and its projected `ContextCompaction` item. The start and
 finish events reuse that ID, so clients can merge adjacent lifecycle updates;
 older envelopes without the optional identity retain the deterministic fallback.
+The local redacted trace keeps the same bounded `item_id` for correlation without
+retaining model or tool payloads.
 
 Thread settings and Goal control use the canonical Thread boundary:
 
@@ -205,6 +209,14 @@ and the explicit continuation mode. Web/Gateway integrations may read this
 projection for a read-only session listing, but mutation remains an App Server
 `thread/settings/update` operation.
 
+Plan mode state is persisted separately in the Session-owned `plan_mode.json`.
+It contains the active state, bounded Plan artifact paths, and
+`review_pending`. A completed Plan Turn sets that flag; starting another Plan
+Turn or disabling Plan clears it. Web Studio can therefore restore the
+“continue planning / start implementation” confirmation after reload or Session
+restore. This is a workflow/UI projection, not a second authority; mode changes
+still go through `thread/settings/update`.
+
 #### Turn execution
 
 | Method | Parameters | Result / effect |
@@ -264,8 +276,9 @@ Goal/Thread projections.
 
 `world/set_execution` changes runtime configuration, not the security order.
 `full_machine` expands the candidate filesystem range but does not mean
-allow-all: Deny, Plan locks, tool availability, and high-risk confirmation
-still apply. `policy` selects the global execution posture; it does not choose
+allow-all: Deny, Plan-mode source-file mutation locks, tool availability, and
+high-risk confirmation still apply. Shell remains governed by the selected
+policy. `policy` selects the global execution posture; it does not choose
 the lifetime of an individual grant.
 
 #### Approval response

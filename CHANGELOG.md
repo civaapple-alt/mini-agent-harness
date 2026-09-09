@@ -7,6 +7,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Documentation synchronization:** align the Studio integration, App Server,
+  configuration, world-state, and limits guides with project-qualified requests,
+  Session `turn_active`/`process_online` semantics, persisted Plan review state,
+  and Compaction `item_id` observability.
+
 - **Plan review persistence and trace identity:** persist the pending
   Plan-mode implementation confirmation in the Session-owned Plan state, clear
   it when a new Plan turn starts, and carry bounded `item_id` values into local
