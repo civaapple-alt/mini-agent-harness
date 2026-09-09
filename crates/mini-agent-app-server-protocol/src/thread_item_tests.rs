@@ -6,6 +6,42 @@ use mini_agent_protocol::ToolCall;
 use mini_agent_protocol::TurnId;
 
 #[test]
+fn realtime_compaction_lifecycle_uses_one_unique_item_id() {
+    let mut started = EventEnvelope::new(
+        ThreadId::new("thread-1"),
+        Some(TurnId::new("turn-1")),
+        10,
+        Event::ContextCompactionStarted { before_bytes: 100 },
+    );
+    started.item_id = Some("turn-1:compaction:10".to_string());
+    let mut finished = EventEnvelope::new(
+        ThreadId::new("thread-1"),
+        Some(TurnId::new("turn-1")),
+        11,
+        Event::ContextCompactionFinished {
+            before_bytes: 100,
+            after_bytes: 40,
+            usage: None,
+        },
+    );
+    finished.item_id = started.item_id.clone();
+
+    let started_item = ThreadItem::from_event(&started);
+    let finished_item = ThreadItem::from_event(&finished);
+    let ThreadItem::ContextCompaction { id: started_id, .. } = &started_item[0] else {
+        panic!("expected compaction item");
+    };
+    let ThreadItem::ContextCompaction {
+        id: finished_id, ..
+    } = &finished_item[0]
+    else {
+        panic!("expected compaction item");
+    };
+    assert_eq!(started_id, finished_id);
+    assert_eq!(started_id, "turn-1:compaction:10");
+}
+
+#[test]
 fn event_projection_reuses_tool_call_id() {
     let event = EventEnvelope::new(
         ThreadId::new("thread-1"),

@@ -103,11 +103,17 @@ impl ThreadItem {
                 output: Some(bound_text(content)),
             }],
             Event::ContextCompactionStarted { .. } => vec![Self::ContextCompaction {
-                id: format!("{turn_prefix}:compaction"),
+                id: event
+                    .item_id
+                    .clone()
+                    .unwrap_or_else(|| format!("{turn_prefix}:compaction")),
                 status: ItemStatus::InProgress,
             }],
             Event::ContextCompactionFinished { .. } => vec![Self::ContextCompaction {
-                id: format!("{turn_prefix}:compaction"),
+                id: event
+                    .item_id
+                    .clone()
+                    .unwrap_or_else(|| format!("{turn_prefix}:compaction")),
                 status: ItemStatus::Completed,
             }],
             Event::RunStarted { .. }

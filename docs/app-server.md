@@ -86,6 +86,11 @@ is the authoritative final projection for that item; the same tool `callId` is
 used across model, tool-start, tool-completion, and replay projections. These
 notifications use the same ordered runtime stream as `turn/event`.
 
+Realtime context compaction also carries an independent item identity through
+the `EventEnvelope` and its projected `ContextCompaction` item. The start and
+finish events reuse that ID, so clients can merge adjacent lifecycle updates;
+older envelopes without the optional identity retain the deterministic fallback.
+
 Thread settings and Goal control use the canonical Thread boundary:
 
 - `thread/settings/update` changes the typed `collaborationMode`, optional

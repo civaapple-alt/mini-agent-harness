@@ -63,6 +63,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Fixed
 
+- **Realtime Compaction identity:** attach an independent item ID to the live
+  Compaction lifecycle and reuse it across start/finish projections, while
+  retaining the legacy fallback for older envelopes.
+
 - **Plan/Shell policy separation:** keep Plan source mutations read-only while
   allowing Shell to use the active approval policy, including explicit approval
   for commands outside automatic/trusted bounded inspection.

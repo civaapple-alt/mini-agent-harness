@@ -96,6 +96,8 @@ pub struct EventEnvelope {
     pub thread_id: ThreadId,
     pub turn_id: Option<TurnId>,
     pub sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
     pub event: Event,
 }
 
@@ -105,6 +107,7 @@ impl EventEnvelope {
             thread_id,
             turn_id,
             sequence,
+            item_id: None,
             event,
         }
     }

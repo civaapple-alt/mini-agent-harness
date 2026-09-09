@@ -249,6 +249,7 @@ impl<M: Model> Thread<M> {
             thread_id: self.id.clone(),
             turn_id: id.clone(),
             next_sequence: self.next_event_sequence,
+            active_compaction_item_id: None,
         };
         observer.observe(&Event::TurnStarted {
             mode: input.mode,
@@ -339,18 +340,30 @@ struct EnvelopeObserver<'a, S> {
     thread_id: ThreadId,
     turn_id: TurnId,
     next_sequence: u64,
+    active_compaction_item_id: Option<String>,
 }
 
 impl<S: EventSink> Observer for EnvelopeObserver<'_, S> {
     fn observe(&mut self, event: &Event) {
         let sequence = self.next_sequence;
         self.next_sequence = self.next_sequence.saturating_add(1);
-        self.sink.emit(EventEnvelope::new(
+        let item_id = match event {
+            Event::ContextCompactionStarted { .. } => {
+                let item_id = format!("{}:compaction:{}", self.turn_id.as_str(), sequence);
+                self.active_compaction_item_id = Some(item_id.clone());
+                Some(item_id)
+            }
+            Event::ContextCompactionFinished { .. } => self.active_compaction_item_id.take(),
+            _ => None,
+        };
+        let mut envelope = EventEnvelope::new(
             self.thread_id.clone(),
             Some(self.turn_id.clone()),
             sequence,
             event.clone(),
-        ));
+        );
+        envelope.item_id = item_id;
+        self.sink.emit(envelope);
     }
 }
 

@@ -14,7 +14,7 @@ use mini_agent_app_server_protocol::{
     METHOD_WORLD_SET_EXECUTION, METHOD_WORLD_STATE, McpRetryResult, McpStatusResult,
     SessionInfoResult, ThreadCloseParams, ThreadForkParams, ThreadForkResult,
     ThreadGoalClearResponse, ThreadGoalGetResponse, ThreadGoalSetParams, ThreadGoalSetResponse,
-    ThreadGoalStatus, ThreadItemsListParams, ThreadItemsListResult, ThreadListParams,
+    ThreadGoalStatus, ThreadItem, ThreadItemsListParams, ThreadItemsListResult, ThreadListParams,
     ThreadListResult, ThreadReadParams, ThreadReadResult, ThreadResumeParams, ThreadResumeResult,
     ThreadSettingsUpdateParams, ThreadSettingsUpdateResult, ThreadStartParams, ThreadStartResult,
     TurnEventNotification, TurnInterruptParams, TurnReadParams, TurnReadResult, TurnStartParams,
@@ -482,12 +482,14 @@ where
             .ok_or_else(|| JsonRpcError::invalid_params("turn/event params are missing"))?;
         let event: TurnEventNotification = serde_json::from_value(params)
             .map_err(|error| JsonRpcError::invalid_params(error.to_string()))?;
-        Ok(EventEnvelope::new(
-            event.thread_id,
-            event.turn_id,
-            event.sequence,
-            event.event,
-        ))
+        let item_id = event.items.iter().find_map(|item| match item {
+            ThreadItem::ContextCompaction { id, .. } => Some(id.clone()),
+            _ => None,
+        });
+        let mut envelope =
+            EventEnvelope::new(event.thread_id, event.turn_id, event.sequence, event.event);
+        envelope.item_id = item_id;
+        Ok(envelope)
     }
 
     pub async fn next_notification(&mut self) -> Result<JsonRpcRequest, JsonRpcError> {
