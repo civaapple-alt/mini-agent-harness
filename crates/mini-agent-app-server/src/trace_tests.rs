@@ -79,6 +79,25 @@ fn diagnostic_metadata_stays_out_of_the_wire_event() {
 }
 
 #[test]
+fn trace_preserves_bounded_item_identity() {
+    let mut bytes = Vec::new();
+    let mut trace = JsonlTrace::new("trace-1", &mut bytes).unwrap();
+    let mut envelope = EventEnvelope::new(
+        ThreadId::new("thread-1"),
+        Some(TurnId::new("turn-1")),
+        1,
+        Event::ContextCompactionStarted { before_bytes: 100 },
+    );
+    envelope.item_id = Some("turn-1:compaction:1".to_string());
+    trace.emit(envelope);
+    let _ = trace.finish().unwrap();
+
+    let output = String::from_utf8(bytes).unwrap();
+    let record: TraceRecord = serde_json::from_str(output.lines().next().unwrap()).unwrap();
+    assert_eq!(record.item_id.as_deref(), Some("turn-1:compaction:1"));
+}
+
+#[test]
 fn trace_rejects_unbounded_trace_ids() {
     assert!(JsonlTrace::new("", Vec::new()).is_err());
     assert!(JsonlTrace::new("x".repeat(129), Vec::new()).is_err());

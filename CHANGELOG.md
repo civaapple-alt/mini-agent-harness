@@ -7,6 +7,12 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Plan review persistence and trace identity:** persist the pending
+  Plan-mode implementation confirmation in the Session-owned Plan state, clear
+  it when a new Plan turn starts, and carry bounded `item_id` values into local
+  App Server trace records so Compaction lifecycle entries remain correlated
+  after recovery.
+
 - **Line-budget ceilings:** raise the Runtime and Control Plane hard limits to
   25,000 effective Rust lines, raise the release-source hard limit to 35,000,
   and move the operating/red thresholds to 24,000/24,500 and 34,000/34,500.

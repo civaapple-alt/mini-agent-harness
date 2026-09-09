@@ -34,9 +34,18 @@ fn plan_mode_lifecycle_creates_and_toggles_state() {
     let plan_file = init_plan_mode_with_prompt(&dir, None).unwrap();
     assert!(plan_file.is_file());
     assert!(is_plan_mode_active(&dir));
+    assert!(!is_plan_review_pending(&dir));
+
+    set_plan_review_pending(&dir, true).unwrap();
+    assert!(is_plan_review_pending(&dir));
+
+    // Starting another planning turn clears the previous confirmation.
+    init_plan_mode_with_prompt(&dir, None).unwrap();
+    assert!(!is_plan_review_pending(&dir));
 
     disable_plan_mode(&dir).unwrap();
     assert!(!is_plan_mode_active(&dir));
+    assert!(!is_plan_review_pending(&dir));
 
     fs::remove_dir_all(dir).unwrap();
 }

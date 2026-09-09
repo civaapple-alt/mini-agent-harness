@@ -88,6 +88,8 @@ pub struct GoalState {
 pub struct PlanModeState {
     pub schema_version: u32,
     pub active: bool,
+    #[serde(default)]
+    pub review_pending: bool,
     pub plan_file: PathBuf,
     pub scratch_dir: PathBuf,
     pub cleanup_manifest: PathBuf,
@@ -161,6 +163,14 @@ impl HostWorkflowStore {
 
     pub fn plan_active(&self) -> bool {
         is_plan_mode_active(&self.session_dir)
+    }
+
+    pub fn plan_review_pending(&self) -> bool {
+        is_plan_review_pending(&self.session_dir)
+    }
+
+    pub fn set_plan_review_pending(&self, pending: bool) -> io::Result<()> {
+        set_plan_review_pending(&self.session_dir, pending)
     }
 
     pub fn set_goal(&self, objective: &str, token_budget: Option<i64>) -> io::Result<GoalState> {
@@ -400,6 +410,7 @@ pub fn init_plan_mode_with_prompt(session_dir: &Path, prompt: Option<&str>) -> i
     let plan_state = PlanModeState {
         schema_version: GOAL_SCHEMA_VERSION,
         active: true,
+        review_pending: false,
         plan_file: plan_path.clone(),
         scratch_dir,
         cleanup_manifest,
@@ -420,6 +431,7 @@ pub fn disable_plan_mode(session_dir: &Path) -> io::Result<()> {
         let plan_state = PlanModeState {
             schema_version: GOAL_SCHEMA_VERSION,
             active: false,
+            review_pending: false,
             plan_file: living_plan_path(session_dir),
             scratch_dir: plan_scratch_path(session_dir),
             cleanup_manifest: plan_cleanup_path(session_dir),
@@ -538,6 +550,24 @@ pub fn is_plan_mode_active(session_dir: &Path) -> bool {
         return state.active;
     }
     false
+}
+
+pub fn is_plan_review_pending(session_dir: &Path) -> bool {
+    let state_file = session_dir.join("plan_mode.json");
+    fs::read_to_string(state_file)
+        .ok()
+        .and_then(|content| serde_json::from_str::<PlanModeState>(&content).ok())
+        .is_some_and(|state| state.active && state.review_pending)
+}
+
+pub fn set_plan_review_pending(session_dir: &Path, pending: bool) -> io::Result<()> {
+    let state_file = session_dir.join("plan_mode.json");
+    let content = fs::read_to_string(&state_file)?;
+    let mut state = serde_json::from_str::<PlanModeState>(&content)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    state.review_pending = state.active && pending;
+    state.updated_at_ms = current_time_ms();
+    write_json(state_file, &state)
 }
 
 pub fn init_goal_workspace_with_limits(

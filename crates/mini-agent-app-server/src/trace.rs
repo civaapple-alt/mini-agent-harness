@@ -20,6 +20,8 @@ pub struct TraceRecord {
     pub trace_id: String,
     pub thread_id: String,
     pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
     pub sequence: u64,
     pub round_index: usize,
     pub event: String,
@@ -103,6 +105,7 @@ impl<W: Write> JsonlTrace<W> {
             trace_id: self.trace_id.clone(),
             thread_id: envelope.thread_id.as_str().to_string(),
             turn_id: envelope.turn_id.as_ref().map(|id| id.as_str().to_string()),
+            item_id: envelope.item_id.clone(),
             sequence: envelope.sequence,
             round_index: self.round_index,
             event: event_name(&envelope.event).to_string(),

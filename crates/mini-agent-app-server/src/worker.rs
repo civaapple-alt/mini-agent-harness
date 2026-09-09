@@ -443,6 +443,12 @@ pub(super) async fn worker_loop<M>(
                         .take()
                         .expect("app-server turn input must exist before execution");
                     let turn_id = thread.next_turn_id();
+                    if let Some(state) = runtime.as_ref()
+                        && state.goal_runtime_handle.plan_active()
+                        && let Err(error) = state.goal_runtime_handle.set_plan_review_pending(false)
+                    {
+                        eprintln!("warning: failed to clear Plan review state: {error}");
+                    }
                     let goal_id = match &origin {
                         TurnOrigin::Client => None,
                         TurnOrigin::Goal { goal_id } => Some(goal_id.clone()),
@@ -631,6 +637,15 @@ pub(super) async fn worker_loop<M>(
                                     state.management.current_checkpoint_seq(),
                                 );
                                 if state.goal_runtime_handle.plan_active() {
+                                    if result.status == mini_agent_protocol::TurnStatus::Completed
+                                        && persistence_error.is_none()
+                                        && let Err(error) =
+                                            state.goal_runtime_handle.set_plan_review_pending(true)
+                                    {
+                                        eprintln!(
+                                            "warning: failed to persist Plan review state: {error}"
+                                        );
+                                    }
                                     runtime_actor::notify_plan_updated(&runtime, true);
                                 }
                             }
@@ -681,6 +696,13 @@ pub(super) async fn worker_loop<M>(
                                     state.management.current_checkpoint_seq(),
                                 );
                                 if state.goal_runtime_handle.plan_active() {
+                                    if let Err(error) =
+                                        state.goal_runtime_handle.set_plan_review_pending(false)
+                                    {
+                                        eprintln!(
+                                            "warning: failed to clear Plan review state: {error}"
+                                        );
+                                    }
                                     runtime_actor::notify_plan_updated(&runtime, true);
                                 }
                             }
