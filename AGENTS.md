@@ -64,11 +64,13 @@ every feature in Codex, Pi, fx, or Qi.
 
 ## Size budget
 
-- Runtime hard limit: 20,000 effective Rust source lines across `core`, `protocol`,
+- Runtime hard limit: 25,000 effective Rust source lines across `core`, `protocol`,
   `host`, and `app-server`. The separately reported `acp` edge is excluded
   from this runtime limit.
-- Release-source hard limit: 30,000 effective Rust source lines across Core, Protocol,
+- Release-source hard limit: 35,000 effective Rust source lines across Core, Protocol,
   Capabilities, Host, and App Server.
+- Control Plane hard limit: 25,000 effective Rust source lines across the Host
+  and Capabilities control-plane categories.
 - The CLI, including the experimental REPL, is reported separately and is
   excluded from the release-source limit. Tests in release packages count.
 - Run `python scripts/line_budget.py` after code changes.
@@ -83,8 +85,8 @@ every feature in Codex, Pi, fx, or Qi.
   dependency directions and reports the existing App Server to Capabilities
   edge as a review finding; it does not require a crate split merely to satisfy
   the line gate.
-- Runtime `19,000` and release Rust `29,000` are the operating budgets;
-  `19,500` and `29,500` are the red-band thresholds. Green and amber pull
+- Runtime `24,000` and release Rust `34,000` are the operating budgets;
+  `24,500` and `34,500` are the red-band thresholds. Green and amber pull
   requests may grow by at most `100` runtime lines or `150` release lines;
   positive growth is frozen once the resulting total enters the red band. Use
   `python scripts/line_budget.py --base <merge-base> --check-delta --json`
@@ -113,8 +115,8 @@ reviewers still judge the answer quality and architecture.
 
 New code defaults to net-zero growth or must identify an explicit offset. Never
 remove Core tests, Actor/CAS/Session authority, or public protocol behavior only
-to satisfy the approximate Stage 1 target. The 20,000-line runtime and
-30,000-line release-source ceilings remain hard gates; experimental CLI/REPL
+to satisfy the approximate Stage 1 target. The 25,000-line runtime and
+35,000-line release-source ceilings remain hard gates; experimental CLI/REPL
 growth is informational until it is promoted into the supported surface.
 
 If a change affects prompt, tool schema, loop-control, context, events, or

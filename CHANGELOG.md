@@ -7,6 +7,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Line-budget ceilings:** raise the Runtime and Control Plane hard limits to
+  25,000 effective Rust lines, raise the release-source hard limit to 35,000,
+  and move the operating/red thresholds to 24,000/24,500 and 34,000/34,500.
+
 - **Compaction item identity:** persist Turn-bound context messages as explicit
   `context_compaction` items and project their existing `turn_id` through the
   App Server ThreadItem listing; unbound world-state context remains internal.

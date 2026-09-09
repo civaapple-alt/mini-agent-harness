@@ -126,8 +126,8 @@ class LineBudgetTests(unittest.TestCase):
                 line_budget.category_counts(root)
 
     def test_delta_gate_allows_bounded_growth_in_amber_band(self):
-        current = {"runtime": 19_200, "release": 29_400, "control_plane": 1}
-        base = {"runtime": 19_100, "release": 29_250, "control_plane": 1}
+        current = {"runtime": 24_200, "release": 34_400, "control_plane": 1}
+        base = {"runtime": 24_100, "release": 34_250, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
@@ -137,8 +137,8 @@ class LineBudgetTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_delta_gate_rejects_growth_above_non_red_limit(self):
-        current = {"runtime": 19_200, "release": 29_400, "control_plane": 1}
-        base = {"runtime": 19_000, "release": 29_200, "control_plane": 1}
+        current = {"runtime": 24_200, "release": 34_400, "control_plane": 1}
+        base = {"runtime": 24_000, "release": 34_200, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
@@ -149,8 +149,8 @@ class LineBudgetTests(unittest.TestCase):
         self.assertIn("release grew by 200 lines, above non-red limit 150", violations)
 
     def test_delta_gate_freezes_growth_in_red_band(self):
-        current = {"runtime": 19_501, "release": 29_997, "control_plane": 1}
-        base = {"runtime": 19_500, "release": 29_996, "control_plane": 1}
+        current = {"runtime": 24_501, "release": 34_997, "control_plane": 1}
+        base = {"runtime": 24_500, "release": 34_996, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
@@ -161,8 +161,8 @@ class LineBudgetTests(unittest.TestCase):
         self.assertIn("release is in red band and cannot grow", violations)
 
     def test_delta_gate_allows_zero_growth_when_checkout_is_red(self):
-        current = {"runtime": 19_887, "release": 29_997, "control_plane": 1}
-        base = {"runtime": 19_887, "release": 29_997, "control_plane": 1}
+        current = {"runtime": 24_887, "release": 34_997, "control_plane": 1}
+        base = {"runtime": 24_887, "release": 34_997, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
@@ -181,15 +181,15 @@ class LineBudgetTests(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 self.assertEqual(line_budget.check(root), 0)
             self.assertIn("production 1, unit 0, integration 0", output.getvalue())
-            self.assertIn("Control Plane: 0 effective code lines", output.getvalue())
+            self.assertIn("Control Plane: 0/25000 effective code lines", output.getvalue())
             self.assertIn(
                 "runtime (core + protocol + host + app-server): "
-                "1/20000 effective code lines",
+                "1/25000 effective code lines",
                 output.getvalue(),
             )
             self.assertIn(
                 "release Rust source (excluding experimental CLI/REPL): "
-                "1/30000 effective code lines",
+                "1/35000 effective code lines",
                 output.getvalue(),
             )
 
@@ -217,9 +217,20 @@ class LineBudgetTests(unittest.TestCase):
             )
             self.assertIn(
                 "runtime (core + protocol + host + app-server): "
-                "1/20000 effective code lines",
+                "1/25000 effective code lines",
                 output.getvalue(),
             )
+
+    def test_control_plane_hard_limit_is_enforced(self):
+        current = {"runtime": 1, "release": 1, "control_plane": 25_001}
+        base = {"runtime": 1, "release": 1, "control_plane": 25_000}
+
+        violations, deltas = line_budget._delta_gate_violations(current, base)
+
+        self.assertEqual(deltas["control_plane"], 1)
+        self.assertIn(
+            "control-plane exceeds hard limit (25001/25000)", violations
+        )
 
     def test_experimental_cli_is_reported_but_excluded_from_release_gate(self):
         with tempfile.TemporaryDirectory() as directory:

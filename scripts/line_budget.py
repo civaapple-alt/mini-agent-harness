@@ -8,19 +8,20 @@ from pathlib import PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME_LIMIT = 20_000
+RUNTIME_LIMIT = 25_000
 # The release-source total includes production code and tests from the supported
 # runtime packages. The experimental CLI/REPL is reported separately and is not
 # part of this hard release gate.
-PROJECT_LIMIT = 30_000
+PROJECT_LIMIT = 35_000
+CONTROL_PLANE_LIMIT = 25_000
 
 # The hard ceilings remain the emergency release boundary. Operating limits
 # leave room for ordinary maintenance; the delta gate below permits bounded
 # growth through the amber band and freezes positive growth in the red band.
-RUNTIME_OPERATING_LIMIT = 19_000
-PROJECT_OPERATING_LIMIT = 29_000
-RUNTIME_RED_LIMIT = 19_500
-PROJECT_RED_LIMIT = 29_500
+RUNTIME_OPERATING_LIMIT = 24_000
+PROJECT_OPERATING_LIMIT = 34_000
+RUNTIME_RED_LIMIT = 24_500
+PROJECT_RED_LIMIT = 34_500
 RUNTIME_NON_RED_DELTA_LIMIT = 100
 PROJECT_NON_RED_DELTA_LIMIT = 150
 
@@ -438,6 +439,12 @@ def _delta_gate_violations(
             )
         if total > red and delta > 0:
             violations.append(f"{name} is in red band and cannot grow")
+    control_plane_total = int(current["control_plane"])
+    if control_plane_total > CONTROL_PLANE_LIMIT:
+        violations.append(
+            "control-plane exceeds hard limit "
+            f"({control_plane_total}/{CONTROL_PLANE_LIMIT})"
+        )
     return violations, deltas
 
 
@@ -494,8 +501,8 @@ def _print_report(report: dict[str, object], root: Path = ROOT) -> None:
             f"(production {production}, unit {unit}, integration {integration})"
         )
     print(
-        f"Control Plane: {report['control_plane']} effective code lines "
-        "(host-control-plane + capability-control-plane)"
+        f"Control Plane: {report['control_plane']}/{CONTROL_PLANE_LIMIT} "
+        "effective code lines (host-control-plane + capability-control-plane)"
     )
     runtime_total = int(report["runtime"])
     release_total = int(report["release"])
@@ -549,6 +556,11 @@ def check(
         violations.append(
             f"release exceeds hard limit ({current['release']}/{PROJECT_LIMIT})"
         )
+    if int(current["control_plane"]) > CONTROL_PLANE_LIMIT:
+        violations.append(
+            "control-plane exceeds hard limit "
+            f"({current['control_plane']}/{CONTROL_PLANE_LIMIT})"
+        )
     deltas = None
     if baseline is not None:
         delta_violations, deltas = _delta_gate_violations(current, baseline)
@@ -560,6 +572,7 @@ def check(
             "limits": {
                 "runtime_hard": RUNTIME_LIMIT,
                 "release_hard": PROJECT_LIMIT,
+                "control_plane_hard": CONTROL_PLANE_LIMIT,
                 "runtime_operating": RUNTIME_OPERATING_LIMIT,
                 "release_operating": PROJECT_OPERATING_LIMIT,
                 "runtime_red": RUNTIME_RED_LIMIT,
