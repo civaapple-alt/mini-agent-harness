@@ -106,6 +106,7 @@ graph LR
 - [Goal Runtime Loop Ownership](implemented/bug-fix/2026-09-08-goal-loop-ownership.md)
 - [Cargo Boundary Audit](implemented/architecture/2026-09-07-cargo-boundary-audit.md)
 - [Multi-Directory Workspace Context Perception](implemented/feature/2026-09-07-multi-directory-workspace-context.md)
+- [Line Budget Ceiling Adjustment Rationale](implemented/process/2026-09-10-line-budget-ceiling-adjustment-rationale.zh.md)
 - [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md)
 - [Hard Limits System](implemented/architecture/2026-08-24-hard-limits-system.md)
 - [Session as Single Durable Store](implemented/architecture/2026-08-28-session-single-source-of-truth.md)
