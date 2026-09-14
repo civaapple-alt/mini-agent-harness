@@ -89,6 +89,7 @@ graph LR
 
 ### Proposed
 
+- [Web Studio 独立 Session 派生与上下文压缩](proposed/architecture/2026-09-14-web-studio-independent-session-fork-and-compaction.zh.md)
 - [Result-Oriented Long-Term Bot Agents](proposed/architecture/2026-09-04-result-oriented-long-term-bot-agents.zh.md)
 - [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
 - [CLI Through App Server](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md)
