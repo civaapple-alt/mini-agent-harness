@@ -1,5 +1,5 @@
 use super::*;
-use crate::security::{ApprovalStore, action_grant_key, is_high_risk};
+use crate::security::{ApprovalStore, action_grant_key, is_high_risk, is_trusted_high_risk};
 use mini_agent_protocol::{
     ActionGrantScope, ApprovalOutcome, ApprovalPolicy, ToolApprovalRequest, ToolApprovalResolution,
 };
@@ -243,11 +243,12 @@ impl ApprovalController {
             SecurityDecision::Allow => return Ok(()),
             SecurityDecision::Ask => {}
         }
-        if matches!(
-            self.approval_policy(),
-            ApprovalPolicy::Automatic | ApprovalPolicy::Trusted
-        ) && !is_high_risk(&request)
-        {
+        let requires_approval = match self.approval_policy() {
+            ApprovalPolicy::Interactive => true,
+            ApprovalPolicy::Automatic => is_high_risk(&request),
+            ApprovalPolicy::Trusted => is_trusted_high_risk(&request),
+        };
+        if !requires_approval {
             return Ok(());
         }
         let key = action_grant_key(&request, &self.access_scope.read().unwrap());

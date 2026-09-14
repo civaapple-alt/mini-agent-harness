@@ -45,6 +45,111 @@ pub(crate) fn is_high_risk(request: &ToolApprovalRequest) -> bool {
         )
     })
 }
+
+/// Trusted execution keeps the normal approval path for actions whose tool
+/// semantics are destructive or external. Ordinary shell commands are
+/// admitted automatically, but known destructive command forms remain
+/// explicit approval boundaries.
+pub(crate) fn is_trusted_high_risk(request: &ToolApprovalRequest) -> bool {
+    let tool_name = request
+        .tool_name
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    match tool_name.as_str() {
+        "shell" | "bash" | "exec" => return is_destructive_shell_command(&request.action),
+        "read_image" | "apply_patch" | "mcp" | "mcp_tool" | "web_fetch" => return true,
+        _ => {}
+    }
+    is_high_risk(request) || is_destructive_shell_command(&request.action)
+}
+
+fn is_destructive_shell_command(action: &str) -> bool {
+    let normalized_action = action.trim().to_ascii_lowercase();
+    let command = normalized_action
+        .trim()
+        .strip_prefix("shell command `")
+        .and_then(|value| value.strip_suffix('`'))
+        .or_else(|| normalized_action.trim().strip_prefix("shell:"))
+        .or_else(|| {
+            normalized_action
+                .trim()
+                .strip_prefix("start process `")
+                .and_then(|value| value.strip_suffix('`'))
+        })
+        .unwrap_or(normalized_action.as_str());
+    let tokens = command
+        .split_whitespace()
+        .map(|token| {
+            token.trim_matches(|character: char| {
+                !character.is_ascii_alphanumeric()
+                    && character != '-'
+                    && character != '/'
+                    && character != '_'
+            })
+        })
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+
+    for (index, token) in tokens.iter().enumerate() {
+        let program = token.rsplit(['/', '\\']).next().unwrap_or(token);
+        let args = &tokens[index + 1..];
+        match program {
+            "rm" => {
+                if args.iter().any(|arg| {
+                    arg.starts_with('-')
+                        && (arg.contains('r')
+                            || arg.contains('f')
+                            || arg == &"--recursive"
+                            || arg == &"--force")
+                }) {
+                    return true;
+                }
+            }
+            "rmdir" | "rd" | "remove-item" | "ri" => return true,
+            "del" | "erase" => {
+                if args
+                    .iter()
+                    .any(|arg| *arg == "/s" || *arg == "/q" || *arg == "/f")
+                {
+                    return true;
+                }
+            }
+            "git" => {
+                let subcommand = args.first().copied();
+                let destructive = match subcommand {
+                    Some("reset") => args.contains(&"--hard"),
+                    Some("clean") => args
+                        .iter()
+                        .any(|arg| arg.starts_with('-') && arg.contains('f')),
+                    Some("push") => args.iter().any(|arg| {
+                        *arg == "--force" || *arg == "-f" || *arg == "--force-with-lease"
+                    }),
+                    Some("branch") => args.iter().any(|arg| *arg == "-d" || *arg == "-D"),
+                    Some("checkout") => args.contains(&"--"),
+                    Some("restore") => true,
+                    _ => false,
+                };
+                if destructive {
+                    return true;
+                }
+            }
+            "format-volume" | "diskpart" | "shutdown" | "stop-computer" => return true,
+            _ => {}
+        }
+    }
+
+    [
+        "shutil.rmtree",
+        "remove-item -recurse",
+        "remove-item -force",
+        "os.remove(",
+        ".unlink(",
+    ]
+    .iter()
+    .any(|fragment| command.contains(fragment))
+}
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -402,5 +507,43 @@ mod tests {
             policy.evaluate("shell command `cargo test`"),
             SecurityDecision::Ask
         );
+    }
+
+    #[test]
+    fn trusted_policy_only_bypasses_non_destructive_and_local_read_actions() {
+        let request = |tool_name: &str, action: &str| ToolApprovalRequest {
+            tool_name: Some(tool_name.to_string()),
+            action: action.to_string(),
+            ..ToolApprovalRequest::default()
+        };
+
+        assert!(!is_trusted_high_risk(&request(
+            "shell",
+            "shell command `cargo test --workspace`"
+        )));
+        assert!(is_trusted_high_risk(&request(
+            "shell",
+            "shell command `rm -rf ./renders`"
+        )));
+        assert!(is_trusted_high_risk(&request(
+            "shell",
+            "shell command `Remove-Item -Recurse ./renders`"
+        )));
+        assert!(is_trusted_high_risk(&request(
+            "shell",
+            "shell command `git reset --hard HEAD`"
+        )));
+        assert!(is_trusted_high_risk(&request(
+            "shell",
+            "shell command `git checkout -- .`"
+        )));
+        assert!(!is_trusted_high_risk(&request(
+            "read_file",
+            "read scripts/build.py"
+        )));
+        assert!(is_trusted_high_risk(&request(
+            "mcp",
+            "call MCP tool \"publish\" on \"remote\""
+        )));
     }
 }

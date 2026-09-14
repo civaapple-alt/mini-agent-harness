@@ -38,7 +38,11 @@ impl ToolHandler for Shell {
 impl ToolRuntime for Shell {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let command = self.validated_command(arguments)?;
-        self.0.approve(&format!("shell command `{command}`"))?;
+        self.0.approval.approve_request(&ToolApprovalRequest {
+            action: format!("shell command `{command}`"),
+            tool_name: Some("shell".to_string()),
+            ..ToolApprovalRequest::default()
+        })?;
         self.run_command(command)
     }
 
@@ -196,7 +200,7 @@ pub(super) fn shell_description(policy: mini_agent_protocol::ApprovalPolicy) -> 
             "automatically for bounded read-only inspection; other shell actions after approval"
         }
         mini_agent_protocol::ApprovalPolicy::Trusted => {
-            "automatically for bounded read-only inspection; shell mutations still require approval"
+            "automatically for ordinary commands; recognized destructive commands still require approval"
         }
     };
     if cfg!(windows) {

@@ -273,7 +273,7 @@ Goal/Thread projections.
 | --- | --- | --- |
 | `world/state` | No parameters | Returns the current workspace, structured status, status lines, and bounded model context. |
 | `world/refresh` | No parameters | Refreshes the world and returns `{changed, state}`. |
-| `world/set_execution` | `access`, `policy` | Sets execution scope and returns `{changed, state}`. `access` is `project` or `full_machine`; `policy` is `interactive`, `automatic`, or `trusted`. `trusted` only bypasses bounded non-destructive workspace patch approval. |
+| `world/set_execution` | `access`, `policy` | Sets execution scope and returns `{changed, state}`. `access` is `project` or `full_machine`; `policy` is `interactive`, `automatic`, or `trusted`. `trusted` bypasses ordinary validated workspace and Shell approval while retaining explicit approval for destructive, system-level, MCP, and workspace-external actions such as `read_image`. |
 | `mcp/status` | No parameters | Returns enabled/inactive servers, tool count, and whether retry is available. |
 | `mcp/retry` | No parameters | Retries MCP setup and returns enabled/inactive servers, diagnostics, and tool count. |
 

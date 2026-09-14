@@ -48,7 +48,7 @@ line gate 的后续计划要求 Permission、Sandbox、Recovery、Audit 不能�
 
 | 边界 | 成功路径 | 失败反例 | 状态 |
 | :--- | :--- | :--- | :--- |
-| Permission / grant | scoped approval 精确匹配 owner/revision；`trusted + project` 普通 patch 直接准入；批准后的 workspace 外部图片读取 | security deny 优先级；外部读取拒绝；Shell 拒绝先于 sandbox；trusted 下删除和高风险 Shell 仍需 approval；App Server 公共 approval denial | covered |
+| Permission / grant | scoped approval 精确匹配 owner/revision；`trusted + project` 普通 patch 和普通 Shell 直接准入；批准后的 workspace 外部图片读取 | security deny 优先级；外部读取拒绝；Shell 拒绝先于 sandbox；trusted 下递归/强制删除、破坏性 Git、系统级命令、MCP 和 workspace 外 `read_image` 仍需 approval；App Server 公共 approval denial | covered |
 | Sandbox | Native guard；Docker workspace mount 与 ephemeral `/tmp` | Shell timeout；只读 Shell 拒绝副作用参数 | covered with platform/daemon caveat |
 | Recovery | Goal pause/resume；恢复 checkpoint 不重放首轮 | Goal 清除后忽略旧 verifier；checkpoint 改变后忽略旧结果；拒绝/失败 verdict | covered |
 | Audit | bounded、redacted trace；round metadata 与输出记录 | unbounded trace id；artifact 总量超限；diagnostic metadata 不进入 wire event | covered |
@@ -106,7 +106,7 @@ Known gap: <what this scenario does not prove>
 | Docker sandbox | availability、mount、ephemeral filesystem probe | host runtime covered | 更强隔离仍需 policy 和跨平台证据 |
 | Goal-owned continuation | `json_rpc::tests::rejects_thread_continuation_updates_while_goal_runtime_is_active`、Gateway preference/settlement tests | active Goal 不接受 Thread continuation 改写；settlement 后恢复显式偏好 | covered |
 | Continuation persistence | Capabilities `session::tests::continuation_preference_survives_session_resume`；App Server `json_rpc::tests::persists_and_restores_thread_continuation_through_app_server_restart`、`json_rpc::tests::broadcasts_thread_settings_updates_with_action_revision`、`json_rpc::tests::exposes_codex_shaped_thread_goal_lifecycle`、`json_rpc::tests::enforces_goal_timeout_with_cooperative_cancellation`；Gateway `test_session_catalog_reads_bounded_history_without_web_state`、`test_attach_thread_honors_explicit_project_canonical_session`、`test_attach_thread_rejects_project_switch_for_live_binding`、`test_fork_and_concurrent_attach_share_the_forked_binding`、`test_restart_broadcasts_runtime_generation`；SDK Goal result mapping、Web Goal revision projection、runtime generation and reconnect rebuild tests | `thread_settings.json` 按 Thread ID 原子保存；显式 idle shutdown 释放旧 worker lock；active turn 返回 `Busy`，settlement 后可 shutdown；两个 App Server subscriber 收到同一 revision；Goal event/action result 保留同一 revision；explicit Project attach 选择同一 canonical Session，live 同 ID 冲突返回 `409`；fork child binding 与并发 attach 在同一 Gateway 临界区内收敛；Gateway runtime restart 广播新 generation，Studio 清 cursor 并重新读取 bounded workflow projection | covered for settings/Goal, Web reconnect and Gateway runtime generation recovery, and Gateway fork/并发组合 |
-| Trusted admission | Capabilities `workspace::tests::trusted_policy_directly_admits_non_destructive_patches_but_not_deletes` | trusted 不能升级为 allow-all：删除和高风险 Shell 仍进入 approval | covered |
+| Trusted admission | Capabilities `workspace::tests::trusted_policy_directly_admits_non_destructive_patches_but_not_deletes`、`workspace::tests::trusted_policy_auto_approves_ordinary_shell_commands`、`security::tests::trusted_policy_only_bypasses_non_destructive_and_local_read_actions` | trusted 自动执行普通工作区操作和普通 Shell；递归/强制删除、破坏性 Git、系统级命令、MCP 和 workspace 外 `read_image` 仍进入 approval，安全 Deny 优先 | covered |
 
 ## 不变量与证据门槛
 

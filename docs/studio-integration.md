@@ -102,11 +102,13 @@ not be reused for the new binding.
 `project` and `full_machine` are access scopes. `full_machine` expands the
 candidate path range but is not allow-all: Deny, Plan-mode source-file mutation
 locks, unavailable tools, and high-risk confirmation remain effective.
-`interactive` and `automatic` are execution policies; Automatic directly admits
-only bounded read-only Shell inspection, while writes, dynamic paths, high-risk
-commands, and outside paths still use approval. Plan mode does not add a separate
-Shell restriction. `once`, `session`, and `project` are action-grant scopes
-selected in an approval response and validated by Host/Capabilities.
+`interactive`, `automatic`, and `trusted` are execution policies; Automatic directly
+admits only bounded read-only Shell inspection, while Trusted also admits ordinary
+validated workspace actions and Shell commands. Trusted still requires approval for
+destructive/system commands, MCP, and workspace-external actions such as `read_image`.
+Plan mode does not add a
+separate Shell restriction. `once`, `session`, and `project` are action-grant
+scopes selected in an approval response and validated by Host/Capabilities.
 
 ## Project-qualified requests and stale-response protection
 

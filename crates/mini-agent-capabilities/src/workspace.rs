@@ -10,8 +10,8 @@ pub use approval::ApprovalController;
 #[cfg(test)]
 use files::{ReadFile, ReadImage};
 use mini_agent_protocol::{
-    Tool, ToolAdmission, ToolError, ToolExecutionOutcome, ToolExecutionRequest, ToolHandler,
-    ToolRuntime, ToolSpec,
+    Tool, ToolAdmission, ToolApprovalRequest, ToolError, ToolExecutionOutcome,
+    ToolExecutionRequest, ToolHandler, ToolRuntime, ToolSpec,
 };
 #[cfg(test)]
 use patch::ApplyPatch;

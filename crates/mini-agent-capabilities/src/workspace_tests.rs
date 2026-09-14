@@ -261,6 +261,24 @@ fn trusted_policy_directly_admits_non_destructive_patches_but_not_deletes() {
 }
 
 #[test]
+fn trusted_policy_auto_approves_ordinary_shell_commands() {
+    let root = test_root();
+    let approval = ApprovalController::with_callback(ApprovalPolicy::Trusted, |_| {
+        panic!("ordinary trusted shell command should not request approval")
+    });
+    let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
+    let shell = Shell(workspace, ResultStore::default());
+    let command = if cfg!(windows) {
+        "Write-Output trusted-shell"
+    } else {
+        "printf trusted-shell"
+    };
+
+    assert!(shell.execute(&json!({"command": command})).is_ok());
+    remove_test_root(&root);
+}
+
+#[test]
 fn read_image_uploads_and_rejects_type_mismatch() {
     let root = test_root();
     fs::write(root.join("shot.png"), crate::image::TINY_PNG).unwrap();
