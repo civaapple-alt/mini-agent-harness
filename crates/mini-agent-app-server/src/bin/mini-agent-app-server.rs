@@ -97,6 +97,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .as_ref()
             .map(|opened| ThreadId::new(opened.store.thread_id().to_string()))
             .unwrap_or_else(|| ThreadId::new("default"));
+        if let Some(opened) = &session {
+            broker.bind_thread_trace(thread_id.as_str().to_string(), opened.store.path());
+        }
         let mut thread = Thread::new(thread_id.clone(), harness);
         if let Some(opened) = &session {
             thread.set_next_turn_number(opened.store.thread_turn_count() as u64 + 1);

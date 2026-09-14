@@ -235,6 +235,16 @@ paths, access, workspace, and revision). Project changes, runtime restart,
 policy changes, or explicit revocation clear it. `state.json` must never be
 treated as an approval store.
 
+The App Server also writes an independent, bounded `approval-evidence.jsonl`
+sidecar beside a durable Thread Session when the Thread is bound to a Session
+file. It records `approval_resolved` entries with project/Thread/Turn/call
+identity, policy, access, a tool/command-prefix summary, the canonical action-key
+hash, and the final outcome/grant scope. It does not record raw prompts,
+complete tool arguments, tool output, or approval grants as reusable authority.
+Each Thread owns its file; project reports merge sidecars at read time. The
+evidence is for reviewing risk rules and repeated approvals. It never changes
+Host/Capabilities authorization or automatically widens an allow rule.
+
 ## Startup and verification
 
 From `mini-agent-web`:

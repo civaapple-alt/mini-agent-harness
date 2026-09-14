@@ -89,6 +89,13 @@ Trace 复用已有 observation events 和 `JsonlTrace`，只记录有界 metadat
 `run --trace-jsonl PATH` 是显式、caller-owned、create-new artifact；不恢复退役
 的外部 `--trace`，不隐式写入 Session。
 
+Web Studio 的审批证据使用独立的 `approval-evidence.jsonl` sidecar，每个 Thread
+单独写入自己的 Session 目录。它记录已完成的审批决策、策略/访问范围、工具与命令
+首词摘要、规范化 action key 的 hash 和结果；它不是 Session history，也不是
+`ApprovalStore`。多个 Thread 的项目级报告必须在读取时聚合，不得让 Gateway 或
+多个 runtime 共同写一个项目级文件。原始 prompt、完整参数、工具输出和密钥不得
+进入该 sidecar。Trace 只能支持后续规则评审，不能自动授予新的权限。
+
 ### Compaction
 
 当前确定性触发点仍是最大上下文的 50%，不是把 70% 预警写成新的运行时语义。

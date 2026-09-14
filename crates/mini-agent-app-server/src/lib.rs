@@ -27,6 +27,7 @@ pub struct ApprovalBroker {
     notify: Arc<Notify>,
     next_id: Arc<AtomicU64>,
     execution: Arc<RwLock<ApprovalExecution>>,
+    trace: approval_trace::ApprovalTrace,
 }
 
 #[derive(Clone, Copy)]
@@ -116,7 +117,17 @@ impl ApprovalBroker {
                 access: AccessScope::Project,
                 policy: ApprovalPolicy::Interactive,
             })),
+            trace: Default::default(),
         }
+    }
+
+    /// Binds a Thread to its independent approval evidence sidecar.
+    ///
+    /// Trace failures are reported to the caller and never affect approval
+    /// or tool execution. The caller may choose to keep the runtime alive
+    /// without evidence when the sidecar cannot be opened.
+    pub fn bind_thread_trace(&self, thread_id: String, session_file: &std::path::Path) {
+        self.trace.bind_thread_file(thread_id, session_file);
     }
 
     pub fn set_execution_scope(&self, access: AccessScope, policy: ApprovalPolicy) {
@@ -237,6 +248,7 @@ impl ApprovalBroker {
             ApprovalDecision::Approve => ApprovalOutcome::Approved,
             ApprovalDecision::Deny => ApprovalOutcome::Denied,
         };
+        let trace_request = request.clone();
         let resolution = ApprovalResolution {
             request_id: request.request_id.clone(),
             action: request.action.clone(),
@@ -256,6 +268,7 @@ impl ApprovalBroker {
         sender
             .send(resolution.clone())
             .map_err(|_| "approval callback is no longer waiting".to_string())?;
+        self.trace.resolved(&trace_request, &resolution);
         self.state.lock().unwrap().resolved.push_back(resolution);
         self.notify.notify_one();
         Ok(())
@@ -269,6 +282,7 @@ impl Default for ApprovalBroker {
 }
 
 mod action;
+mod approval_trace;
 pub mod client;
 pub mod frontend;
 mod goal_runtime;
