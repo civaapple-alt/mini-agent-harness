@@ -1,6 +1,8 @@
 use super::*;
 use crate::tests::{DoneModel, harness};
-use mini_agent_app_server_protocol::{CapabilityProviderSelection, ClientCapabilities};
+use mini_agent_app_server_protocol::{
+    ActionGrantScope, ApprovalDecision, CapabilityProviderSelection, ClientCapabilities,
+};
 use mini_agent_capabilities::{
     ApprovalController, ApprovalPolicy, ImageStore, ResultStore, SandboxKind, SecurityPolicy,
     SecurityPreset, SessionRequest as SessionStoreRequest, SessionStore,
@@ -9,7 +11,7 @@ use mini_agent_capabilities::{
 use mini_agent_core::{Harness, HarnessConfig, Thread, ToolRouter};
 use mini_agent_protocol::{
     Message, Model, ModelEventSink, ModelRequest, ModelResponse, ModelUsage, ThreadId, ThreadStart,
-    ToolCall, ToolExecutionStatus, TurnInput,
+    ToolApprovalRequest, ToolCall, ToolExecutionStatus, TurnInput,
 };
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -46,6 +48,56 @@ fn turn_start_request(id: u64, prompt: &str) -> JsonRpcRequest {
             input: TurnInput::new(TurnInputMode::Start, prompt),
         }),
     )
+}
+
+#[tokio::test]
+async fn approval_request_ids_remain_unique_across_brokers() {
+    let first = ApprovalBroker::new();
+    let second = ApprovalBroker::new();
+    let first_receiver = first.clone();
+    let second_receiver = second.clone();
+    let second_request_broker = second_receiver.clone();
+    let request = ToolApprovalRequest {
+        action: "shell command `pwd`".to_string(),
+        tool_name: Some("shell".to_string()),
+        call_id: Some("same-call-id-fixture".to_string()),
+        ..ToolApprovalRequest::default()
+    };
+
+    let first_task = tokio::task::spawn_blocking(move || first.request_resolution(&request));
+    let second_task = tokio::task::spawn_blocking(move || {
+        second_request_broker.request_resolution(&ToolApprovalRequest {
+            action: "shell command `pwd`".to_string(),
+            tool_name: Some("shell".to_string()),
+            call_id: Some("same-call-id-fixture".to_string()),
+            ..ToolApprovalRequest::default()
+        })
+    });
+
+    let first_pending = tokio::time::timeout(Duration::from_secs(2), first_receiver.next_request())
+        .await
+        .expect("first approval should be queued");
+    let second_pending =
+        tokio::time::timeout(Duration::from_secs(2), second_receiver.next_request())
+            .await
+            .expect("second approval should be queued");
+    assert_ne!(first_pending.request_id, second_pending.request_id);
+
+    for (broker, request_id) in [
+        (first_receiver, first_pending.request_id),
+        (second_receiver, second_pending.request_id),
+    ] {
+        broker
+            .respond(ApprovalRespondParams {
+                request_id,
+                decision: ApprovalDecision::Approve,
+                grant_scope: Some(ActionGrantScope::Once),
+                reason: None,
+            })
+            .expect("approval should resolve its own broker entry");
+    }
+    first_task.await.unwrap().unwrap();
+    second_task.await.unwrap().unwrap();
 }
 
 async fn initialize_connection<M: Model + Send + 'static>(
@@ -1283,7 +1335,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
     let pending = tokio::time::timeout(Duration::from_secs(3), broker.next_request())
         .await
         .expect("Shell approval should reach the App Server broker");
-    assert_eq!(pending.request_id, "approval-1");
+    assert!(pending.request_id.ends_with("-shell-call-1"));
     assert_eq!(
         pending.action,
         format!("shell command `{}`", shell_approval_command())
@@ -1317,7 +1369,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         ApprovalEvent::Resolved(resolution) => resolution,
         ApprovalEvent::Requested(_) => panic!("expected approval resolution"),
     };
-    assert_eq!(resolution.request_id, "approval-1");
+    assert_eq!(resolution.request_id, pending.request_id);
     assert_eq!(resolution.call_id.as_deref(), Some("shell-call-1"));
     assert_eq!(resolution.thread_id, Some(ThreadId::new("thread-1")));
     assert_eq!(

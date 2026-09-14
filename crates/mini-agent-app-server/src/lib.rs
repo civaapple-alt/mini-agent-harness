@@ -20,11 +20,13 @@ use tokio::sync::{Notify, broadcast, mpsc, oneshot};
 const EVENT_BUFFER: usize = 256;
 const EVENT_REPLAY_BUFFER: usize = 512;
 const COMMAND_BUFFER: usize = 32;
+static NEXT_BROKER_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 pub struct ApprovalBroker {
     state: Arc<Mutex<ApprovalState>>,
     notify: Arc<Notify>,
+    broker_id: u64,
     next_id: Arc<AtomicU64>,
     execution: Arc<RwLock<ApprovalExecution>>,
     trace: approval_trace::ApprovalTrace,
@@ -112,6 +114,7 @@ impl ApprovalBroker {
                 responders: HashMap::new(),
             })),
             notify: Arc::new(Notify::new()),
+            broker_id: NEXT_BROKER_ID.fetch_add(1, Ordering::Relaxed),
             next_id: Arc::new(AtomicU64::new(1)),
             execution: Arc::new(RwLock::new(ApprovalExecution {
                 access: AccessScope::Project,
@@ -141,13 +144,31 @@ impl ApprovalBroker {
 
     /// Called by a synchronous Host approval callback with tool identity.
     ///
-    /// The broker assigns `request_id`; the caller-provided Thread, Turn, and
-    /// call IDs remain attached to both request and resolution events.
+    /// The broker assigns a process/broker/call-scoped `request_id`; the
+    /// caller-provided Thread, Turn, and call IDs remain attached to both
+    /// request and resolution events. Including the broker and call identity
+    /// prevents two runtime instances from reusing a local `approval-1` while
+    /// a Gateway is still waiting on both requests.
     pub fn request_resolution(
         &self,
         approval: &ToolApprovalRequest,
     ) -> Result<ApprovalResolution, String> {
-        let request_id = format!("approval-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
+        let sequence = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let request_id = match approval.call_id.as_deref() {
+            Some(call_id) if !call_id.is_empty() => format!(
+                "approval-{}-{}-{}-{}",
+                std::process::id(),
+                self.broker_id,
+                sequence,
+                call_id
+            ),
+            _ => format!(
+                "approval-{}-{}-{}",
+                std::process::id(),
+                self.broker_id,
+                sequence
+            ),
+        };
         let (sender, receiver) = std::sync::mpsc::channel();
         let execution = *self.execution.read().unwrap();
         let access_scope = match execution.access {
