@@ -21,7 +21,7 @@ from a workspace or user `.env` by `RuntimeConfig`.
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | for primary commands | Bearer credential for the Responses endpoint |
-| `OPENAI_MODEL` | for primary commands | Provider model identifier. DeepSeek Responses currently uses `deepseek-v4-flash`; image-bearing requests use `deepseek-v4-flash-vision-exp` |
+| `OPENAI_MODEL` | for primary commands | Provider model identifier. Current DeepSeek unified entrypoint is `deepseek-flash`; image-bearing requests use `deepseek-v4-flash-vision-exp` |
 | `OPENAI_BASE_URL` | no | Responses API root; defaults to `https://api.openai.com/v1`. Files API is `{base}/files` |
 | `VERIFIER_OPENAI_MODEL` | for Goal verification | Goal verifier model identifier |
 | `VERIFIER_OPENAI_API_KEY` | no | Goal verifier credential override; otherwise inherits `OPENAI_API_KEY` |
@@ -135,7 +135,7 @@ therefore uses:
 
 ```dotenv
 OPENAI_API_KEY=
-OPENAI_MODEL=deepseek-v4-flash
+OPENAI_MODEL=deepseek-flash
 OPENAI_BASE_URL=https://api.deepseek.com
 ```
 

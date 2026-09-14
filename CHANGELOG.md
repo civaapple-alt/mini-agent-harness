@@ -7,6 +7,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **DeepSeek model naming**: document the current unified `deepseek-flash`
+  entrypoint and keep the image route compatible with both the unified name
+  and legacy `deepseek-v4-*` identifiers.
+
 - **Provider web-search capability**: expose the enabled server-side
   `web_search` tool in the bounded Host prompt guidance and keep its request
   inclusion independent from the Host function-tool catalog. Model-only

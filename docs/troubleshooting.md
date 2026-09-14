@@ -122,7 +122,7 @@ It uploads the file once through DeepSeek Files API (`POST /files`, `purpose=use
 turns reuse the returned `file_id`. Inline base64 is only a fallback if that upload fails.
 
 DeepSeek text models ignore `input_image` (they replace it with a placeholder). When the current
-`OPENAI_MODEL` is `deepseek-v4-flash` or `deepseek-v4-pro` and the request actually contains images,
+`OPENAI_MODEL` is `deepseek-flash`, `deepseek-v4-flash`, or `deepseek-v4-pro` and the request actually contains images,
 that one request is sent as `deepseek-v4-flash-vision-exp`. All requests use the Responses endpoint;
 DeepSeek keeps using `file_id` from the envelope when present. Resume and fork reload session
 `attachments/` so image turns can be retried without losing the local bytes.

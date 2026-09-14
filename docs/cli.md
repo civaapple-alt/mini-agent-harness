@@ -33,7 +33,7 @@ Provider-backed 命令需要凭证和模型配置。推荐将它们放在用户�
 
 ```dotenv
 OPENAI_API_KEY=
-OPENAI_MODEL=deepseek-v4-flash
+OPENAI_MODEL=deepseek-flash
 OPENAI_BASE_URL=https://api.deepseek.com
 ```
 

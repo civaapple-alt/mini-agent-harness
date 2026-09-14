@@ -408,7 +408,9 @@ pub(crate) fn uses_deepseek_files(base_url: &str) -> bool {
 fn is_deepseek_text_model(model: &str) -> bool {
     let model = model.to_ascii_lowercase();
     !model.contains("vision")
-        && (model.starts_with("deepseek-v4-flash") || model.starts_with("deepseek-v4-pro"))
+        && (model.starts_with("deepseek-flash")
+            || model.starts_with("deepseek-v4-flash")
+            || model.starts_with("deepseek-v4-pro"))
 }
 
 #[derive(Clone, Debug)]
@@ -562,6 +564,10 @@ mod tests {
     fn vision_model_swaps_deepseek_text_routes() {
         assert_eq!(
             vision_model_for("deepseek-v4-flash", true),
+            "deepseek-v4-flash-vision-exp"
+        );
+        assert_eq!(
+            vision_model_for("deepseek-flash", true),
             "deepseek-v4-flash-vision-exp"
         );
         assert_eq!(
