@@ -482,9 +482,11 @@ where
             .ok_or_else(|| JsonRpcError::invalid_params("turn/event params are missing"))?;
         let event: TurnEventNotification = serde_json::from_value(params)
             .map_err(|error| JsonRpcError::invalid_params(error.to_string()))?;
-        let item_id = event.items.iter().find_map(|item| match item {
-            ThreadItem::ContextCompaction { id, .. } => Some(id.clone()),
-            _ => None,
+        let item_id = event.item_id.or_else(|| {
+            event.items.iter().find_map(|item| match item {
+                ThreadItem::ContextCompaction { id, .. } => Some(id.clone()),
+                _ => None,
+            })
         });
         let mut envelope =
             EventEnvelope::new(event.thread_id, event.turn_id, event.sequence, event.event);

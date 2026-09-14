@@ -75,7 +75,10 @@ impl ThreadItem {
                 tool_calls,
                 ..
             } => assistant_items(
-                &format!("{turn_prefix}:{}", event.sequence),
+                &event
+                    .item_id
+                    .clone()
+                    .unwrap_or_else(|| format!("{turn_prefix}:{}", event.sequence)),
                 reasoning,
                 text,
                 tool_calls,

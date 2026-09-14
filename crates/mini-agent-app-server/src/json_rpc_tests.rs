@@ -1577,8 +1577,9 @@ async fn local_and_json_rpc_clients_preserve_the_same_event_trace() {
     let mut json_events = Vec::new();
     loop {
         let event = next_turn_event(&mut json_rpc).await;
-        let envelope =
+        let mut envelope =
             EventEnvelope::new(event.thread_id, event.turn_id, event.sequence, event.event);
+        envelope.item_id = event.item_id;
         let finished = matches!(
             envelope.event,
             mini_agent_protocol::Event::TurnFinished { .. }

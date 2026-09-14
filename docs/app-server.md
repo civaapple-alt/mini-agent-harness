@@ -13,9 +13,12 @@ interruption, and approval request/response routing. External adapters should
 use the same App Server boundary.
 
 Ordered `turn/event` notifications preserve `thread_id`, `turn_id`, sequence,
-and bounded ThreadItem identity. In particular, a live context-compaction
-start/finish pair shares one unique `item_id`; local redacted trace records
-retain that identity without retaining model or tool payloads.
+and bounded ThreadItem identity. Each model response also carries an optional
+`item_id` shared by its `model_started`, reasoning/text delta, and
+`model_responded` events; the projected reasoning item uses
+`<item_id>:reasoning`. In particular, a live context-compaction start/finish
+pair shares one unique `item_id`; local redacted trace records retain these
+identities without retaining model or tool payloads.
 
 Run it after configuring the provider environment:
 

@@ -250,6 +250,7 @@ impl<M: Model> Thread<M> {
             turn_id: id.clone(),
             next_sequence: self.next_event_sequence,
             active_compaction_item_id: None,
+            active_model_item_id: None,
         };
         observer.observe(&Event::TurnStarted {
             mode: input.mode,
@@ -341,6 +342,7 @@ struct EnvelopeObserver<'a, S> {
     turn_id: TurnId,
     next_sequence: u64,
     active_compaction_item_id: Option<String>,
+    active_model_item_id: Option<String>,
 }
 
 impl<S: EventSink> Observer for EnvelopeObserver<'_, S> {
@@ -348,6 +350,15 @@ impl<S: EventSink> Observer for EnvelopeObserver<'_, S> {
         let sequence = self.next_sequence;
         self.next_sequence = self.next_sequence.saturating_add(1);
         let item_id = match event {
+            Event::ModelStarted { step, .. } => {
+                let item_id = format!("{}:model:{}", self.turn_id.as_str(), step);
+                self.active_model_item_id = Some(item_id.clone());
+                Some(item_id)
+            }
+            Event::AssistantReasoningDelta { .. } | Event::AssistantTextDelta { .. } => {
+                self.active_model_item_id.clone()
+            }
+            Event::ModelResponded { .. } => self.active_model_item_id.take(),
             Event::ContextCompactionStarted { .. } => {
                 let item_id = format!("{}:compaction:{}", self.turn_id.as_str(), sequence);
                 self.active_compaction_item_id = Some(item_id.clone());

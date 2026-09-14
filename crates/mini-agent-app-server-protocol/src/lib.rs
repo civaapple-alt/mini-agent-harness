@@ -949,6 +949,8 @@ pub struct TurnEventNotification {
     pub thread_id: ThreadId,
     pub turn_id: Option<TurnId>,
     pub sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
     pub items: Vec<ThreadItem>,
     pub event: mini_agent_protocol::Event,
 }
@@ -960,6 +962,7 @@ impl From<EventEnvelope> for TurnEventNotification {
             thread_id: event.thread_id,
             turn_id: event.turn_id,
             sequence: event.sequence,
+            item_id: event.item_id,
             items,
             event: event.event,
         }

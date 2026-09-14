@@ -7,6 +7,16 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Model response item identity:** carry a bounded `itemId` for each model
+  response through streaming and `turn/event` projections so reasoning deltas,
+  ThreadItems, replay, and renderers can reconcile one response segment without
+  merging it into a prior tool-loop segment.
+
+- **Approval evidence:** write request and resolution metadata plus a
+  `session_item_id` join key in the per-Thread `approval-evidence.jsonl` sidecar;
+  risk review recovers the bounded command from the co-located Session log, while
+  the trace remains diagnostic and never becomes authorization state.
+
 - **DeepSeek model naming**: document the current unified `deepseek-flash`
   entrypoint and keep the image route compatible with both the unified name
   and legacy `deepseek-v4-*` identifiers.

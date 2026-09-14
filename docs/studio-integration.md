@@ -237,10 +237,13 @@ treated as an approval store.
 
 The App Server also writes an independent, bounded `approval-evidence.jsonl`
 sidecar beside a durable Thread Session when the Thread is bound to a Session
-file. It records `approval_resolved` entries with project/Thread/Turn/call
-identity, policy, access, a tool/command-prefix summary, the canonical action-key
-hash, and the final outcome/grant scope. It does not record raw prompts,
-complete tool arguments, tool output, or approval grants as reusable authority.
+file. It records `approval_requested` and `approval_resolved` entries with
+project/Thread/Turn/call identity, policy, access, a tool/command-prefix summary,
+the `session_item_id` join key, the canonical action-key hash, and, for a
+resolution, the final outcome/grant scope. It does not copy the full command,
+raw prompts, complete tool arguments, tool output, or approval grants as reusable
+authority. To inspect the bounded/redacted command, readers join `session_item_id`
+to the `kind=item` record with the same `item_id` in the co-located `session.jsonl`.
 Each Thread owns its file; project reports merge sidecars at read time. The
 evidence is for reviewing risk rules and repeated approvals. It never changes
 Host/Capabilities authorization or automatically widens an allow rule.

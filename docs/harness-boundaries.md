@@ -91,10 +91,13 @@ Trace 复用已有 observation events 和 `JsonlTrace`，只记录有界 metadat
 
 Web Studio 的审批证据使用独立的 `approval-evidence.jsonl` sidecar，每个 Thread
 单独写入自己的 Session 目录。它记录已完成的审批决策、策略/访问范围、工具与命令
-首词摘要、规范化 action key 的 hash 和结果；它不是 Session history，也不是
-`ApprovalStore`。多个 Thread 的项目级报告必须在读取时聚合，不得让 Gateway 或
-多个 runtime 共同写一个项目级文件。原始 prompt、完整参数、工具输出和密钥不得
-进入该 sidecar。Trace 只能支持后续规则评审，不能自动授予新的权限。
+首词摘要、`call_id`/`session_item_id` 关联键、规范化 action key 的 hash 和结果；请求
+进入等待态时先写 `approval_requested`，最终决策再写 `approval_resolved`。它不是
+Session history，也不是 `ApprovalStore`。完整命令不复制到 sidecar；读取方通过同目录
+`session.jsonl` 中 `kind=item` 且 `item_id=session_item_id` 的 bounded/redacted
+arguments 关联命令。多个 Thread 的项目级报告必须在读取时聚合，不得让 Gateway 或多个
+runtime 共同写一个项目级文件。原始 prompt、完整 tool 参数、工具输出和密钥不得进入
+该 sidecar。Trace 只能支持后续规则评审，不能自动授予新的权限。
 
 ### Compaction
 

@@ -187,8 +187,9 @@ impl ApprovalBroker {
             state
                 .responders
                 .insert(request_id, (request.clone(), sender));
-            state.queued.push_back(request);
+            state.queued.push_back(request.clone());
         }
+        self.trace.requested(&request);
         self.notify.notify_one();
         receiver
             .recv()
