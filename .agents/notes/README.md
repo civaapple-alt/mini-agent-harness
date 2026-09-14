@@ -118,7 +118,6 @@ graph LR
 - [Codex-Aligned Agent Control Plane](implemented/architecture/2026-09-03-codex-aligned-agent-control-plane.md)
 - [Codex-Aligned Agent Control Plane（中文）](implemented/architecture/2026-09-03-codex-aligned-agent-control-plane.zh.md)
 - [薄 Agent Loop、厚 Control Plane：系统工程决策](implemented/architecture/2026-09-08-thin-loop-thick-control-plane-system-engineering.zh.md)
-- [审批身份与生命周期收敛](implemented/bug-fix/2026-09-14-approval-identity-and-lifecycle.md)
 
 ### Process Guides
 
