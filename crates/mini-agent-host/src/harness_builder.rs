@@ -33,6 +33,15 @@ pub struct HarnessBuild<M: Model> {
 /// with host state needed by persistence, extensions, and workflow adapters.
 pub type HostRuntime = HarnessBuild<OpenAiModel>;
 
+const PROVIDER_WEB_SEARCH_PROMPT: &str = "## Provider web search\nThe model provider has enabled its server-side `web_search` tool for current web research. Use `web_search` for current or broad web research. It is separate from the Host `web_fetch` tool, which is only for reading an exact URL. Do not claim that `web_search` is unavailable merely because it is not listed with Host function tools; only report it unavailable after the provider returns a tool error.";
+
+fn append_provider_web_search_prompt(prompt: &mut String, enabled: bool) {
+    if enabled {
+        prompt.push_str("\n\n");
+        prompt.push_str(PROVIDER_WEB_SEARCH_PROMPT);
+    }
+}
+
 /// Provider seam used by the Host composition root to construct a model
 /// without coupling the runtime assembly to one concrete HTTP provider.
 pub trait ModelProviderFactory<M>: Send + Sync {
@@ -91,6 +100,7 @@ where
         &composition.extension_provider,
     )?;
     let provider = runtime_config.provider_settings()?;
+    append_provider_web_search_prompt(&mut config.system_prompt, provider.web_search);
     let images = ImageStore::for_provider(provider.api_key.clone(), &provider.base_url);
     let model = model_factory.build(
         &composition.model_provider,
@@ -264,4 +274,20 @@ where
         retry_mcp_servers,
         capability_manifest,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_search_prompt_is_only_added_when_enabled() {
+        let mut prompt = "base prompt".to_string();
+        append_provider_web_search_prompt(&mut prompt, false);
+        assert_eq!(prompt, "base prompt");
+
+        append_provider_web_search_prompt(&mut prompt, true);
+        assert!(prompt.contains("`web_search`"));
+        assert!(prompt.contains("`web_fetch`"));
+    }
 }

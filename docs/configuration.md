@@ -21,12 +21,12 @@ from a workspace or user `.env` by `RuntimeConfig`.
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | for primary commands | Bearer credential for the Responses endpoint |
-| `OPENAI_MODEL` | for primary commands | Provider model identifier. DeepSeek flash/pro image-bearing requests use `deepseek-v4-flash-vision-exp` |
+| `OPENAI_MODEL` | for primary commands | Provider model identifier. DeepSeek Responses currently uses `deepseek-v4-flash`; image-bearing requests use `deepseek-v4-flash-vision-exp` |
 | `OPENAI_BASE_URL` | no | Responses API root; defaults to `https://api.openai.com/v1`. Files API is `{base}/files` |
 | `VERIFIER_OPENAI_MODEL` | for Goal verification | Goal verifier model identifier |
 | `VERIFIER_OPENAI_API_KEY` | no | Goal verifier credential override; otherwise inherits `OPENAI_API_KEY` |
 | `VERIFIER_OPENAI_BASE_URL` | no | Goal verifier API root override; otherwise inherits `OPENAI_BASE_URL` |
-| `MINI_AGENT_WEB_SEARCH` | no | Boolean web-search override; official OpenAI/DeepSeek endpoints enable it by default when unset |
+| `MINI_AGENT_WEB_SEARCH` | no | Boolean provider-side web-search override; official OpenAI/DeepSeek endpoints enable it by default when unset. It is independent from Host function tools and is not an approval-gated Host action |
 | `OPENAI_WEB_SEARCH` | no | Accepted web-search configuration alias; `MINI_AGENT_WEB_SEARCH` takes precedence |
 | `MINI_AGENT_GOAL_MAX_LOOPS` | no | Maximum Goal continuation loops; defaults to `100` |
 | `MINI_AGENT_GOAL_STEP_BUDGET` | no | Maximum Core model steps per Goal milestone; defaults to `200` |

@@ -7,6 +7,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Provider web-search capability**: expose the enabled server-side
+  `web_search` tool in the bounded Host prompt guidance and keep its request
+  inclusion independent from the Host function-tool catalog. Model-only
+  compositions can therefore still use provider search when configured.
+
 - **Documentation synchronization:** align the Studio integration, App Server,
   configuration, world-state, and limits guides with project-qualified requests,
   Session `turn_active`/`process_online` semantics, persisted Plan review state,

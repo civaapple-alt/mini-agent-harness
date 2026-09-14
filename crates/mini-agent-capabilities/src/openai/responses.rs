@@ -95,7 +95,10 @@ fn request_body_with_limit(
         })
         .collect::<Vec<_>>();
 
-    if web_search && !request.tools.is_empty() {
+    // Provider-managed search is independent from Host function tools. Keep it
+    // available even when a model-only composition intentionally has no Host
+    // tools; the provider executes this tool server-side.
+    if web_search {
         tools.push(json!({
             "type": "web_search"
         }));
@@ -412,7 +415,17 @@ mod tests {
             true,
             &images,
         );
-        assert_eq!(body_empty_tools["tools"], json!([]));
+        assert_eq!(body_empty_tools["tools"], json!([{ "type": "web_search" }]));
+
+        let body_without_search = render_body(
+            "test-model",
+            &config,
+            &messages,
+            &empty_tools,
+            false,
+            &images,
+        );
+        assert_eq!(body_without_search["tools"], json!([]));
     }
 
     #[test]
