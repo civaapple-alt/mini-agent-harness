@@ -3,9 +3,29 @@ use crate::security::{ApprovalStore, action_grant_key, is_high_risk, is_trusted_
 use mini_agent_protocol::{
     ActionGrantScope, ApprovalOutcome, ApprovalPolicy, ToolApprovalRequest, ToolApprovalResolution,
 };
+use std::fmt;
 
 type ApprovalCallback =
     dyn Fn(&ToolApprovalRequest) -> Result<ToolApprovalResolution, ToolError> + Send + Sync;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApprovalFailure {
+    PolicyDenied(String),
+    UserDenied(String),
+    Internal(String),
+}
+
+impl fmt::Display for ApprovalFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PolicyDenied(message) | Self::UserDenied(message) | Self::Internal(message) => {
+                formatter.write_str(message)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ApprovalFailure {}
 
 #[derive(Clone, Debug, Default)]
 struct ApprovalBinding {
@@ -200,18 +220,20 @@ impl ApprovalController {
     }
 
     pub fn ensure_plan_mode_unlocked(&self) -> Result<(), ToolError> {
+        self.plan_mode_block_reason()
+            .map_or(Ok(()), |reason| Err(ToolError(reason)))
+    }
+
+    pub fn plan_mode_block_reason(&self) -> Option<String> {
         if self.read_only_agent() {
-            return Err(ToolError(
-                "workspace mutations disabled by the active agent profile".to_string(),
-            ));
+            return Some("workspace mutations disabled by the active agent profile".to_string());
         }
-        match self.living_plan() {
-            Some(living) => Err(ToolError(format!(
+        self.living_plan().map(|living| {
+            format!(
                 "workspace mutations locked in Plan Mode; living plan is {}",
                 living.display()
-            ))),
-            None => Ok(()),
-        }
+            )
+        })
     }
 
     pub fn approve(&self, action: &str) -> Result<(), ToolError> {
@@ -219,6 +241,14 @@ impl ApprovalController {
     }
 
     pub fn approve_request(&self, request: &ToolApprovalRequest) -> Result<(), ToolError> {
+        self.approve_request_with_classification(request)
+            .map_err(|error| ToolError(error.to_string()))
+    }
+
+    pub fn approve_request_with_classification(
+        &self,
+        request: &ToolApprovalRequest,
+    ) -> Result<(), ApprovalFailure> {
         let mut request = request.clone();
         let binding = self.approval_binding.read().unwrap().clone();
         if binding.project_id.is_some() {
@@ -235,7 +265,7 @@ impl ApprovalController {
         }
         match self.policy.read().unwrap().evaluate(&request.action) {
             SecurityDecision::Deny => {
-                return Err(ToolError(format!(
+                return Err(ApprovalFailure::PolicyDenied(format!(
                     "forbidden by security policy: {}",
                     request.action
                 )));
@@ -268,19 +298,25 @@ impl ApprovalController {
         {
             return Ok(());
         }
-        let resolution = (self.callback)(&request)?;
+        let resolution = (self.callback)(&request)
+            .map_err(|error| ApprovalFailure::Internal(error.to_string()))?;
         if resolution.outcome != ApprovalOutcome::Approved {
-            return Err(ToolError(format!(
-                "user denied: {}",
-                resolution
-                    .reason
-                    .as_deref()
-                    .unwrap_or(request.action.as_str())
-            )));
+            let reason = resolution
+                .reason
+                .as_deref()
+                .unwrap_or(request.action.as_str());
+            let message = if reason.starts_with("denied non-interactive action:") {
+                reason.to_string()
+            } else {
+                format!("user denied: {reason}")
+            };
+            return Err(ApprovalFailure::UserDenied(message));
         }
         if resolution.grant_scope != ActionGrantScope::Once {
             let key = key.ok_or_else(|| {
-                ToolError("approval grant requires a complete action key".to_string())
+                ApprovalFailure::Internal(
+                    "approval grant requires a complete action key".to_string(),
+                )
             })?;
             let owner = binding
                 .owner(resolution.grant_scope)
@@ -289,7 +325,9 @@ impl ApprovalController {
                         .then(|| self.session_dir().map(|path| path.display().to_string()))
                         .flatten()
                 })
-                .ok_or_else(|| ToolError("approval grant owner is unavailable".to_string()))?;
+                .ok_or_else(|| {
+                    ApprovalFailure::Internal("approval grant owner is unavailable".to_string())
+                })?;
             self.store.insert(resolution.grant_scope, &owner, &key);
         }
         Ok(())
@@ -299,9 +337,11 @@ impl ApprovalController {
 fn terminal_approval(request: &ToolApprovalRequest) -> Result<ToolApprovalResolution, ToolError> {
     let action = request.action.as_str();
     if !io::stdin().is_terminal() {
-        return Err(ToolError(format!(
-            "denied non-interactive action: {action}"
-        )));
+        return Ok(ToolApprovalResolution {
+            outcome: ApprovalOutcome::Denied,
+            grant_scope: ActionGrantScope::Once,
+            reason: Some(format!("denied non-interactive action: {action}")),
+        });
     }
     eprint!("approve {action}? [y/N] ");
     io::stderr()

@@ -204,6 +204,27 @@ impl ToolExecutionOutcome {
             content: content.into(),
         }
     }
+
+    pub fn needs_approval(content: impl Into<String>) -> Self {
+        Self {
+            status: ToolExecutionStatus::NeedsApproval,
+            content: content.into(),
+        }
+    }
+
+    pub fn deferred(content: impl Into<String>) -> Self {
+        Self {
+            status: ToolExecutionStatus::Deferred,
+            content: content.into(),
+        }
+    }
+
+    pub fn retryable(content: impl Into<String>) -> Self {
+        Self {
+            status: ToolExecutionStatus::Retryable,
+            content: content.into(),
+        }
+    }
 }
 
 /// Describes the admission work required before a tool can cause side effects.
@@ -217,6 +238,9 @@ impl ToolExecutionOutcome {
 pub enum ToolAdmission {
     Legacy,
     Allowed,
+    Deferred {
+        reason: String,
+    },
     ApprovalRequired {
         action: String,
         target_paths: Vec<String>,

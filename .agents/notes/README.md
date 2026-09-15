@@ -97,6 +97,7 @@ graph LR
 
 ### Implemented
 
+- [主执行链 typed Tool outcome 边界](implemented/architecture/2026-09-15-typed-tool-outcome-boundary.zh.md)
 - [Session fork 结构化冲突契约](implemented/architecture/2026-09-15-session-fork-structured-conflict.zh.md)
 - [Gateway 本地 Session fork 冲突统一契约](implemented/bug-fix/2026-09-15-local-gateway-fork-conflict.zh.md)
 - [Session fork 上下文策略与结果元数据契约](implemented/architecture/2026-09-15-session-fork-context-policy-contract.zh.md)

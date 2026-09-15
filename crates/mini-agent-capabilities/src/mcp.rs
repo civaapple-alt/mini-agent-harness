@@ -13,6 +13,7 @@ use rmcp::transport::{
 use rmcp::{ClientLifecycleMode, ClientServiceExt};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
+use std::fmt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
@@ -52,8 +53,31 @@ enum ServerCommand {
     Call {
         name: String,
         arguments: serde_json::Map<String, Value>,
-        reply: mpsc::SyncSender<Result<String, String>>,
+        reply: mpsc::SyncSender<Result<String, McpCallError>>,
     },
+}
+
+#[derive(Debug)]
+enum McpCallError {
+    Stopped(String),
+    Retryable(String),
+    Failed(String),
+}
+
+impl McpCallError {
+    fn is_retryable(&self) -> bool {
+        matches!(self, Self::Retryable(_))
+    }
+}
+
+impl fmt::Display for McpCallError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stopped(message) | Self::Retryable(message) | Self::Failed(message) => {
+                formatter.write_str(message)
+            }
+        }
+    }
 }
 
 struct McpTool {
@@ -149,7 +173,9 @@ impl ToolHandler for McpTool {
     }
 
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
-        self.approval.ensure_plan_mode_unlocked()?;
+        if let Some(reason) = self.approval.plan_mode_block_reason() {
+            return Ok(ToolAdmission::Deferred { reason });
+        }
         request
             .arguments
             .as_object()
@@ -166,10 +192,17 @@ impl ToolRuntime for McpTool {
         self.approval.ensure_plan_mode_unlocked()?;
         self.approval.approve(&self.action())?;
         self.call(arguments)
+            .map_err(|error| ToolError(error.to_string()))
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
-        crate::into_tool_outcome(self.call(&request.arguments))
+        match self.call(&request.arguments) {
+            Ok(content) => ToolExecutionOutcome::completed(content),
+            Err(error) if error.is_retryable() => {
+                ToolExecutionOutcome::retryable(error.to_string())
+            }
+            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+        }
     }
 }
 
@@ -181,10 +214,12 @@ impl McpTool {
         )
     }
 
-    fn call(&self, arguments: &Value) -> Result<String, ToolError> {
+    fn call(&self, arguments: &Value) -> Result<String, McpCallError> {
         let arguments = arguments
             .as_object()
-            .ok_or_else(|| ToolError("MCP tool arguments must be a JSON object".to_string()))?
+            .ok_or_else(|| {
+                McpCallError::Failed("MCP tool arguments must be a JSON object".to_string())
+            })?
             .clone();
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         self.commands
@@ -193,11 +228,19 @@ impl McpTool {
                 arguments,
                 reply: reply_tx,
             })
-            .map_err(|_| ToolError(format!("MCP server {} stopped", self.server_label)))?;
+            .map_err(|_| {
+                McpCallError::Stopped(format!("MCP server {} stopped", self.server_label))
+            })?;
         reply_rx
             .recv_timeout(CALL_TIMEOUT)
-            .map_err(|error| ToolError(format!("MCP call did not complete: {error}")))?
-            .map_err(ToolError)
+            .map_err(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => {
+                    McpCallError::Retryable("MCP tool call timed out".to_string())
+                }
+                mpsc::RecvTimeoutError::Disconnected => McpCallError::Stopped(
+                    "MCP call did not complete: channel disconnected".to_string(),
+                ),
+            })?
     }
 }
 
@@ -298,7 +341,7 @@ fn run_server(
                     reply,
                 } => {
                     if let Err(error) = circuit_breaker.can_execute() {
-                        let _ = reply.send(Err(error));
+                        let _ = reply.send(Err(McpCallError::Retryable(error)));
                         continue;
                     }
                     let params = CallToolRequestParams::new(name).with_arguments(arguments);
@@ -306,15 +349,17 @@ fn run_server(
                     let result = match result {
                         Ok(Ok(result)) => {
                             circuit_breaker.record_success();
-                            bounded_result(&result)
+                            bounded_result(&result).map_err(McpCallError::Failed)
                         }
                         Ok(Err(error)) => {
                             circuit_breaker.record_failure();
-                            Err(error.to_string())
+                            Err(McpCallError::Failed(error.to_string()))
                         }
                         Err(_) => {
                             circuit_breaker.record_failure();
-                            Err("MCP tool call timed out".to_string())
+                            Err(McpCallError::Retryable(
+                                "MCP tool call timed out".to_string(),
+                            ))
                         }
                     };
                     let _ = reply.send(result);

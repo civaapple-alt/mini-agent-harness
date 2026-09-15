@@ -20,6 +20,12 @@ and bounded ThreadItem identity. Each model response also carries an optional
 pair shares one unique `item_id`; local redacted trace records retain these
 identities without retaining model or tool payloads.
 
+The main execution path is `Core → Host → App Server`: Core owns the turn loop
+and records the tool outcome, Host owns admission, approval, concrete execution,
+and typed outcome propagation, and App Server serializes the settled event and
+item projections. `ToolExecutionStatus` is carried as structured state; clients
+must not infer status from the human-readable tool `content`.
+
 Run it after configuring the provider environment:
 
 ```sh

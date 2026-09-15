@@ -47,10 +47,25 @@ impl ToolRuntime for Shell {
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
-        let result = self
-            .validated_command(&request.arguments)
-            .and_then(|command| self.run_command(command));
-        crate::into_tool_outcome(result)
+        let command = match self.validated_command(&request.arguments) {
+            Ok(command) => command,
+            Err(error) => return ToolExecutionOutcome::failed(error.to_string()),
+        };
+        let output = match run_shell(
+            command,
+            &self.0.shell_root(command),
+            self.0.sandbox,
+            COMMAND_TIMEOUT,
+        ) {
+            Ok(output) => output,
+            Err(error) => return ToolExecutionOutcome::failed(error.to_string()),
+        };
+        let timed_out = output.timed_out;
+        match self.render_command_output(&output) {
+            Ok(content) if timed_out => ToolExecutionOutcome::retryable(content),
+            Ok(content) => ToolExecutionOutcome::completed(content),
+            Err(error) => ToolExecutionOutcome::failed(error.to_string()),
+        }
     }
 }
 
@@ -68,12 +83,18 @@ impl Shell {
     fn run_command(&self, command: &str) -> Result<String, ToolError> {
         let root = self.0.shell_root(command);
         let output = run_shell(command, &root, self.0.sandbox, COMMAND_TIMEOUT)?;
+        self.render_command_output(&output)
+    }
+
+    fn render_command_output(&self, output: &CommandOutput) -> Result<String, ToolError> {
         if output.text.len() <= INLINE_COMMAND_OUTPUT_BYTES {
-            return Ok(output.text);
+            return Ok(output.text.clone());
         }
-        let stored = self
-            .1
-            .store(output.text, output.source_bytes, output.source_truncated)?;
+        let stored = self.1.store(
+            output.text.clone(),
+            output.source_bytes,
+            output.source_truncated,
+        )?;
         Ok(format!(
             "<tool_result_preview handle=\"{}\" stored_bytes=\"{}\" source_bytes=\"{}\" source_truncated=\"{}\">\n{}\n</tool_result_preview>\nOutput was truncated to the default bounded preview; result continuation is not enabled in the default builtin catalog.",
             stored.handle,
@@ -277,6 +298,7 @@ pub(super) struct CommandOutput {
     pub(super) text: String,
     pub(super) source_bytes: usize,
     pub(super) source_truncated: bool,
+    pub(super) timed_out: bool,
 }
 
 fn run_sandboxed_command(
@@ -340,6 +362,7 @@ fn run_sandboxed_command(
         text: format!("exit: {status_str}\nstdout:\n{raw_stdout}\nstderr:\n{raw_stderr}"),
         source_bytes,
         source_truncated,
+        timed_out,
     })
 }
 

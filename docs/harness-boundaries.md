@@ -10,7 +10,7 @@ Core ToolRouter
 Protocol ToolHandler
   → 解析参数、描述 admission、产生协议级输入/结果
 Host ToolOrchestrator
-  → 编排 admission、approval、执行和结果投影
+  → 编排 admission、approval、执行，并透传 typed outcome
 ToolRuntime
   → 持有具体副作用及其 workspace/sandbox 配置
 ```
@@ -18,6 +18,14 @@ ToolRuntime
 Core 只拥有可移植的 model/tool contract、显式 run loop、limits、stop
 classification 和 observation events。Provider、文件、进程、approval UI、
 persistence 和 terminal output 留在 Core 外。被动 observer 不改变执行。
+
+工具结果沿着主执行链保持结构化状态：Core 解析并调用 ToolRouter，Host 根据
+`ToolAdmission` 编排准入与审批，Capabilities 的 `ToolRuntime` 返回带有
+`ToolExecutionStatus` 的 `ToolExecutionOutcome`，最后由 Core 写入
+`ToolFinished`、history 和下一轮模型输入，再由 App Server 投影为事件与 Item。
+Host 不通过 `content` 的错误文本猜测 `NeedsApproval`、`Deferred` 或 `Retryable`；
+`ToolError(String)` 仅是旧工具兼容边界，Legacy 工具必须自行返回明确的 outcome。
+因此 `content` 是有界诊断信息，不是跨层状态协议。
 
 稳定内置 prompt body 属于 crate-owned `builtin/prompts` Markdown asset 并在
 编译期嵌入；Host 的 project、extension、world、workflow instruction 只能在

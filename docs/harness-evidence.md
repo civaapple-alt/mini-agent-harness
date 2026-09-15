@@ -98,6 +98,7 @@ Known gap: <what this scenario does not prove>
 | 模型部分流失败 | Core `partial_model_stream_is_failed_without_fabricating_completion` | covered | 真实 provider 截断仍需矩阵 |
 | Partial tool batch | Core `harness::tests::recovers_after_partial_tool_batch_without_erasing_completed_action` | 同一 batch 中第一个 action 保持 `Completed`、第二个明确为 `Failed`，有序写入 history/event，模型随后恢复 | App Server/Capabilities 具体副作用 batch 仍需公共路径 scenario |
 | Retryable 工具结果 | Core `retryable_tool_result_is_preserved_until_model_recovers` | covered | 无隐式重试，策略层 deferred |
+| 主链 typed tool outcome | Host `preserves_explicit_deferred_admission`、`maps_typed_approval_denial_to_needs_approval`、`does_not_reclassify_legacy_failure_text`；App Server approval/MCP projection | covered | Legacy 工具仍保留兼容路径；真实 provider 仍需矩阵 |
 | HTTP 429 | Capabilities `maps_http_429_to_bounded_api_error_without_retrying` | covered: bounded fail-fast | provider-specific retry/backoff deferred |
 | shell timeout | Capabilities `shell_process_has_a_timeout` | capability boundary covered | CLI/App Server 公共路径未独立覆盖 |
 | turn/Goal timeout | App Server/CLI Goal timeout scenario | public path covered | 与 tool timeout 的组合矩阵未覆盖 |

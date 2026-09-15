@@ -25,6 +25,12 @@ mini-agent-app-server
 Host → Capabilities → Core
 ```
 
+请求控制面从 Web Studio 向内进入 App Server；一次模型回合的执行与结果则沿
+`Core → Host → Capabilities → App Server → Python SDK → Gateway → Web Studio`
+向外返回。Core 产生的 `ToolExecutionOutcome` 在 Host/Capabilities 边界保留
+`ToolExecutionStatus`，App Server 只负责有序投影；Gateway、SDK 和前端消费
+`outcome`，不复制准入、审批或重试分类权威。
+
 | Concern | Authority | Gateway responsibility |
 | --- | --- | --- |
 | Model steps, tool loop, limits, stop classification, Core events | Core | Relay the bounded projection. |
