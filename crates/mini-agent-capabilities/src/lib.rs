@@ -46,6 +46,7 @@ pub use security::SecurityPreset;
 pub use security::action_grant_key;
 pub use session::OpenedSession;
 pub use session::SessionForkInfo;
+pub use session::SessionForkMetadata;
 pub use session::SessionItem;
 pub use session::SessionRequest;
 pub use session::SessionStore;

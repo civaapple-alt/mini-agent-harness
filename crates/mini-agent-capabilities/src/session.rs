@@ -46,6 +46,34 @@ pub struct OpenedSession {
     pub resumed: bool,
 }
 
+/// Bounded fork metadata persisted with a newly created child Session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionForkMetadata {
+    pub context_policy: String,
+    pub context_before_bytes: usize,
+    pub context_after_bytes: usize,
+    pub compacted: bool,
+    pub method: String,
+}
+
+impl SessionForkMetadata {
+    fn validate(&self) -> Result<(), String> {
+        if !matches!(self.context_policy.as_str(), "exact" | "compact") {
+            return Err("invalid fork context policy".to_string());
+        }
+        if !matches!(
+            self.method.as_str(),
+            "exact" | "model_summary" | "mechanical"
+        ) {
+            return Err("invalid fork compaction method".to_string());
+        }
+        if self.context_policy == "exact" && self.compacted {
+            return Err("exact fork cannot be marked compacted".to_string());
+        }
+        Ok(())
+    }
+}
+
 /// Metadata for a newly persisted independent Session fork.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionForkInfo {
@@ -55,6 +83,7 @@ pub struct SessionForkInfo {
     pub parent_session_id: String,
     pub parent_checkpoint_seq: u64,
     pub session_bytes: u64,
+    pub metadata: Option<SessionForkMetadata>,
 }
 
 pub struct SessionStore {
@@ -523,6 +552,7 @@ impl SessionStore {
         parent_session_id: &str,
         parent_checkpoint_seq: u64,
         child_thread_id: &str,
+        context_policy: &str,
     ) -> Result<Option<SessionForkInfo>, String> {
         let index_path = project_dir.join(THREAD_INDEX_FILE_NAME);
         let Some(session_id) = fs::read_to_string(&index_path)
@@ -552,6 +582,10 @@ impl SessionStore {
         let header: Value = serde_json::from_str(&line)
             .map_err(|error| format!("invalid Session {session_id} header: {error}"))?;
         let forked_from = header.get("forked_from");
+        let fork_metadata = forked_from
+            .map(Self::read_fork_metadata)
+            .transpose()?
+            .flatten();
         let matches_parent = forked_from
             .and_then(|value| value.get("parent_session_id"))
             .and_then(Value::as_str)
@@ -563,6 +597,14 @@ impl SessionStore {
         if !matches_parent {
             return Err(format!(
                 "child thread id {child_thread_id} is already used by another Session"
+            ));
+        }
+        if fork_metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.context_policy != context_policy)
+        {
+            return Err(format!(
+                "child thread id {child_thread_id} already uses another fork context policy"
             ));
         }
         line.clear();
@@ -586,7 +628,69 @@ impl SessionStore {
             parent_session_id: parent_session_id.to_string(),
             parent_checkpoint_seq,
             session_bytes,
+            metadata: fork_metadata,
         }))
+    }
+
+    fn read_fork_metadata(forked_from: &Value) -> Result<Option<SessionForkMetadata>, String> {
+        let Some(context_policy) = forked_from.get("context_policy") else {
+            return Ok(None);
+        };
+        let context_policy = context_policy
+            .as_str()
+            .ok_or_else(|| "fork context policy is not a string".to_string())?;
+        let context_before_bytes = forked_from
+            .get("context_before_bytes")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "fork metadata is missing context_before_bytes".to_string())?;
+        let context_after_bytes = forked_from
+            .get("context_after_bytes")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "fork metadata is missing context_after_bytes".to_string())?;
+        let compacted = forked_from
+            .get("compacted")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| "fork metadata is missing compacted".to_string())?;
+        let method = forked_from
+            .get("method")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "fork metadata is missing method".to_string())?;
+        let metadata = SessionForkMetadata {
+            context_policy: context_policy.to_string(),
+            context_before_bytes: usize::try_from(context_before_bytes)
+                .map_err(|_| "fork context_before_bytes is too large".to_string())?,
+            context_after_bytes: usize::try_from(context_after_bytes)
+                .map_err(|_| "fork context_after_bytes is too large".to_string())?,
+            compacted,
+            method: method.to_string(),
+        };
+        metadata.validate()?;
+        Ok(Some(metadata))
+    }
+
+    /// Finds a previously persisted fork without preparing model context.
+    pub fn find_fork(
+        workspace: &Path,
+        parent_session_id: &str,
+        parent_checkpoint_seq: u64,
+        child_thread_id: &str,
+        context_policy: &str,
+    ) -> Result<Option<SessionForkInfo>, String> {
+        validate_session_id(parent_session_id)?;
+        validate_session_id(child_thread_id)?;
+        if !matches!(context_policy, "exact" | "compact") {
+            return Err("invalid fork context policy".to_string());
+        }
+        let project_dir = session_directory(workspace)?;
+        let _fork_lock = acquire_lock(&project_dir, "session-fork")?;
+        Ok(Self::existing_fork(
+            &project_dir,
+            parent_session_id,
+            parent_checkpoint_seq,
+            child_thread_id,
+            context_policy,
+        )?
+        .filter(|info| info.metadata.is_some()))
     }
 
     /// Persists a bounded checkpoint as a new independent Session.
@@ -600,9 +704,11 @@ impl SessionStore {
         parent_checkpoint_seq: u64,
         child_thread_id: &str,
         checkpoint: &[Message],
+        fork_metadata: SessionForkMetadata,
     ) -> Result<SessionForkInfo, String> {
         validate_session_id(parent_session_id)?;
         validate_session_id(child_thread_id)?;
+        fork_metadata.validate()?;
         let (parent_dir, parent_path) = resolve_session_file(workspace, parent_session_id)?;
         let metadata = fs::metadata(&parent_path)
             .map_err(|error| format!("cannot open parent session {parent_session_id}: {error}"))?;
@@ -623,6 +729,7 @@ impl SessionStore {
             parent_session_id,
             parent_checkpoint_seq,
             child_thread_id,
+            &fork_metadata.context_policy,
         )? {
             return Ok(existing);
         }
@@ -662,6 +769,7 @@ impl SessionStore {
                 child_thread_id,
                 checkpoint,
                 Some((parent_session_id, parent_checkpoint_seq)),
+                Some(&fork_metadata),
             );
             let store = match initialized {
                 Ok(store) => store,
@@ -681,6 +789,7 @@ impl SessionStore {
                 parent_session_id: parent_session_id.to_string(),
                 parent_checkpoint_seq,
                 session_bytes: store.bytes,
+                metadata: Some(fork_metadata.clone()),
             };
             drop(store);
             return Ok(info);
@@ -713,6 +822,7 @@ impl SessionStore {
             &thread_id,
             checkpoint,
             forked_from,
+            None,
         )
     }
 
@@ -727,6 +837,7 @@ impl SessionStore {
         thread_id: &str,
         checkpoint: &[Message],
         forked_from: Option<(&str, u64)>,
+        fork_metadata: Option<&SessionForkMetadata>,
     ) -> Result<Self, String> {
         let now = timestamp_ms();
         let mut store = Self {
@@ -754,10 +865,18 @@ impl SessionStore {
             "timestamp_ms": now,
         });
         if let Some((parent_session_id, parent_checkpoint_seq)) = forked_from {
-            header["forked_from"] = json!({
+            let mut lineage = json!({
                 "parent_session_id": parent_session_id,
                 "parent_checkpoint_seq": parent_checkpoint_seq,
             });
+            if let Some(metadata) = fork_metadata {
+                lineage["context_policy"] = json!(metadata.context_policy.as_str());
+                lineage["context_before_bytes"] = json!(metadata.context_before_bytes);
+                lineage["context_after_bytes"] = json!(metadata.context_after_bytes);
+                lineage["compacted"] = json!(metadata.compacted);
+                lineage["method"] = json!(metadata.method.as_str());
+            }
+            header["forked_from"] = lineage;
         }
         store.append_records(vec![
             header,
@@ -1010,6 +1129,26 @@ pub(crate) fn timestamp_ms() -> u64 {
 mod tests {
     use super::*;
 
+    fn exact_fork_metadata() -> SessionForkMetadata {
+        SessionForkMetadata {
+            context_policy: "exact".to_string(),
+            context_before_bytes: 128,
+            context_after_bytes: 128,
+            compacted: false,
+            method: "exact".to_string(),
+        }
+    }
+
+    fn compact_fork_metadata() -> SessionForkMetadata {
+        SessionForkMetadata {
+            context_policy: "compact".to_string(),
+            context_before_bytes: 128,
+            context_after_bytes: 64,
+            compacted: true,
+            method: "mechanical".to_string(),
+        }
+    }
+
     #[test]
     fn item_index_survives_session_resume() {
         let root = crate::test_support::test_root();
@@ -1134,12 +1273,19 @@ mod tests {
             parent.store.checkpoint_seq(),
             "child-thread",
             &messages,
+            exact_fork_metadata(),
         )
         .unwrap();
 
         assert_ne!(info.session_id, parent_id);
         assert_eq!(info.thread_id, "child-thread");
         assert_eq!(info.parent_session_id, parent_id);
+        assert_eq!(info.metadata, Some(exact_fork_metadata()));
+        assert!(
+            fs::read_to_string(&info.path)
+                .unwrap()
+                .contains("\"context_policy\":\"exact\"")
+        );
         assert_eq!(fs::read(parent.store.path()).unwrap(), parent_bytes);
         let child = SessionStore::open(&root, SessionRequest::Resume(info.session_id)).unwrap();
         assert_eq!(child.store.thread_id(), "child-thread");
@@ -1180,6 +1326,7 @@ mod tests {
             checkpoint_seq,
             "child-thread",
             &messages,
+            exact_fork_metadata(),
         )
         .unwrap();
         let retry = SessionStore::fork_from_checkpoint(
@@ -1188,10 +1335,21 @@ mod tests {
             checkpoint_seq,
             "child-thread",
             &messages,
+            exact_fork_metadata(),
         )
         .unwrap();
 
         assert_eq!(retry, first);
+        let conflict = SessionStore::fork_from_checkpoint(
+            &root,
+            &parent_id,
+            checkpoint_seq,
+            "child-thread",
+            &messages,
+            compact_fork_metadata(),
+        )
+        .unwrap_err();
+        assert!(conflict.contains("another fork context policy"));
         let project_dir = session_directory(&root).unwrap();
         let child_sessions = fs::read_dir(project_dir)
             .unwrap()
@@ -1234,6 +1392,7 @@ mod tests {
             first_checkpoint,
             "child-thread",
             &first_messages,
+            exact_fork_metadata(),
         )
         .unwrap();
         let second_messages = vec![Message::User {
@@ -1261,6 +1420,7 @@ mod tests {
             parent.store.checkpoint_seq(),
             "child-thread",
             &second_messages,
+            exact_fork_metadata(),
         )
         .unwrap_err();
         assert!(error.contains("already used"));

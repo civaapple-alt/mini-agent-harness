@@ -84,12 +84,12 @@ where
         .ok_or_else(|| AppServerError::Checkpoint("session persistence is disabled".to_string()))?;
     let parent_checkpoint_seq = state.management.current_checkpoint_seq();
     let workspace = state.management.world().workspace().to_path_buf();
-    let core_policy = match context_policy {
+    let (core_policy, context_policy_name) = match context_policy {
         mini_agent_app_server_protocol::ForkContextPolicy::Exact => {
-            mini_agent_core::ForkContextPolicy::Exact
+            (mini_agent_core::ForkContextPolicy::Exact, "exact")
         }
         mini_agent_app_server_protocol::ForkContextPolicy::Compact => {
-            mini_agent_core::ForkContextPolicy::Compact
+            (mini_agent_core::ForkContextPolicy::Compact, "compact")
         }
     };
     let thread = threads
@@ -98,21 +98,34 @@ where
     if thread.status() == mini_agent_protocol::ThreadStatus::Running {
         return Err(AppServerError::Busy);
     }
+    if let Some(existing) = mini_agent_capabilities::SessionStore::find_fork(
+        &workspace,
+        &parent.session_id,
+        parent_checkpoint_seq,
+        new_thread_id.as_str(),
+        context_policy_name,
+    )
+    .map_err(AppServerError::Checkpoint)?
+    {
+        return session_fork_result(existing, None);
+    }
     let prepared = thread
         .harness_mut()
         .prepare_fork_checkpoint(core_policy)
         .await
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
     let method = match prepared.method {
-        mini_agent_core::ForkCompactionMethod::Exact => {
-            mini_agent_app_server_protocol::ForkCompactionMethod::Exact
-        }
-        mini_agent_core::ForkCompactionMethod::ModelSummary => {
-            mini_agent_app_server_protocol::ForkCompactionMethod::ModelSummary
-        }
-        mini_agent_core::ForkCompactionMethod::Mechanical => {
-            mini_agent_app_server_protocol::ForkCompactionMethod::Mechanical
-        }
+        mini_agent_core::ForkCompactionMethod::Exact => "exact",
+        mini_agent_core::ForkCompactionMethod::ModelSummary => "model_summary",
+        mini_agent_core::ForkCompactionMethod::Mechanical => "mechanical",
+    }
+    .to_string();
+    let fork_metadata = mini_agent_capabilities::SessionForkMetadata {
+        context_policy: context_policy_name.to_string(),
+        context_before_bytes: prepared.context_before_bytes,
+        context_after_bytes: prepared.context_after_bytes,
+        compacted: method != "exact",
+        method,
     };
     let child = mini_agent_capabilities::SessionStore::fork_from_checkpoint(
         &workspace,
@@ -120,8 +133,31 @@ where
         parent_checkpoint_seq,
         new_thread_id.as_str(),
         prepared.session.messages(),
+        fork_metadata.clone(),
     )
     .map_err(AppServerError::Checkpoint)?;
+    session_fork_result(child, Some(fork_metadata))
+}
+
+fn session_fork_result(
+    child: mini_agent_capabilities::SessionForkInfo,
+    fallback_metadata: Option<mini_agent_capabilities::SessionForkMetadata>,
+) -> Result<mini_agent_app_server_protocol::SessionForkResult, AppServerError> {
+    let metadata = child.metadata.or(fallback_metadata).ok_or_else(|| {
+        AppServerError::Checkpoint(
+            "fork metadata is unavailable for an existing Session".to_string(),
+        )
+    })?;
+    let method = match metadata.method.as_str() {
+        "exact" => mini_agent_app_server_protocol::ForkCompactionMethod::Exact,
+        "model_summary" => mini_agent_app_server_protocol::ForkCompactionMethod::ModelSummary,
+        "mechanical" => mini_agent_app_server_protocol::ForkCompactionMethod::Mechanical,
+        other => {
+            return Err(AppServerError::Checkpoint(format!(
+                "unknown fork compaction method {other}"
+            )));
+        }
+    };
     Ok(mini_agent_app_server_protocol::SessionForkResult {
         session_id: child.session_id,
         thread_id: child.thread_id,
@@ -129,9 +165,9 @@ where
         parent_session_id: child.parent_session_id,
         parent_checkpoint_seq: child.parent_checkpoint_seq,
         session_bytes: child.session_bytes,
-        context_before_bytes: prepared.context_before_bytes,
-        context_after_bytes: prepared.context_after_bytes,
-        compacted: method != mini_agent_app_server_protocol::ForkCompactionMethod::Exact,
+        context_before_bytes: metadata.context_before_bytes,
+        context_after_bytes: metadata.context_after_bytes,
+        compacted: metadata.compacted,
         method,
     })
 }

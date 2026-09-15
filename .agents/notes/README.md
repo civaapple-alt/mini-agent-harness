@@ -97,6 +97,7 @@ graph LR
 
 ### Implemented
 
+- [Session fork 上下文策略与结果元数据契约](implemented/architecture/2026-09-15-session-fork-context-policy-contract.zh.md)
 - [Session fork 重试幂等与 child Thread 冲突](implemented/bug-fix/2026-09-15-session-fork-retry-idempotency.zh.md)
 - [Runtime 子系统跨仓契约基线](implemented/testing/2026-09-15-cross-repository-runtime-contract-baseline.zh.md)
 - [Web Studio 独立 Session 派生与上下文压缩](implemented/architecture/2026-09-14-web-studio-independent-session-fork-and-compaction.zh.md)

@@ -676,6 +676,72 @@ async fn persists_and_restores_thread_continuation_through_app_server_restart() 
 }
 
 #[tokio::test]
+async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
+    let root = rpc_root("session-fork-retry");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let source_thread_id = opened.store.thread_id().to_string();
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let mut connection = managed_connection_with_session(
+        ScenarioModel::Counting(model_calls.clone()),
+        root.clone(),
+        opened,
+    );
+    initialize_connection(&mut connection, "session-fork-retry-test").await;
+
+    let _ = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
+            2,
+            METHOD_TURN_START,
+            serde_json::json!(TurnStartParams {
+                thread_id: ThreadId::new(source_thread_id.clone()),
+                input: TurnInput::new(TurnInputMode::Start, "seed fork checkpoint"),
+            }),
+        ),
+    )
+    .await;
+    wait_for_turn_finished(&mut connection).await;
+    assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+
+    let params = serde_json::json!({
+        "sourceThreadId": source_thread_id,
+        "newThreadId": "forked-rpc-thread",
+        "contextPolicy": "exact"
+    });
+    let first = rpc_call(&mut connection, 3, METHOD_SESSION_FORK, params.clone()).await;
+    let retry = rpc_call(&mut connection, 4, METHOD_SESSION_FORK, params).await;
+    assert_eq!(first["value"]["method"], "exact");
+    assert_eq!(retry["value"]["sessionId"], first["value"]["sessionId"]);
+    assert_eq!(
+        retry["value"]["contextBeforeBytes"],
+        first["value"]["contextBeforeBytes"]
+    );
+    assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+
+    let conflict = connection
+        .handle_request(JsonRpcRequest::request(
+            5,
+            METHOD_SESSION_FORK,
+            serde_json::json!({
+                "sourceThreadId": source_thread_id,
+                "newThreadId": "forked-rpc-thread",
+                "contextPolicy": "compact"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        conflict
+            .error
+            .expect("policy conflict should be an RPC error")
+            .message
+            .contains("another fork context policy")
+    );
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn rejects_thread_continuation_updates_while_goal_runtime_is_active() {
     let (mut connection, root) = managed_connection("goal-owns-continuation");
     initialize_connection(&mut connection, "goal-continuation-test").await;
