@@ -25,7 +25,7 @@ Provider calls are not part of the release gate. Use local tests and build
 verification; paid provider checks, if needed, belong in an external evaluation
 harness.
 
-The commands below use the repository's current `0.7.0` version as a concrete
+The commands below use the repository's current `0.8.0` version as a concrete
 example. For a later release, replace the version in the checklist, tag, archive
 names, and verification commands together; never publish a different commit
 under an existing tag.
@@ -37,12 +37,12 @@ release, every user-visible behavior change should be represented in
 `CHANGELOG.md`; breaking changes require an explicit migration note and a
 major-version decision.
 
-For `0.7.0`, check:
+For `0.8.0`, check:
 
 - [ ] The release scope is agreed and no unrelated work is included.
 - [ ] `README.md` answers “what is it, how do I install it, and how do I run it”
       without requiring the reader to understand the architecture first.
-- [ ] `CHANGELOG.md` has a dated `0.7.0` section and an empty `Unreleased`
+- [ ] `CHANGELOG.md` has a dated `0.8.0` section and an empty `Unreleased`
       section for subsequent work.
 - [ ] Configuration, limits, troubleshooting, security, and privacy docs agree
       with the current implementation.
@@ -59,7 +59,7 @@ Use strict SemVer and the `v` prefix for the Git tag:
 
 ```sh
 rg -n '^version = |mini-agent-core = ' Cargo.toml crates/*/Cargo.toml
-rg -n '^## \[(Unreleased|0\.7\.0)\]' CHANGELOG.md
+rg -n '^## \[(Unreleased|0\.8\.0)\]' CHANGELOG.md
 ```
 
 Keep `Unreleased` at the top. Move the completed entries into the dated
@@ -98,7 +98,7 @@ git diff --check
 git status --short
 ```
 
-For the 0.7.0 release, the 25,000-effective-line runtime budget, the
+For the 0.8.0 release, the 25,000-effective-line runtime budget, the
 25,000-effective-line Control Plane budget, and the 35,000-effective-line
 release-source total, including tests in supported packages, are hard gates.
 The budget excludes blank and comment-only lines;
@@ -118,10 +118,10 @@ must point at the exact commit that passed local review and CI:
 ```sh
 git status --short
 git add Cargo.toml Cargo.lock crates/mini-agent-cli/Cargo.toml README.md CHANGELOG.md docs scripts/line_budget.py
-git commit -m "release: prepare v0.7.0"
+git commit -m "release: prepare v0.8.0"
 git push origin main
-git tag -a v0.7.0 -m "Release v0.7.0"
-git push origin v0.7.0
+git tag -a v0.8.0 -m "Release v0.8.0"
+git push origin v0.8.0
 ```
 
 Do not move or overwrite an existing release tag. If the commit is wrong,
@@ -151,7 +151,7 @@ tag, not for publishing a different commit under the same tag.
 ## Post-release verification
 
 After the workflow succeeds, open the
-[v0.7.0 release page](https://github.com/civaapple-alt/mini-agent-harness/releases)
+[v0.8.0 release page](https://github.com/civaapple-alt/mini-agent-harness/releases)
 and verify that all four platform archives and matching `.sha256` files are
 present. Download at least one archive from each operating system family when
 possible.
@@ -159,20 +159,20 @@ possible.
 On macOS/Linux:
 
 ```sh
-shasum -a 256 -c mini-agent-v0.7.0-<target>.tar.gz.sha256
-tar -xzf mini-agent-v0.7.0-<target>.tar.gz
-./mini-agent-v0.7.0-<target>/mini-agent --version
+shasum -a 256 -c mini-agent-v0.8.0-<target>.tar.gz.sha256
+tar -xzf mini-agent-v0.8.0-<target>.tar.gz
+./mini-agent-v0.8.0-<target>/mini-agent --version
 ```
 
 On Windows PowerShell:
 
 ```powershell
-Get-FileHash .\\mini-agent-v0.7.0-x86_64-pc-windows-msvc.zip -Algorithm SHA256
-Expand-Archive .\\mini-agent-v0.7.0-x86_64-pc-windows-msvc.zip .\\mini-agent-v0.7.0
-.\\mini-agent-v0.7.0\\mini-agent.exe --version
+Get-FileHash .\\mini-agent-v0.8.0-x86_64-pc-windows-msvc.zip -Algorithm SHA256
+Expand-Archive .\\mini-agent-v0.8.0-x86_64-pc-windows-msvc.zip .\\mini-agent-v0.8.0
+.\\mini-agent-v0.8.0\\mini-agent.exe --version
 ```
 
-Confirm that `--version` reports `0.7.0`. Then announce the release with a
+Confirm that `--version` reports `0.8.0`. Then announce the release with a
 short summary, supported platforms, upgrade instructions, and known
 limitations. Link to the GitHub Release rather than attaching unverified
 builds elsewhere.

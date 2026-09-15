@@ -5,6 +5,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.8.0] - 2026-09-15
+
 ### Changed
 
 - **Session fork policy and idempotency:** make `exact` the default fork context
