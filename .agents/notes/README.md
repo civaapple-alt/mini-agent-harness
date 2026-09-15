@@ -98,6 +98,7 @@ graph LR
 ### Implemented
 
 - [Tool outcome 公共投影与 Web 消费边界](implemented/architecture/2026-09-15-tool-outcome-public-projection.zh.md)
+- [Web Studio Tool Outcome 消费](implemented/architecture/2026-09-15-web-studio-tool-outcome-consumption.zh.md)
 - [主执行链 typed Tool outcome 边界](implemented/architecture/2026-09-15-typed-tool-outcome-boundary.zh.md)
 - [Session fork 结构化冲突契约](implemented/architecture/2026-09-15-session-fork-structured-conflict.zh.md)
 - [Gateway 本地 Session fork 冲突统一契约](implemented/bug-fix/2026-09-15-local-gateway-fork-conflict.zh.md)
