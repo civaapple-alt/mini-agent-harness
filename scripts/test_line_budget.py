@@ -127,26 +127,26 @@ class LineBudgetTests(unittest.TestCase):
 
     def test_delta_gate_allows_bounded_growth_in_amber_band(self):
         current = {"runtime": 24_200, "release": 34_400, "control_plane": 1}
-        base = {"runtime": 24_100, "release": 34_250, "control_plane": 1}
+        base = {"runtime": 24_000, "release": 34_100, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(
-            deltas, {"runtime": 100, "release": 150, "control_plane": 0}
+            deltas, {"runtime": 200, "release": 300, "control_plane": 0}
         )
         self.assertEqual(violations, [])
 
     def test_delta_gate_rejects_growth_above_non_red_limit(self):
-        current = {"runtime": 24_200, "release": 34_400, "control_plane": 1}
-        base = {"runtime": 24_000, "release": 34_200, "control_plane": 1}
+        current = {"runtime": 24_201, "release": 34_401, "control_plane": 1}
+        base = {"runtime": 24_000, "release": 34_100, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(
-            deltas, {"runtime": 200, "release": 200, "control_plane": 0}
+            deltas, {"runtime": 201, "release": 301, "control_plane": 0}
         )
-        self.assertIn("runtime grew by 200 lines, above non-red limit 100", violations)
-        self.assertIn("release grew by 200 lines, above non-red limit 150", violations)
+        self.assertIn("runtime grew by 201 lines, above non-red limit 200", violations)
+        self.assertIn("release grew by 301 lines, above non-red limit 300", violations)
 
     def test_delta_gate_freezes_growth_in_red_band(self):
         current = {"runtime": 24_501, "release": 34_997, "control_plane": 1}

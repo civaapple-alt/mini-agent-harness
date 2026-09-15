@@ -200,6 +200,7 @@ Thread returned by `thread/start`.
 | `thread/close` | `threadId` | Closes the Thread; the action value is `{closed: true}`. |
 | `thread/items/list` | `threadId`; optional `turnId`, `cursor`, `limit`, `sortDirection` | Returns cursor-bounded `data` entries, `nextCursor`, and `backwardsCursor`. |
 | `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
+| `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or `compact_if_needed`) | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. The source Thread must be idle. |
 
 `thread/resume` is a controlled checkpoint install, not a second persistence
 format. The Session store and App Server remain the authorities for the

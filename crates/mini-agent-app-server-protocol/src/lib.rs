@@ -55,6 +55,7 @@ pub const METHOD_THREAD_GOAL_CLEAR: &str = "thread/goal/clear";
 pub const METHOD_THREAD_GOAL_UPDATED: &str = "thread/goal/updated";
 pub const METHOD_THREAD_GOAL_CLEARED: &str = "thread/goal/cleared";
 pub const METHOD_SESSION_INFO: &str = "session/info";
+pub const METHOD_SESSION_FORK: &str = "session/fork";
 pub const METHOD_WORLD_STATE: &str = "world/state";
 pub const METHOD_WORLD_REFRESH: &str = "world/refresh";
 pub const METHOD_WORLD_SET_EXECUTION: &str = "world/set_execution";
@@ -332,6 +333,8 @@ pub struct ServerCapabilities {
     #[serde(default)]
     pub thread_fork: bool,
     #[serde(default)]
+    pub session_fork: bool,
+    #[serde(default)]
     pub thread_read: bool,
     #[serde(default)]
     pub thread_close: bool,
@@ -551,6 +554,46 @@ pub struct SessionInfoResult {
     pub thread_id: String,
     pub path: String,
     pub resumed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForkContextPolicy {
+    Exact,
+    #[default]
+    CompactIfNeeded,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForkCompactionMethod {
+    Exact,
+    ModelSummary,
+    Mechanical,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionForkParams {
+    pub source_thread_id: ThreadId,
+    pub new_thread_id: ThreadId,
+    #[serde(default)]
+    pub context_policy: ForkContextPolicy,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionForkResult {
+    pub session_id: String,
+    pub thread_id: String,
+    pub path: String,
+    pub parent_session_id: String,
+    pub parent_checkpoint_seq: u64,
+    pub session_bytes: u64,
+    pub context_before_bytes: usize,
+    pub context_after_bytes: usize,
+    pub compacted: bool,
+    pub method: ForkCompactionMethod,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -1097,6 +1140,38 @@ mod tests {
         assert_eq!(value["providers"]["model"], "openai");
         assert_eq!(value["providers"]["tools"], "builtin");
         assert!(value.get("protocol_version").is_none());
+    }
+
+    #[test]
+    fn session_fork_contract_keeps_policy_and_lineage_bounded() {
+        let params = serde_json::to_value(SessionForkParams {
+            source_thread_id: ThreadId::new("source"),
+            new_thread_id: ThreadId::new("child"),
+            context_policy: ForkContextPolicy::CompactIfNeeded,
+        })
+        .unwrap();
+        assert_eq!(params["sourceThreadId"], "source");
+        assert_eq!(params["newThreadId"], "child");
+        assert_eq!(params["contextPolicy"], "compact_if_needed");
+        assert!(params.get("source_thread_id").is_none());
+
+        let result = serde_json::to_value(SessionForkResult {
+            session_id: "s-child".to_string(),
+            thread_id: "child".to_string(),
+            path: "sessions/s-child/session.jsonl".to_string(),
+            parent_session_id: "s-parent".to_string(),
+            parent_checkpoint_seq: 9,
+            session_bytes: 1024,
+            context_before_bytes: 8192,
+            context_after_bytes: 4096,
+            compacted: true,
+            method: ForkCompactionMethod::ModelSummary,
+        })
+        .unwrap();
+        assert_eq!(result["sessionId"], "s-child");
+        assert_eq!(result["parentCheckpointSeq"], 9);
+        assert_eq!(result["contextAfterBytes"], 4096);
+        assert_eq!(result["method"], "model_summary");
     }
 
     #[test]

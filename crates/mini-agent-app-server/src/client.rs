@@ -6,16 +6,17 @@ use crate::runtime::{RuntimeTurnBatch, RuntimeTurnResult};
 use mini_agent_app_server_protocol::{
     CapabilityProviderSelection, ClientCapabilities, CollaborationMode, CollaborationModeKind,
     InitializeParams, InitializeResult, JsonRpcError, JsonRpcRequest, METHOD_INITIALIZE,
-    METHOD_MCP_RETRY, METHOD_MCP_STATUS, METHOD_SESSION_INFO, METHOD_THREAD_CLOSE,
-    METHOD_THREAD_FORK, METHOD_THREAD_GOAL_CLEAR, METHOD_THREAD_GOAL_GET, METHOD_THREAD_GOAL_SET,
-    METHOD_THREAD_ITEMS_LIST, METHOD_THREAD_LIST, METHOD_THREAD_READ, METHOD_THREAD_RESUME,
-    METHOD_THREAD_SETTINGS_UPDATE, METHOD_THREAD_START, METHOD_TURN_EVENT, METHOD_TURN_INTERRUPT,
-    METHOD_TURN_READ, METHOD_TURN_START, METHOD_TURN_STEER, METHOD_WORLD_REFRESH,
-    METHOD_WORLD_SET_EXECUTION, METHOD_WORLD_STATE, McpRetryResult, McpStatusResult,
-    SessionInfoResult, ThreadCloseParams, ThreadForkParams, ThreadForkResult,
-    ThreadGoalClearResponse, ThreadGoalGetResponse, ThreadGoalSetParams, ThreadGoalSetResponse,
-    ThreadGoalStatus, ThreadItem, ThreadItemsListParams, ThreadItemsListResult, ThreadListParams,
-    ThreadListResult, ThreadReadParams, ThreadReadResult, ThreadResumeParams, ThreadResumeResult,
+    METHOD_MCP_RETRY, METHOD_MCP_STATUS, METHOD_SESSION_FORK, METHOD_SESSION_INFO,
+    METHOD_THREAD_CLOSE, METHOD_THREAD_FORK, METHOD_THREAD_GOAL_CLEAR, METHOD_THREAD_GOAL_GET,
+    METHOD_THREAD_GOAL_SET, METHOD_THREAD_ITEMS_LIST, METHOD_THREAD_LIST, METHOD_THREAD_READ,
+    METHOD_THREAD_RESUME, METHOD_THREAD_SETTINGS_UPDATE, METHOD_THREAD_START, METHOD_TURN_EVENT,
+    METHOD_TURN_INTERRUPT, METHOD_TURN_READ, METHOD_TURN_START, METHOD_TURN_STEER,
+    METHOD_WORLD_REFRESH, METHOD_WORLD_SET_EXECUTION, METHOD_WORLD_STATE, McpRetryResult,
+    McpStatusResult, SessionForkParams, SessionForkResult, SessionInfoResult, ThreadCloseParams,
+    ThreadForkParams, ThreadForkResult, ThreadGoalClearResponse, ThreadGoalGetResponse,
+    ThreadGoalSetParams, ThreadGoalSetResponse, ThreadGoalStatus, ThreadItem,
+    ThreadItemsListParams, ThreadItemsListResult, ThreadListParams, ThreadListResult,
+    ThreadReadParams, ThreadReadResult, ThreadResumeParams, ThreadResumeResult,
     ThreadSettingsUpdateParams, ThreadSettingsUpdateResult, ThreadStartParams, ThreadStartResult,
     TurnEventNotification, TurnInterruptParams, TurnReadParams, TurnReadResult, TurnStartParams,
     TurnSteerParams, WorldRefreshResult, WorldSetExecutionParams, WorldSetExecutionResult,
@@ -131,6 +132,23 @@ where
             ThreadForkParams {
                 source_thread_id,
                 new_thread_id,
+            },
+        )
+        .await
+    }
+
+    pub async fn fork_session(
+        &mut self,
+        source_thread_id: ThreadId,
+        new_thread_id: ThreadId,
+        context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+    ) -> Result<SessionForkResult, JsonRpcError> {
+        self.call(
+            METHOD_SESSION_FORK,
+            SessionForkParams {
+                source_thread_id,
+                new_thread_id,
+                context_policy,
             },
         )
         .await

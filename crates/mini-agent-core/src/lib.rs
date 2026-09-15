@@ -9,6 +9,9 @@ mod tool_batch_executor;
 mod turn_engine;
 
 pub use harness::ContextLimitBehavior;
+pub use harness::ForkCompactionMethod;
+pub use harness::ForkContextPolicy;
+pub use harness::ForkPreparation;
 pub use harness::Harness;
 pub use harness::HarnessConfig;
 pub use harness::HarnessError;

@@ -368,14 +368,25 @@ pub(super) async fn worker_loop<M>(
             Command::Runtime(request) => {
                 let restore_continuation =
                     matches!(&request.command, RuntimeCommand::ThreadGoalClear { .. });
-                runtime_actor::handle_request(
-                    request,
-                    receipt,
-                    action_base_revision,
-                    &mut runtime,
-                    &mut threads,
-                    &runtime_revision,
-                );
+                if matches!(&request.command, RuntimeCommand::PrepareSessionFork { .. }) {
+                    runtime_actor::handle_session_fork_request(
+                        request,
+                        receipt,
+                        action_base_revision,
+                        &mut runtime,
+                        &mut threads,
+                    )
+                    .await;
+                } else {
+                    runtime_actor::handle_request(
+                        request,
+                        receipt,
+                        action_base_revision,
+                        &mut runtime,
+                        &mut threads,
+                        &runtime_revision,
+                    );
+                }
                 if restore_continuation
                     && let Err(error) =
                         runtime_actor::restore_thread_continuation(&mut runtime, &mut threads)

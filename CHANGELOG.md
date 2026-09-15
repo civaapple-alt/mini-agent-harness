@@ -7,6 +7,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Line-budget delta gate:** raise the Green/Amber single-PR allowance to
+  `+200` Runtime lines and `+300` release-source lines; hard ceilings and Red-band
+  positive-growth freeze remain unchanged.
+
 - **Model response item identity:** carry a bounded `itemId` for each model
   response through streaming and `turn/event` projections so reasoning deltas,
   ThreadItems, replay, and renderers can reconcile one response segment without

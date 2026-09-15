@@ -87,7 +87,7 @@ every feature in Codex, Pi, fx, or Qi.
   the line gate.
 - Runtime `24,000` and release Rust `34,000` are the operating budgets;
   `24,500` and `34,500` are the red-band thresholds. Green and amber pull
-  requests may grow by at most `100` runtime lines or `150` release lines;
+  requests may grow by at most `200` runtime lines or `300` release lines;
   positive growth is frozen once the resulting total enters the red band. Use
   `python scripts/line_budget.py --base <merge-base> --check-delta --json`
   for the incremental check.

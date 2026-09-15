@@ -4,6 +4,30 @@ impl<M> AppServerConnection<M>
 where
     M: Model + Send + 'static,
 {
+    pub(super) async fn handle_session_fork(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<SessionForkParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        action_response(
+            request.id,
+            management.fork_session_action(
+                params.source_thread_id,
+                params.new_thread_id,
+                params.context_policy,
+            ),
+            Clone::clone,
+        )
+        .await
+    }
+
     pub(super) async fn handle_session_info(
         &self,
         request: JsonRpcRequest,

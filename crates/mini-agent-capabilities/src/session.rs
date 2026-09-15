@@ -46,6 +46,17 @@ pub struct OpenedSession {
     pub resumed: bool,
 }
 
+/// Metadata for a newly persisted independent Session fork.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionForkInfo {
+    pub session_id: String,
+    pub thread_id: String,
+    pub path: String,
+    pub parent_session_id: String,
+    pub parent_checkpoint_seq: u64,
+    pub session_bytes: u64,
+}
+
 pub struct SessionStore {
     session_id: String,
     thread_id: String,
@@ -507,6 +518,92 @@ impl SessionStore {
         Err("cannot allocate a unique session id".to_string())
     }
 
+    /// Persists a bounded checkpoint as a new independent Session.
+    ///
+    /// The caller supplies the already-prepared checkpoint. This method only
+    /// writes the child header, Thread record, checkpoint, and attachments. It
+    /// never rewrites the parent file.
+    pub fn fork_from_checkpoint(
+        workspace: &Path,
+        parent_session_id: &str,
+        parent_checkpoint_seq: u64,
+        child_thread_id: &str,
+        checkpoint: &[Message],
+    ) -> Result<SessionForkInfo, String> {
+        validate_session_id(parent_session_id)?;
+        validate_session_id(child_thread_id)?;
+        let (parent_dir, parent_path) = resolve_session_file(workspace, parent_session_id)?;
+        let metadata = fs::metadata(&parent_path)
+            .map_err(|error| format!("cannot open parent session {parent_session_id}: {error}"))?;
+        if metadata.len() > MAX_SESSION_BYTES {
+            return Err(format!(
+                "parent session exceeds {MAX_SESSION_BYTES} byte limit"
+            ));
+        }
+
+        let project_dir = session_directory(workspace)?;
+        for _ in 0..16 {
+            let session_id = new_id("s");
+            let session_dir = project_dir.join(&session_id);
+            fs::create_dir_all(&session_dir)
+                .map_err(|error| format!("cannot create session directory: {error}"))?;
+            let path = session_dir.join(SESSION_FILE_NAME);
+            let file = match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&session_dir);
+                    return Err(format!("cannot create session: {error}"));
+                }
+            };
+            let lock = match acquire_lock(&session_dir, SESSION_LOCK_NAME) {
+                Ok(lock) => lock,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&session_dir);
+                    return Err(error);
+                }
+            };
+            let initialized = Self::initialize_new_for_thread(
+                workspace,
+                &session_id,
+                session_dir.clone(),
+                path,
+                file,
+                lock,
+                child_thread_id,
+                checkpoint,
+                Some((parent_session_id, parent_checkpoint_seq)),
+            );
+            let store = match initialized {
+                Ok(store) => store,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&session_dir);
+                    return Err(error);
+                }
+            };
+            copy_attachments(
+                &parent_dir.join("attachments"),
+                &session_dir.join("attachments"),
+            );
+            let info = SessionForkInfo {
+                session_id: store.session_id.clone(),
+                thread_id: store.thread_id.clone(),
+                path: store.path.display().to_string(),
+                parent_session_id: parent_session_id.to_string(),
+                parent_checkpoint_seq,
+                session_bytes: store.bytes,
+            };
+            drop(store);
+            return Ok(info);
+        }
+        Err("cannot allocate a unique session id".to_string())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn initialize_new(
         workspace: &Path,
@@ -522,10 +619,35 @@ impl SessionStore {
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| new_id("t"));
+        Self::initialize_new_for_thread(
+            workspace,
+            session_id,
+            session_dir,
+            path,
+            file,
+            lock,
+            &thread_id,
+            checkpoint,
+            forked_from,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn initialize_new_for_thread(
+        workspace: &Path,
+        session_id: &str,
+        session_dir: PathBuf,
+        path: PathBuf,
+        file: File,
+        lock: SessionLock,
+        thread_id: &str,
+        checkpoint: &[Message],
+        forked_from: Option<(&str, u64)>,
+    ) -> Result<Self, String> {
         let now = timestamp_ms();
         let mut store = Self {
             session_id: session_id.to_string(),
-            thread_id: thread_id.clone(),
+            thread_id: thread_id.to_string(),
             session_dir,
             path,
             file,
@@ -887,6 +1009,59 @@ mod tests {
         assert!(session_text.contains("\"item_kind\":\"context_compaction\""));
         assert!(session_text.contains("\"turn_id\":\"turn-compaction\""));
         drop(opened);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn fork_from_checkpoint_creates_an_independent_session_and_preserves_parent() {
+        let root = crate::test_support::test_root();
+        let mut parent = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let parent_id = parent.store.session_id().to_string();
+        let messages = vec![
+            Message::User {
+                text: "parent question".to_string(),
+            },
+            Message::Assistant {
+                reasoning: String::new(),
+                text: "parent answer".to_string(),
+                tool_calls: Vec::new(),
+            },
+        ];
+        parent
+            .store
+            .record_turn_with_id(
+                "turn-1",
+                TurnCommit {
+                    started_at_ms: timestamp_ms(),
+                    prompt: "parent question",
+                    status: TurnStatus::Completed,
+                    steps: 1,
+                    error: None,
+                    messages: &messages,
+                    tool_arguments: &[],
+                    checkpoint: &messages,
+                },
+            )
+            .unwrap();
+        let parent_bytes = fs::read(parent.store.path()).unwrap();
+        let info = SessionStore::fork_from_checkpoint(
+            &root,
+            &parent_id,
+            parent.store.checkpoint_seq(),
+            "child-thread",
+            &messages,
+        )
+        .unwrap();
+
+        assert_ne!(info.session_id, parent_id);
+        assert_eq!(info.thread_id, "child-thread");
+        assert_eq!(info.parent_session_id, parent_id);
+        assert_eq!(fs::read(parent.store.path()).unwrap(), parent_bytes);
+        let child = SessionStore::open(&root, SessionRequest::Resume(info.session_id)).unwrap();
+        assert_eq!(child.store.thread_id(), "child-thread");
+        assert_eq!(child.state, SessionState::from_messages(messages));
+        drop(child);
+        drop(parent);
         crate::test_support::remove_test_root(&root);
     }
 

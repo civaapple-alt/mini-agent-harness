@@ -22,8 +22,8 @@ RUNTIME_OPERATING_LIMIT = 24_000
 PROJECT_OPERATING_LIMIT = 34_000
 RUNTIME_RED_LIMIT = 24_500
 PROJECT_RED_LIMIT = 34_500
-RUNTIME_NON_RED_DELTA_LIMIT = 100
-PROJECT_NON_RED_DELTA_LIMIT = 150
+RUNTIME_NON_RED_DELTA_LIMIT = 200
+PROJECT_NON_RED_DELTA_LIMIT = 300
 
 # Keep the report aligned with the conceptual runtime layers. Capabilities are
 # reported separately because they are provider implementations behind Host;

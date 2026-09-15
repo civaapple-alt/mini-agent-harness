@@ -21,6 +21,12 @@ pub(super) enum RuntimeCommand {
     SessionInfo {
         reply: oneshot::Sender<ActionResult<Option<crate::RuntimeSessionInfo>>>,
     },
+    PrepareSessionFork {
+        source_thread_id: ThreadId,
+        new_thread_id: ThreadId,
+        context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::SessionForkResult>>,
+    },
     CheckpointSeq {
         reply: oneshot::Sender<ActionResult<Option<u64>>>,
     },
@@ -87,6 +93,7 @@ impl RuntimeCommand {
                 | Self::ThreadSettingsUpdate { .. }
                 | Self::ThreadGoalSet { .. }
                 | Self::ThreadGoalClear { .. }
+                | Self::PrepareSessionFork { .. }
         )
     }
 }

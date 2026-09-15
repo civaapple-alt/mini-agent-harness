@@ -33,6 +33,30 @@ pub enum ContextLimitBehavior {
     Compact,
 }
 
+/// Controls how a settled history is prepared for an independent Session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForkContextPolicy {
+    Exact,
+    CompactIfNeeded,
+}
+
+/// Records how the Core prepared a fork checkpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForkCompactionMethod {
+    Exact,
+    ModelSummary,
+    Mechanical,
+}
+
+/// A bounded, storage-neutral checkpoint prepared for a child Session.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForkPreparation {
+    pub session: SessionState,
+    pub context_before_bytes: usize,
+    pub context_after_bytes: usize,
+    pub method: ForkCompactionMethod,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HarnessConfig {
     pub system_prompt: String,
@@ -241,6 +265,55 @@ impl<M: Model> Harness<M> {
         }
         self.session = session;
         Ok(())
+    }
+
+    /// Prepares a settled copy of the current history for an independent
+    /// Session without changing this Harness.
+    ///
+    /// Model summarization runs with an empty tool list and a silent observer.
+    /// Tool execution, approval, and turn events cannot occur during this
+    /// operation.
+    pub async fn prepare_fork_checkpoint(
+        &mut self,
+        policy: ForkContextPolicy,
+    ) -> Result<ForkPreparation, HarnessError<M::Error>> {
+        let tool_specs = self.tools.specs();
+        let before_bytes = self.context_bytes(&self.config.system_prompt, &tool_specs);
+        let should_compact = policy == ForkContextPolicy::CompactIfNeeded
+            && self.session.messages().len() > 1
+            && before_bytes >= self.config.max_context_bytes / 2;
+
+        if !should_compact {
+            self.ensure_context_limit(&tool_specs)
+                .map_err(HarnessError::Limit)?;
+            return Ok(ForkPreparation {
+                session: self.session.clone(),
+                context_before_bytes: before_bytes,
+                context_after_bytes: before_bytes,
+                method: ForkCompactionMethod::Exact,
+            });
+        }
+
+        let original = self.session.clone();
+        let method = match self.compact_context(&tool_specs, &mut ()).await {
+            Ok(method) => method,
+            Err(error) => {
+                self.session = original;
+                return Err(error);
+            }
+        };
+        let after_bytes = self.context_bytes(&self.config.system_prompt, &tool_specs);
+        let result = self
+            .ensure_context_limit(&tool_specs)
+            .map_err(HarnessError::Limit)
+            .map(|()| ForkPreparation {
+                session: self.session.clone(),
+                context_before_bytes: before_bytes,
+                context_after_bytes: after_bytes,
+                method,
+            });
+        self.session = original;
+        result
     }
 
     pub fn replace_config(&mut self, config: HarnessConfig) {
@@ -555,7 +628,7 @@ impl<M: Model> Harness<M> {
             && self.session.messages().len() > 1
             && actual >= compact_at;
         if should_compact {
-            self.compact_context(tool_specs, observer).await?;
+            let _ = self.compact_context(tool_specs, observer).await?;
         }
         self.ensure_context_limit(tool_specs)
             .map_err(|limit| fail_limit(limit, observer))
@@ -565,12 +638,12 @@ impl<M: Model> Harness<M> {
         &mut self,
         tool_specs: &[mini_agent_protocol::ToolSpec],
         observer: &mut O,
-    ) -> Result<(), HarnessError<M::Error>> {
+    ) -> Result<ForkCompactionMethod, HarnessError<M::Error>> {
         let before_bytes = self.context_bytes(&self.config.system_prompt, tool_specs);
         let compact_at = self.config.max_context_bytes / 2;
         let (mut prefix, context, tail) = split_compaction_parts(self.session.messages());
         if prefix.is_empty() {
-            return Ok(());
+            return Ok(ForkCompactionMethod::Exact);
         }
         observer.observe(&Event::ContextCompactionStarted { before_bytes });
         trim_prefix_to_fit(
@@ -583,7 +656,8 @@ impl<M: Model> Harness<M> {
         if prefix.is_empty() {
             let compacted =
                 assemble_compacted(None, context, tail, self.config.max_user_input_bytes);
-            return self.finish_compacted(compacted, before_bytes, None, tool_specs, observer);
+            self.finish_compacted(compacted, before_bytes, None, tool_specs, observer)?;
+            return Ok(ForkCompactionMethod::Mechanical);
         }
         let mut compaction_messages = prefix.clone();
         compaction_messages.push(Message::User {
@@ -635,6 +709,11 @@ impl<M: Model> Harness<M> {
                 compacted = Some(candidate);
             }
         }
+        let method = if compacted.is_some() {
+            ForkCompactionMethod::ModelSummary
+        } else {
+            ForkCompactionMethod::Mechanical
+        };
         let compacted = compacted.unwrap_or_else(|| {
             mechanical_compact(
                 prefix,
@@ -652,7 +731,8 @@ impl<M: Model> Harness<M> {
             response.usage,
             tool_specs,
             observer,
-        )
+        )?;
+        Ok(method)
     }
 
     fn finish_compacted<O: Observer + Send>(

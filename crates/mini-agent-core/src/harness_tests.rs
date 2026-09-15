@@ -1020,6 +1020,93 @@ async fn trims_over_budget_compaction_prefix_and_continues() {
     )));
 }
 
+#[tokio::test]
+async fn prepares_a_compacted_fork_without_mutating_the_parent() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let model = RecordingModel {
+        responses: VecDeque::from([text_response("summary of the older turns")]),
+        requests: Arc::clone(&requests),
+    };
+    let padding = "p".repeat(500);
+    let history = vec![
+        Message::User {
+            text: format!("old:{padding}"),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: format!("old answer:{padding}"),
+            tool_calls: Vec::new(),
+        },
+        Message::User {
+            text: format!("middle:{padding}"),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: format!("middle answer:{padding}"),
+            tool_calls: Vec::new(),
+        },
+        Message::User {
+            text: "recent question".to_string(),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: "recent answer".to_string(),
+            tool_calls: Vec::new(),
+        },
+    ];
+    let config = HarnessConfig {
+        system_prompt: "system".to_string(),
+        max_context_bytes: 4_000,
+        context_limit_behavior: ContextLimitBehavior::Compact,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(model, ToolRouter::default(), config);
+    harness.restore_history(history).unwrap();
+    let parent_messages = harness.messages().to_vec();
+
+    let prepared = harness
+        .prepare_fork_checkpoint(ForkContextPolicy::CompactIfNeeded)
+        .await
+        .unwrap();
+
+    assert_eq!(harness.messages(), parent_messages.as_slice());
+    assert_eq!(prepared.method, ForkCompactionMethod::ModelSummary);
+    assert!(prepared.context_after_bytes < prepared.context_before_bytes);
+    assert!(prepared.session.messages().iter().any(|message| matches!(
+        message,
+        Message::User { text } if text.contains("summary of the older turns")
+    )));
+    assert_eq!(requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn exact_fork_preparation_keeps_history_and_skips_the_model() {
+    let history = vec![Message::User {
+        text: "keep this history".to_string(),
+    }];
+    let mut harness = Harness::new(
+        ScriptedModel {
+            responses: VecDeque::new(),
+        },
+        ToolRouter::default(),
+        HarnessConfig {
+            system_prompt: "system".to_string(),
+            max_context_bytes: 5_000,
+            ..HarnessConfig::default()
+        },
+    );
+    harness.restore_history(history.clone()).unwrap();
+
+    let prepared = harness
+        .prepare_fork_checkpoint(ForkContextPolicy::Exact)
+        .await
+        .unwrap();
+
+    assert_eq!(prepared.method, ForkCompactionMethod::Exact);
+    assert_eq!(prepared.session.messages(), history.as_slice());
+    assert_eq!(harness.messages(), history.as_slice());
+}
+
 #[test]
 fn split_prefix_tail_keeps_last_two_assistant_groups() {
     let assistant = |text: &str| Message::Assistant {

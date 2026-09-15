@@ -249,6 +249,23 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
+    pub(crate) async fn fork_session_action(
+        &self,
+        source_thread_id: ThreadId,
+        new_thread_id: ThreadId,
+        context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::SessionForkResult>, ActionFailure>
+    {
+        self.client
+            .request_action(|reply| RuntimeCommand::PrepareSessionFork {
+                source_thread_id,
+                new_thread_id,
+                context_policy,
+                reply,
+            })
+            .await
+    }
+
     pub(crate) fn notifications(&self) -> broadcast::Sender<RuntimeNotification> {
         self.notifications.clone()
     }

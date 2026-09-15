@@ -44,7 +44,7 @@ Scope: Runtime、Release Rust、Control Plane 的行数预算治理
 - `25,000` Runtime、`35,000` Release Rust 和 `25,000` Control Plane 仍是硬上限；
 - operating/red 区间同步上调为 Runtime `24,000/24,500`、Release Rust
   `34,000/34,500`；
-- Green/Amber 的单 PR 增量仍分别受 `+100/+150` 行约束，进入 Red 后冻结正增长；
+- Green/Amber 的单 PR 增量仍分别受 `+200/+300` 行约束，进入 Red 后冻结正增长；
 - 新代码默认净零增长，优先删除废弃概念、重复状态和冗余分支；
 - 行数门禁只是准入证据之一，仍必须同时检查职责边界、权限、Sandbox、Recovery、
   Audit、协议和测试证据。

@@ -30,6 +30,108 @@ pub(super) fn handle_request<M>(
     handle(request.command, receipt, runtime, threads, runtime_revision);
 }
 
+pub(super) async fn handle_session_fork_request<M>(
+    request: RuntimeRequest,
+    receipt: ActionReceipt,
+    base_revision: RuntimeRevision,
+    runtime: &mut Option<RuntimeActorState>,
+    threads: &mut ThreadManager<M>,
+) where
+    M: Model + Send + 'static,
+{
+    if let Err(error) = check_revision(&request, runtime, base_revision) {
+        reject_runtime(request.command, receipt, error);
+        return;
+    }
+    let RuntimeCommand::PrepareSessionFork {
+        source_thread_id,
+        new_thread_id,
+        context_policy,
+        reply,
+    } = request.command
+    else {
+        unreachable!("session fork handler received another runtime command");
+    };
+
+    let result = prepare_session_fork(
+        source_thread_id,
+        new_thread_id,
+        context_policy,
+        runtime,
+        threads,
+    )
+    .await;
+    respond(reply, receipt, result);
+}
+
+async fn prepare_session_fork<M>(
+    source_thread_id: ThreadId,
+    new_thread_id: ThreadId,
+    context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+    runtime: &Option<RuntimeActorState>,
+    threads: &mut ThreadManager<M>,
+) -> Result<mini_agent_app_server_protocol::SessionForkResult, AppServerError>
+where
+    M: Model + Send + 'static,
+{
+    let state = runtime.as_ref().ok_or(AppServerError::RuntimeUnavailable)?;
+    if state.management.thread_id() != source_thread_id {
+        return Err(AppServerError::ThreadNotFound(source_thread_id));
+    }
+    let parent = state
+        .management
+        .session_info()
+        .ok_or_else(|| AppServerError::Checkpoint("session persistence is disabled".to_string()))?;
+    let parent_checkpoint_seq = state.management.current_checkpoint_seq();
+    let workspace = state.management.world().workspace().to_path_buf();
+    let core_policy = match context_policy {
+        mini_agent_app_server_protocol::ForkContextPolicy::Exact => {
+            mini_agent_core::ForkContextPolicy::Exact
+        }
+        mini_agent_app_server_protocol::ForkContextPolicy::CompactIfNeeded => {
+            mini_agent_core::ForkContextPolicy::CompactIfNeeded
+        }
+    };
+    let prepared = threads
+        .get_mut(source_thread_id.as_str())
+        .ok_or_else(|| AppServerError::ThreadNotFound(source_thread_id.clone()))?
+        .harness_mut()
+        .prepare_fork_checkpoint(core_policy)
+        .await
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
+    let method = match prepared.method {
+        mini_agent_core::ForkCompactionMethod::Exact => {
+            mini_agent_app_server_protocol::ForkCompactionMethod::Exact
+        }
+        mini_agent_core::ForkCompactionMethod::ModelSummary => {
+            mini_agent_app_server_protocol::ForkCompactionMethod::ModelSummary
+        }
+        mini_agent_core::ForkCompactionMethod::Mechanical => {
+            mini_agent_app_server_protocol::ForkCompactionMethod::Mechanical
+        }
+    };
+    let child = mini_agent_capabilities::SessionStore::fork_from_checkpoint(
+        &workspace,
+        &parent.session_id,
+        parent_checkpoint_seq,
+        new_thread_id.as_str(),
+        prepared.session.messages(),
+    )
+    .map_err(AppServerError::Checkpoint)?;
+    Ok(mini_agent_app_server_protocol::SessionForkResult {
+        session_id: child.session_id,
+        thread_id: child.thread_id,
+        path: child.path,
+        parent_session_id: child.parent_session_id,
+        parent_checkpoint_seq: child.parent_checkpoint_seq,
+        session_bytes: child.session_bytes,
+        context_before_bytes: prepared.context_before_bytes,
+        context_after_bytes: prepared.context_after_bytes,
+        compacted: method != mini_agent_app_server_protocol::ForkCompactionMethod::Exact,
+        method,
+    })
+}
+
 pub(super) fn cleanup_plan_scratch(
     runtime: &mut Option<RuntimeActorState>,
 ) -> Result<(), AppServerError> {
@@ -213,6 +315,9 @@ pub(super) fn handle<M>(
     M: Model + 'static,
 {
     match command {
+        RuntimeCommand::PrepareSessionFork { .. } => {
+            unreachable!("session fork must use the async runtime handler")
+        }
         RuntimeCommand::SessionInfo { reply } => respond(
             reply,
             receipt,
@@ -432,6 +537,7 @@ pub(super) fn handle<M>(
 fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppServerError) {
     match command {
         RuntimeCommand::SessionInfo { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::PrepareSessionFork { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::CheckpointSeq { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ThreadId { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::World { reply } => respond(reply, receipt, Err(error)),

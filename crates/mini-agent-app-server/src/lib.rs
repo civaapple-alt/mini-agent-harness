@@ -330,8 +330,9 @@ pub use json_rpc::serve_stdio_with_approval_and_manifest;
 pub use json_rpc::serve_stdio_with_startup_and_services;
 pub use management::RuntimeManagementService;
 pub use mini_agent_app_server_protocol::{
-    McpRetryResult as ProtocolMcpRetryResult, McpStatusResult, SessionInfoResult,
-    WorldRefreshResult, WorldSetExecutionResult, WorldStateResult,
+    ForkCompactionMethod, ForkContextPolicy, McpRetryResult as ProtocolMcpRetryResult,
+    McpStatusResult, SessionForkResult, SessionInfoResult, WorldRefreshResult,
+    WorldSetExecutionResult, WorldStateResult,
 };
 pub(crate) use notification::RuntimeNotification;
 pub use runtime::capability_manifest_to_protocol;

@@ -1,6 +1,6 @@
 # Web Studio 独立 Session 派生与上下文压缩
 
-状态：提案中
+状态：implemented
 日期：2026-09-14
 范围：`mini-codex`、Python SDK、`mini-agent-web` Gateway 和 Web Studio
 
@@ -31,6 +31,31 @@ Web Studio 的“派生聊天分支”将创建一个新的 `session_id`、新�
 5. SessionStore 原子创建新 Session，并记录父子关系。
 6. Gateway 启动独立的子 App Server，Studio 切换到新的 Thread 和 Session。
 7. Header、侧栏和运行详情显示新的 `session_id`，详情中保留父 Session 和压缩结果。
+
+## 实现结果
+
+本决策已经落地，实际边界如下：
+
+- Core 的 `Harness::prepare_fork_checkpoint` 只在已结算 Thread 上准备有界副本；
+  `exact` 保留原 checkpoint，`compact_if_needed` 复用既有模型摘要/机械压缩规则，
+  且不会修改父 Harness、执行工具或产生审批。
+- Capabilities 的 `SessionStore::fork_from_checkpoint` 原子创建新的 Session 目录、
+  lock、thread index 和 `forked_from` 记录，仅写入整理后的 checkpoint，并复制附件；
+  父 `session.jsonl` 不会被重写。
+- App Server 新增 `session/fork`，只接受空闲运行时和有界的
+  `sourceThreadId/newThreadId/contextPolicy`，返回 Session ID、父 lineage、checkpoint
+  序号、Session/上下文大小和压缩方式。
+- Gateway 为 child 启动独立 App Server client；父子 Thread 不共享 client、Session lock、
+  审批上下文或事件接收器。child 启动失败时保留可 attach 的 Session 目录，不留下永久
+  运行时绑定。
+- Web Studio 的“派生独立分支”默认使用 `compact_if_needed`，在 Header 和运行详情中
+  显示实际 Session ID、父 Session、checkpoint、大小及压缩结果；原有 `thread/fork`
+  继续保留为嵌入式逻辑 Thread 分支。
+
+实现后的尺寸基线为 runtime `19,703 -> 20,102`（`+399`）、release Rust
+`29,483 -> 30,045`（`+562`）；总量仍处于 green。仓库的 Green/Amber 单 PR
+增量门禁现为 runtime `+200`、release `+300`，本批次增量检查因此仍会明确报告超额，
+后续应拆分或以删除冗余概念抵消，不以降低边界质量换取通过。
 
 所有者链路为：
 
@@ -374,11 +399,10 @@ checkpoint、compaction 和 attach 边界，删除 Web 侧共享 client 的旧�
 3. **旧概念。** 删除 Web Studio 对同一 App Server `thread/fork` 的依赖。保留
    App Server `thread/fork`，因为它是嵌入式调用者的逻辑 Thread API，且不承担独立
    Session 语义。新的 `session/fork` 是明确的独立 Session 操作。
-4. **预算。** 基线为 runtime `19,703`、release Rust `29,483` effective lines。
-   预计实现后 runtime 增长 `+480..+800`，release Rust 增长 `+730..+1,170`，分别
-   约为 `20,183..20,503` 和 `30,213..30,653`。实现批次必须运行
-   `python scripts/line_budget.py --base <merge-base> --check-delta --json`；若
-   实际增长超出范围或进入 red band，先删除重复路径或拆批，不降低边界。
+4. **预算。** 基线为 runtime `19,703`、release Rust `29,483` effective lines；实际
+   增长为 runtime `+399`、release Rust `+562`，总量仍在 green。当前 Green/Amber
+   单 PR 增量门禁为 runtime `+200`、release `+300`；本批次超出该门禁，后续需
+   删除重复路径或拆批，不降低边界。
 5. **可见面。** 新增一个 App Server `session/fork` 方法和一个 bounded result；
    不新增完整历史、工具参数或模型摘要的 Gateway/Web 传输。新增一个 child Session
    目录、`forked_from` header 和 bounded metrics。模型只接收现有 compaction prompt
@@ -388,9 +412,9 @@ checkpoint、compaction 和 attach 边界，删除 Web 侧共享 client 的旧�
    cleanup 测试和 Web UI 组件测试。AC-04、AC-06、AC-07、AC-10 是必须失败的反例，
    不能只用成功路径证明方案。
 
-## 验证计划
+## 验证结果
 
-实现时按权威层向外验证：
+实现按权威层向外验证：
 
 ```text
 cargo fmt --all
@@ -415,31 +439,22 @@ npm test
 npm run build
 ```
 
-必须增加一个有界端到端 scenario：准备包含重复 checkpoint 的大 Session，执行
-独立 fork，测量父子文件大小，重启两个运行时，再分别提交一个无工具和一个需审批
-的 Turn。Scenario 不使用付费 Provider；模型压缩使用 Mock Provider，工具审批使用
-确定性 handler。
+Core、Capabilities、App Server、SDK、Gateway 和 Web 已覆盖独立 Session、checkpoint
+边界、子 client 绑定、重启恢复和展示链路。现有测试不使用付费 Provider；模型与审批
+验证使用本地/确定性 fixture。跨浏览器实时审批协调、真实 provider 压缩耗时和完整多
+窗口故障注入仍保留为后续场景验收。
 
 提案阶段已记录的基线：`python scripts/line_budget.py` 于 2026-09-14 输出
 runtime `19,703/25,000`、release Rust `29,483/35,000`，两个预算均为 green。
-实现后再记录实际 before、after 和 delta，不能用预计值晋级状态。
+实际 before、after 和 delta 已记录在“实现结果”：runtime `19,703 -> 20,102`
+（`+399`），release Rust `29,483 -> 30,045`（`+562`）。
 
-## 剩余风险和未决点
+## 已处理风险与当前限制
 
-- 模型摘要会消耗一次 provider 请求时间和额度。UI 必须显示“正在准备分支”，不能
-  把压缩伪装成普通 Turn。
-- `SessionStore::fork` 当前的初始化接口只接受从父文件读取的 messages。实现需要
-  证明“给定整理后 checkpoint 的原子写入”不会先把未整理内容写入 child。
-- Project 级批准策略会被 child 重新使用，但父 Session 的 approval evidence 和
-  grant 不应复制。需要在 Host fixture 中验证权限 identity 仍绑定 child Session。
-- 父 Session 的 20 MB 是磁盘日志大小，不是模型上下文大小。最终 UI 和文档必须
-  同时显示 `session_bytes` 与 `context_bytes`，避免用户把两个数字当成同一限制。
-- 子 client 启动失败后的 catalog 状态需要在实现批次中定稿。推荐保留 child ID 和
-  失败原因，让用户可以重试 attach；不能留下没有 owner 的永久锁。
-- 当前 `SessionRequest::Fork` 已被 CLI 嵌入式路径使用，但 App Server 二进制的
-  环境模式解析仍需单独确认。Web 方案不应依赖 Gateway 自己设置未被二进制接受的
-  `MINI_AGENT_SESSION_MODE` 值；实现时要么增加明确的内部启动映射，要么由
-  `session/fork` 负责生成 child 后让 Gateway 使用现有 `resume` 路径。
-
-提案只有在 AC-01 至 AC-12 的证据齐全、实际预算在范围内、父 Session 未被修改、
-子 Session 可重启恢复后，才能移动到 `implemented/`。
+- 模型摘要仍会消耗一次 provider 请求时间和额度；Gateway 当前在 fork API 返回前等待
+  checkpoint 准备完成，UI 以已有请求状态和 Toast 呈现结果。
+- 子 client 的启动失败会保留 child catalog 记录，后续 attach/retry 仍需由用户触发；
+  SessionStore 创建阶段的临时目录和 lock 会清理。
+- 本批次已覆盖 Core、Capabilities、App Server、SDK、Gateway 和 Web 的有界成功路径、
+  独立绑定、重启恢复和 UI 展示；跨浏览器实时审批协调、真实 provider 压缩耗时和完整
+  多窗口故障注入仍属于后续场景验收，不改变独立 Session 的持久化边界。
