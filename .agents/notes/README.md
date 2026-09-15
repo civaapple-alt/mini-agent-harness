@@ -97,6 +97,7 @@ graph LR
 
 ### Implemented
 
+- [Runtime 子系统跨仓契约基线](implemented/testing/2026-09-15-cross-repository-runtime-contract-baseline.zh.md)
 - [Web Studio 独立 Session 派生与上下文压缩](implemented/architecture/2026-09-14-web-studio-independent-session-fork-and-compaction.zh.md)
 - [Decoupling Approval Policy and Action Grant Scope](implemented/architecture/2026-09-07-decoupling-approval-policy-and-action-grant-scope.md)
 - [Line Gate: Control Plane Statistics and Delta Gate](implemented/process/2026-09-07-line-gate-control-plane-and-delta.md)
