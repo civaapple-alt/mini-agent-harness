@@ -92,9 +92,13 @@ where
             mini_agent_core::ForkContextPolicy::Compact
         }
     };
-    let prepared = threads
+    let thread = threads
         .get_mut(source_thread_id.as_str())
-        .ok_or_else(|| AppServerError::ThreadNotFound(source_thread_id.clone()))?
+        .ok_or_else(|| AppServerError::ThreadNotFound(source_thread_id.clone()))?;
+    if thread.status() == mini_agent_protocol::ThreadStatus::Running {
+        return Err(AppServerError::Busy);
+    }
+    let prepared = thread
         .harness_mut()
         .prepare_fork_checkpoint(core_policy)
         .await
@@ -562,6 +566,7 @@ pub(super) fn handle_running<M>(
     runtime: &mut Option<RuntimeActorState>,
     threads: &mut ThreadManager<M>,
     runtime_revision: &AtomicU64,
+    stopping: bool,
 ) where
     M: Model + 'static,
 {
@@ -570,7 +575,9 @@ pub(super) fn handle_running<M>(
         return;
     }
     let command = request.command;
-    if command.is_mutation() && !is_safe_goal_mutation_while_running(&command) {
+    if (stopping && command.is_mutation())
+        || (command.is_mutation() && !is_safe_goal_mutation_while_running(&command))
+    {
         reject_runtime(command, receipt, AppServerError::Busy);
     } else {
         handle(command, receipt, runtime, threads, runtime_revision);

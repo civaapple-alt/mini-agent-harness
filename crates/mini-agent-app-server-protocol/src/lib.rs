@@ -185,6 +185,7 @@ pub enum RuntimePhase {
     Model,
     Tool,
     WaitingApproval,
+    Stopping,
     Compaction,
     Persisting,
     GoalVerification,

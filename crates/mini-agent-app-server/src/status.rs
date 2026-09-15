@@ -63,6 +63,19 @@ pub(crate) fn publish_at(
     };
     let changed = {
         let mut current = handle.lock().unwrap();
+        // Cancellation is an ordered lifecycle boundary, not a UI hint. Keep
+        // the authoritative status at `Stopping` until the worker publishes
+        // the terminal result for the same Turn. This prevents late approval
+        // or tool notifications from making a cancelled Turn look runnable.
+        if current.phase == RuntimePhase::Stopping
+            && current.turn_id.as_ref() == next.turn_id.as_ref()
+            && !matches!(
+                phase,
+                RuntimePhase::Stopping | RuntimePhase::Completed | RuntimePhase::Failed
+            )
+        {
+            return;
+        }
         if *current == next {
             false
         } else {

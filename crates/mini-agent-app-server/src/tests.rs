@@ -571,10 +571,35 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
             turn_id: turn_id.clone()
         }
     );
+    assert!(matches!(
+        server
+            .thread_fork(
+                ThreadId::new("thread-1"),
+                ThreadId::new("fork-while-running")
+            )
+            .await,
+        Err(AppServerError::Busy)
+    ));
     server
         .turn_cancel_for(ThreadId::new("thread-1"), TurnCancel::new(turn_id))
         .await
         .unwrap();
+    assert_eq!(
+        server
+            .turn_start_for(
+                ThreadId::new("thread-1"),
+                TurnStart::new(TurnInput::new(TurnInputMode::FollowUp, "too late")),
+            )
+            .await
+            .unwrap(),
+        TurnSubmission::NotSubmitted {
+            reason: "turn is stopping; wait for turn_finished".to_string(),
+        }
+    );
+    assert_eq!(
+        server.runtime_status().phase,
+        mini_agent_app_server_protocol::RuntimePhase::Stopping
+    );
     release.notify_one();
 
     let mut statuses = Vec::new();
@@ -595,6 +620,10 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
             mini_agent_protocol::TurnStatus::Completed,
             mini_agent_protocol::TurnStatus::Completed,
         ]
+    );
+    assert_eq!(
+        server.runtime_status().phase,
+        mini_agent_app_server_protocol::RuntimePhase::Completed
     );
 }
 

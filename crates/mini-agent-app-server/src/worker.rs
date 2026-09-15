@@ -14,7 +14,7 @@ use mini_agent_core::{SteeringMode, TurnResult};
 use mini_agent_protocol::{Event, EventEnvelope, EventSink, ModelUsage};
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
@@ -104,6 +104,7 @@ struct ThreadListener {
     event_replay: Arc<Mutex<VecDeque<EventEnvelope>>>,
     runtime_status: RuntimeStatusHandle,
     runtime_revision: Arc<AtomicU64>,
+    stopping: Arc<AtomicBool>,
     pending_finish: Option<EventEnvelope>,
     tool_arguments: Vec<(String, Value)>,
     tokens_used: u64,
@@ -167,6 +168,26 @@ impl ThreadListener {
     }
 
     fn update_status_for_event(&self, event: &EventEnvelope) {
+        if self.stopping.load(Ordering::Acquire)
+            && !matches!(event.event, Event::TurnFinished { .. })
+        {
+            let checkpoint_seq = self.runtime_status.lock().unwrap().checkpoint_seq;
+            status::publish(
+                &self.runtime_status,
+                &self.notifications,
+                event.thread_id.clone(),
+                RuntimePhase::Stopping,
+                event.turn_id.clone(),
+                event
+                    .turn_id
+                    .as_ref()
+                    .map(|turn_id| status::operation("turn", turn_id.as_str())),
+                checkpoint_seq,
+                &self.runtime_revision,
+                None,
+            );
+            return;
+        }
         let (phase, operation_id) = match &event.event {
             Event::TurnStarted { .. } => (
                 RuntimePhase::StartingTurn,
@@ -232,6 +253,9 @@ struct RunningCommandContext<'a, M> {
     runtime: &'a mut Option<RuntimeActorState>,
     threads: &'a mut ThreadManager<M>,
     runtime_revision: &'a Arc<AtomicU64>,
+    runtime_status: &'a RuntimeStatusHandle,
+    notifications: &'a broadcast::Sender<RuntimeNotification>,
+    stopping: &'a Arc<AtomicBool>,
 }
 
 impl EventSink for ThreadListener {
@@ -536,6 +560,7 @@ pub(super) async fn worker_loop<M>(
                     let started_at_ms = timestamp_ms();
                     let prompt = input.text.clone();
                     let previous_message_count = thread.harness().messages().len();
+                    let stopping = Arc::new(AtomicBool::new(false));
                     if let Some(reply) = initial_reply.take() {
                         runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                         respond(
@@ -553,6 +578,7 @@ pub(super) async fn worker_loop<M>(
                         event_replay: event_replay.clone(),
                         runtime_status: runtime_status.clone(),
                         runtime_revision: runtime_revision.clone(),
+                        stopping: stopping.clone(),
                         pending_finish: None,
                         tool_arguments: Vec::new(),
                         tokens_used: 0,
@@ -602,6 +628,9 @@ pub(super) async fn worker_loop<M>(
                                         runtime: &mut runtime,
                                         threads: &mut threads,
                                         runtime_revision: &runtime_revision,
+                                        runtime_status: &runtime_status,
+                                        notifications: &notifications,
+                                        stopping: &stopping,
                                     },
                                 );
                             },
@@ -820,6 +849,7 @@ pub(super) async fn worker_loop<M>(
                         RuntimePhase::StartingTurn
                             | RuntimePhase::Model
                             | RuntimePhase::Tool
+                            | RuntimePhase::Stopping
                             | RuntimePhase::Compaction
                             | RuntimePhase::Persisting
                     ) || (current_status.phase
@@ -1173,6 +1203,16 @@ fn handle_running_command<M>(
                 );
                 return;
             }
+            if context.stopping.load(Ordering::Acquire) {
+                respond(
+                    reply,
+                    receipt,
+                    Ok(TurnSubmission::NotSubmitted {
+                        reason: "turn is stopping; wait for turn_finished".to_string(),
+                    }),
+                );
+                return;
+            }
             let result = match request.input.mode {
                 TurnInputMode::Steer => control
                     .submit(request.input)
@@ -1200,7 +1240,20 @@ fn handle_running_command<M>(
                 return;
             }
             let result = if request.turn_id == *turn_id {
+                context.stopping.store(true, Ordering::Release);
                 control.request_cancel();
+                let checkpoint_seq = context.runtime_status.lock().unwrap().checkpoint_seq;
+                status::publish(
+                    context.runtime_status,
+                    context.notifications,
+                    active_thread_id.clone(),
+                    RuntimePhase::Stopping,
+                    Some(turn_id.clone()),
+                    Some(status::operation("turn", turn_id.as_str())),
+                    checkpoint_seq,
+                    context.runtime_revision,
+                    None,
+                );
                 Ok(())
             } else {
                 Err(AppServerError::TurnNotActive(request.turn_id))
@@ -1248,6 +1301,7 @@ fn handle_running_command<M>(
             context.runtime,
             context.threads,
             context.runtime_revision,
+            context.stopping.load(Ordering::Acquire),
         ),
     }
 }

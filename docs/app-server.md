@@ -61,8 +61,11 @@ Thread event stream and is intentionally distinct from `actionSequence`. The
 single runtime stream prevents a ready Goal/settings notification from racing
 past an earlier Core notification at the transport boundary. `turn/steer`
 validates the supplied active `turnId`;
-`turn/interrupt` requests cooperative cancellation; `turn/read` returns the
-settled result and messages. When the host runtime is wired with
+`turn/interrupt` requests cooperative cancellation and acknowledges admission,
+not settlement; `turn/read` returns the settled result and messages. A
+successful interrupt publishes `runtime/status` with `phase=stopping` and
+keeps the same `turnId` until the worker publishes the terminal result. When
+the host runtime is wired with
 an `ApprovalBroker`, sensitive tool calls emit an `approval/request`
 notification, then emit `approval/resolved` after the client replies with
 `approval/respond`. The request carries typed access, policy, a structured
@@ -229,7 +232,7 @@ still go through `thread/settings/update`.
 | `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, and optional error. |
 | `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of ordered `turn/event` notifications with `nextCursor`, `oldestSequence`, and `hasGap`. |
 | `turn/steer` | `threadId`, `turnId`, `text` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. |
-| `turn/interrupt` | `threadId`, `turnId` | Requests cooperative cancellation and returns `{accepted: true}` when admitted. |
+| `turn/interrupt` | `threadId`, `turnId` | Requests cooperative cancellation and returns `{accepted: true}` when admitted; settlement remains pending until `turn_finished`. |
 
 `turn/start` is asynchronous. Clients should render `turn/event` and Item
 notifications while the turn is running, then use `turn/read` for the settled
@@ -263,10 +266,34 @@ submit verifier verdicts or advance milestones directly.
 | `runtime/status` | `threadId` | Returns a non-blocking bounded snapshot: `phase`, `threadId`, optional `turnId`/`operationId`/`checkpointSeq`, `stateRevision`, `timestampMs`, and optional `error`. |
 
 `phase` distinguishes `starting_turn`, `model`, `tool`, `waiting_approval`,
-`compaction`, `persisting`, `goal_verification`, `goal_continuation_queued`,
-`completed`, and `failed` (as well as `idle`, `resuming`). The snapshot is
+`stopping`, `compaction`, `persisting`, `goal_verification`,
+`goal_continuation_queued`, `completed`, and `failed` (as well as `idle`,
+`resuming`). `stopping` is monotonic for that Turn: late approval or tool
+notifications cannot regress it to a runnable phase. The snapshot is
 control-plane telemetry; it does not replace `turn/read` or the canonical
 Goal/Thread projections.
+
+#### Control ordering and attachment
+
+The App Server worker admits commands in one sequence. While a Turn is active,
+`turn/start` can only submit typed steer/follow-up input for that same Thread;
+`turn/interrupt`, `thread/fork`, `session/fork`, Thread mutations, and runtime
+mutations are checked against the active identity. `turn/interrupt` sets the
+cooperative stop request and returns before tool/model cleanup finishes. A
+fork that is admitted before an interrupt is rejected as busy; a fork that
+arrives after the interrupt is also rejected while the source Turn is
+stopping, and must be retried after `turn_finished`. Neither fork path copies
+an in-flight Turn or approval wait. After stopping is accepted, new
+steer/follow-up input and runtime mutations are rejected until the same Turn
+reaches `turn_finished`; read-only observation remains available.
+
+`thread/fork` remains an in-process logical Thread fork. `session/fork` creates
+an independent Session from the latest settled checkpoint and therefore only
+admits when the source Thread is idle. Gateway `attach` reuses an existing
+local client when possible, reports the local active Turn in its response, and
+returns a locked external Session as read-only. It never steals a Session lock
+or starts a competing writer. Consumers should keep the active identity until
+`turn_finished` and use the canonical Session status after reconnect.
 
 #### Runtime management
 
@@ -313,7 +340,7 @@ emitted on one ordered runtime stream.
 | `thread/settings/updated` | `threadId`, effective mode, Builtin tools, continuation mode, `stateRevision` | Projects a settings change. |
 | `thread/goal/updated` | `threadId`, optional `turnId`, Goal projection, `stateRevision` | Projects Goal creation, update, or runtime progress. |
 | `thread/goal/cleared` | `threadId`, `stateRevision` | Projects Goal removal. |
-| `runtime/status/updated` | Runtime status snapshot | Reports phase transitions without waiting for a turn to settle. |
+| `runtime/status/updated` | Runtime status snapshot | Reports phase transitions without waiting for a turn to settle, including the monotonic `stopping` phase. |
 | `checkpoint/committed` | `threadId`, `turnId`, `checkpointSeq`, `stateRevision`, `operationId` | Confirms a settled turn checkpoint was persisted. |
 | `goal/verification_started\|completed\|failed` | Goal/turn/checkpoint identity, milestone fields, optional `error` | Exposes the verifier boundary and result. |
 | `goal/continuation_queued\|started` | Goal/turn identity, checkpoint and milestone fields | Exposes scheduling and actual start of the next Goal turn. |
