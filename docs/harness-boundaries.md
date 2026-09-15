@@ -27,6 +27,11 @@ Host 不通过 `content` 的错误文本猜测 `NeedsApproval`、`Deferred` 或 
 `ToolError(String)` 仅是旧工具兼容边界，Legacy 工具必须自行返回明确的 outcome。
 因此 `content` 是有界诊断信息，不是跨层状态协议。
 
+App Server 的 `ThreadItem.ToolCall` 保留两个正交字段：`status` 表示 Item
+生命周期，`outcome` 表示 Core 工具结果。`needs_approval`、`deferred` 和
+`retryable` 不能被折叠成一个 `completed/failed` 布尔判断；旧 Session 没有
+`outcome` 时仍按兼容规则读取。
+
 稳定内置 prompt body 属于 crate-owned `builtin/prompts` Markdown asset 并在
 编译期嵌入；Host 的 project、extension、world、workflow instruction 只能在
 有界 runtime composition 中加入。App Server 只能选择 allowlisted startup

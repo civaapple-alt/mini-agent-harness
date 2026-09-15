@@ -63,6 +63,7 @@ fn event_projection_reuses_tool_call_id() {
             name: "shell".to_string(),
             arguments: serde_json::json!({"command": "pwd"}),
             status: ItemStatus::InProgress,
+            outcome: None,
             output: None,
         }]
     );
@@ -124,7 +125,7 @@ fn completed_tool_item_keeps_the_call_projection() {
             content: "ok".to_string(),
             is_error: false,
             truncated: false,
-            outcome: None,
+            outcome: Some(mini_agent_protocol::ToolExecutionStatus::Completed),
         },
     );
 
@@ -135,6 +136,7 @@ fn completed_tool_item_keeps_the_call_projection() {
             name: "shell".to_string(),
             arguments: serde_json::json!({"command": "pwd"}),
             status: ItemStatus::Completed,
+            outcome: Some(mini_agent_protocol::ToolExecutionStatus::Completed),
             output: Some("ok".to_string()),
         }]
     );
@@ -216,9 +218,43 @@ fn persisted_tool_projection_keeps_supplied_arguments() {
             name: "shell".to_string(),
             arguments,
             status: ItemStatus::Completed,
+            outcome: Some(mini_agent_protocol::ToolExecutionStatus::Completed),
             output: Some("exit: 0".to_string()),
         }]
     );
+}
+
+#[test]
+fn completed_projection_preserves_non_completed_tool_outcome() {
+    let event = EventEnvelope::new(
+        ThreadId::new("thread-1"),
+        Some(TurnId::new("turn-1")),
+        8,
+        Event::ToolFinished {
+            call_id: "call-1".to_string(),
+            name: "mcp__fixture__slow".to_string(),
+            arguments: serde_json::json!({"query": "status"}),
+            content: "MCP tool call timed out".to_string(),
+            is_error: true,
+            truncated: false,
+            outcome: Some(mini_agent_protocol::ToolExecutionStatus::Retryable),
+        },
+    );
+
+    let ThreadItem::ToolCall {
+        status, outcome, ..
+    } = &ThreadItem::from_event(&event)[0]
+    else {
+        panic!("expected tool item");
+    };
+    assert_eq!(*status, ItemStatus::Failed);
+    assert_eq!(
+        *outcome,
+        Some(mini_agent_protocol::ToolExecutionStatus::Retryable)
+    );
+    let wire = serde_json::to_value(ThreadItem::from_event(&event)[0].clone()).unwrap();
+    assert_eq!(wire["status"], "failed");
+    assert_eq!(wire["outcome"], "retryable");
 }
 
 #[test]

@@ -2,6 +2,7 @@ use mini_agent_protocol::Event;
 use mini_agent_protocol::EventEnvelope;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::ToolCall as ModelToolCall;
+use mini_agent_protocol::ToolExecutionStatus;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -48,6 +49,8 @@ pub enum ThreadItem {
         arguments: Value,
         status: ItemStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        outcome: Option<ToolExecutionStatus>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         output: Option<String>,
     },
     ContextCompaction {
@@ -85,7 +88,7 @@ impl ThreadItem {
                 ItemStatus::InProgress,
             ),
             Event::ToolStarted { call } => {
-                vec![tool_item(call, ItemStatus::InProgress, None)]
+                vec![tool_item(call, ItemStatus::InProgress, None, None)]
             }
             Event::ToolFinished {
                 call_id,
@@ -93,6 +96,7 @@ impl ThreadItem {
                 arguments,
                 content,
                 is_error,
+                outcome,
                 ..
             } => vec![Self::ToolCall {
                 id: call_id.clone(),
@@ -103,6 +107,7 @@ impl ThreadItem {
                 } else {
                     ItemStatus::Completed
                 },
+                outcome: *outcome,
                 output: Some(bound_text(content)),
             }],
             Event::ContextCompactionStarted { .. } => vec![Self::ContextCompaction {
@@ -191,6 +196,7 @@ impl ThreadItem {
                 name,
                 content,
                 is_error,
+                outcome,
                 ..
             } => vec![Self::ToolCall {
                 id: call_id.clone(),
@@ -203,6 +209,7 @@ impl ThreadItem {
                 } else {
                     ItemStatus::Completed
                 },
+                outcome: *outcome,
                 output: Some(bound_text(content)),
             }],
             Message::Context { .. } => vec![Self::ContextCompaction {
@@ -228,12 +235,18 @@ impl ThreadItem {
     }
 }
 
-fn tool_item(call: &ModelToolCall, status: ItemStatus, output: Option<String>) -> ThreadItem {
+fn tool_item(
+    call: &ModelToolCall,
+    status: ItemStatus,
+    outcome: Option<ToolExecutionStatus>,
+    output: Option<String>,
+) -> ThreadItem {
     ThreadItem::ToolCall {
         id: call.id.clone(),
         name: call.name.clone(),
         arguments: project_arguments(&call.arguments),
         status,
+        outcome,
         output,
     }
 }
@@ -261,7 +274,7 @@ fn assistant_items(
     items.extend(
         tool_calls
             .iter()
-            .map(|call| tool_item(call, tool_status, None)),
+            .map(|call| tool_item(call, tool_status, None, None)),
     );
     items
 }

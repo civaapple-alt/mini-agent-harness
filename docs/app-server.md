@@ -105,6 +105,14 @@ is the authoritative final projection for that item; the same tool `callId` is
 used across model, tool-start, tool-completion, and replay projections. These
 notifications use the same ordered runtime stream as `turn/event`.
 
+For a `ToolCall` item, `status` is the lifecycle projection
+(`inProgress`, `completed`, or `failed`) and optional `outcome` preserves the
+Core `ToolExecutionStatus` (`completed`, `failed`, `needs_approval`, `deferred`,
+or `retryable`). Keep these fields separate. A client may use `status` for
+rendering lifecycle and `outcome` for the tool's policy/execution result; it
+must not reconstruct the latter from `output` text. Older persisted items may
+omit `outcome` and remain valid.
+
 Realtime context compaction also carries an independent item identity through
 the `EventEnvelope` and its projected `ContextCompaction` item. The start and
 finish events reuse that ID, so clients can merge adjacent lifecycle updates;
