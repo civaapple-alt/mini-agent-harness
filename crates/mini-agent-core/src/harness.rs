@@ -37,7 +37,8 @@ pub enum ContextLimitBehavior {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForkContextPolicy {
     Exact,
-    CompactIfNeeded,
+    /// Explicitly compact the fork checkpoint before it is persisted.
+    Compact,
 }
 
 /// Records how the Core prepared a fork checkpoint.
@@ -270,20 +271,16 @@ impl<M: Model> Harness<M> {
     /// Prepares a settled copy of the current history for an independent
     /// Session without changing this Harness.
     ///
-    /// Model summarization runs with an empty tool list and a silent observer.
-    /// Tool execution, approval, and turn events cannot occur during this
-    /// operation.
+    /// `Exact` only clones the settled history. `Compact` may summarize it with
+    /// an empty tool list and a silent observer. Tool execution, approval, and
+    /// turn events cannot occur during this operation.
     pub async fn prepare_fork_checkpoint(
         &mut self,
         policy: ForkContextPolicy,
     ) -> Result<ForkPreparation, HarnessError<M::Error>> {
         let tool_specs = self.tools.specs();
         let before_bytes = self.context_bytes(&self.config.system_prompt, &tool_specs);
-        let should_compact = policy == ForkContextPolicy::CompactIfNeeded
-            && self.session.messages().len() > 1
-            && before_bytes >= self.config.max_context_bytes / 2;
-
-        if !should_compact {
+        if policy == ForkContextPolicy::Exact {
             self.ensure_context_limit(&tool_specs)
                 .map_err(HarnessError::Limit)?;
             return Ok(ForkPreparation {

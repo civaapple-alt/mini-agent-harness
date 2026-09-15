@@ -1065,7 +1065,7 @@ async fn prepares_a_compacted_fork_without_mutating_the_parent() {
     let parent_messages = harness.messages().to_vec();
 
     let prepared = harness
-        .prepare_fork_checkpoint(ForkContextPolicy::CompactIfNeeded)
+        .prepare_fork_checkpoint(ForkContextPolicy::Compact)
         .await
         .unwrap();
 
@@ -1081,12 +1081,22 @@ async fn prepares_a_compacted_fork_without_mutating_the_parent() {
 
 #[tokio::test]
 async fn exact_fork_preparation_keeps_history_and_skips_the_model() {
-    let history = vec![Message::User {
-        text: "keep this history".to_string(),
-    }];
+    let padding = "p".repeat(1_800);
+    let history = vec![
+        Message::User {
+            text: format!("keep this history:{padding}"),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: format!("and do not compact it at fork time:{padding}"),
+            tool_calls: Vec::new(),
+        },
+    ];
+    let requests = Arc::new(Mutex::new(Vec::new()));
     let mut harness = Harness::new(
-        ScriptedModel {
+        RecordingModel {
             responses: VecDeque::new(),
+            requests: Arc::clone(&requests),
         },
         ToolRouter::default(),
         HarnessConfig {
@@ -1096,7 +1106,6 @@ async fn exact_fork_preparation_keeps_history_and_skips_the_model() {
         },
     );
     harness.restore_history(history.clone()).unwrap();
-
     let prepared = harness
         .prepare_fork_checkpoint(ForkContextPolicy::Exact)
         .await
@@ -1104,7 +1113,9 @@ async fn exact_fork_preparation_keeps_history_and_skips_the_model() {
 
     assert_eq!(prepared.method, ForkCompactionMethod::Exact);
     assert_eq!(prepared.session.messages(), history.as_slice());
+    assert!(prepared.context_before_bytes >= 2_500);
     assert_eq!(harness.messages(), history.as_slice());
+    assert!(requests.lock().unwrap().is_empty());
 }
 
 #[test]

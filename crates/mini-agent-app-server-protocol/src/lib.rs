@@ -559,9 +559,9 @@ pub struct SessionInfoResult {
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ForkContextPolicy {
-    Exact,
     #[default]
-    CompactIfNeeded,
+    Exact,
+    Compact,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1144,15 +1144,22 @@ mod tests {
 
     #[test]
     fn session_fork_contract_keeps_policy_and_lineage_bounded() {
+        let defaults: SessionForkParams = serde_json::from_value(serde_json::json!({
+            "sourceThreadId": "source",
+            "newThreadId": "child"
+        }))
+        .unwrap();
+        assert_eq!(defaults.context_policy, ForkContextPolicy::Exact);
+
         let params = serde_json::to_value(SessionForkParams {
             source_thread_id: ThreadId::new("source"),
             new_thread_id: ThreadId::new("child"),
-            context_policy: ForkContextPolicy::CompactIfNeeded,
+            context_policy: ForkContextPolicy::Compact,
         })
         .unwrap();
         assert_eq!(params["sourceThreadId"], "source");
         assert_eq!(params["newThreadId"], "child");
-        assert_eq!(params["contextPolicy"], "compact_if_needed");
+        assert_eq!(params["contextPolicy"], "compact");
         assert!(params.get("source_thread_id").is_none());
 
         let result = serde_json::to_value(SessionForkResult {

@@ -10,13 +10,14 @@ Web Studio 的“派生聊天分支”将创建一个新的 `session_id`、新�
 独立的 App Server client。父 Session 保持不变。派生只复制父 Thread 最近一次
 已结算的 checkpoint，不复制整份历史 JSONL。
 
-派生默认使用 `compact_if_needed` 策略：
+派生默认使用 `exact` 策略：
 
-- 如果 checkpoint 已经符合模型上下文和 Session 记录限制，原样复制 checkpoint；
-- 如果上下文达到软阈值、超过硬限制，或无法放入单条有界 checkpoint 记录，先在
-  内存副本上执行现有上下文压缩规则；
-- 压缩失败时先尝试现有机械裁剪；仍然无法满足限制时，派生失败，父 Session 不变；
-- 压缩过程不调用工具，不产生工具审批；页面显示压缩前后大小和结果。
+- 只复制最近一次已结算 checkpoint，不在 fork 时调用模型，也不触发压缩；
+- 源 Session 的正常 Turn 继续按自身 `ContextLimitBehavior` 自动压缩，并把结果
+  写回源 Session；child 首次运行时再按 child 自己的配置判断是否需要压缩；
+- “派生并压缩”只能通过显式 `contextPolicy=compact` 请求，压缩失败时父 Session
+  保持不变；
+- 两种路径都不执行工具、不产生工具审批，页面显示实际的压缩前后大小和结果。
 
 这项能力解决两个问题。20 MB 的父 `session.jsonl` 不会被完整复制到分支，父文件
 也不会因为分支继续增长。派生分支会得到一个新的、可重启恢复的 Session。新文件
@@ -36,9 +37,9 @@ Web Studio 的“派生聊天分支”将创建一个新的 `session_id`、新�
 
 本决策已经落地，实际边界如下：
 
-- Core 的 `Harness::prepare_fork_checkpoint` 只在已结算 Thread 上准备有界副本；
-  `exact` 保留原 checkpoint，`compact_if_needed` 复用既有模型摘要/机械压缩规则，
-  且不会修改父 Harness、执行工具或产生审批。
+- Core 的 `Harness::prepare_fork_checkpoint` 只在已结算 Thread 上准备副本；`exact`
+  保留原 checkpoint，不检查 fork 专属的上下文软阈值、不调用模型；显式 `compact`
+  才复用既有模型摘要/机械压缩规则，且不会修改父 Harness、执行工具或产生审批。
 - Capabilities 的 `SessionStore::fork_from_checkpoint` 原子创建新的 Session 目录、
   lock、thread index 和 `forked_from` 记录，仅写入整理后的 checkpoint，并复制附件；
   父 `session.jsonl` 不会被重写。
@@ -48,9 +49,9 @@ Web Studio 的“派生聊天分支”将创建一个新的 `session_id`、新�
 - Gateway 为 child 启动独立 App Server client；父子 Thread 不共享 client、Session lock、
   审批上下文或事件接收器。child 启动失败时保留可 attach 的 Session 目录，不留下永久
   运行时绑定。
-- Web Studio 的“派生独立分支”默认使用 `compact_if_needed`，在 Header 和运行详情中
-  显示实际 Session ID、父 Session、checkpoint、大小及压缩结果；原有 `thread/fork`
-  继续保留为嵌入式逻辑 Thread 分支。
+- Web Studio 的“派生独立分支”默认使用 `exact`，在 Header 和运行详情中显示实际
+  Session ID、父 Session、checkpoint、大小及压缩结果；侧栏另提供“派生并压缩”，
+  通过显式 `compact` 选择。原有 `thread/fork` 继续保留为嵌入式逻辑 Thread 分支。
 
 实现后的尺寸基线为 runtime `19,703 -> 20,102`（`+399`）、release Rust
 `29,483 -> 30,045`（`+562`）；总量仍处于 green。仓库的 Green/Amber 单 PR
@@ -70,13 +71,14 @@ Core context normalization
 
 ## Harness hypothesis
 
-如果派生操作复制的是最近一次已结算 checkpoint，而不是整份 Session 日志，且在
-写入新 Session 前执行与正常运行一致的有界上下文整理，那么：
+如果派生操作复制的是最近一次已结算 checkpoint，而不是整份 Session 日志，且默认
+不改变源 Session 的正常压缩节奏，那么：
 
 - 父 Session 不会被分支操作改写；
 - 分支可以拥有独立的 Session lock、生命周期、事件序列和恢复路径；
 - 一个因重复 checkpoint 变大的 20 MB Session 可以生成远小于 20 MB 的新 Session；
-- 分支首次运行不会因为恢复了超限上下文而立即失败。
+- 分支首次运行按 child 自身的上下文配置处理，不会因为 fork 隐式改变了 checkpoint
+  而产生不可解释的压缩差异。
 
 反例是：父 Thread 正在运行、父 Session 只有未结算状态、压缩后仍超过上下文或
 记录限制，或者子 Session 在 Gateway 重启后无法从 catalog 恢复。任一反例成立，
@@ -90,7 +92,7 @@ Core context normalization
 | E-02 | App Server `ThreadManager::fork` 读取 source checkpoint，并在内存中恢复到新 Thread。 | [`thread_manager.rs`](../../../../crates/mini-agent-app-server/src/thread_manager.rs) 的 `fork` | 分支建立时没有新的持久化 Session 记录。 | Core Thread 拓扑和 SessionStore 生命周期是两个不同概念。 | 如果 fork action 同时写入 SessionStore，需补充代码证据；当前 action 只操作 ThreadManager。 |
 | E-03 | Capabilities 已有 `SessionRequest::Fork`，会读取最新 settled checkpoint，创建新目录，写入 `forked_from`，并复制附件。 | [`session.rs`](../../../../crates/mini-agent-capabilities/src/session.rs) 的 `SessionStore::fork` | 可复用持久化和 lineage 基础，但 Web Gateway 尚未使用。 | CLI 嵌入式运行路径先实现了 Session fork，Web 路径仍停留在 Thread fork。 | 如果新目录复制完整 JSONL，E-03 的“只写 checkpoint”描述不成立；当前实现写入初始化 header、Thread 和 checkpoint。 |
 | E-04 | SessionStore 的单文件上限是 32 MiB，单条 JSONL 记录上限是 512 KiB。 | [`session.rs`](../../../../crates/mini-agent-capabilities/src/session.rs) 的 `MAX_SESSION_BYTES`、`MAX_RECORD_BYTES`；[`docs/limits.md`](../../../../docs/limits.md) | 父 Session 接近上限时，整文件复制会放大失败概率；子 checkpoint 也必须满足单条记录上限。 | 存储大小和模型上下文大小是不同边界。 | 如果未来改了限制，契约测试必须从常量读取，而不能依赖本提案中的数字。 |
-| E-05 | Core 的压缩只在运行 Turn 的 `prepare_context` 中按配置触发，默认配置是 `Reject`；`Compact` 会保留最新 Context 和最近的模型步骤组。 | [`harness.rs`](../../../../crates/mini-agent-core/src/harness.rs) 的 `prepare_context`、`compact_context`；[`docs/limits.md`](../../../../docs/limits.md) | 当前 fork 不会因为派生动作自动压缩。高上下文分支可能无法恢复或首次采样失败。 | 压缩是 run loop 内部能力，尚无“为分支准备 checkpoint”的边界方法。 | 如果 fork 已经调用 Core 压缩且有对应 event 和测试，E-05 需要更新为已解决。 |
+| E-05 | Core 的正常压缩在运行 Turn 的 `prepare_context` 中按源配置触发；`session/fork` 默认只复制最近 settled checkpoint，显式 `compact` 才调用同一套整理规则。 | [`harness.rs`](../../../../crates/mini-agent-core/src/harness.rs) 的 `prepare_context`、`prepare_fork_checkpoint`、`compact_context`；[`docs/limits.md`](../../../../docs/limits.md) | 源 Session 的压缩节奏与 fork 的快照语义分离；用户可明确选择是否为 child 预压缩。 | fork 不应猜测 source/child 的上下文阈值，也不应在默认操作中额外调用模型。 | 如果默认 fork 仍在软阈值处调用 provider，E-05 重新成立。 |
 | E-06 | App Server `thread/fork` 返回的结果只有新的 Thread ID，Gateway 的 fork 响应没有新的 Session ID。 | [`json_rpc/thread.rs`](../../../../crates/mini-agent-app-server/src/json_rpc/thread.rs)；[`server/control/client_pool.py`](../../../../mini-agent-web/server/control/client_pool.py) | Studio 无法准确显示新分支的实际 Session，也无法在重启后独立 attach。 | 协议只表达 Thread 分叉，没有表达 Session 分叉结果。 | 如果现有响应能稳定返回 child Session ID，需把该响应 fixture 加入证据。 |
 
 ## 设计决定
@@ -118,15 +120,10 @@ App Server 生成一个内部结果，避免 Gateway 自己拼装 checkpoint：
 
 ```text
 ForkPreparation {
-    source_thread_id: ThreadId,
-    parent_session_id: SessionId,
-    parent_checkpoint_seq: u64,
     messages: Vec<Message>,
     context_before_bytes: usize,
     context_after_bytes: usize,
-    checkpoint_bytes: usize,
-    compacted: bool,
-    compaction_method: Exact | ModelSummary | MechanicalTrim,
+    method: Exact | ModelSummary | Mechanical,
 }
 ```
 
@@ -136,24 +133,27 @@ ForkPreparation {
 ### 3. 在 Core 增加“为分支准备 checkpoint”的边界方法
 
 Core 将复用现有 `compact_context` 的保留规则，不新增第二套压缩算法。新的方法
-只允许在 Thread 已结算时调用：
+只允许在 Thread 已结算时调用。`exact` 依赖已恢复的 settled checkpoint 已通过
+逐条消息限制校验；`compact` 才在 fork 边界执行模型上下文限制校验：
 
 ```text
-prepare_fork_checkpoint(observer, policy)
-    -> bounded messages + compaction report
+prepare_fork_checkpoint(policy)
+    -> settled messages + compaction report
 ```
 
 方法在临时 SessionState 上工作。它不会向父 Session 写入 checkpoint，不改变父
 Thread 的下一轮计数、最后 Turn、事件序列或状态。压缩请求使用空工具列表，不能
 触发工具、副作用或审批。
 
-方法必须同时验证：
+显式 `compact` 方法必须同时验证：
 
 - 模型请求上下文不超过 `HarnessConfig.max_context_bytes`；
 - 每个 Context、模型响应和工具结果仍符合 Core 限制；
-- 初始化 checkpoint 的 JSON 序列化结果不超过 `MAX_RECORD_BYTES`；
 - 压缩确实减少上下文，或者机械裁剪后满足硬限制；
 - 无法满足限制时返回结构化错误，不创建半成品子 Session。
+
+初始化 checkpoint 的 JSONL 单记录上限由 Capabilities `SessionStore` 在写入边界
+校验；Core 不复制这个存储常量，也不在内部重复实现 Session 文件限制。
 
 ### 4. Capabilities 写入独立 Session
 
@@ -190,11 +190,11 @@ checkpoint 决定。
 {
   "sourceThreadId": "thread-a",
   "newThreadId": "thread-a_fork_7k2m",
-  "contextPolicy": "compact_if_needed"
+  "contextPolicy": "exact"
 }
 ```
 
-结果只返回：
+需要显式压缩时，调用方传入 `contextPolicy=compact`；结果只返回：
 
 ```json
 {
@@ -202,11 +202,10 @@ checkpoint 决定。
   "sessionId": "s-child",
   "parentSessionId": "s-parent",
   "parentCheckpointSeq": 42,
-  "compacted": true,
+  "compacted": false,
   "contextBeforeBytes": 812000,
-  "contextAfterBytes": 276000,
-  "checkpointBytes": 287000,
-  "compactionMethod": "model_summary"
+  "contextAfterBytes": 812000,
+  "method": "exact"
 }
 ```
 
@@ -283,10 +282,12 @@ child Session file <= 32 MiB
 因此，20 MB 父 Session 的典型结果是：
 
 - 父文件仍约 20 MB；
-- child 只写一个整理后的 checkpoint，初始文件通常是几百 KiB 量级；
-- 如果最新 checkpoint 已经很小，则不产生模型压缩请求；
-- 如果最新上下文接近或超过软阈值，则 child 使用压缩后的大小；
-- 不能用“20 MB 的固定比例”承诺结果，必须以 `checkpointBytes` 和磁盘测量值为准。
+- child 只写一个 checkpoint，初始文件通常是几百 KiB 量级；
+- 默认 `exact` 始终不产生模型压缩请求；显式 `compact` 是否需要请求取决于可压缩
+  的历史前缀；
+- 默认不会因为最新上下文接近软阈值而改变 checkpoint；只有显式 `compact` 才使用
+  压缩后的大小；
+- 不能用“20 MB 的固定比例”承诺结果，必须以返回的 `sessionBytes` 和磁盘测量值为准。
 
 ## 失败、重启和并发处理
 
@@ -294,7 +295,8 @@ child Session file <= 32 MiB
 - source 等待审批：返回 `ApprovalPending`，不让 fork 绕过审批或复制 pending。
 - source 正在停止：返回 `Stopping`，等待权威终态后由用户重试。
 - source 是其他进程的只读 Session：允许历史读取，但拒绝 fork 控制操作。
-- provider 压缩请求失败：先执行机械裁剪；仍超限则返回 `CompactionFailed`，父不变。
+- 显式 `compact` 的 provider 压缩请求失败：按现有压缩错误路径返回，父不变；默认
+  `exact` 不发起 provider 请求，因此不会因 fork 增加一次模型失败点。
 - 子文件写入中断：child 目录不可进入 catalog；重启清理未提交临时目录。
 - 子 client 启动失败：保留 child Session 的失败原因和 Session ID，允许 attach 重试。
 - Gateway 在返回前崩溃：下次 catalog 扫描通过 `forked_from` 和 child Session 文件恢复；
@@ -330,10 +332,10 @@ checkpoint、compaction 和 attach 边界，删除 Web 侧共享 client 的旧�
 | ID | 前置条件 | 操作 | 可观察结果 | 失败反例 | 证据 |
 | --- | --- | --- | --- | --- | --- |
 | AC-01 | source 有 settled checkpoint | 点击“派生聊天分支” | 返回新的 `thread_id` 和 `session_id`，父 ID 不变 | child 使用父 Session ID 或复用父 client | App Server fixture、Gateway 集成测试 |
-| AC-02 | source `session.jsonl` 为 20 MB，最新 checkpoint 远小于全日志 | 派生并检查 child 文件 | child 不包含父历史全量日志，报告真实 `checkpointBytes` | child 复制出接近 20 MB 的重复 JSONL | bounded SessionStore scenario |
-| AC-03 | source 上下文达到 512 KiB 软阈值 | 派生 | child 标记 `compacted=true`，上下文前后大小和压缩方法可读 | 父文件出现新的 compaction 记录，或 UI 无结果 | Core scenario + event fixture |
-| AC-04 | source 上下文超过 1 MiB，但可通过保留规则压缩 | 派生 | child 恢复成功，首次 Turn 不因 restore context limit 失败 | child 创建后 attach 失败 | Core/App Server scenario |
-| AC-05 | 压缩 provider 失败 | 派生 | 机械裁剪结果可读；若仍超限则返回结构化失败且不创建可见 child | 静默丢历史或创建半成品 Session | Mock provider scenario |
+| AC-02 | source `session.jsonl` 为 20 MB，最新 checkpoint 远小于全日志 | 派生并检查 child 文件 | child 不包含父历史全量日志，报告真实 `sessionBytes` | child 复制出接近 20 MB 的重复 JSONL | bounded SessionStore scenario |
+| AC-03 | source 上下文达到 512 KiB 软阈值 | 使用默认策略派生 | child 标记 `compacted=false`，前后大小相同且 provider 请求数不增加 | fork 因软阈值隐式压缩或父文件出现新的 compaction 记录 | Core scenario + protocol fixture |
+| AC-04 | source checkpoint 可由 child 自身的正常 Turn 压缩处理 | 默认派生后启动 child | fork 不先代替 child 压缩；child 首次 Turn 按自身配置产生正常 compaction | fork 使用 source 的阈值猜测 child 行为 | Core/App Server scenario |
+| AC-05 | 显式 `compact` 的 provider 请求失败 | 派生 | 返回结构化失败且不创建可见 child；仅对不适合的模型摘要响应沿用既有机械裁剪路径 | 静默丢历史或创建半成品 Session | Mock provider scenario |
 | AC-06 | source 有活跃 Turn、审批或停止结算 | 派生 | 返回对应 busy 状态，不创建 child，不改变 source | child 从未结算状态产生 | App Server/Gateway tests |
 | AC-07 | parent and child 已创建 | 重启 Gateway 和两个 App Server | 两个 Session 均从独立目录恢复，ID、lineage、Thread 可读 | child 只存在内存，重启后消失 | restart scenario |
 | AC-08 | parent 和 child 同时运行 | 分别提交 Turn | 两个 Turn、事件序列和审批身份互不污染 | 一个 Session 收到另一个 Session 的事件或 approval | multi-session integration test |
@@ -358,7 +360,8 @@ checkpoint、compaction 和 attach 边界，删除 Web 侧共享 client 的旧�
 
 - Scope：`mini-agent-core` 的 Harness/Thread、Core bounded scenario。
 - Delete/replace：复用现有 compaction 保留规则，不新增第二套裁剪器。
-- Contract delta：增加 `ForkContextPolicy`、`ForkPreparation` 和结构化压缩结果。
+- Contract delta：增加 `ForkContextPolicy`、`ForkPreparation` 和结构化压缩结果；默认
+  策略为 `Exact`，`Compact` 仅由显式调用选择。
 - Expected budget：runtime `+180..+300` effective lines；release `+180..+320`。
 - Evidence：AC-03、AC-04、AC-05，包含 parent unchanged 和 empty tool catalog。
 - Stop conditions：无法保证压缩失败时 source checkpoint 不变时停止。
@@ -444,6 +447,9 @@ Core、Capabilities、App Server、SDK、Gateway 和 Web 已覆盖独立 Session
 验证使用本地/确定性 fixture。跨浏览器实时审批协调、真实 provider 压缩耗时和完整多
 窗口故障注入仍保留为后续场景验收。
 
+本轮语义优化的验证重点是：默认 `exact` fork 不增加 provider 请求、不写回父
+Session，也不因 source 的软阈值触发 fork 压缩；显式 `compact` 仍复用原有压缩路径。
+
 提案阶段已记录的基线：`python scripts/line_budget.py` 于 2026-09-14 输出
 runtime `19,703/25,000`、release Rust `29,483/35,000`，两个预算均为 green。
 实际 before、after 和 delta 已记录在“实现结果”：runtime `19,703 -> 20,102`
@@ -451,8 +457,9 @@ runtime `19,703/25,000`、release Rust `29,483/35,000`，两个预算均为 gree
 
 ## 已处理风险与当前限制
 
-- 模型摘要仍会消耗一次 provider 请求时间和额度；Gateway 当前在 fork API 返回前等待
-  checkpoint 准备完成，UI 以已有请求状态和 Toast 呈现结果。
+- 显式 `compact` 仍会消耗一次 provider 请求时间和额度；Gateway 当前在 fork API
+  返回前等待 checkpoint 准备完成，UI 以已有请求状态和 Toast 呈现结果。默认
+  `exact` 不增加 provider 请求，child 的正常 Turn 才按自身配置决定是否压缩。
 - 子 client 的启动失败会保留 child catalog 记录，后续 attach/retry 仍需由用户触发；
   SessionStore 创建阶段的临时目录和 lock 会清理。
 - 本批次已覆盖 Core、Capabilities、App Server、SDK、Gateway 和 Web 的有界成功路径、

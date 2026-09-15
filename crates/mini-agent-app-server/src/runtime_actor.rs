@@ -88,8 +88,8 @@ where
         mini_agent_app_server_protocol::ForkContextPolicy::Exact => {
             mini_agent_core::ForkContextPolicy::Exact
         }
-        mini_agent_app_server_protocol::ForkContextPolicy::CompactIfNeeded => {
-            mini_agent_core::ForkContextPolicy::CompactIfNeeded
+        mini_agent_app_server_protocol::ForkContextPolicy::Compact => {
+            mini_agent_core::ForkContextPolicy::Compact
         }
     };
     let prepared = threads
