@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -518,6 +518,77 @@ impl SessionStore {
         Err("cannot allocate a unique session id".to_string())
     }
 
+    fn existing_fork(
+        project_dir: &Path,
+        parent_session_id: &str,
+        parent_checkpoint_seq: u64,
+        child_thread_id: &str,
+    ) -> Result<Option<SessionForkInfo>, String> {
+        let index_path = project_dir.join(THREAD_INDEX_FILE_NAME);
+        let Some(session_id) = fs::read_to_string(&index_path)
+            .ok()
+            .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
+            .and_then(|value| value.get("threads").cloned())
+            .and_then(|value| value.get(child_thread_id).cloned())
+            .and_then(|value| {
+                value
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+        else {
+            return Ok(None);
+        };
+        validate_session_id(&session_id)?;
+        let session_dir = project_dir.join(&session_id);
+        let path = session_dir.join(SESSION_FILE_NAME);
+        let file = File::open(&path)
+            .map_err(|error| format!("cannot inspect indexed Session {session_id}: {error}"))?;
+        let mut reader = BufReader::new(file);
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .map_err(|error| format!("cannot read Session {session_id} header: {error}"))?;
+        let header: Value = serde_json::from_str(&line)
+            .map_err(|error| format!("invalid Session {session_id} header: {error}"))?;
+        let forked_from = header.get("forked_from");
+        let matches_parent = forked_from
+            .and_then(|value| value.get("parent_session_id"))
+            .and_then(Value::as_str)
+            == Some(parent_session_id)
+            && forked_from
+                .and_then(|value| value.get("parent_checkpoint_seq"))
+                .and_then(Value::as_u64)
+                == Some(parent_checkpoint_seq);
+        if !matches_parent {
+            return Err(format!(
+                "child thread id {child_thread_id} is already used by another Session"
+            ));
+        }
+        line.clear();
+        reader
+            .read_line(&mut line)
+            .map_err(|error| format!("cannot read Session {session_id} thread: {error}"))?;
+        let started: Value = serde_json::from_str(&line)
+            .map_err(|error| format!("invalid Session {session_id} thread record: {error}"))?;
+        if started.get("thread_id").and_then(Value::as_str) != Some(child_thread_id) {
+            return Err(format!(
+                "thread index for {child_thread_id} points to a different Session thread"
+            ));
+        }
+        let session_bytes = fs::metadata(&path)
+            .map_err(|error| format!("cannot stat Session {session_id}: {error}"))?
+            .len();
+        Ok(Some(SessionForkInfo {
+            session_id,
+            thread_id: child_thread_id.to_string(),
+            path: path.display().to_string(),
+            parent_session_id: parent_session_id.to_string(),
+            parent_checkpoint_seq,
+            session_bytes,
+        }))
+    }
+
     /// Persists a bounded checkpoint as a new independent Session.
     ///
     /// The caller supplies the already-prepared checkpoint. This method only
@@ -542,6 +613,19 @@ impl SessionStore {
         }
 
         let project_dir = session_directory(workspace)?;
+        // A retry can arrive after the child file is committed but before the
+        // caller binds its new client. Serialize the lookup and allocation so
+        // the same child thread returns the existing fork instead of creating
+        // another durable Session.
+        let _fork_lock = acquire_lock(&project_dir, "session-fork")?;
+        if let Some(existing) = Self::existing_fork(
+            &project_dir,
+            parent_session_id,
+            parent_checkpoint_seq,
+            child_thread_id,
+        )? {
+            return Ok(existing);
+        }
         for _ in 0..16 {
             let session_id = new_id("s");
             let session_dir = project_dir.join(&session_id);
@@ -1061,6 +1145,125 @@ mod tests {
         assert_eq!(child.store.thread_id(), "child-thread");
         assert_eq!(child.state, SessionState::from_messages(messages));
         drop(child);
+        drop(parent);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn retrying_the_same_fork_returns_the_existing_session() {
+        let root = crate::test_support::test_root();
+        let mut parent = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let parent_id = parent.store.session_id().to_string();
+        let messages = vec![Message::User {
+            text: "parent question".to_string(),
+        }];
+        parent
+            .store
+            .record_turn_with_id(
+                "turn-1",
+                TurnCommit {
+                    started_at_ms: timestamp_ms(),
+                    prompt: "parent question",
+                    status: TurnStatus::Completed,
+                    steps: 1,
+                    error: None,
+                    messages: &messages,
+                    tool_arguments: &[],
+                    checkpoint: &messages,
+                },
+            )
+            .unwrap();
+        let checkpoint_seq = parent.store.checkpoint_seq();
+        let first = SessionStore::fork_from_checkpoint(
+            &root,
+            &parent_id,
+            checkpoint_seq,
+            "child-thread",
+            &messages,
+        )
+        .unwrap();
+        let retry = SessionStore::fork_from_checkpoint(
+            &root,
+            &parent_id,
+            checkpoint_seq,
+            "child-thread",
+            &messages,
+        )
+        .unwrap();
+
+        assert_eq!(retry, first);
+        let project_dir = session_directory(&root).unwrap();
+        let child_sessions = fs::read_dir(project_dir)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy() == first.session_id)
+            .count();
+        assert_eq!(child_sessions, 1);
+        drop(parent);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn fork_rejects_reusing_a_child_thread_for_another_checkpoint() {
+        let root = crate::test_support::test_root();
+        let mut parent = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let parent_id = parent.store.session_id().to_string();
+        let first_messages = vec![Message::User {
+            text: "first".to_string(),
+        }];
+        parent
+            .store
+            .record_turn_with_id(
+                "turn-1",
+                TurnCommit {
+                    started_at_ms: timestamp_ms(),
+                    prompt: "first",
+                    status: TurnStatus::Completed,
+                    steps: 1,
+                    error: None,
+                    messages: &first_messages,
+                    tool_arguments: &[],
+                    checkpoint: &first_messages,
+                },
+            )
+            .unwrap();
+        let first_checkpoint = parent.store.checkpoint_seq();
+        SessionStore::fork_from_checkpoint(
+            &root,
+            &parent_id,
+            first_checkpoint,
+            "child-thread",
+            &first_messages,
+        )
+        .unwrap();
+        let second_messages = vec![Message::User {
+            text: "second".to_string(),
+        }];
+        parent
+            .store
+            .record_turn_with_id(
+                "turn-2",
+                TurnCommit {
+                    started_at_ms: timestamp_ms(),
+                    prompt: "second",
+                    status: TurnStatus::Completed,
+                    steps: 1,
+                    error: None,
+                    messages: &second_messages,
+                    tool_arguments: &[],
+                    checkpoint: &second_messages,
+                },
+            )
+            .unwrap();
+        let error = SessionStore::fork_from_checkpoint(
+            &root,
+            &parent_id,
+            parent.store.checkpoint_seq(),
+            "child-thread",
+            &second_messages,
+        )
+        .unwrap_err();
+        assert!(error.contains("already used"));
         drop(parent);
         crate::test_support::remove_test_root(&root);
     }
