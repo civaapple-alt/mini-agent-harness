@@ -105,7 +105,7 @@ where
         new_thread_id.as_str(),
         context_policy_name,
     )
-    .map_err(AppServerError::Checkpoint)?
+    .map_err(map_session_fork_error)?
     {
         return session_fork_result(existing, None);
     }
@@ -135,8 +135,19 @@ where
         prepared.session.messages(),
         fork_metadata.clone(),
     )
-    .map_err(AppServerError::Checkpoint)?;
+    .map_err(map_session_fork_error)?;
     session_fork_result(child, Some(fork_metadata))
+}
+
+fn map_session_fork_error(error: mini_agent_capabilities::SessionForkError) -> AppServerError {
+    match error {
+        mini_agent_capabilities::SessionForkError::Conflict(conflict) => {
+            AppServerError::SessionForkConflict(conflict)
+        }
+        mini_agent_capabilities::SessionForkError::Storage(error) => {
+            AppServerError::Checkpoint(error)
+        }
+    }
 }
 
 fn session_fork_result(

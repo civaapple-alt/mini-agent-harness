@@ -97,6 +97,7 @@ graph LR
 
 ### Implemented
 
+- [Session fork 结构化冲突契约](implemented/architecture/2026-09-15-session-fork-structured-conflict.zh.md)
 - [Session fork 上下文策略与结果元数据契约](implemented/architecture/2026-09-15-session-fork-context-policy-contract.zh.md)
 - [Session fork 重试幂等与 child Thread 冲突](implemented/bug-fix/2026-09-15-session-fork-retry-idempotency.zh.md)
 - [Runtime 子系统跨仓契约基线](implemented/testing/2026-09-15-cross-repository-runtime-contract-baseline.zh.md)

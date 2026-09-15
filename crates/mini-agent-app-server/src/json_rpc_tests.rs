@@ -2,6 +2,7 @@ use super::*;
 use crate::tests::{DoneModel, harness};
 use mini_agent_app_server_protocol::{
     ActionGrantScope, ApprovalDecision, CapabilityProviderSelection, ClientCapabilities,
+    SESSION_FORK_CONFLICT_CODE,
 };
 use mini_agent_capabilities::{
     ApprovalController, ApprovalPolicy, ImageStore, ResultStore, SandboxKind, SecurityPolicy,
@@ -730,13 +731,17 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
         ))
         .await
         .unwrap();
-    assert!(
-        conflict
-            .error
-            .expect("policy conflict should be an RPC error")
-            .message
-            .contains("another fork context policy")
-    );
+    let error = conflict
+        .error
+        .expect("policy conflict should be an RPC error");
+    assert_eq!(error.code, SESSION_FORK_CONFLICT_CODE);
+    let data = error.data.unwrap();
+    assert_eq!(data["kind"], "contextPolicy");
+    assert_eq!(data["childThreadId"], "forked-rpc-thread");
+    assert_eq!(data["requestedContextPolicy"], "compact");
+    assert_eq!(data["existingContextPolicy"], "exact");
+    assert_eq!(data["actionId"], 4);
+    assert_eq!(data["actionSequence"], 4);
     connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }

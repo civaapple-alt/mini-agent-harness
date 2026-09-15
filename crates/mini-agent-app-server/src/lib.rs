@@ -364,6 +364,7 @@ pub enum AppServerError {
     TurnNotFound(TurnId),
     InvalidItemCursor(String),
     Checkpoint(String),
+    SessionForkConflict(mini_agent_capabilities::SessionForkConflict),
     RevisionConflict { expected: u64, actual: u64 },
     ThreadNotFound(ThreadId),
     ThreadAlreadyExists(ThreadId),
@@ -423,6 +424,7 @@ impl fmt::Display for AppServerError {
                 write!(formatter, "invalid ThreadItem cursor: {cursor}")
             }
             Self::Checkpoint(error) => write!(formatter, "checkpoint unavailable: {error}"),
+            Self::SessionForkConflict(conflict) => conflict.fmt(formatter),
             Self::RevisionConflict { expected, actual } => write!(
                 formatter,
                 "runtime revision conflict: expected {expected}, actual {actual}"

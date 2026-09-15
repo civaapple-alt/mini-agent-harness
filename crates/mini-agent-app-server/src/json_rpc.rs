@@ -30,10 +30,10 @@ use mini_agent_app_server_protocol::{
     METHOD_TURN_INTERRUPT, METHOD_TURN_READ, METHOD_TURN_START, METHOD_TURN_STEER,
     METHOD_WORLD_REFRESH, METHOD_WORLD_SET_EXECUTION, METHOD_WORLD_STATE,
     McpRetryResult as ProtocolMcpRetryResult, McpStatusResult, PROTOCOL_VERSION,
-    RuntimeStatusParams, ServerCapabilities, SessionForkParams, SessionInfoResult,
-    ThreadCloseParams, ThreadForkParams, ThreadForkResult, ThreadGoalClearParams,
-    ThreadGoalClearResponse, ThreadGoalClearedNotification, ThreadGoalGetParams,
-    ThreadGoalGetResponse, ThreadGoalSetParams, ThreadGoalSetResponse,
+    RuntimeStatusParams, ServerCapabilities, SessionForkConflictData, SessionForkParams,
+    SessionInfoResult, ThreadCloseParams, ThreadForkParams, ThreadForkResult,
+    ThreadGoalClearParams, ThreadGoalClearResponse, ThreadGoalClearedNotification,
+    ThreadGoalGetParams, ThreadGoalGetResponse, ThreadGoalSetParams, ThreadGoalSetResponse,
     ThreadGoalUpdatedNotification, ThreadItemsListParams, ThreadListParams, ThreadListResult,
     ThreadReadParams, ThreadReadResult, ThreadResumeParams, ThreadResumeResult,
     ThreadSettingsUpdateParams, ThreadSettingsUpdateResult, ThreadSettingsUpdatedNotification,
@@ -673,14 +673,44 @@ fn workflow_error(message: String) -> JsonRpcError {
 }
 
 fn map_server_error(error: AppServerError) -> JsonRpcError {
-    JsonRpcError::server_error(error.to_string())
+    match error {
+        AppServerError::SessionForkConflict(conflict) => {
+            JsonRpcError::session_fork_conflict(match conflict {
+                mini_agent_capabilities::SessionForkConflict::ParentLineage { child_thread_id } => {
+                    SessionForkConflictData::ParentLineage { child_thread_id }
+                }
+                mini_agent_capabilities::SessionForkConflict::ContextPolicy {
+                    child_thread_id,
+                    requested_context_policy,
+                    existing_context_policy,
+                } => SessionForkConflictData::ContextPolicy {
+                    child_thread_id,
+                    requested_context_policy,
+                    existing_context_policy,
+                },
+            })
+        }
+        error => JsonRpcError::server_error(error.to_string()),
+    }
 }
 
 fn map_action_error(error: ActionFailure) -> JsonRpcError {
     let metadata = error.metadata();
     let mut mapped = map_server_error(error.error);
-    if let Some(metadata) = metadata {
-        mapped.data = serde_json::to_value(metadata).ok();
+    if let Some(metadata) = metadata
+        && let Ok(serde_json::Value::Object(mut metadata)) = serde_json::to_value(metadata)
+    {
+        match mapped.data.take() {
+            Some(serde_json::Value::Object(mut data)) => {
+                data.extend(metadata);
+                mapped.data = Some(serde_json::Value::Object(data));
+            }
+            Some(data) => {
+                metadata.insert("errorData".to_string(), data);
+                mapped.data = Some(serde_json::Value::Object(metadata));
+            }
+            None => mapped.data = Some(serde_json::Value::Object(metadata)),
+        }
     }
     mapped
 }

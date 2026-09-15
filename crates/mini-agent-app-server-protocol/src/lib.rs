@@ -74,6 +74,8 @@ pub const METHOD_PLAN_CLEANUP_STARTED: &str = "plan/cleanup_started";
 pub const METHOD_PLAN_CLEANUP_COMPLETED: &str = "plan/cleanup_completed";
 pub const METHOD_PLAN_CLEANUP_FAILED: &str = "plan/cleanup_failed";
 
+pub const SESSION_FORK_CONFLICT_CODE: i32 = -32001;
+
 /// A JSON-RPC request or notification received by the app-server.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct JsonRpcRequest {
@@ -125,6 +127,24 @@ pub struct JsonRpcResponse {
     pub result: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<JsonRpcError>,
+}
+
+/// Machine-readable reason for refusing to reuse a child Thread identity.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SessionForkConflictData {
+    ParentLineage {
+        #[serde(rename = "childThreadId")]
+        child_thread_id: String,
+    },
+    ContextPolicy {
+        #[serde(rename = "childThreadId")]
+        child_thread_id: String,
+        #[serde(rename = "requestedContextPolicy")]
+        requested_context_policy: String,
+        #[serde(rename = "existingContextPolicy")]
+        existing_context_policy: String,
+    },
 }
 
 impl JsonRpcResponse {
@@ -272,6 +292,14 @@ impl JsonRpcError {
 
     pub fn server_error(message: impl Into<String>) -> Self {
         Self::new(-32000, message)
+    }
+
+    pub fn session_fork_conflict(data: SessionForkConflictData) -> Self {
+        Self {
+            code: SESSION_FORK_CONFLICT_CODE,
+            message: "session fork conflicts with existing child".to_string(),
+            data: Some(serde_json::to_value(data).expect("fork conflict is serializable")),
+        }
     }
 
     fn new(code: i32, message: impl Into<String>) -> Self {
@@ -1180,6 +1208,17 @@ mod tests {
         assert_eq!(result["parentCheckpointSeq"], 9);
         assert_eq!(result["contextAfterBytes"], 4096);
         assert_eq!(result["method"], "model_summary");
+
+        let conflict =
+            JsonRpcError::session_fork_conflict(SessionForkConflictData::ContextPolicy {
+                child_thread_id: "child".to_string(),
+                requested_context_policy: "compact".to_string(),
+                existing_context_policy: "exact".to_string(),
+            });
+        assert_eq!(conflict.code, SESSION_FORK_CONFLICT_CODE);
+        let conflict_data = conflict.data.unwrap();
+        assert_eq!(conflict_data["kind"], "contextPolicy");
+        assert_eq!(conflict_data["childThreadId"], "child");
     }
 
     #[test]

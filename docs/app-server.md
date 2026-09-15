@@ -373,6 +373,11 @@ Runtime revision observed when the result was produced. Actor-rejected
 actions carry the same metadata in JSON-RPC error `data`; requests rejected
 before admission do not claim an action.
 
+`session/fork` child identity conflicts use `-32001`, not the generic `-32000`
+runtime error. The error `data` keeps the action metadata and adds a tagged
+`kind` of `parentLineage` or `contextPolicy`, plus the bounded child and policy
+fields relevant to that conflict.
+
 The standard error codes currently used are:
 
 | Code | Meaning |
@@ -382,6 +387,7 @@ The standard error codes currently used are:
 | `-32601` | Method not found, including removed legacy methods. |
 | `-32602` | Invalid or incomplete parameters. |
 | `-32000` | Runtime, capability, approval, or management failure. |
+| `-32001` | `session/fork` cannot reuse the child identity because its parent lineage or context policy conflicts. |
 
 All messages, tool arguments, tool output, event lists, item projections,
 cursor pages, and model context are bounded. Sensitive approval and item

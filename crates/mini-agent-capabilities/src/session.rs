@@ -3,6 +3,7 @@ use mini_agent_protocol::Message;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::env;
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -55,6 +56,54 @@ pub struct SessionForkMetadata {
     pub compacted: bool,
     pub method: String,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionForkConflict {
+    ParentLineage {
+        child_thread_id: String,
+    },
+    ContextPolicy {
+        child_thread_id: String,
+        requested_context_policy: String,
+        existing_context_policy: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionForkError {
+    Conflict(SessionForkConflict),
+    Storage(String),
+}
+
+impl fmt::Display for SessionForkConflict {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ParentLineage { child_thread_id } => write!(
+                formatter,
+                "child thread id {child_thread_id} is already used by another Session"
+            ),
+            Self::ContextPolicy {
+                child_thread_id,
+                requested_context_policy,
+                existing_context_policy,
+            } => write!(
+                formatter,
+                "child thread id {child_thread_id} already uses fork context policy '{existing_context_policy}', requested '{requested_context_policy}'"
+            ),
+        }
+    }
+}
+
+impl fmt::Display for SessionForkError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Conflict(conflict) => conflict.fmt(formatter),
+            Self::Storage(error) => formatter.write_str(error),
+        }
+    }
+}
+
+impl std::error::Error for SessionForkError {}
 
 impl SessionForkMetadata {
     fn validate(&self) -> Result<(), String> {
@@ -553,7 +602,7 @@ impl SessionStore {
         parent_checkpoint_seq: u64,
         child_thread_id: &str,
         context_policy: &str,
-    ) -> Result<Option<SessionForkInfo>, String> {
+    ) -> Result<Option<SessionForkInfo>, SessionForkError> {
         let index_path = project_dir.join(THREAD_INDEX_FILE_NAME);
         let Some(session_id) = fs::read_to_string(&index_path)
             .ok()
@@ -569,22 +618,27 @@ impl SessionStore {
         else {
             return Ok(None);
         };
-        validate_session_id(&session_id)?;
+        validate_session_id(&session_id).map_err(SessionForkError::Storage)?;
         let session_dir = project_dir.join(&session_id);
         let path = session_dir.join(SESSION_FILE_NAME);
-        let file = File::open(&path)
-            .map_err(|error| format!("cannot inspect indexed Session {session_id}: {error}"))?;
+        let file = File::open(&path).map_err(|error| {
+            SessionForkError::Storage(format!(
+                "cannot inspect indexed Session {session_id}: {error}"
+            ))
+        })?;
         let mut reader = BufReader::new(file);
         let mut line = String::new();
-        reader
-            .read_line(&mut line)
-            .map_err(|error| format!("cannot read Session {session_id} header: {error}"))?;
-        let header: Value = serde_json::from_str(&line)
-            .map_err(|error| format!("invalid Session {session_id} header: {error}"))?;
+        reader.read_line(&mut line).map_err(|error| {
+            SessionForkError::Storage(format!("cannot read Session {session_id} header: {error}"))
+        })?;
+        let header: Value = serde_json::from_str(&line).map_err(|error| {
+            SessionForkError::Storage(format!("invalid Session {session_id} header: {error}"))
+        })?;
         let forked_from = header.get("forked_from");
         let fork_metadata = forked_from
             .map(Self::read_fork_metadata)
-            .transpose()?
+            .transpose()
+            .map_err(SessionForkError::Storage)?
             .flatten();
         let matches_parent = forked_from
             .and_then(|value| value.get("parent_session_id"))
@@ -595,31 +649,41 @@ impl SessionStore {
                 .and_then(Value::as_u64)
                 == Some(parent_checkpoint_seq);
         if !matches_parent {
-            return Err(format!(
-                "child thread id {child_thread_id} is already used by another Session"
+            return Err(SessionForkError::Conflict(
+                SessionForkConflict::ParentLineage {
+                    child_thread_id: child_thread_id.to_string(),
+                },
             ));
         }
-        if fork_metadata
-            .as_ref()
-            .is_some_and(|metadata| metadata.context_policy != context_policy)
+        if let Some(metadata) = fork_metadata.as_ref()
+            && metadata.context_policy != context_policy
         {
-            return Err(format!(
-                "child thread id {child_thread_id} already uses another fork context policy"
+            return Err(SessionForkError::Conflict(
+                SessionForkConflict::ContextPolicy {
+                    child_thread_id: child_thread_id.to_string(),
+                    requested_context_policy: context_policy.to_string(),
+                    existing_context_policy: metadata.context_policy.clone(),
+                },
             ));
         }
         line.clear();
-        reader
-            .read_line(&mut line)
-            .map_err(|error| format!("cannot read Session {session_id} thread: {error}"))?;
-        let started: Value = serde_json::from_str(&line)
-            .map_err(|error| format!("invalid Session {session_id} thread record: {error}"))?;
+        reader.read_line(&mut line).map_err(|error| {
+            SessionForkError::Storage(format!("cannot read Session {session_id} thread: {error}"))
+        })?;
+        let started: Value = serde_json::from_str(&line).map_err(|error| {
+            SessionForkError::Storage(format!(
+                "invalid Session {session_id} thread record: {error}"
+            ))
+        })?;
         if started.get("thread_id").and_then(Value::as_str) != Some(child_thread_id) {
-            return Err(format!(
+            return Err(SessionForkError::Storage(format!(
                 "thread index for {child_thread_id} points to a different Session thread"
-            ));
+            )));
         }
         let session_bytes = fs::metadata(&path)
-            .map_err(|error| format!("cannot stat Session {session_id}: {error}"))?
+            .map_err(|error| {
+                SessionForkError::Storage(format!("cannot stat Session {session_id}: {error}"))
+            })?
             .len();
         Ok(Some(SessionForkInfo {
             session_id,
@@ -675,14 +739,17 @@ impl SessionStore {
         parent_checkpoint_seq: u64,
         child_thread_id: &str,
         context_policy: &str,
-    ) -> Result<Option<SessionForkInfo>, String> {
-        validate_session_id(parent_session_id)?;
-        validate_session_id(child_thread_id)?;
+    ) -> Result<Option<SessionForkInfo>, SessionForkError> {
+        validate_session_id(parent_session_id).map_err(SessionForkError::Storage)?;
+        validate_session_id(child_thread_id).map_err(SessionForkError::Storage)?;
         if !matches!(context_policy, "exact" | "compact") {
-            return Err("invalid fork context policy".to_string());
+            return Err(SessionForkError::Storage(
+                "invalid fork context policy".to_string(),
+            ));
         }
-        let project_dir = session_directory(workspace)?;
-        let _fork_lock = acquire_lock(&project_dir, "session-fork")?;
+        let project_dir = session_directory(workspace).map_err(SessionForkError::Storage)?;
+        let _fork_lock =
+            acquire_lock(&project_dir, "session-fork").map_err(SessionForkError::Storage)?;
         Ok(Self::existing_fork(
             &project_dir,
             parent_session_id,
@@ -705,25 +772,32 @@ impl SessionStore {
         child_thread_id: &str,
         checkpoint: &[Message],
         fork_metadata: SessionForkMetadata,
-    ) -> Result<SessionForkInfo, String> {
-        validate_session_id(parent_session_id)?;
-        validate_session_id(child_thread_id)?;
-        fork_metadata.validate()?;
-        let (parent_dir, parent_path) = resolve_session_file(workspace, parent_session_id)?;
-        let metadata = fs::metadata(&parent_path)
-            .map_err(|error| format!("cannot open parent session {parent_session_id}: {error}"))?;
+    ) -> Result<SessionForkInfo, SessionForkError> {
+        validate_session_id(parent_session_id).map_err(SessionForkError::Storage)?;
+        validate_session_id(child_thread_id).map_err(SessionForkError::Storage)?;
+        fork_metadata
+            .validate()
+            .map_err(SessionForkError::Storage)?;
+        let (parent_dir, parent_path) = resolve_session_file(workspace, parent_session_id)
+            .map_err(SessionForkError::Storage)?;
+        let metadata = fs::metadata(&parent_path).map_err(|error| {
+            SessionForkError::Storage(format!(
+                "cannot open parent session {parent_session_id}: {error}"
+            ))
+        })?;
         if metadata.len() > MAX_SESSION_BYTES {
-            return Err(format!(
+            return Err(SessionForkError::Storage(format!(
                 "parent session exceeds {MAX_SESSION_BYTES} byte limit"
-            ));
+            )));
         }
 
-        let project_dir = session_directory(workspace)?;
+        let project_dir = session_directory(workspace).map_err(SessionForkError::Storage)?;
         // A retry can arrive after the child file is committed but before the
         // caller binds its new client. Serialize the lookup and allocation so
         // the same child thread returns the existing fork instead of creating
         // another durable Session.
-        let _fork_lock = acquire_lock(&project_dir, "session-fork")?;
+        let _fork_lock =
+            acquire_lock(&project_dir, "session-fork").map_err(SessionForkError::Storage)?;
         if let Some(existing) = Self::existing_fork(
             &project_dir,
             parent_session_id,
@@ -736,8 +810,9 @@ impl SessionStore {
         for _ in 0..16 {
             let session_id = new_id("s");
             let session_dir = project_dir.join(&session_id);
-            fs::create_dir_all(&session_dir)
-                .map_err(|error| format!("cannot create session directory: {error}"))?;
+            fs::create_dir_all(&session_dir).map_err(|error| {
+                SessionForkError::Storage(format!("cannot create session directory: {error}"))
+            })?;
             let path = session_dir.join(SESSION_FILE_NAME);
             let file = match OpenOptions::new()
                 .read(true)
@@ -749,14 +824,16 @@ impl SessionStore {
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => {
                     let _ = fs::remove_dir_all(&session_dir);
-                    return Err(format!("cannot create session: {error}"));
+                    return Err(SessionForkError::Storage(format!(
+                        "cannot create session: {error}"
+                    )));
                 }
             };
             let lock = match acquire_lock(&session_dir, SESSION_LOCK_NAME) {
                 Ok(lock) => lock,
                 Err(error) => {
                     let _ = fs::remove_dir_all(&session_dir);
-                    return Err(error);
+                    return Err(SessionForkError::Storage(error));
                 }
             };
             let initialized = Self::initialize_new_for_thread(
@@ -775,7 +852,7 @@ impl SessionStore {
                 Ok(store) => store,
                 Err(error) => {
                     let _ = fs::remove_dir_all(&session_dir);
-                    return Err(error);
+                    return Err(SessionForkError::Storage(error));
                 }
             };
             copy_attachments(
@@ -794,7 +871,9 @@ impl SessionStore {
             drop(store);
             return Ok(info);
         }
-        Err("cannot allocate a unique session id".to_string())
+        Err(SessionForkError::Storage(
+            "cannot allocate a unique session id".to_string(),
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1349,7 +1428,14 @@ mod tests {
             compact_fork_metadata(),
         )
         .unwrap_err();
-        assert!(conflict.contains("another fork context policy"));
+        assert_eq!(
+            conflict,
+            SessionForkError::Conflict(SessionForkConflict::ContextPolicy {
+                child_thread_id: "child-thread".to_string(),
+                requested_context_policy: "compact".to_string(),
+                existing_context_policy: "exact".to_string(),
+            })
+        );
         let project_dir = session_directory(&root).unwrap();
         let child_sessions = fs::read_dir(project_dir)
             .unwrap()
@@ -1423,7 +1509,12 @@ mod tests {
             exact_fork_metadata(),
         )
         .unwrap_err();
-        assert!(error.contains("already used"));
+        assert_eq!(
+            error,
+            SessionForkError::Conflict(SessionForkConflict::ParentLineage {
+                child_thread_id: "child-thread".to_string(),
+            })
+        );
         drop(parent);
         crate::test_support::remove_test_root(&root);
     }
