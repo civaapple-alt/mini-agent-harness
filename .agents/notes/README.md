@@ -97,6 +97,7 @@ graph LR
 
 ### Implemented
 
+- [Web Cookbook Tool Outcome 契约](implemented/architecture/2026-09-15-web-cookbook-tool-outcome-contract.zh.md)
 - [安全边界与硬限制证据](implemented/architecture/2026-09-15-security-boundaries-and-hard-limits.zh.md)
 - [Legacy 工具结构化迁移](implemented/architecture/2026-09-15-legacy-tool-typed-migration.zh.md)
 - [Stopping、EOF 与跨仓恢复契约](implemented/architecture/2026-09-15-stopping-eof-recovery.zh.md)
