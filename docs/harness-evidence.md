@@ -57,6 +57,9 @@ line gate 的后续计划要求 Permission、Sandbox、Recovery、Audit 不能�
 | Cross-client revision projection | App Server `stateRevision` 经 Python SDK、Gateway route 和 Web Studio settings/Goal notification 到达所有客户端；各客户端按 Thread 单调消费，浏览器重连或 Gateway runtime generation 后重建 cursor | stale SDK notification 或 Web notification 覆盖较新的 Plan/continuation/Goal state | covered for settings/Goal, Web reconnect rebuild, and `gateway/runtime/restarted` generation recovery |
 | Concurrent Thread attach | SessionManager serializes client creation and rechecks the canonical/live binding inside one critical section; fork also binds its child while holding the same lock | two concurrent attach/start calls create two clients or claim one Session twice; attach observes an incompletely bound fork | covered by `test_concurrent_thread_attach_creates_one_client` and `test_fork_and_concurrent_attach_share_the_forked_binding` |
 | Session fork retry and conflict | SessionStore persists fork policy/result metadata; App Server preflights the durable child before Core preparation; SDK and Gateway preserve the conflict code/data | retry calls Core or the model twice; a child ID silently changes policy; action metadata disappears from the conflict | covered by `json_rpc::tests::session_fork_retry_reuses_persisted_result_before_core_preparation`, Capabilities fork tests, Gateway structured-409 test, and protocol compatibility fixture |
+| Plan Mode mutation admission | ApplyPatch returns `Deferred`, Shell mutation returns `ApprovalRequired`, and MCP call admission returns `Deferred`; read-only Shell and bounded reads remain available | a Plan Mode mutation reaches the side effect without typed admission, or an absent `SpawnAgent` surface is treated as covered | covered by Capabilities Plan Mode admission tests; no `SpawnAgent` public path exists in the current catalog |
+| WebFetch resolver boundary | a controlled address fixture accepts public-to-public and explicit loopback targets | public DNS resolves to loopback/private/metadata, or a redirect changes host/class | covered by Capabilities resolver and redirect fixtures plus the real loopback HTTP fixture; hostile DNS remains a fixture limitation |
+| Compaction byte ceiling | UTF-8-safe compaction prompt and retained context fit user/context byte limits | stable prompt, prefix, or multi-byte truncation causes an oversized provider request | covered by Core UTF-8 and compaction tests; provider quality and pathological single-step behavior remain separate |
 
 可复现命令和逐项测试名见
 [`2026-09-07-control-plane-boundary-evidence.md`](../.agents/notes/implemented/testing/2026-09-07-control-plane-boundary-evidence.md)。
@@ -64,6 +67,24 @@ line gate 的后续计划要求 Permission、Sandbox、Recovery、Audit 不能�
 与 Gateway 场景证据。Docker 不可用时按既有契约显式跳过；本次 Windows
 运行实际通过了挂载和容器临时目录断言。未覆盖恶意内核、跨平台隔离、崩溃后的审计
 完整性和真实 Provider 质量。
+
+## Batch 11 bounded scenario/eval evidence
+
+本批没有建立新的 benchmark framework，也没有调用付费 provider；复用现有 CLI 和
+App Server 公共路径，把安全 admission、工具结果和 hard-limit 观察接入现有
+evidence matrix：
+
+| 场景 | 公共路径 | 可观察结果 |
+| :--- | :--- | :--- |
+| CLI typed file admission and mutation gate | `cargo test -p mini-agent-cli --test interactive run_keeps_high_risk_patch_gated_on_public_path -- --exact` | 两次 `read_file` 先完成读取，`apply_patch` 仍需显式 approval；拒绝后两个文件保持原值 |
+| CLI shell fail-closed approval | `cargo test -p mini-agent-cli --test interactive run_without_auto_approval_denies_shell_when_stdin_is_not_a_tty -- --exact` | 非交互 Shell 不执行副作用，诊断和退出状态保持机器可读 |
+| App Server MCP timeout projection | `cargo test -p mini-agent-app-server --lib tests::projects_mcp_timeout_through_public_app_server` | MCP timeout 经过 App Server event、checkpoint 和下一轮模型输入，未被 Gateway/Web 自行分类 |
+| Core compaction hard limit | `cargo test -p mini-agent-core --lib harness::tests::bounded_compaction_prompt_respects_small_utf8_limits` | 0、1、4、17 和 351 字节配置均产生 UTF-8 安全且不超限的 compaction prompt |
+
+这些场景证明的是本地 mock/fixture 下的 harness 控制流和字节边界，不是 DNS、
+真实 provider、跨平台 sandbox 或模型质量证明。`SpawnAgent` 不在当前公共工具面，
+因此没有伪造对应 scenario；未来新增该能力时必须先补 child-session 与权限 owner
+契约。
 
 ## Scenario report template
 

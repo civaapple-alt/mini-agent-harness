@@ -1,7 +1,8 @@
 use super::*;
 use crate::test_support::{approval_controller, python_command, remove_test_root, test_root};
 use mini_agent_protocol::{
-    ApprovalOutcome, ApprovalPolicy, ToolApprovalResolution, ToolExecutionStatus,
+    ApprovalOutcome, ApprovalPolicy, ToolAdmission, ToolApprovalResolution, ToolExecutionRequest,
+    ToolExecutionStatus,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -166,6 +167,38 @@ fn approval_denial_prevents_server_start_and_data_creation() {
     );
     assert!(!plugin_data.exists());
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn plan_mode_defers_mcp_tool_admission_before_remote_call() {
+    let root = test_root();
+    let plan = root.join("plan.md");
+    fs::write(&plan, "# Plan\n").unwrap();
+    let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
+    approval.set_living_plan(Some(plan));
+    let (commands, _receiver) = tokio_mpsc::unbounded_channel();
+    let tool = McpTool {
+        spec: ToolSpec {
+            name: "mcp__fixture__echo".to_string(),
+            description: "fixture".to_string(),
+            parameters: json!({"type": "object"}),
+        },
+        remote_name: "echo".to_string(),
+        server_label: "fixture".to_string(),
+        commands,
+        approval,
+    };
+    let request = ToolExecutionRequest::new(
+        "plan-mcp",
+        "mcp__fixture__echo",
+        json!({"text": "must not call"}),
+    );
+
+    assert!(matches!(
+        tool.admission(&request),
+        Ok(ToolAdmission::Deferred { reason }) if reason.contains("Plan Mode")
+    ));
+    remove_test_root(&root);
 }
 
 fn serve_http_mcp(listener: TcpListener) -> bool {

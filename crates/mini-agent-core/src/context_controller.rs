@@ -10,6 +10,10 @@ pub(super) const COMPACTION_PREFIX: &str = "[Compacted conversation context]";
 pub(super) fn compaction_prompt() -> &'static str {
     include_str!("../builtin/prompts/system/compaction.md").trim_end()
 }
+
+pub(super) fn bounded_compaction_prompt(max_user_input_bytes: usize) -> String {
+    truncate_utf8(compaction_prompt().to_string(), max_user_input_bytes)
+}
 pub(super) const COMPACT_TAIL_GROUPS: usize = 2;
 pub(super) const COMPACT_TAIL_MAX_BYTES: usize = 128 * 1024;
 

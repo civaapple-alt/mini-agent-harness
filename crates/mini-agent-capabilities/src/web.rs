@@ -789,6 +789,7 @@ mod tests {
         let public = SocketAddr::from(([93, 184, 216, 34], 443));
         let private = SocketAddr::from(([192, 168, 1, 5], 443));
         let loopback = SocketAddr::from(([127, 0, 0, 1], 3000));
+        let metadata = SocketAddr::from(([169, 254, 169, 254], 80));
 
         assert_eq!(
             validate_resolved_addresses("example.com", TargetClass::Public, &[public]).unwrap(),
@@ -797,6 +798,12 @@ mod tests {
         assert!(
             validate_resolved_addresses("example.com", TargetClass::Public, &[private, public])
                 .is_err()
+        );
+        assert!(
+            validate_resolved_addresses("example.com", TargetClass::Public, &[loopback]).is_err()
+        );
+        assert!(
+            validate_resolved_addresses("example.com", TargetClass::Public, &[metadata]).is_err()
         );
         assert!(
             validate_resolved_addresses("app.example.com", TargetClass::Loopback, &[loopback])

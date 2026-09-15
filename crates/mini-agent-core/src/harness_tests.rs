@@ -1,6 +1,7 @@
 use super::*;
 use crate::context_controller::COMPACTION_PREFIX;
 use crate::context_controller::assemble_compacted;
+use crate::context_controller::bounded_compaction_prompt;
 use crate::context_controller::compaction_prompt;
 use crate::context_controller::split_prefix_tail;
 use crate::context_controller::trim_prefix_to_fit;
@@ -1204,6 +1205,19 @@ fn truncates_utf8_within_hard_byte_limit() {
     assert!(output.is_char_boundary(output.len()));
     assert!(output.starts_with('一'));
     assert!(output.ends_with('十'));
+}
+
+#[test]
+fn bounded_compaction_prompt_respects_small_utf8_limits() {
+    for limit in [0, 1, 4, 17, 351] {
+        let prompt = bounded_compaction_prompt(limit);
+        assert!(
+            prompt.len() <= limit,
+            "limit={limit}, bytes={}",
+            prompt.len()
+        );
+        assert!(prompt.is_char_boundary(prompt.len()));
+    }
 }
 
 #[tokio::test]

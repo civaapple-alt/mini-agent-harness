@@ -13,7 +13,7 @@ use std::fmt;
 
 use crate::SessionState;
 use crate::context_controller::assemble_compacted;
-use crate::context_controller::compaction_prompt;
+use crate::context_controller::bounded_compaction_prompt;
 use crate::context_controller::mechanical_compact;
 use crate::context_controller::split_compaction_parts;
 use crate::context_controller::trim_prefix_to_fit;
@@ -642,10 +642,11 @@ impl<M: Model> Harness<M> {
         if prefix.is_empty() {
             return Ok(ForkCompactionMethod::Exact);
         }
+        let compaction_prompt = bounded_compaction_prompt(self.config.max_user_input_bytes);
         observer.observe(&Event::ContextCompactionStarted { before_bytes });
         trim_prefix_to_fit(
             &mut prefix,
-            compaction_prompt(),
+            &compaction_prompt,
             &self.config.system_prompt,
             &[],
             self.config.max_context_bytes,
@@ -658,7 +659,7 @@ impl<M: Model> Harness<M> {
         }
         let mut compaction_messages = prefix.clone();
         compaction_messages.push(Message::User {
-            text: compaction_prompt().to_string(),
+            text: compaction_prompt,
         });
         let response = match self
             .model

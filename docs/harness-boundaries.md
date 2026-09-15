@@ -118,6 +118,24 @@ runtime 共同写一个项目级文件。原始 prompt、完整 tool 参数、�
 后续 scenario 记录 70% 预警、最近轮次保留和压缩前后预算；只有证据证明 50%
 不合适时才改阈值。
 
+Compaction 的辅助 user prompt 也受 `max_user_input_bytes` 限制，并使用 UTF-8
+安全截断；prefix、摘要、最近 tail 和 system/tool 请求最终都必须通过同一个
+`context_bytes_for` 字节上限。小配置值不能因为稳定的 compaction prompt 或多字节
+字符而绕过 user/context limit。
+
+### Plan Mode 与外部网络
+
+Plan Mode 的 mutation admission 保持按工具分层：ApplyPatch 返回 `Deferred`，Shell
+对变更命令返回 `ApprovalRequired`，MCP tool call 返回 `Deferred`；只读 Shell、
+工作区/extension-root 读取和显式允许的 loopback `web_fetch` 仍可执行。当前工具
+目录没有 `SpawnAgent` 公共路径，因此不以不存在的能力声称覆盖；若未来加入，必须
+先定义其 child-session、路径和审批 owner，再补同一组边界证据。
+
+`web_fetch` 在 DNS 解析后固定 origin endpoint，并要求所有解析地址与已准入的
+public/loopback class 一致；redirect 只能留在同一 host 和同一 class。公共 URL
+进入 Host approval，loopback 是显式本地允许目标；resolver 不能把公共域名转成
+loopback、私网或 cloud metadata 地址。
+
 ### Docker
 
 当前 Docker evidence 只证明 daemon 可达、workspace mount 和容器临时文件探针，
