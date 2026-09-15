@@ -97,6 +97,7 @@ graph LR
 
 ### Implemented
 
+- [Legacy 工具结构化迁移](implemented/architecture/2026-09-15-legacy-tool-typed-migration.zh.md)
 - [Stopping、EOF 与跨仓恢复契约](implemented/architecture/2026-09-15-stopping-eof-recovery.zh.md)
 - [Tool outcome 公共投影与 Web 消费边界](implemented/architecture/2026-09-15-tool-outcome-public-projection.zh.md)
 - [Web Studio Tool Outcome 消费](implemented/architecture/2026-09-15-web-studio-tool-outcome-consumption.zh.md)

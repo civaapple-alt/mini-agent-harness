@@ -2,11 +2,10 @@ use crate::result_store::ResultStore;
 use crate::workspace::string_arg;
 use futures_util::StreamExt;
 use htmd::HtmlToMarkdown;
-use mini_agent_protocol::Tool;
-use mini_agent_protocol::ToolError;
-use mini_agent_protocol::ToolHandler;
-use mini_agent_protocol::ToolRuntime;
-use mini_agent_protocol::ToolSpec;
+use mini_agent_protocol::{
+    Tool, ToolAdmission, ToolError, ToolExecutionOutcome, ToolExecutionRequest, ToolHandler,
+    ToolRuntime, ToolSpec,
+};
 use reqwest::Url;
 use serde_json::Value;
 use serde_json::json;
@@ -24,12 +23,46 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_EXTRACT_CHARS: usize = MAX_FETCH_SOURCE_BYTES;
 const INLINE_FETCH_OUTPUT_BYTES: usize = 16 * 1024;
 
-type HttpGet = fn(&str) -> Result<FetchedPage, ToolError>;
+type HttpGet = fn(&str) -> Result<FetchedPage, FetchError>;
 struct FetchedPage {
     final_url: String,
     status: u16,
     content_type: String,
     body: String,
+}
+
+#[derive(Debug)]
+enum FetchError {
+    Failed(String),
+    Retryable(String),
+}
+
+impl FetchError {
+    fn failed(error: impl Into<String>) -> Self {
+        Self::Failed(error.into())
+    }
+
+    fn retryable(error: impl Into<String>) -> Self {
+        Self::Retryable(error.into())
+    }
+
+    fn into_tool_error(self) -> ToolError {
+        ToolError(self.to_string())
+    }
+}
+
+impl From<ToolError> for FetchError {
+    fn from(error: ToolError) -> Self {
+        Self::Failed(error.to_string())
+    }
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Failed(error) | Self::Retryable(error) => formatter.write_str(error),
+        }
+    }
 }
 
 struct WebFetch {
@@ -57,17 +90,46 @@ impl ToolHandler for WebFetch {
             }),
         }
     }
+
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        let raw_url = string_arg(&request.arguments, "url")?;
+        let (url, class) = classify_url(raw_url)?;
+        if class == TargetClass::Loopback {
+            return Ok(ToolAdmission::Allowed);
+        }
+        Ok(ToolAdmission::ApprovalRequired {
+            action: format!("fetch URL {url}"),
+            target_paths: Vec::new(),
+        })
+    }
 }
 
 impl ToolRuntime for WebFetch {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let url = string_arg(arguments, "url")?;
+        self.fetch(arguments).map_err(FetchError::into_tool_error)
+    }
+
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        match self.fetch(&request.arguments) {
+            Ok(content) => ToolExecutionOutcome::completed(content),
+            Err(FetchError::Retryable(error)) => ToolExecutionOutcome::retryable(error),
+            Err(FetchError::Failed(error)) => ToolExecutionOutcome::failed(error),
+        }
+    }
+}
+
+impl WebFetch {
+    fn fetch(&self, arguments: &Value) -> Result<String, FetchError> {
+        let url = string_arg(arguments, "url").map_err(FetchError::from)?;
         let page = (self.get)(url)?;
         let rendered = render_page(&page);
         if rendered.len() <= INLINE_FETCH_OUTPUT_BYTES {
             return Ok(rendered);
         }
-        let stored = self.results.store(rendered, page.body.len(), false)?;
+        let stored = self
+            .results
+            .store(rendered, page.body.len(), false)
+            .map_err(FetchError::from)?;
         let continuation = if stored.source_truncated {
             "The fetched page exceeded the session cache limit and the retained artifact is truncated. The default builtin catalog does not expose result continuation."
         } else {
@@ -235,19 +297,20 @@ fn same_class_redirect(
     Ok(url)
 }
 
-fn http_get(url: &str) -> Result<FetchedPage, ToolError> {
-    let (admitted, class) = classify_url(url)?;
+fn http_get(url: &str) -> Result<FetchedPage, FetchError> {
+    let (admitted, class) = classify_url(url).map_err(FetchError::from)?;
     crate::blocking::run("mini-agent-web-fetch", "fetch", async move {
         fetch_admitted(admitted, class).await
     })
 }
 
-async fn fetch_admitted(url: Url, class: TargetClass) -> Result<FetchedPage, ToolError> {
+async fn fetch_admitted(url: Url, class: TargetClass) -> Result<FetchedPage, FetchError> {
     let origin_host = url
         .host_str()
         .ok_or_else(|| ToolError("url is missing a host".to_string()))?
         .to_string();
-    let endpoint = resolve_checked_endpoint(&origin_host, url.port_or_known_default(), class)?;
+    let endpoint = resolve_checked_endpoint(&origin_host, url.port_or_known_default(), class)
+        .map_err(FetchError::from)?;
     let client = reqwest::Client::builder()
         .resolve(&origin_host, endpoint)
         .redirect(reqwest::redirect::Policy::custom({
@@ -265,7 +328,7 @@ async fn fetch_admitted(url: Url, class: TargetClass) -> Result<FetchedPage, Too
         .timeout(FETCH_TIMEOUT)
         .user_agent("mini-agent/0.2 (web_fetch)")
         .build()
-        .map_err(|error| ToolError(format!("cannot build http client: {error}")))?;
+        .map_err(|error| FetchError::failed(format!("cannot build http client: {error}")))?;
     let response = client
         .get(url)
         .header(
@@ -274,7 +337,14 @@ async fn fetch_admitted(url: Url, class: TargetClass) -> Result<FetchedPage, Too
         )
         .send()
         .await
-        .map_err(|error| ToolError(format!("fetch failed: {error}")))?;
+        .map_err(|error| {
+            let message = format!("fetch failed: {error}");
+            if error.is_redirect() {
+                FetchError::failed(message)
+            } else {
+                FetchError::retryable(message)
+            }
+        })?;
     let status = response.status().as_u16();
     let final_url = response.url().clone();
     same_class_redirect(class, &origin_host, final_url.as_str())?;
@@ -287,23 +357,24 @@ async fn fetch_admitted(url: Url, class: TargetClass) -> Result<FetchedPage, Too
     if let Some(length) = response.content_length()
         && length > MAX_FETCH_SOURCE_BYTES as u64
     {
-        return Err(ToolError(format!(
+        return Err(FetchError::failed(format!(
             "response exceeds {MAX_FETCH_SOURCE_BYTES} byte fetch limit"
         )));
     }
     let mut collected = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| ToolError(format!("fetch failed: {error}")))?;
+        let chunk =
+            chunk.map_err(|error| FetchError::retryable(format!("fetch failed: {error}")))?;
         if collected.len().saturating_add(chunk.len()) > MAX_FETCH_SOURCE_BYTES {
-            return Err(ToolError(format!(
+            return Err(FetchError::failed(format!(
                 "response exceeds {MAX_FETCH_SOURCE_BYTES} byte fetch limit"
             )));
         }
         collected.extend_from_slice(&chunk);
     }
     let body = String::from_utf8(collected)
-        .map_err(|_| ToolError("response is not UTF-8 text".to_string()))?;
+        .map_err(|_| FetchError::failed("response is not UTF-8 text"))?;
     Ok(FetchedPage {
         final_url: final_url.to_string(),
         status,
@@ -570,7 +641,7 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 mod tests {
     use super::*;
 
-    fn stub_ok(_url: &str) -> Result<FetchedPage, ToolError> {
+    fn stub_ok(_url: &str) -> Result<FetchedPage, FetchError> {
         Ok(FetchedPage {
             final_url: "https://example.com/".to_string(),
             status: 200,
@@ -579,7 +650,7 @@ mod tests {
         })
     }
 
-    fn stub_shell(_url: &str) -> Result<FetchedPage, ToolError> {
+    fn stub_shell(_url: &str) -> Result<FetchedPage, FetchError> {
         Ok(FetchedPage {
             final_url: "https://example.com/app".to_string(),
             status: 200,
@@ -589,7 +660,7 @@ mod tests {
         })
     }
 
-    fn stub_long(_url: &str) -> Result<FetchedPage, ToolError> {
+    fn stub_long(_url: &str) -> Result<FetchedPage, FetchError> {
         Ok(FetchedPage {
             final_url: "https://example.com/long".to_string(),
             status: 200,
@@ -602,6 +673,10 @@ mod tests {
         })
     }
 
+    fn stub_retryable(_url: &str) -> Result<FetchedPage, FetchError> {
+        Err(FetchError::retryable("fetch failed: connection reset"))
+    }
+
     fn fetch(get: HttpGet, url: &str) -> String {
         WebFetch {
             get,
@@ -609,6 +684,46 @@ mod tests {
         }
         .execute(&json!({"url": url}))
         .unwrap()
+    }
+
+    #[test]
+    fn web_fetch_public_urls_use_host_approval_and_loopback_is_allowed() {
+        let tool = WebFetch {
+            get: stub_ok,
+            results: ResultStore::default(),
+        };
+        let public = ToolExecutionRequest::new(
+            "fetch-public",
+            "web_fetch",
+            json!({"url": "https://example.com/docs"}),
+        );
+        assert_eq!(
+            tool.admission(&public).unwrap(),
+            ToolAdmission::ApprovalRequired {
+                action: "fetch URL https://example.com/docs".to_string(),
+                target_paths: Vec::new(),
+            }
+        );
+
+        let loopback = ToolExecutionRequest::new(
+            "fetch-loopback",
+            "web_fetch",
+            json!({"url": "http://localhost:3000/"}),
+        );
+        assert_eq!(tool.admission(&loopback).unwrap(), ToolAdmission::Allowed);
+        assert_eq!(
+            tool.execute_after_admission(&loopback).status,
+            mini_agent_protocol::ToolExecutionStatus::Completed
+        );
+
+        let transient = WebFetch {
+            get: stub_retryable,
+            results: ResultStore::default(),
+        };
+        assert_eq!(
+            transient.execute_after_admission(&loopback).status,
+            mini_agent_protocol::ToolExecutionStatus::Retryable
+        );
     }
 
     #[test]

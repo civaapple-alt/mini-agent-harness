@@ -49,6 +49,14 @@ fn reads_and_patches_inside_workspace() {
     let read = ReadFile(Arc::clone(&workspace));
     let patch = ApplyPatch(workspace);
 
+    let request =
+        ToolExecutionRequest::new("read-inside", "read_file", json!({"path": "note.txt"}));
+    assert_eq!(read.admission(&request).unwrap(), ToolAdmission::Allowed);
+    assert_eq!(
+        read.execute_after_admission(&request).status,
+        ToolExecutionStatus::Completed
+    );
+
     let first = read.execute(&json!({"path": "note.txt"})).unwrap();
     assert!(first.contains("total_lines=1 | offset=0 | limit=200"));
     assert!(first.contains("1: hello world"));
@@ -310,6 +318,15 @@ fn read_image_accepts_absolute_path_outside_workspace_after_approval() {
         workspace: Arc::clone(&workspace),
         store: crate::image::ImageStore::with_uploader(Arc::new(StubFiles("file-api-outside"))),
     };
+    let request = ToolExecutionRequest::new(
+        "read-image-outside",
+        "read_image",
+        json!({"path": abs.to_string_lossy().to_string()}),
+    );
+    assert!(matches!(
+        tool.admission(&request).unwrap(),
+        ToolAdmission::ApprovalRequired { .. }
+    ));
     let out = tool
         .execute(&json!({"path": abs.to_string_lossy().to_string()}))
         .unwrap();
@@ -345,6 +362,32 @@ fn read_image_outside_workspace_can_be_denied() {
     assert!(error.0.contains("denied"), "{error:?}");
     remove_test_root(&root);
     remove_test_root(&pictures);
+}
+
+#[test]
+fn read_file_outside_workspace_requires_typed_admission() {
+    let root = test_root();
+    let other = test_root();
+    fs::write(other.join("secret.txt"), "secret").unwrap();
+    let workspace = automatic_workspace(root.clone());
+    let read = ReadFile(workspace);
+    let request = ToolExecutionRequest::new(
+        "read-outside",
+        "read_file",
+        json!({"path": other.join("secret.txt").to_string_lossy().to_string()}),
+    );
+
+    assert!(matches!(
+        read.admission(&request).unwrap(),
+        ToolAdmission::ApprovalRequired { .. }
+    ));
+    assert_eq!(
+        read.execute_after_admission(&request).status,
+        ToolExecutionStatus::Completed
+    );
+
+    remove_test_root(&other);
+    remove_test_root(&root);
 }
 
 #[test]

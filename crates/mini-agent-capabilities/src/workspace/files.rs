@@ -72,7 +72,7 @@ impl ToolHandler for ReadImage {
             .workspace
             .local_file_path_with_admission(&request.arguments)?;
         if !requires_approval {
-            return Ok(ToolAdmission::Legacy);
+            return Ok(ToolAdmission::Allowed);
         }
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("read_image {}", path.display()),
@@ -117,11 +117,36 @@ impl ToolHandler for ReadFile {
             }),
         }
     }
+
+    fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
+        let (path, requires_approval) =
+            self.0.local_file_path_with_admission(&request.arguments)?;
+        if !requires_approval {
+            return Ok(ToolAdmission::Allowed);
+        }
+        Ok(ToolAdmission::ApprovalRequired {
+            action: format!("read_file {}", path.display()),
+            target_paths: vec![path.display().to_string()],
+        })
+    }
 }
 
 impl ToolRuntime for ReadFile {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let path = self.0.read_path(arguments)?;
+        self.read_page(path, arguments)
+    }
+
+    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        match self.0.local_file_path_with_admission(&request.arguments) {
+            Ok((path, _)) => crate::into_tool_outcome(self.read_page(path, &request.arguments)),
+            Err(error) => crate::into_tool_outcome(Err(error)),
+        }
+    }
+}
+
+impl ReadFile {
+    fn read_page(&self, path: PathBuf, arguments: &Value) -> Result<String, ToolError> {
         if !path.is_file() {
             return Err(ToolError(format!(
                 "cannot read {:?}: not a regular file",

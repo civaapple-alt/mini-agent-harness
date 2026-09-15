@@ -105,8 +105,13 @@ dev server, use `web_fetch` instead of `curl` or PowerShell download cmdlets. `w
 public `http`/`https` URLs and loopback (`localhost`, `127.0.0.1`, `[::1]`). It still rejects
 credentials, LAN/private IPs, cloud metadata (`169.254.169.254`), and `file:` paths, and it
 does not run JavaScript. A public page cannot redirect onto loopback. Client-only SPAs may
-come back as a thin shell with a warning; SSR HTML is returned as markdown. `read_file` returns
-bounded, line-numbered pages; pass its `next_offset` back as `offset` to continue. `apply_patch`
+come back as a thin shell with a warning; SSR HTML is returned as markdown. A public `web_fetch`
+request crosses the Host approval boundary in interactive/trusted policy; loopback is an explicit
+allowed target, and automatic policy can admit public reads without a round trip. Network
+timeouts and transient transport failures are reported as retryable tool outcomes. `read_file`
+returns bounded, line-numbered pages; workspace and configured extension-root paths are allowed,
+while an existing file outside those roots requires Host admission. Pass its `next_offset` back as
+`offset` to continue. `apply_patch`
 is the preferred multi-file mutation path and validates all affected files before writing. There is no screenshot, vision,
 or headless-browser tool.
 
