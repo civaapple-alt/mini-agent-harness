@@ -7,6 +7,25 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changed
 
+- **Session fork policy and idempotency:** make `exact` the default fork context
+  policy, persist context policy and compaction metadata, and return the same
+  durable child Session for an identical `parent/checkpoint/child/policy`
+  retry. Conflicting reuse of a child Thread now returns structured conflict
+  data.
+
+- **Typed tool execution outcomes:** carry typed admission and execution results
+  through Capabilities, Host, App Server, and ThreadItem projections. Known
+  outcomes are `completed`, `failed`, `needs_approval`, `deferred`, and
+  `retryable`; future outcome strings remain visible to clients. Public
+  `ThreadItem.status` remains lifecycle state and `outcome` remains tool result
+  state.
+
+- **Built-in tool admission:** migrate `ReadFile`, `ReadImage`, and `WebFetch`
+  to explicit typed admission and post-admission execution. Workspace reads are
+  allowed, outside file reads require Host approval, loopback fetches are
+  explicitly allowed, public fetches cross Host approval, and transient network
+  failures project as retryable results.
+
 - **Line-budget delta gate:** raise the Green/Amber single-PR allowance to
   `+200` Runtime lines and `+300` release-source lines; hard ceilings and Red-band
   positive-growth freeze remain unchanged.
@@ -96,6 +115,17 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   variant is introduced.
 
 ### Fixed
+
+- **Stopping and fork lifecycle:** keep runtime status at `Stopping` until the
+  authoritative `turn_finished` event, reject mutations and new fork/follow-up
+  work during that interval, and reject forks from an active Turn.
+
+- **Plan Mode and hard-limit boundaries:** defer ApplyPatch and MCP mutations in
+  Plan Mode while keeping bounded read-only inspection available. WebFetch
+  rejects public DNS results that resolve to loopback, private, or metadata
+  addresses and applies the same host/class rule to redirects. Compaction
+  prompt text is UTF-8 safely bounded by `max_user_input_bytes`, including tiny
+  configuration values.
 
 - **Realtime Compaction identity:** attach an independent item ID to the live
   Compaction lifecycle and reuse it across start/finish projections, while
