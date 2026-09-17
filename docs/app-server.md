@@ -278,6 +278,12 @@ uses `activation: "explicit"`. The event carries the same Thread/Turn
 identity, Core sequence, and bounded `itemId` as other `turn/event`
 notifications.
 
+启用 Skill 的根目录由 Host 作为受信任的只读根加入工具 Workspace。模型可以在
+需要时用现有 `read_file` 查看该 Skill 目录内的关联文档、脚本源码或其他文本
+资源；App Server 不递归预加载这些文件，也不把资源路径加入 capability manifest。
+当前 Turn 的 Skill 目录读取结果合计不超过 64 KiB。这个授权不改变写入、Shell
+执行或审批边界。
+
 The capability manifest returned by `initialize` contains
 `builtinSkillGroups` and `availableSkills`. Each available-skill entry contains
 only `name`, `qualifiedName`, compatibility `aliases`, `description`, `source`,

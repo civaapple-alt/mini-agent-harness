@@ -280,6 +280,19 @@ impl Discovery {
             .collect()
     }
 
+    /// Returns the canonical roots of enabled Skills for read-only tool
+    /// access. The paths stay inside Host/Capabilities and are never part of
+    /// the public catalog or event payloads.
+    pub fn skill_read_roots(&self) -> Vec<PathBuf> {
+        self.skills
+            .iter()
+            .filter(|skill| skill.enabled)
+            .filter_map(|skill| skill.path.parent().map(Path::to_path_buf))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     /// Returns the bounded declaration for a named Skill without enabling any
     /// tool provider or reading the Skill body.
     pub fn activate_skill(&self, name: &str) -> Result<SkillActivation, String> {

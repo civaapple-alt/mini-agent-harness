@@ -291,6 +291,24 @@ fn catalogs_and_loads_selected_skills_with_bounded_activation() {
 }
 
 #[test]
+fn skill_read_roots_include_only_enabled_discovered_skills() {
+    let root = test_root();
+    let enabled = root.join(".agents/skills/enabled");
+    let disabled = root.join(".agents/skills/disabled");
+    write_skill(&enabled, "enabled", "Enabled Skill.", "ENABLED BODY");
+    write_skill(&disabled, "disabled", "Disabled Skill.", "DISABLED BODY");
+
+    let mut discovery = discover_with_builtin_groups(&root, &[]);
+    discovery.retain_selected(&["enabled".to_string()]);
+
+    assert_eq!(
+        discovery.skill_read_roots(),
+        vec![enabled.canonicalize().unwrap()]
+    );
+    remove_test_root(&root);
+}
+
+#[test]
 fn canonicalizes_skill_root_boundaries_before_containment_checks() {
     let root = test_root();
     let boundary = root.join("builtin");

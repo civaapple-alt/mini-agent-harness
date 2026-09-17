@@ -104,7 +104,7 @@ impl ToolHandler for ReadFile {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "read_file".to_string(),
-            description: "Read a bounded page from a UTF-8 workspace or configured extension-root file. offset is a zero-based line offset and limit is the maximum number of lines; use the returned next_offset to continue through long files. Output includes stable 1-based line numbers and never relies on shell output truncation.".to_string(),
+            description: "Read a bounded page from a UTF-8 workspace, configured extension-root, or enabled Skill-root file. offset is a zero-based line offset and limit is the maximum number of lines; use the returned next_offset to continue through long files. Output includes stable 1-based line numbers and never relies on shell output truncation.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -134,19 +134,33 @@ impl ToolHandler for ReadFile {
 impl ToolRuntime for ReadFile {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
         let path = self.0.read_path(arguments)?;
-        self.read_page(path, arguments)
+        self.read_page(path, arguments, None)
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
         match self.0.local_file_path_with_admission(&request.arguments) {
-            Ok((path, _)) => crate::into_tool_outcome(self.read_page(path, &request.arguments)),
+            Ok((path, _)) => crate::into_tool_outcome(
+                self.read_page(
+                    path,
+                    &request.arguments,
+                    request
+                        .context
+                        .as_ref()
+                        .map(|context| context.turn_id.as_str()),
+                ),
+            ),
             Err(error) => crate::into_tool_outcome(Err(error)),
         }
     }
 }
 
 impl ReadFile {
-    fn read_page(&self, path: PathBuf, arguments: &Value) -> Result<String, ToolError> {
+    fn read_page(
+        &self,
+        path: PathBuf,
+        arguments: &Value,
+        turn_id: Option<&str>,
+    ) -> Result<String, ToolError> {
         if !path.is_file() {
             return Err(ToolError(format!(
                 "cannot read {:?}: not a regular file",
@@ -173,7 +187,9 @@ impl ReadFile {
             .map_err(|_| ToolError("file is not UTF-8 text".to_string()))?;
         let offset = bounded_usize(arguments, "offset", 0, usize::MAX)?;
         let limit = bounded_usize(arguments, "limit", DEFAULT_READ_LINES, MAX_READ_LINES)?;
-        Ok(format_read_page(&path, &text, offset, limit))
+        let output = format_read_page(&path, &text, offset, limit);
+        self.0.record_skill_read(&path, turn_id, output.len())?;
+        Ok(output)
     }
 }
 

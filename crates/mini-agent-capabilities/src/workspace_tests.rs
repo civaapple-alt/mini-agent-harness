@@ -1,6 +1,8 @@
 use super::*;
 use crate::test_support::{approval_controller, remove_test_root, test_root};
-use mini_agent_protocol::{ApprovalOutcome, ApprovalPolicy, ToolExecutionStatus};
+use mini_agent_protocol::{
+    ApprovalOutcome, ApprovalPolicy, ThreadId, ToolExecutionContext, ToolExecutionStatus, TurnId,
+};
 
 struct StubFiles(&'static str);
 
@@ -17,7 +19,15 @@ fn workspace(
     sandbox: SandboxKind,
 ) -> Arc<Workspace> {
     Arc::new(
-        Workspace::with_read_roots(root, approval, extra_read_roots, Vec::new(), sandbox).unwrap(),
+        Workspace::with_read_roots_and_skill_roots(
+            root,
+            approval,
+            extra_read_roots,
+            Vec::new(),
+            Vec::new(),
+            sandbox,
+        )
+        .unwrap(),
     )
 }
 
@@ -28,6 +38,31 @@ fn automatic_workspace(root: PathBuf) -> Arc<Workspace> {
         Vec::new(),
         SandboxKind::Native,
     )
+}
+
+fn skill_workspace(root: PathBuf, skill_root: PathBuf) -> Arc<Workspace> {
+    Arc::new(
+        Workspace::with_read_roots_and_skill_roots(
+            root,
+            approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Denied),
+            Vec::new(),
+            vec![skill_root],
+            Vec::new(),
+            SandboxKind::Native,
+        )
+        .unwrap(),
+    )
+}
+
+fn turn_context(turn_id: &str) -> ToolExecutionContext {
+    ToolExecutionContext {
+        thread_id: ThreadId::new("skill-resource-thread"),
+        turn_id: TurnId::new(turn_id),
+        project_id: None,
+        workspace_id: None,
+        workspace_revision: None,
+        session_id: None,
+    }
 }
 
 #[test]
@@ -475,6 +510,112 @@ fn read_file_accepts_configured_extension_roots() {
     );
 
     remove_test_root(&extra);
+    remove_test_root(&root);
+}
+
+#[test]
+fn enabled_skill_roots_are_readable_without_approval_but_not_writable() {
+    let root = test_root();
+    let skill_root = test_root();
+    fs::create_dir_all(skill_root.join("references")).unwrap();
+    fs::create_dir_all(skill_root.join("scripts")).unwrap();
+    fs::write(
+        skill_root.join("references/patterns.md"),
+        "reference pattern\n",
+    )
+    .unwrap();
+    fs::write(skill_root.join("scripts/check.py"), "print('check')\n").unwrap();
+    let workspace = skill_workspace(root.clone(), skill_root.clone());
+    let read = ReadFile(Arc::clone(&workspace));
+    let path = skill_root.join("references/patterns.md");
+    let request = ToolExecutionRequest::new(
+        "skill-reference",
+        "read_file",
+        json!({"path": path.to_string_lossy().to_string()}),
+    )
+    .with_context(turn_context("turn-read"));
+
+    assert_eq!(read.admission(&request).unwrap(), ToolAdmission::Allowed);
+    assert!(
+        read.execute_after_admission(&request)
+            .content
+            .contains("1: reference pattern")
+    );
+    let script_request = ToolExecutionRequest::new(
+        "skill-script",
+        "read_file",
+        json!({"path": skill_root.join("scripts/check.py").to_string_lossy().to_string()}),
+    )
+    .with_context(turn_context("turn-read"));
+    assert_eq!(
+        read.admission(&script_request).unwrap(),
+        ToolAdmission::Allowed
+    );
+    assert!(
+        read.execute_after_admission(&script_request)
+            .content
+            .contains("1: print('check')")
+    );
+
+    let patch = ApplyPatch(Arc::clone(&workspace));
+    let write = patch.execute(&json!({
+        "patch": format!(
+            "*** Begin Patch\n*** Update File: {}\n@@\n-reference pattern\n+changed\n*** End Patch",
+            path.display()
+        )
+    }));
+    assert!(write.is_err());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "reference pattern\n");
+
+    remove_test_root(&skill_root);
+    remove_test_root(&root);
+}
+
+#[test]
+fn skill_read_budget_is_scoped_to_a_turn() {
+    let root = test_root();
+    let skill_root = test_root();
+    let content = (0..2_000)
+        .map(|index| format!("reference-line-{index:04}-{}", "x".repeat(32)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let path = skill_root.join("references.md");
+    fs::write(&path, content).unwrap();
+    let workspace = skill_workspace(root.clone(), skill_root.clone());
+    let read = ReadFile(Arc::clone(&workspace));
+
+    let mut failed = false;
+    for index in 0..8 {
+        let request = ToolExecutionRequest::new(
+            format!("skill-budget-{index}"),
+            "read_file",
+            json!({"path": path.to_string_lossy().to_string()}),
+        )
+        .with_context(turn_context("turn-budget"));
+        let outcome = read.execute_after_admission(&request);
+        if outcome.status == ToolExecutionStatus::Failed {
+            assert!(outcome.content.contains("skill file reads exceed"));
+            failed = true;
+            break;
+        }
+    }
+    assert!(
+        failed,
+        "the skill read budget should eventually reject a page"
+    );
+
+    let next_turn = ToolExecutionRequest::new(
+        "skill-budget-next-turn",
+        "read_file",
+        json!({"path": path.to_string_lossy().to_string()}),
+    )
+    .with_context(turn_context("turn-next"));
+    assert_eq!(
+        read.execute_after_admission(&next_turn).status,
+        ToolExecutionStatus::Completed
+    );
+
+    remove_test_root(&skill_root);
     remove_test_root(&root);
 }
 

@@ -35,6 +35,7 @@ const MAX_READ_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
 const DEFAULT_READ_LINES: usize = 200;
 const MAX_READ_LINES: usize = 2_000;
 const MAX_READ_PAGE_BYTES: usize = 15 * 1024;
+pub const MAX_SKILL_READ_BYTES: usize = 64 * 1024;
 const MAX_WRITE_BYTES: usize = 1024 * 1024;
 const MAX_COMMAND_BYTES: usize = 16 * 1024;
 const MAX_COMMAND_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
@@ -50,12 +51,41 @@ pub fn workspace_tools_with_read_roots_and_results(
     images: crate::image::ImageStore,
     results: ResultStore,
 ) -> Result<Vec<Box<dyn Tool>>, ToolError> {
-    let workspace = Arc::new(Workspace::with_read_roots(
-        root,
-        approval,
-        extra_read_roots,
-        extra_write_roots,
-        sandbox,
+    workspace_tools_with_config(
+        WorkspaceToolConfig {
+            root,
+            approval,
+            extra_read_roots,
+            skill_read_roots: Vec::new(),
+            extra_write_roots,
+            sandbox,
+        },
+        images,
+        results,
+    )
+}
+
+pub(crate) struct WorkspaceToolConfig {
+    pub(crate) root: PathBuf,
+    pub(crate) approval: ApprovalController,
+    pub(crate) extra_read_roots: Vec<PathBuf>,
+    pub(crate) skill_read_roots: Vec<PathBuf>,
+    pub(crate) extra_write_roots: Vec<PathBuf>,
+    pub(crate) sandbox: SandboxKind,
+}
+
+pub(crate) fn workspace_tools_with_config(
+    config: WorkspaceToolConfig,
+    images: crate::image::ImageStore,
+    results: ResultStore,
+) -> Result<Vec<Box<dyn Tool>>, ToolError> {
+    let workspace = Arc::new(Workspace::with_read_roots_and_skill_roots(
+        config.root,
+        config.approval,
+        config.extra_read_roots,
+        config.skill_read_roots,
+        config.extra_write_roots,
+        config.sandbox,
     )?);
     let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(files::ReadFile(Arc::clone(&workspace))),
@@ -73,16 +103,19 @@ pub fn workspace_tools_with_read_roots_and_results(
 struct Workspace {
     root: PathBuf,
     extra_read_roots: Vec<PathBuf>,
+    skill_read_roots: Vec<PathBuf>,
     extra_write_roots: Vec<PathBuf>,
     approval: ApprovalController,
     sandbox: SandboxKind,
+    skill_read_budget: Mutex<SkillReadBudget>,
 }
 
 impl Workspace {
-    fn with_read_roots(
+    fn with_read_roots_and_skill_roots(
         root: PathBuf,
         approval: ApprovalController,
         extra_read_roots: Vec<PathBuf>,
+        skill_read_roots: Vec<PathBuf>,
         extra_write_roots: Vec<PathBuf>,
         sandbox: SandboxKind,
     ) -> Result<Self, ToolError> {
@@ -94,6 +127,13 @@ impl Workspace {
             .filter_map(|path| path.canonicalize().ok())
             .filter(|path| path.is_dir() && !path.starts_with(&root))
             .collect();
+        let mut skill_read_roots = skill_read_roots
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok())
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        skill_read_roots.sort();
+        skill_read_roots.dedup();
         let extra_write_roots = extra_write_roots
             .into_iter()
             .filter_map(|path| path.canonicalize().ok())
@@ -102,9 +142,11 @@ impl Workspace {
         Ok(Self {
             root,
             extra_read_roots,
+            skill_read_roots,
             extra_write_roots,
             approval,
             sandbox,
+            skill_read_budget: Mutex::new(SkillReadBudget::default()),
         })
     }
 
@@ -410,6 +452,10 @@ impl Workspace {
             .extra_read_roots
             .iter()
             .any(|root| path.starts_with(root) && path != *root)
+            || self
+                .skill_read_roots
+                .iter()
+                .any(|root| path.starts_with(root) && path != *root)
         {
             Ok(path)
         } else {
@@ -417,8 +463,53 @@ impl Workspace {
         }
     }
 
+    fn record_skill_read(
+        &self,
+        path: &Path,
+        turn_id: Option<&str>,
+        bytes: usize,
+    ) -> Result<(), ToolError> {
+        if !self
+            .skill_read_roots
+            .iter()
+            .any(|root| path.starts_with(root))
+        {
+            return Ok(());
+        }
+        self.skill_read_budget
+            .lock()
+            .map_err(|_| ToolError("skill read budget is unavailable".to_string()))?
+            .record(turn_id, bytes)
+    }
+
     fn approve(&self, action: &str) -> Result<(), ToolError> {
         self.approval.approve(action)
+    }
+}
+
+#[derive(Default)]
+struct SkillReadBudget {
+    turn_id: Option<String>,
+    bytes: usize,
+}
+
+impl SkillReadBudget {
+    fn record(&mut self, turn_id: Option<&str>, bytes: usize) -> Result<(), ToolError> {
+        let Some(turn_id) = turn_id else {
+            return Ok(());
+        };
+        if self.turn_id.as_deref() != Some(turn_id) {
+            self.turn_id = Some(turn_id.to_string());
+            self.bytes = 0;
+        }
+        let total = self.bytes.saturating_add(bytes);
+        if total > MAX_SKILL_READ_BYTES {
+            return Err(ToolError(format!(
+                "skill file reads exceed {MAX_SKILL_READ_BYTES} bytes for this turn"
+            )));
+        }
+        self.bytes = total;
+        Ok(())
     }
 }
 

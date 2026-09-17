@@ -89,7 +89,6 @@ graph LR
 
 ### Proposed
 
-- [Skill 关联资源按需读取](proposed/architecture/2026-09-17-skill-associated-resources.zh.md)
 - [Result-Oriented Long-Term Bot Agents](proposed/architecture/2026-09-04-result-oriented-long-term-bot-agents.zh.md)
 - [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
 - [CLI Through App Server](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md)
@@ -98,6 +97,7 @@ graph LR
 
 ### Implemented
 
+- [Skill 启用目录只读放行](implemented/architecture/2026-09-17-skill-associated-resources.zh.md)
 - [pstack 插件级与命名空间 Skill 双入口](implemented/feature/2026-09-17-pstack-plugin-and-namespaced-skill.zh.md)
 - [Builtin Skill 组与 Turn 级显式激活](implemented/feature/2026-09-17-builtin-skill-groups-and-explicit-activation.zh.md)
 - [Web Cookbook 恢复与投影契约](implemented/architecture/2026-09-15-web-cookbook-recovery-and-projection.zh.md)

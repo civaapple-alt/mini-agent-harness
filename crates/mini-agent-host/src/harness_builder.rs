@@ -199,6 +199,9 @@ where
             workspace: workspace.clone(),
             approval: approval.clone(),
             extra_read_roots: runtime_config.extra_read_roots(),
+            skill_read_roots: skill_discovery
+                .as_ref()
+                .map_or_else(Vec::new, |discovery| discovery.skill_read_roots()),
             extra_write_roots: runtime_config.extra_write_roots(),
             sandbox: composition.sandbox,
             images: images.clone(),

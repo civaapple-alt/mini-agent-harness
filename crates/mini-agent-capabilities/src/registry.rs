@@ -42,6 +42,7 @@ pub struct ToolBuildRequest {
     pub workspace: PathBuf,
     pub approval: ApprovalController,
     pub extra_read_roots: Vec<PathBuf>,
+    pub skill_read_roots: Vec<PathBuf>,
     pub extra_write_roots: Vec<PathBuf>,
     pub sandbox: SandboxKind,
     pub images: ImageStore,
@@ -93,12 +94,15 @@ impl ToolProvider for BuiltinToolProvider {
     }
 
     fn build_tools(&self, request: ToolBuildRequest) -> Result<Vec<Box<dyn Tool>>, ToolError> {
-        crate::workspace::workspace_tools_with_read_roots_and_results(
-            request.workspace,
-            request.approval,
-            request.extra_read_roots,
-            request.extra_write_roots,
-            request.sandbox,
+        crate::workspace::workspace_tools_with_config(
+            crate::workspace::WorkspaceToolConfig {
+                root: request.workspace,
+                approval: request.approval,
+                extra_read_roots: request.extra_read_roots,
+                skill_read_roots: request.skill_read_roots,
+                extra_write_roots: request.extra_write_roots,
+                sandbox: request.sandbox,
+            },
             request.images,
             request.results,
         )

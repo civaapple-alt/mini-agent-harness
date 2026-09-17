@@ -83,6 +83,7 @@ pub use skills::discover;
 pub use skills::discover_with_builtin_groups;
 pub use workspace::ApprovalController;
 pub use workspace::ApprovalFailure;
+pub use workspace::MAX_SKILL_READ_BYTES;
 pub use workspace::workspace_tools_with_read_roots_and_results;
 
 /// Stable identifier for the built-in OpenAI-compatible model provider.
