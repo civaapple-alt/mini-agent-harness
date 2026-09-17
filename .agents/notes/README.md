@@ -89,6 +89,7 @@ graph LR
 
 ### Proposed
 
+- [Skill 关联资源按需读取](proposed/architecture/2026-09-17-skill-associated-resources.zh.md)
 - [Result-Oriented Long-Term Bot Agents](proposed/architecture/2026-09-04-result-oriented-long-term-bot-agents.zh.md)
 - [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
 - [CLI Through App Server](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md)
