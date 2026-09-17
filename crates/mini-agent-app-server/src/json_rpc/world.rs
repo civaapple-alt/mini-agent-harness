@@ -22,6 +22,8 @@ where
                 params.source_thread_id,
                 params.new_thread_id,
                 params.context_policy,
+                params.operation_id,
+                params.operation_attempt,
             ),
             Clone::clone,
         )

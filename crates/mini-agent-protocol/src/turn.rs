@@ -86,11 +86,21 @@ impl ThreadStart {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct TurnStart {
     pub input: TurnInput,
+    /// Optional Host-owned operation identity for a detached/background turn.
+    /// Core carries this boundary metadata but does not schedule or interpret it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_attempt: Option<u32>,
 }
 
 impl TurnStart {
     pub fn new(input: TurnInput) -> Self {
-        Self { input }
+        Self {
+            input,
+            operation_id: None,
+            operation_attempt: None,
+        }
     }
 }
 

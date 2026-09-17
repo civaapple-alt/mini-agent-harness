@@ -608,6 +608,10 @@ pub struct SessionForkParams {
     pub new_thread_id: ThreadId,
     #[serde(default)]
     pub context_policy: ForkContextPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_attempt: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -861,6 +865,10 @@ pub struct ThreadCloseParams {
 pub struct TurnStartParams {
     pub thread_id: ThreadId,
     pub input: TurnInput,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_attempt: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -1211,6 +1219,8 @@ mod tests {
             source_thread_id: ThreadId::new("source"),
             new_thread_id: ThreadId::new("child"),
             context_policy: ForkContextPolicy::Compact,
+            operation_id: None,
+            operation_attempt: None,
         })
         .unwrap();
         assert_eq!(params["sourceThreadId"], "source");

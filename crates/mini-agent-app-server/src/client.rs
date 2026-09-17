@@ -143,12 +143,32 @@ where
         new_thread_id: ThreadId,
         context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
     ) -> Result<SessionForkResult, JsonRpcError> {
+        self.fork_session_with_operation(
+            source_thread_id,
+            new_thread_id,
+            context_policy,
+            None,
+            None,
+        )
+        .await
+    }
+
+    pub async fn fork_session_with_operation(
+        &mut self,
+        source_thread_id: ThreadId,
+        new_thread_id: ThreadId,
+        context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+        operation_id: Option<String>,
+        operation_attempt: Option<u32>,
+    ) -> Result<SessionForkResult, JsonRpcError> {
         self.call(
             METHOD_SESSION_FORK,
             SessionForkParams {
                 source_thread_id,
                 new_thread_id,
                 context_policy,
+                operation_id,
+                operation_attempt,
             },
         )
         .await
@@ -174,8 +194,16 @@ where
         thread_id: ThreadId,
         input: mini_agent_protocol::TurnInput,
     ) -> Result<TurnSubmission, JsonRpcError> {
-        self.call(METHOD_TURN_START, TurnStartParams { thread_id, input })
-            .await
+        self.call(
+            METHOD_TURN_START,
+            TurnStartParams {
+                thread_id,
+                input,
+                operation_id: None,
+                operation_attempt: None,
+            },
+        )
+        .await
     }
 
     pub async fn steer(

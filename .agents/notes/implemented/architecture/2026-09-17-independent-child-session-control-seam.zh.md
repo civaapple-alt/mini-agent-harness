@@ -45,11 +45,12 @@ Capabilities 和 event replay。Web Gateway 只负责创建/绑定独立 client 
   `forked_from`，不依赖 Gateway metadata；
 - Gateway 与 frontend 相关测试通过。
 
-## 尚未实现
+## 本切片未覆盖的范围
 
-该接缝还不是完整的 `delegate_task` 产品能力。Notebook、可恢复的持久化
-operation register、断线后的 child task 控制、有限重试、父子取消级联和
-模型自主委派仍按提案批次推进；它们不能通过本切片的 Web endpoint 假设已经存在。
+这个初始控制切片本身没有包含 `delegate_task`、notebook、持久化 operation
+register、断线后的 child task 控制、有限重试、父子取消级联和模型自主委派。
+这些能力后来在独立的 operation/notebook 批次中实现，当前决策记录见
+[Child Session、operation 与 Session notebook](2026-09-17-time-extended-child-session-and-notebook.zh.md)。
 
 相关计划见
 [时间上延展、结构上并发：Agent Harness Charter](../../../../.agents/notes/proposed/architecture/2026-09-17-time-extended-structural-concurrency.zh.md)。

@@ -312,6 +312,22 @@ written to later turns or to the global system prompt. A turn-local
 `workflow: {kind: "skill_group", id: "pstack", mode: "auto"}` activates
 only group metadata; the model chooses and reads relevant bodies on demand.
 
+### Session-owned long-lived state
+
+Child execution and notebook state are persisted beside the normal Session
+history, but neither becomes mutable Core state. `session.jsonl` may contain
+bounded `operation` records with the lifecycle states `queued`, `running`,
+`awaiting_approval`, `completed`, `failed`, and `cancelled`. The latest record
+is the recoverable operation projection after a runtime restart. Child Sessions
+are exact-checkpoint branches with independent locks and runtimes; the current
+control seam allows depth one and at most two active children per parent.
+
+Each Session may also contain a bounded `notebook.json`. It is owned by the
+Session store, survives compaction and runtime restart, and is accessed through
+`notebook_read`/`notebook_write`. Resume injects only a bounded summary into the
+turn context. Notebook entries are not copied into child Sessions and do not
+grant any additional workspace, shell, approval, or write access.
+
 ### Plugins
 
 Put one installed plugin in `.agents/plugins/<plugin>`. Supported package

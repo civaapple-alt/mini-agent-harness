@@ -5,9 +5,11 @@
 //! runtime composition and orchestration.
 
 mod blocking;
+mod child_tasks;
 mod image;
 mod mcp;
 mod model;
+mod notebook;
 mod openai;
 mod path_policy;
 mod persona;
@@ -50,14 +52,17 @@ pub use session::SessionForkError;
 pub use session::SessionForkInfo;
 pub use session::SessionForkMetadata;
 pub use session::SessionItem;
+pub use session::SessionOperation;
 pub use session::SessionRequest;
 pub use session::SessionStore;
 pub use session::THREAD_SETTINGS_FILE_NAME;
 pub use session::TurnCommit;
 pub use session::TurnStatus;
+pub use session::resolve_session_file;
 
 // Host/App Server composition and embedding seams. These exports assemble
 // concrete providers without exposing their internal wire or process logic.
+pub use child_tasks::child_task_tools;
 pub use image::FileUploader;
 pub use image::ImageStore;
 pub use mcp::LoadResult as McpLoadResult;
@@ -65,6 +70,10 @@ pub use mcp::load as load_mcp;
 pub use mini_agent_protocol::ApprovalPolicy;
 pub use model::ModelProviderSettings;
 pub use model::build_model;
+pub use notebook::{
+    MAX_NOTEBOOK_BYTES, NOTEBOOK_FILE_NAME, NotebookEntry, NotebookSnapshot, notebook_tools,
+    read_notebook, upsert_notebook,
+};
 pub use openai::OpenAiError;
 pub use openai::OpenAiModel;
 pub use path_policy::normalize_path;

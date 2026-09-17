@@ -155,6 +155,9 @@ Use these endpoints:
 | `POST /api/threads/fork` | Fork a Thread through the canonical App Server boundary. |
 | `GET /api/threads/{thread_id}/children` | List child Sessions derived from a parent Thread. |
 | `POST /api/threads/{thread_id}/children` | Start one bounded Turn in an independent child Session/runtime. |
+| `POST /api/threads/{thread_id}/children/{child_thread_id}/cancel` | Request cooperative cancellation of an active child Turn. |
+| `POST /api/threads/{thread_id}/children/{child_thread_id}/retry` | Start a bounded new attempt for a settled failed or cancelled child. |
+| `GET /api/threads/{thread_id}/notebook` | Read the bounded Session-owned notebook projection. |
 | `POST /api/threads/{thread_id}/close` | Close an active Thread and release resources. |
 | `PATCH /api/threads/{thread_id}/summary` | Update Web display metadata only. |
 | `PATCH /api/threads/{thread_id}/rename` | Update the Web display title only. |
@@ -191,6 +194,18 @@ input, mutable Core context, tool calls, and approvals are not copied. Child
 history and status remain addressable by the child Thread and are observed
 through the existing event and canonical Session projections. This is
 structural concurrency through independent runtimes, not a Core scheduler.
+
+The child projection is recoverable because `session.jsonl` is the authority for
+the latest `operation` record. `queued`, `running`, `awaiting_approval`,
+`completed`, `failed`, and `cancelled` remain distinguishable after a Gateway
+restart. `cancel` sends a cooperative `turn/interrupt`; it does not delete the
+child Session. `retry` starts a fresh child Turn with the same operation ID and
+an incremented attempt. If no process is online, the projection reports that
+recovery or re-attach is required instead of fabricating a completed result.
+
+The Session notebook is read through the dedicated projection endpoint. The
+Gateway does not cache it as a second authority: the App Server/SessionStore
+owns the bounded entries, and resume injects only a summary into the runtime.
 
 If a live process owns the Session lock, `attach` returns a conflict or an
 `attached: false` lock description. The Gateway must not delete the lock or
@@ -245,6 +260,12 @@ bounded error code. These events are replayable through
 `GET /api/threads/{thread_id}/events`
 while the App Server runtime retains its bounded replay window; no Skill body or
 filesystem path is sent to WebStudio.
+
+When a parent model emits the Host `delegate_task` tool, the Gateway observes
+the real `tool_started` event and invokes the same child control seam internally.
+The event is therefore an observation trigger, not a Gateway-owned task state
+machine; the child Session operation records and runtime projection remain
+authoritative.
 
 The runtime catalog also includes direct user Skills from
 `%USERPROFILE%/.mini-agent/skills` and `%USERPROFILE%/.agents/skills`, plus the

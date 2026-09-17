@@ -5,7 +5,12 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
-No changes yet.
+- Add an independent Child Session control seam. Child Sessions use exact
+  persisted checkpoints and their own runtime, history, approvals, and replay;
+  Core remains a single-Thread Turn loop.
+- Persist bounded child operation lifecycle records and Session-owned notebook
+  state. Add `delegate_task`, `task_read`, retry/cancel correlation, and bounded
+  notebook summary restoration without adding a Core scheduler.
 
 ## [0.8.0] - 2026-09-15
 

@@ -24,6 +24,26 @@ use tokio::time::Instant;
 
 const EVENT_REPLAY_BUFFER: usize = 512;
 
+fn operation_record(
+    operation_id: &str,
+    status: &str,
+    turn_id: Option<&str>,
+    attempt: u32,
+    result: Option<&str>,
+    error: Option<&str>,
+) -> mini_agent_capabilities::SessionOperation {
+    let mut operation = mini_agent_capabilities::SessionOperation::new(
+        operation_id.to_string(),
+        "child_task".to_string(),
+        status.to_string(),
+    );
+    operation.turn_id = turn_id.map(str::to_string);
+    operation.attempt = attempt;
+    operation.result = result.map(str::to_string);
+    operation.error = error.map(str::to_string);
+    operation
+}
+
 #[derive(Clone)]
 pub(super) enum TurnOrigin {
     Client,
@@ -621,6 +641,8 @@ pub(super) async fn worker_loop<M>(
                 }
 
                 let mut next_input = Some(request.input);
+                let mut operation_id = request.operation_id.clone();
+                let operation_attempt = request.operation_attempt.unwrap_or(1);
                 let mut initial_reply = Some(reply);
                 let mut origin = origin;
                 let goal_turn = matches!(&origin, TurnOrigin::Goal { .. });
@@ -824,6 +846,22 @@ pub(super) async fn worker_loop<M>(
                     }
                     let started_at_ms = timestamp_ms();
                     let prompt = input.text.clone();
+                    if let Some(operation_id) = operation_id.as_deref()
+                        && skill_error.is_none()
+                        && let Err(error) = runtime_actor::record_operation(
+                            &mut runtime,
+                            operation_record(
+                                operation_id,
+                                "running",
+                                Some(turn_id.as_str()),
+                                operation_attempt,
+                                None,
+                                None,
+                            ),
+                        )
+                    {
+                        eprintln!("warning: failed to persist child operation start: {error}");
+                    }
                     let previous_message_count = thread.harness().messages().len();
                     let stopping = Arc::new(AtomicBool::new(false));
                     if let Some(reply) = initial_reply.take() {
@@ -947,6 +985,37 @@ pub(super) async fn worker_loop<M>(
                             )
                             .err()
                             .map(|error| error.to_string());
+                            if let Some(operation_id) = operation_id.as_deref() {
+                                let operation_status = if persistence_error.is_some() {
+                                    "failed"
+                                } else {
+                                    match result.status {
+                                        mini_agent_protocol::TurnStatus::Completed => "completed",
+                                        mini_agent_protocol::TurnStatus::Cancelled => "cancelled",
+                                        _ => "failed",
+                                    }
+                                };
+                                let operation_result = if operation_status == "completed" {
+                                    Some(result.outcome.final_text.as_str())
+                                } else {
+                                    None
+                                };
+                                if let Err(error) = runtime_actor::record_operation(
+                                    &mut runtime,
+                                    operation_record(
+                                        operation_id,
+                                        operation_status,
+                                        Some(result.id.as_str()),
+                                        operation_attempt,
+                                        operation_result,
+                                        persistence_error.as_deref(),
+                                    ),
+                                ) {
+                                    eprintln!(
+                                        "warning: failed to persist child operation result: {error}"
+                                    );
+                                }
+                            }
                             if persistence_error.is_none()
                                 && let Some(state) = runtime.as_ref()
                             {
@@ -1006,6 +1075,23 @@ pub(super) async fn worker_loop<M>(
                             .map(|persist_error| {
                                 format!("{error}; session persistence failed: {persist_error}")
                             });
+                            if let Some(operation_id) = operation_id.as_deref()
+                                && let Err(persist_error) = runtime_actor::record_operation(
+                                    &mut runtime,
+                                    operation_record(
+                                        operation_id,
+                                        "failed",
+                                        Some(turn_id.as_str()),
+                                        operation_attempt,
+                                        None,
+                                        persistence_error.as_deref(),
+                                    ),
+                                )
+                            {
+                                eprintln!(
+                                    "warning: failed to persist child operation failure: {persist_error}"
+                                );
+                            }
                             if persistence_error.is_none()
                                 && let Some(state) = runtime.as_ref()
                             {
@@ -1180,6 +1266,7 @@ pub(super) async fn worker_loop<M>(
                             }
                         }
                     }
+                    operation_id = None;
                     origin = TurnOrigin::Client;
                     if next_input.is_none() {
                         break;

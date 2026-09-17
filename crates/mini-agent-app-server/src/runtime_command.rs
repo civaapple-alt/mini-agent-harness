@@ -25,6 +25,8 @@ pub(super) enum RuntimeCommand {
         source_thread_id: ThreadId,
         new_thread_id: ThreadId,
         context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+        operation_id: Option<String>,
+        operation_attempt: Option<u32>,
         reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::SessionForkResult>>,
     },
     CheckpointSeq {

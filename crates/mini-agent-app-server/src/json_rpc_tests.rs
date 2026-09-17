@@ -47,6 +47,8 @@ fn turn_start_request(id: u64, prompt: &str) -> JsonRpcRequest {
         serde_json::json!(TurnStartParams {
             thread_id: ThreadId::new("thread-1"),
             input: TurnInput::new(TurnInputMode::Start, prompt),
+            operation_id: None,
+            operation_attempt: None,
         }),
     )
 }
@@ -697,6 +699,8 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
             serde_json::json!(TurnStartParams {
                 thread_id: ThreadId::new(source_thread_id.clone()),
                 input: TurnInput::new(TurnInputMode::Start, "seed fork checkpoint"),
+                operation_id: None,
+                operation_attempt: None,
             }),
         ),
     )
@@ -707,7 +711,9 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
     let params = serde_json::json!({
         "sourceThreadId": source_thread_id,
         "newThreadId": "forked-rpc-thread",
-        "contextPolicy": "exact"
+        "contextPolicy": "exact",
+        "operationId": "child:forked-rpc-thread",
+        "operationAttempt": 1
     });
     let first = rpc_call(&mut connection, 3, METHOD_SESSION_FORK, params.clone()).await;
     let retry = rpc_call(&mut connection, 4, METHOD_SESSION_FORK, params).await;
@@ -717,6 +723,12 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
         retry["value"]["contextBeforeBytes"],
         first["value"]["contextBeforeBytes"]
     );
+    let child_session_id = first["value"]["sessionId"].as_str().unwrap();
+    let (_, child_path) =
+        mini_agent_capabilities::resolve_session_file(&root, child_session_id).unwrap();
+    let child_session = std::fs::read_to_string(child_path).unwrap();
+    assert!(child_session.contains("\"operation_id\":\"child:forked-rpc-thread\""));
+    assert!(child_session.contains("\"status\":\"queued\""));
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
 
     let conflict = connection
@@ -768,6 +780,8 @@ async fn exact_session_fork_can_prepare_from_an_active_parent_turn() {
             serde_json::json!(TurnStartParams {
                 thread_id: ThreadId::new(source_thread_id.clone()),
                 input: TurnInput::new(TurnInputMode::Start, "active parent"),
+                operation_id: None,
+                operation_attempt: None,
             }),
         ),
     )

@@ -281,6 +281,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         source_thread_id: ThreadId,
         new_thread_id: ThreadId,
         context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+        operation_id: Option<String>,
+        operation_attempt: Option<u32>,
     ) -> Result<ActionResponse<mini_agent_app_server_protocol::SessionForkResult>, ActionFailure>
     {
         self.client
@@ -288,6 +290,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 source_thread_id,
                 new_thread_id,
                 context_policy,
+                operation_id,
+                operation_attempt,
                 reply,
             })
             .await
@@ -507,6 +511,19 @@ impl RuntimeManagementState {
         session
             .store
             .record_context(context, checkpoint.session.messages())
+            .map_err(AppServerError::Checkpoint)
+    }
+
+    pub(crate) fn record_operation(
+        &mut self,
+        operation: mini_agent_capabilities::SessionOperation,
+    ) -> Result<(), AppServerError> {
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        session
+            .store
+            .record_operation(operation)
             .map_err(AppServerError::Checkpoint)
     }
 

@@ -1,5 +1,6 @@
 use mini_agent_core::SessionState;
 use mini_agent_protocol::Message;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::env;
@@ -24,6 +25,10 @@ const SCHEMA_VERSION: u64 = 1;
 const MAX_SESSION_BYTES: u64 = 32 * 1024 * 1024;
 pub(crate) const MAX_RECORD_BYTES: usize = 512 * 1024;
 const MAX_WORKSPACE_KEY: usize = 240;
+const MAX_OPERATION_ID_BYTES: usize = 128;
+const MAX_OPERATION_KIND_BYTES: usize = 64;
+const MAX_OPERATION_ERROR_BYTES: usize = 4096;
+const MAX_OPERATION_RESULT_BYTES: usize = 16 * 1024;
 const SESSION_FILE_NAME: &str = "session.jsonl";
 const SESSION_LOCK_NAME: &str = "session";
 pub const SUMMARY_FILE_NAME: &str = "summary.json";
@@ -175,6 +180,85 @@ pub struct TurnCommit<'a> {
     pub checkpoint: &'a [Message],
 }
 
+/// A bounded Host-owned lifecycle record for work that outlives one Turn.
+///
+/// This is deliberately a Session record rather than Core state. It lets an
+/// App Server rebuild child-task status after a process restart without adding
+/// a second scheduler or mutating the Core run loop.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct SessionOperation {
+    pub operation_id: String,
+    pub kind: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    pub attempt: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub timestamp_ms: u64,
+}
+
+impl SessionOperation {
+    pub fn new(
+        operation_id: impl Into<String>,
+        kind: impl Into<String>,
+        status: impl Into<String>,
+    ) -> Self {
+        Self {
+            operation_id: operation_id.into(),
+            kind: kind.into(),
+            status: status.into(),
+            parent_thread_id: None,
+            turn_id: None,
+            attempt: 1,
+            result: None,
+            error: None,
+            timestamp_ms: timestamp_ms(),
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        validate_operation_text(&self.operation_id, MAX_OPERATION_ID_BYTES, "operation id")?;
+        validate_operation_text(&self.kind, MAX_OPERATION_KIND_BYTES, "operation kind")?;
+        if !matches!(
+            self.status.as_str(),
+            "queued" | "running" | "awaiting_approval" | "completed" | "failed" | "cancelled"
+        ) {
+            return Err("invalid operation status".to_string());
+        }
+        if self.attempt == 0 {
+            return Err("operation attempt must be positive".to_string());
+        }
+        for (value, limit, label) in [
+            (
+                self.parent_thread_id.as_deref(),
+                MAX_OPERATION_ID_BYTES,
+                "parent thread id",
+            ),
+            (self.turn_id.as_deref(), MAX_OPERATION_ID_BYTES, "turn id"),
+            (
+                self.result.as_deref(),
+                MAX_OPERATION_RESULT_BYTES,
+                "operation result",
+            ),
+            (
+                self.error.as_deref(),
+                MAX_OPERATION_ERROR_BYTES,
+                "operation error",
+            ),
+        ] {
+            if let Some(value) = value {
+                validate_operation_text(value, limit, label)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One durable message record that can be projected into a public ThreadItem.
 /// The session JSONL remains authoritative; this value is only the bounded
 /// in-process index used by the App Server item listing.
@@ -315,6 +399,27 @@ impl SessionStore {
         ])?;
         self.checkpoint_seq = self.next_seq.saturating_sub(1);
         Ok(())
+    }
+
+    /// Appends one bounded lifecycle snapshot for a Host-owned operation.
+    ///
+    /// Operation records are append-only so the latest valid record is the
+    /// recoverable state after a restart. They are ignored by Core's message
+    /// reconstruction and therefore cannot change the model conversation.
+    pub fn record_operation(&mut self, operation: SessionOperation) -> Result<(), String> {
+        operation.validate()?;
+        self.append_records(vec![json!({
+            "kind": "operation",
+            "operation_id": operation.operation_id,
+            "operation_kind": operation.kind,
+            "status": operation.status,
+            "parent_thread_id": operation.parent_thread_id,
+            "turn_id": operation.turn_id,
+            "attempt": operation.attempt,
+            "result": operation.result,
+            "error": operation.error,
+            "timestamp_ms": operation.timestamp_ms,
+        })])
     }
 
     pub fn record_turn_with_id(
@@ -800,6 +905,28 @@ impl SessionStore {
         checkpoint: &[Message],
         fork_metadata: SessionForkMetadata,
     ) -> Result<SessionForkInfo, SessionForkError> {
+        Self::fork_from_checkpoint_with_operation(
+            workspace,
+            parent_session_id,
+            parent_checkpoint_seq,
+            child_thread_id,
+            checkpoint,
+            fork_metadata,
+            None,
+        )
+    }
+
+    /// Persists a fork and, when requested, its initial queued operation in
+    /// the same child Session before returning to the caller.
+    pub fn fork_from_checkpoint_with_operation(
+        workspace: &Path,
+        parent_session_id: &str,
+        parent_checkpoint_seq: u64,
+        child_thread_id: &str,
+        checkpoint: &[Message],
+        fork_metadata: SessionForkMetadata,
+        operation: Option<SessionOperation>,
+    ) -> Result<SessionForkInfo, SessionForkError> {
         validate_session_id(parent_session_id).map_err(SessionForkError::Storage)?;
         validate_session_id(child_thread_id).map_err(SessionForkError::Storage)?;
         fork_metadata
@@ -876,7 +1003,16 @@ impl SessionStore {
                 Some(&fork_metadata),
             );
             let store = match initialized {
-                Ok(store) => store,
+                Ok(mut store) => {
+                    if let Some(operation) = operation.clone() {
+                        if let Err(error) = store.record_operation(operation) {
+                            drop(store);
+                            let _ = fs::remove_dir_all(&session_dir);
+                            return Err(SessionForkError::Storage(error));
+                        }
+                    }
+                    store
+                }
                 Err(error) => {
                     let _ = fs::remove_dir_all(&session_dir);
                     return Err(SessionForkError::Storage(error));
@@ -1222,6 +1358,15 @@ fn new_id(prefix: &str) -> String {
     )
 }
 
+fn validate_operation_text(value: &str, max_bytes: usize, label: &str) -> Result<(), String> {
+    if value.is_empty() || value.len() > max_bytes || value.chars().any(char::is_control) {
+        return Err(format!(
+            "{label} is empty, oversized, or contains control characters"
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1338,6 +1483,30 @@ mod tests {
         assert!(session_text.contains("\"item_kind\":\"context_compaction\""));
         assert!(session_text.contains("\"turn_id\":\"turn-compaction\""));
         drop(opened);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn operation_lifecycle_records_survive_session_resume() {
+        let root = crate::test_support::test_root();
+        let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let mut operation = SessionOperation::new("child:one", "child_task", "queued");
+        operation.parent_thread_id = Some("parent".to_string());
+        opened.store.record_operation(operation).unwrap();
+        let mut completed = SessionOperation::new("child:one", "child_task", "completed");
+        completed.turn_id = Some("turn-child".to_string());
+        completed.result = Some("bounded result".to_string());
+        opened.store.record_operation(completed).unwrap();
+        let path = opened.store.path().to_path_buf();
+        drop(opened);
+
+        let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        let text = fs::read_to_string(path).unwrap();
+        assert!(text.contains("\"operation_kind\":\"child_task\""));
+        assert!(text.contains("\"status\":\"completed\""));
+        assert_eq!(resumed.state.messages().len(), 0);
+        drop(resumed);
         crate::test_support::remove_test_root(&root);
     }
 

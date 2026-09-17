@@ -34,6 +34,12 @@ child 时，Host 只能从父 Session 读取最近一次完整持久化 checkpoi
 Approval、ToolRuntime 和 event replay。这里不引入 Core 内多租户调度器，也不
 把 Gateway 的 client/task map 当成历史或授权的第二权威。
 
+Child operation lifecycle and the Session notebook follow the same rule. The
+SessionStore owns durable operation records and notebook entries; Host owns
+their tool admission and App Server owns runtime/control projection. Core may
+carry bounded operation correlation on a Turn, but it does not create child
+Sessions, schedule work, persist notebook state, or interpret Gateway task maps.
+
 App Server 的 `ThreadItem.ToolCall` 保留两个正交字段：`status` 表示 Item
 生命周期，`outcome` 表示 Core 工具结果。`needs_approval`、`deferred` 和
 `retryable` 不能被折叠成一个 `completed/failed` 布尔判断；旧 Session 没有

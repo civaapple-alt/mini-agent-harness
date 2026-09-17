@@ -47,6 +47,8 @@ pub(super) async fn handle_session_fork_request<M>(
         source_thread_id,
         new_thread_id,
         context_policy,
+        operation_id,
+        operation_attempt,
         reply,
     } = request.command
     else {
@@ -57,6 +59,8 @@ pub(super) async fn handle_session_fork_request<M>(
         source_thread_id,
         new_thread_id,
         context_policy,
+        operation_id,
+        operation_attempt,
         runtime,
         threads,
     )
@@ -68,6 +72,8 @@ async fn prepare_session_fork<M>(
     source_thread_id: ThreadId,
     new_thread_id: ThreadId,
     context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+    operation_id: Option<String>,
+    operation_attempt: Option<u32>,
     runtime: &Option<RuntimeActorState>,
     threads: &mut ThreadManager<M>,
 ) -> Result<mini_agent_app_server_protocol::SessionForkResult, AppServerError>
@@ -127,13 +133,21 @@ where
         compacted: method != "exact",
         method,
     };
-    let child = mini_agent_capabilities::SessionStore::fork_from_checkpoint(
+    let operation = operation_id.map(|operation_id| {
+        let mut operation =
+            mini_agent_capabilities::SessionOperation::new(operation_id, "child_task", "queued");
+        operation.parent_thread_id = Some(source_thread_id.as_str().to_string());
+        operation.attempt = operation_attempt.unwrap_or(1);
+        operation
+    });
+    let child = mini_agent_capabilities::SessionStore::fork_from_checkpoint_with_operation(
         &workspace,
         &parent.session_id,
         parent_checkpoint_seq,
         new_thread_id.as_str(),
         prepared.session.messages(),
         fork_metadata.clone(),
+        operation,
     )
     .map_err(map_session_fork_error)?;
     session_fork_result(child, Some(fork_metadata))
@@ -652,13 +666,21 @@ fn handle_active_session_fork(
         source_thread_id,
         new_thread_id,
         context_policy,
+        operation_id,
+        operation_attempt,
         reply,
     } = request.command
     else {
         unreachable!("active session fork handler received another runtime command");
     };
-    let result =
-        prepare_active_session_fork(source_thread_id, new_thread_id, context_policy, runtime);
+    let result = prepare_active_session_fork(
+        source_thread_id,
+        new_thread_id,
+        context_policy,
+        operation_id,
+        operation_attempt,
+        runtime,
+    );
     respond(reply, receipt, result);
 }
 
@@ -666,6 +688,8 @@ fn prepare_active_session_fork(
     source_thread_id: ThreadId,
     new_thread_id: ThreadId,
     context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+    operation_id: Option<String>,
+    operation_attempt: Option<u32>,
     runtime: &Option<RuntimeActorState>,
 ) -> Result<mini_agent_app_server_protocol::SessionForkResult, AppServerError> {
     if context_policy != mini_agent_app_server_protocol::ForkContextPolicy::Exact {
@@ -696,13 +720,21 @@ fn prepare_active_session_fork(
         compacted: false,
         method: "exact".to_string(),
     };
-    let child = mini_agent_capabilities::SessionStore::fork_from_checkpoint(
+    let operation = operation_id.map(|operation_id| {
+        let mut operation =
+            mini_agent_capabilities::SessionOperation::new(operation_id, "child_task", "queued");
+        operation.parent_thread_id = Some(source_thread_id.as_str().to_string());
+        operation.attempt = operation_attempt.unwrap_or(1);
+        operation
+    });
+    let child = mini_agent_capabilities::SessionStore::fork_from_checkpoint_with_operation(
         &workspace,
         &parent.session_id,
         parent_checkpoint_seq,
         new_thread_id.as_str(),
         &checkpoint,
         metadata,
+        operation,
     )
     .map_err(map_session_fork_error)?;
     session_fork_result(child, None)
@@ -1455,4 +1487,14 @@ pub(super) fn persist_turn(
         tool_arguments,
         checkpoint.session.messages(),
     )
+}
+
+pub(super) fn record_operation(
+    runtime: &mut Option<RuntimeActorState>,
+    operation: mini_agent_capabilities::SessionOperation,
+) -> Result<(), AppServerError> {
+    let Some(state) = runtime.as_mut() else {
+        return Ok(());
+    };
+    state.management.record_operation(operation)
 }

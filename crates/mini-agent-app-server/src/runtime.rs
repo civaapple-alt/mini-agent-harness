@@ -128,6 +128,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         let workspace = runtime_config.workspace();
         let goal_limits = runtime_config.goal_limits();
         let model_name = runtime_config.model().unwrap_or_default().to_string();
+        let include_session_tools = composition.tools == mini_agent_host::ToolScope::All;
         let session = match session_request {
             SessionRequest::Disabled => None,
             other => {
@@ -187,6 +188,36 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
                 harness
                     .restore_session(opened.state.clone())
                     .map_err(|error| format!("cannot restore session: {error}"))?;
+            }
+        }
+        if include_session_tools
+            && let Some(session_dir) = session
+                .as_ref()
+                .and_then(|opened| opened.store.path().parent().map(PathBuf::from))
+        {
+            harness.extend_tools(mini_agent_capabilities::notebook_tools(session_dir.clone()));
+            harness.extend_tools(mini_agent_capabilities::child_task_tools(
+                session_dir.clone(),
+            ));
+            if let Ok(notebook) = mini_agent_capabilities::read_notebook(
+                &session_dir.join(mini_agent_capabilities::NOTEBOOK_FILE_NAME),
+            ) {
+                let summary = notebook.summary(8 * 1024);
+                if !summary.is_empty()
+                    && !harness.messages().iter().any(|message| {
+                        matches!(
+                            message,
+                            mini_agent_protocol::Message::Context { text }
+                                if text.starts_with("<session_notebook_summary>")
+                        )
+                    })
+                {
+                    harness
+                        .append_context(format!(
+                            "<session_notebook_summary>\n{summary}\n</session_notebook_summary>"
+                        ))
+                        .map_err(|error| error.to_string())?;
+                }
             }
         }
         let base_harness_config = harness.config().clone();

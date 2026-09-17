@@ -217,7 +217,7 @@ Thread returned by `thread/start`.
 | `thread/close` | `threadId` | Closes the Thread; the action value is `{closed: true}`. |
 | `thread/items/list` | `threadId`; optional `turnId`, `cursor`, `limit`, `sortDirection` | Returns cursor-bounded `data` entries, `nextCursor`, and `backwardsCursor`. |
 | `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
-| `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`) | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. `exact` may read the latest settled checkpoint while the source Thread has an active Turn; `compact` still requires an idle source because it prepares context through the source runtime. `exact` never invokes the model; the child owns any later normal-turn compaction. Repeating the same request returns the existing child; reusing the child ID with another context policy is rejected. |
+| `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`), `operationId`, `operationAttempt` | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. `exact` may read the latest settled checkpoint while the source Thread has an active Turn; `compact` still requires an idle source because it prepares context through the source runtime. `exact` never invokes the model; the child owns any later normal-turn compaction. When operation metadata is supplied, the child Session also records a durable `queued` operation before the fork result is returned. Repeating the same request returns the existing child; reusing the child ID with another context policy is rejected. |
 
 `thread/resume` is a controlled checkpoint install, not a second persistence
 format. The Session store and App Server remain the authorities for the
@@ -242,7 +242,7 @@ still go through `thread/settings/update`.
 
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
-| `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?}` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. |
+| `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?}`, optional `operationId`, `operationAttempt` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. Operation metadata is opaque lifecycle correlation for a Host-owned child task; Core carries it with the Turn but does not schedule, authorize, or interpret it. |
 | `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, and optional error. |
 | `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of ordered `turn/event` notifications with `nextCursor`, `oldestSequence`, and `hasGap`. |
 | `turn/steer` | `threadId`, `turnId`, `text` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. |
@@ -292,6 +292,31 @@ The capability manifest returned by `initialize` contains
 `builtinSkillGroups` and `availableSkills`. Each available-skill entry contains
 only `name`, `qualifiedName`, compatibility `aliases`, `description`, `source`,
 `group`, and `enabled`. The manifest does not expose skill paths or bodies.
+
+#### Child operations and Session notebook
+
+`delegate_task` and `task_read` are Host-owned capabilities. `delegate_task`
+returns a bounded queue request; the surrounding Host/App Server control seam
+creates an exact child Session and starts a separate child runtime. `task_read`
+reads the child’s canonical Session projection and returns only bounded status,
+attempt, result, and error fields. Neither tool adds a scheduler or a second
+history authority to Core. Child execution is limited to one level and two
+active children per parent in the current WebStudio integration.
+
+The Session store appends operation lifecycle records (`queued`, `running`,
+`awaiting_approval`, `completed`, `failed`, or `cancelled`) to the existing
+bounded JSONL persistence. A child operation keeps the same `operationId` across
+its retry attempts and increments `operationAttempt`; a retry is a new child
+Turn, not a replay of the old Core loop. The App Server `runtime/status` and
+WebStudio child projection may expose the latest operation identity without
+copying child history into the parent.
+
+The Session-owned `notebook.json` is a separate bounded persistence surface.
+`notebook_read` and `notebook_write` are Host/Capabilities tools; after resume,
+App Server injects only a bounded notebook summary, while full entries remain
+available through explicit reads. Notebook data is not Core state, is not
+shared with child Sessions in the first version, and is never an unbounded
+system-prompt replacement.
 
 #### Thread settings, Plan, and Goal
 

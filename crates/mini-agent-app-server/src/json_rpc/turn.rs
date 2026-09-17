@@ -71,10 +71,13 @@ where
                 JsonRpcError::invalid_params("turn/start requires start or start_if_idle"),
             );
         }
+        let mut turn = TurnStart::new(params.input);
+        turn.operation_id = params.operation_id;
+        turn.operation_attempt = params.operation_attempt;
         action_response(
             request.id,
             self.server
-                .submit_start_action(params.thread_id, TurnStart::new(params.input), None),
+                .submit_start_action(params.thread_id, turn, None),
             Clone::clone,
         )
         .await
