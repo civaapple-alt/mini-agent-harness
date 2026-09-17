@@ -2,6 +2,10 @@ use super::*;
 use crate::test_support::{approval_controller, python_command, remove_test_root, test_root};
 use mini_agent_protocol::{ApprovalOutcome, ApprovalPolicy};
 
+fn discover_for_tests(workspace: &Path, enabled_groups: &[String]) -> Discovery {
+    super::discover_with_roots(workspace, enabled_groups, None, None)
+}
+
 #[test]
 fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
     let root = test_root();
@@ -29,7 +33,7 @@ fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
     )
     .unwrap();
 
-    let discovery = discover_with_builtin_groups(&root, &[]);
+    let discovery = discover_for_tests(&root, &[]);
     let prompt = discovery.augment_system_prompt("base").unwrap();
 
     assert_eq!(discovery.mcp_server_labels(), ["deploy.tools/local"]);
@@ -51,7 +55,7 @@ fn activates_typed_skill_dependencies_without_enabling_providers() {
         "  tools:\n    - type: builtin\n      value: read_file\n    - type: mcp\n      value: github\n",
     );
 
-    let discovery = discover_with_builtin_groups(&root, &[]);
+    let discovery = discover_for_tests(&root, &[]);
     assert_eq!(
         discovery.skill_names(),
         ["review"],
@@ -88,7 +92,7 @@ fn rejects_unsupported_skill_dependency_types() {
         "  tools:\n    - type: process\n      value: shell\n",
     );
 
-    let discovery = discover_with_builtin_groups(&root, &[]);
+    let discovery = discover_for_tests(&root, &[]);
     assert!(
         !discovery.diagnostics().is_empty(),
         "{:?}",
@@ -120,7 +124,7 @@ fn selected_extensions_keep_named_entries_and_report_missing_names() {
         "DROP BODY",
     );
 
-    let mut discovery = discover_with_builtin_groups(&root, &[]);
+    let mut discovery = discover_for_tests(&root, &[]);
     discovery.retain_selected(&["keep".to_string(), "missing".to_string()]);
 
     assert_eq!(discovery.skill_names(), ["keep"]);
@@ -152,7 +156,7 @@ fn selecting_plugin_retains_its_provider_inputs() {
     )
     .unwrap();
 
-    let mut discovery = discover_with_builtin_groups(&root, &[]);
+    let mut discovery = discover_for_tests(&root, &[]);
     discovery.retain_selected(&["deploy.tools".to_string()]);
 
     assert_eq!(discovery.plugin_names(), ["deploy.tools"]);
@@ -189,7 +193,7 @@ fn discovers_and_selects_bounded_mcp_transports() {
     )
     .unwrap();
 
-    let mut discovery = discover_with_builtin_groups(&root, &[]);
+    let mut discovery = discover_for_tests(&root, &[]);
     discovery.retain_selected(&["keep".to_string()]);
     let loaded = crate::mcp::load(
         discovery.mcp_servers(),
@@ -228,7 +232,7 @@ fn project_skill_overrides_invalid_or_plugin_duplicate() {
         "broken",
     );
 
-    let discovery = discover_with_builtin_groups(&root, &[]);
+    let discovery = discover_for_tests(&root, &[]);
     let prompt = discovery.augment_system_prompt("base").unwrap();
 
     assert!(prompt.contains("Project review"));
@@ -258,7 +262,7 @@ fn catalogs_and_loads_selected_skills_with_bounded_activation() {
         "REVIEW BODY",
     );
 
-    let discovery = discover_with_builtin_groups(&root, &[]);
+    let discovery = discover_for_tests(&root, &[]);
     let review = discovery
         .skill_catalog()
         .into_iter()
@@ -298,7 +302,7 @@ fn skill_read_roots_include_only_enabled_discovered_skills() {
     write_skill(&enabled, "enabled", "Enabled Skill.", "ENABLED BODY");
     write_skill(&disabled, "disabled", "Disabled Skill.", "DISABLED BODY");
 
-    let mut discovery = discover_with_builtin_groups(&root, &[]);
+    let mut discovery = discover_for_tests(&root, &[]);
     discovery.retain_selected(&["enabled".to_string()]);
 
     assert_eq!(
@@ -330,7 +334,7 @@ fn rejects_pstack_namespace_when_the_builtin_group_is_not_enabled() {
         "Explain the selected subsystem.",
         "HOW BODY",
     );
-    let discovery = discover_with_builtin_groups(&root, &[]);
+    let discovery = discover_for_tests(&root, &[]);
     let loaded = discovery.load_skills(&["how".to_string()]).unwrap();
     assert_eq!(loaded[0].qualified_name, "how");
     assert!(discovery.load_skills(&["pstack:how".to_string()]).is_err());
@@ -382,6 +386,63 @@ fn loads_canonical_and_codex_aliases_once_for_a_pstack_skill() {
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].qualified_name, "pstack:how");
     remove_test_root(&root);
+}
+
+#[test]
+fn discovers_builtin_and_global_skill_roots_with_fixed_precedence() {
+    let workspace = test_root();
+    let home = test_root();
+    write_skill(
+        &home.join(".mini-agent/skills/builtin/pstack/how"),
+        "how",
+        "Explain pstack behavior.",
+        "PSTACK HOW",
+    );
+    write_skill(
+        &home.join(".mini-agent/skills/review"),
+        "review",
+        "Review from Mini Agent.",
+        "MINI REVIEW",
+    );
+    write_skill(
+        &home.join(".agents/skills/review"),
+        "review",
+        "Review from Agent Skills.",
+        "AGENTS REVIEW",
+    );
+    write_skill(
+        &workspace.join(".agents/skills/review"),
+        "review",
+        "Review from the project.",
+        "PROJECT REVIEW",
+    );
+
+    let discovery = super::discover_with_roots(
+        &workspace,
+        &["pstack".to_string()],
+        Some(home.join(".mini-agent/skills")),
+        Some(home.join(".agents/skills")),
+    );
+    let catalog = discovery.skill_catalog();
+    let review = catalog
+        .iter()
+        .find(|skill| skill.qualified_name == "review")
+        .expect("the highest-priority review Skill should remain");
+    assert_eq!(review.source, "project");
+    assert!(
+        discovery
+            .diagnostics()
+            .iter()
+            .any(|item| item.contains("shadowed"))
+    );
+    assert!(
+        discovery
+            .augment_system_prompt("base")
+            .unwrap()
+            .contains(".mini-agent/skills/builtin/pstack/how/SKILL.md")
+    );
+    remove_test_root(&workspace);
+    remove_test_root(&home);
 }
 
 fn write_plugin_manifest(root: &Path, name: &str) {

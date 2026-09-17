@@ -11,9 +11,10 @@ use mini_agent_app_server_protocol::{
     ThreadItem, ThreadItemEntry, ThreadItemsListParams, ThreadItemsListResult, TurnReadResult,
 };
 use mini_agent_core::{SteeringMode, TurnResult};
-use mini_agent_protocol::{Event, EventEnvelope, EventSink, ModelUsage};
+use mini_agent_protocol::{Event, EventEnvelope, EventSink, ModelUsage, SkillLoadPhase};
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -111,8 +112,9 @@ struct ThreadListener {
     tool_arguments: Vec<(String, Value)>,
     skill_paths: Vec<mini_agent_capabilities::SkillPathRecord>,
     pending_skill_reads: BTreeMap<String, mini_agent_protocol::SkillLoadRecord>,
-    loaded_group_skills: Vec<mini_agent_protocol::SkillLoadRecord>,
-    group_auto_active: bool,
+    started_skill_reads: BTreeSet<String>,
+    loaded_skill_reads: BTreeSet<String>,
+    failed_skill_reads: BTreeSet<String>,
     tokens_used: u64,
 }
 
@@ -278,27 +280,45 @@ struct RunningCommandContext<'a, M> {
     stopping: &'a Arc<AtomicBool>,
 }
 
+impl ThreadListener {
+    fn emit_skill_event(
+        &self,
+        thread_id: &ThreadId,
+        turn_id: &TurnId,
+        phase: SkillLoadPhase,
+        skill: Option<mini_agent_protocol::SkillLoadRecord>,
+        failure: Option<(String, &str)>,
+        next_sequence: &mut u64,
+    ) {
+        let event = if let Some((name, reason_code)) = failure {
+            Event::SkillsLoadFailed {
+                activation: Some("on_demand".to_string()),
+                skills: vec![name],
+                reason_code: reason_code.to_string(),
+            }
+        } else {
+            Event::SkillsLoaded {
+                phase,
+                activation: Some("on_demand".to_string()),
+                skills: skill.into_iter().collect(),
+            }
+        };
+        let mut envelope = EventEnvelope::new(
+            thread_id.clone(),
+            Some(turn_id.clone()),
+            *next_sequence,
+            event,
+        );
+        envelope.item_id = Some(format!("{}:skills", turn_id.as_str()));
+        self.send_event(envelope);
+        *next_sequence = (*next_sequence).saturating_add(1);
+    }
+}
+
 impl EventSink for ThreadListener {
     fn emit(&mut self, event: EventEnvelope) {
         self.update_status_for_event(&event);
         if matches!(&event.event, Event::ToolStarted { .. }) {
-            if let Event::ToolStarted { call } = &event.event
-                && self.group_auto_active
-                && call.name == "read_file"
-                && let Some(path) = call.arguments.get("path").and_then(Value::as_str)
-                && let Ok(path) = PathBuf::from(path).canonicalize()
-                && let Some(skill) = self.skill_paths.iter().find(|skill| skill.path == path)
-            {
-                self.pending_skill_reads.insert(
-                    call.id.clone(),
-                    mini_agent_protocol::SkillLoadRecord {
-                        name: skill.name.clone(),
-                        qualified_name: Some(skill.qualified_name.clone()),
-                        source: skill.source.clone(),
-                        group: skill.group.clone(),
-                    },
-                );
-            }
             for item in ThreadItem::from_event(&event) {
                 if let ThreadItem::ToolCall { id, arguments, .. } = item {
                     self.tool_arguments.push((id, arguments));
@@ -309,19 +329,6 @@ impl EventSink for ThreadListener {
             Event::ModelResponded { usage, .. }
             | Event::ContextCompactionFinished { usage, .. } => self.record_usage(*usage),
             _ => {}
-        }
-        if let Event::ToolFinished {
-            call_id,
-            is_error: false,
-            ..
-        } = &event.event
-            && let Some(skill) = self.pending_skill_reads.remove(call_id)
-            && !self
-                .loaded_group_skills
-                .iter()
-                .any(|loaded| loaded.qualified_name == skill.qualified_name)
-        {
-            self.loaded_group_skills.push(skill);
         }
         if matches!(event.event, Event::TurnFinished { .. }) {
             self.pending_finish = Some(event);
@@ -337,24 +344,91 @@ impl EventSink for ThreadListener {
         event: &Event,
         next_sequence: &mut u64,
     ) {
-        if !matches!(event, Event::TurnFinished { .. }) {
+        let Event::ToolStarted { call } = event else {
+            return;
+        };
+        if call.name != "read_file" {
             return;
         }
-        if self.loaded_group_skills.is_empty() {
+        let Some(path) = call.arguments.get("path").and_then(Value::as_str) else {
             return;
+        };
+        let requested = path
+            .replace('\\', "/")
+            .strip_prefix("./")
+            .map_or_else(|| path.replace('\\', "/"), str::to_string);
+        let canonical = PathBuf::from(path).canonicalize().ok();
+        let Some(skill) = self
+            .skill_paths
+            .iter()
+            .find(|skill| canonical.as_ref() == Some(&skill.path) || requested == skill.location)
+        else {
+            return;
+        };
+        let record = mini_agent_protocol::SkillLoadRecord {
+            name: skill.name.clone(),
+            qualified_name: Some(skill.qualified_name.clone()),
+            source: skill.source.clone(),
+            group: skill.group.clone(),
+        };
+        self.pending_skill_reads
+            .insert(call.id.clone(), record.clone());
+        if self
+            .started_skill_reads
+            .insert(skill.qualified_name.clone())
+        {
+            self.emit_skill_event(
+                thread_id,
+                turn_id,
+                SkillLoadPhase::Started,
+                Some(record),
+                None,
+                next_sequence,
+            );
         }
-        let mut envelope = EventEnvelope::new(
-            thread_id.clone(),
-            Some(turn_id.clone()),
-            *next_sequence,
-            Event::SkillsLoaded {
-                activation: Some("group_auto".to_string()),
-                skills: std::mem::take(&mut self.loaded_group_skills),
-            },
-        );
-        envelope.item_id = Some(format!("{}:skills", turn_id.as_str()));
-        self.send_event(envelope);
-        *next_sequence = (*next_sequence).saturating_add(1);
+    }
+
+    fn after_event(
+        &mut self,
+        thread_id: &ThreadId,
+        turn_id: &TurnId,
+        event: &Event,
+        next_sequence: &mut u64,
+    ) {
+        let Event::ToolFinished {
+            call_id, is_error, ..
+        } = event
+        else {
+            return;
+        };
+        let Some(skill) = self.pending_skill_reads.remove(call_id) else {
+            return;
+        };
+        let qualified_name = skill
+            .qualified_name
+            .clone()
+            .unwrap_or_else(|| skill.name.clone());
+        if *is_error {
+            if self.failed_skill_reads.insert(qualified_name.clone()) {
+                self.emit_skill_event(
+                    thread_id,
+                    turn_id,
+                    SkillLoadPhase::Loaded,
+                    None,
+                    Some((qualified_name, "body_read_failed")),
+                    next_sequence,
+                );
+            }
+        } else if self.loaded_skill_reads.insert(qualified_name) {
+            self.emit_skill_event(
+                thread_id,
+                turn_id,
+                SkillLoadPhase::Loaded,
+                Some(skill),
+                None,
+                next_sequence,
+            );
+        }
     }
 }
 
@@ -717,17 +791,24 @@ pub(super) async fn worker_loop<M>(
                             config.system_prompt, body
                         );
                         thread.harness_mut().replace_config(config);
+                        let records: Vec<mini_agent_protocol::SkillLoadRecord> = loaded_skills
+                            .iter()
+                            .map(|skill| mini_agent_protocol::SkillLoadRecord {
+                                name: skill.name.clone(),
+                                qualified_name: Some(skill.qualified_name.clone()),
+                                source: skill.source.clone(),
+                                group: skill.group.clone(),
+                            })
+                            .collect();
                         skill_prelude.push(Event::SkillsLoaded {
+                            phase: SkillLoadPhase::Started,
                             activation: Some("explicit".to_string()),
-                            skills: loaded_skills
-                                .iter()
-                                .map(|skill| mini_agent_protocol::SkillLoadRecord {
-                                    name: skill.name.clone(),
-                                    qualified_name: Some(skill.qualified_name.clone()),
-                                    source: skill.source.clone(),
-                                    group: skill.group.clone(),
-                                })
-                                .collect(),
+                            skills: records.clone(),
+                        });
+                        skill_prelude.push(Event::SkillsLoaded {
+                            phase: SkillLoadPhase::Loaded,
+                            activation: Some("explicit".to_string()),
+                            skills: records,
                         });
                     }
                     if workflow.is_some() && skill_error.is_none() {
@@ -774,8 +855,9 @@ pub(super) async fn worker_loop<M>(
                         tool_arguments: Vec::new(),
                         skill_paths,
                         pending_skill_reads: BTreeMap::new(),
-                        loaded_group_skills: Vec::new(),
-                        group_auto_active: input.workflow.is_some() && skill_error.is_none(),
+                        started_skill_reads: BTreeSet::new(),
+                        loaded_skill_reads: BTreeSet::new(),
+                        failed_skill_reads: BTreeSet::new(),
                         tokens_used: 0,
                     };
                     let mut turn = Box::pin(thread.run_turn_with_events_and_preflight(

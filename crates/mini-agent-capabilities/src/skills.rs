@@ -82,6 +82,7 @@ struct SkillRootOptions<'a> {
     group: Option<&'a str>,
     enabled: bool,
     overrides: bool,
+    location_prefix: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -130,6 +131,21 @@ pub fn discover(workspace: &Path) -> Discovery {
 }
 
 pub fn discover_with_builtin_groups(workspace: &Path, enabled_groups: &[String]) -> Discovery {
+    let home = user_home();
+    discover_with_roots(
+        workspace,
+        enabled_groups,
+        home.as_deref().map(|home| home.join(".mini-agent/skills")),
+        home.as_deref().map(|home| home.join(".agents/skills")),
+    )
+}
+
+pub(super) fn discover_with_roots(
+    workspace: &Path,
+    enabled_groups: &[String],
+    mini_agent_skills_root: Option<PathBuf>,
+    agents_skills_root: Option<PathBuf>,
+) -> Discovery {
     let workspace = match workspace.canonicalize() {
         Ok(workspace) => workspace,
         Err(error) => {
@@ -141,7 +157,8 @@ pub fn discover_with_builtin_groups(workspace: &Path, enabled_groups: &[String])
     };
     let mut skills = BTreeMap::new();
     let mut discovery = Discovery::default();
-    if let Some(builtin_root) = builtin_skill_root() {
+    if let Some(mini_agent_skills_root) = mini_agent_skills_root.as_deref() {
+        let builtin_root = mini_agent_skills_root.join("builtin");
         let pstack_root = builtin_root.join("pstack");
         let enabled = enabled_groups.iter().any(|group| group == "pstack");
         discovery::discover_skill_root(
@@ -153,6 +170,37 @@ pub fn discover_with_builtin_groups(workspace: &Path, enabled_groups: &[String])
                 group: Some("pstack"),
                 enabled,
                 overrides: false,
+                location_prefix: Some(".mini-agent/skills/builtin/pstack"),
+            },
+            &mut skills,
+            &mut discovery.diagnostics,
+        );
+        discovery::discover_skill_root(
+            mini_agent_skills_root,
+            mini_agent_skills_root,
+            &workspace,
+            SkillRootOptions {
+                source: "user",
+                group: None,
+                enabled: true,
+                overrides: true,
+                location_prefix: Some(".mini-agent/skills"),
+            },
+            &mut skills,
+            &mut discovery.diagnostics,
+        );
+    }
+    if let Some(agents_skills_root) = agents_skills_root.as_deref() {
+        discovery::discover_skill_root(
+            agents_skills_root,
+            agents_skills_root,
+            &workspace,
+            SkillRootOptions {
+                source: "user",
+                group: None,
+                enabled: true,
+                overrides: true,
+                location_prefix: Some(".agents/skills"),
             },
             &mut skills,
             &mut discovery.diagnostics,
@@ -167,6 +215,7 @@ pub fn discover_with_builtin_groups(workspace: &Path, enabled_groups: &[String])
             group: None,
             enabled: true,
             overrides: true,
+            location_prefix: None,
         },
         &mut skills,
         &mut discovery.diagnostics,
@@ -178,13 +227,16 @@ pub fn discover_with_builtin_groups(workspace: &Path, enabled_groups: &[String])
 }
 
 pub fn builtin_skill_root() -> Option<PathBuf> {
+    user_home().map(|home| home.join(".mini-agent/skills/builtin"))
+}
+
+fn user_home() -> Option<PathBuf> {
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)
-        .map(|home| home.join(".mini-agent/skills/builtin"))
 }
 
-fn skill_metadata(skill: &Skill) -> Value {
+fn skill_metadata(skill: &Skill, aliases: Vec<String>) -> Value {
     let mut metadata = json!({
         "name": skill.name,
         "qualifiedName": qualified_name(skill),
@@ -193,7 +245,6 @@ fn skill_metadata(skill: &Skill) -> Value {
         "source": skill.source,
         "enabled": skill.enabled,
     });
-    let aliases = skill_aliases(skill);
     if !aliases.is_empty() {
         metadata["aliases"] = json!(aliases);
     }
@@ -238,6 +289,20 @@ fn skill_aliases(skill: &Skill) -> Vec<String> {
     aliases
 }
 
+fn skill_aliases_for(skill: &Skill, skills: &[Skill]) -> Vec<String> {
+    let mut aliases = Vec::new();
+    if skill.group.as_deref() == Some("pstack") {
+        aliases.push(format!("pstack-plugin:{}", skill.name));
+        if !skills
+            .iter()
+            .any(|other| other.group.is_none() && other.name == skill.name)
+        {
+            aliases.push(skill.name.clone());
+        }
+    }
+    aliases
+}
+
 impl Discovery {
     pub fn mcp_servers(&self) -> &[McpServerConfig] {
         &self.mcp_servers
@@ -257,7 +322,7 @@ impl Discovery {
             .map(|skill| SkillCatalogEntry {
                 name: skill.name.clone(),
                 qualified_name: qualified_name(skill),
-                aliases: skill_aliases(skill),
+                aliases: skill_aliases_for(skill, &self.skills),
                 description: skill.description.clone(),
                 source: skill.source.clone(),
                 group: skill.group.clone(),
@@ -274,6 +339,7 @@ impl Discovery {
                 path: skill.path.clone(),
                 name: skill.name.clone(),
                 qualified_name: qualified_name(skill),
+                location: skill.location.clone(),
                 source: skill.source.clone(),
                 group: skill.group.clone(),
             })
@@ -367,6 +433,22 @@ impl Discovery {
     }
 
     fn resolve_skill(&self, reference: &str) -> Result<&Skill, String> {
+        if !reference.contains(':') {
+            let short = self
+                .skills
+                .iter()
+                .filter(|skill| skill.name == reference)
+                .collect::<Vec<_>>();
+            match short.as_slice() {
+                [skill] => return Ok(skill),
+                [] => {}
+                _ => {
+                    return Err(format!(
+                        "skill {reference:?} is ambiguous; use its qualified name"
+                    ));
+                }
+            }
+        }
         if let Some(skill) = self
             .skills
             .iter()
@@ -374,25 +456,14 @@ impl Discovery {
         {
             return Ok(skill);
         }
-        if let Some(skill) = self
-            .skills
-            .iter()
-            .find(|skill| skill_aliases(skill).iter().any(|alias| alias == reference))
-        {
+        if let Some(skill) = self.skills.iter().find(|skill| {
+            skill_aliases_for(skill, &self.skills)
+                .iter()
+                .any(|alias| alias == reference)
+        }) {
             return Ok(skill);
         }
-        let short = self
-            .skills
-            .iter()
-            .filter(|skill| skill.name == reference)
-            .collect::<Vec<_>>();
-        match short.as_slice() {
-            [skill] => Ok(skill),
-            [] => Err(format!("skill {reference:?} was not found")),
-            _ => Err(format!(
-                "skill {reference:?} is ambiguous; use its qualified name"
-            )),
-        }
+        Err(format!("skill {reference:?} was not found"))
     }
 
     pub fn plugin_names(&self) -> Vec<String> {
@@ -418,14 +489,32 @@ impl Discovery {
     pub fn retain_selected(&mut self, names: &[String]) {
         let requested: BTreeSet<&str> = names.iter().map(String::as_str).collect();
         let mut matched = BTreeSet::<String>::new();
-        self.skills.retain(|skill| {
-            if requested.contains(skill.name.as_str()) {
+        for skill in &self.skills {
+            if requested.contains(skill.name.as_str())
+                || requested.contains(qualified_name(skill).as_str())
+                || skill_aliases_for(skill, &self.skills)
+                    .iter()
+                    .any(|alias| requested.contains(alias.as_str()))
+            {
                 matched.insert(skill.name.clone());
-                true
-            } else {
-                false
+                matched.insert(qualified_name(skill));
+                matched.extend(skill_aliases_for(skill, &self.skills));
             }
-        });
+        }
+        let retained = self
+            .skills
+            .iter()
+            .filter(|skill| {
+                requested.contains(skill.name.as_str())
+                    || requested.contains(qualified_name(skill).as_str())
+                    || skill_aliases_for(skill, &self.skills)
+                        .iter()
+                        .any(|alias| requested.contains(alias.as_str()))
+            })
+            .map(qualified_name)
+            .collect::<BTreeSet<_>>();
+        self.skills
+            .retain(|skill| retained.contains(&qualified_name(skill)));
         self.plugins.retain(|name| {
             if requested.contains(name.as_str()) {
                 matched.insert(name.clone());
@@ -492,8 +581,11 @@ impl Discovery {
                 continue;
             }
             catalog.push_str(
-                &serde_json::to_string(&skill_metadata(skill))
-                    .map_err(|error| format!("cannot serialize skill catalog: {error}"))?,
+                &serde_json::to_string(&skill_metadata(
+                    skill,
+                    skill_aliases_for(skill, &self.skills),
+                ))
+                .map_err(|error| format!("cannot serialize skill catalog: {error}"))?,
             );
             catalog.push('\n');
         }
@@ -527,6 +619,7 @@ pub struct SkillPathRecord {
     pub path: PathBuf,
     pub name: String,
     pub qualified_name: String,
+    pub location: String,
     pub source: String,
     pub group: Option<String>,
 }

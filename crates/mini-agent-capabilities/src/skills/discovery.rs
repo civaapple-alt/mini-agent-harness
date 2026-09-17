@@ -36,6 +36,7 @@ pub(super) fn discover_skill_root(
             options.source,
             options.group,
             options.enabled,
+            options.location_prefix,
         ) {
             Ok(skill) => insert_skill(skill, options.overrides, skills, diagnostics),
             Err(error) => diagnostics.push(error),
@@ -49,13 +50,14 @@ fn insert_skill(
     skills: &mut BTreeMap<String, Skill>,
     diagnostics: &mut Vec<String>,
 ) {
-    if skills.len() >= MAX_DISCOVERED_SKILLS && !skills.contains_key(&skill.name) {
+    let key = super::qualified_name(&skill);
+    if skills.len() >= MAX_DISCOVERED_SKILLS && !skills.contains_key(&key) {
         diagnostics.push(format!(
             "skill limit reached ({MAX_DISCOVERED_SKILLS}); remaining skills were skipped"
         ));
         return;
     }
-    if let Some(existing) = skills.get(&skill.name) {
+    if let Some(existing) = skills.get(&key) {
         diagnostics.push(format!(
             "extension {:?} from {} was shadowed by {}",
             skill.name,
@@ -74,7 +76,7 @@ fn insert_skill(
             return;
         }
     }
-    skills.insert(skill.name.clone(), skill);
+    skills.insert(key, skill);
 }
 
 fn parse_instruction(
@@ -84,6 +86,7 @@ fn parse_instruction(
     source: &str,
     group: Option<&str>,
     enabled: bool,
+    location_prefix: Option<&str>,
 ) -> Result<Skill, String> {
     let path = path
         .canonicalize()
@@ -136,11 +139,14 @@ fn parse_instruction(
         .into_iter()
         .map(|dependency| parse_skill_dependency(dependency, &path))
         .collect::<Result<Vec<_>, _>>()?;
-    let location = path
-        .strip_prefix(workspace)
-        .unwrap_or(&path)
-        .to_string_lossy()
-        .replace('\\', "/");
+    let location = location_prefix
+        .map(|prefix| format!("{prefix}/{}/SKILL.md", metadata.name))
+        .unwrap_or_else(|| {
+            path.strip_prefix(workspace)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        });
     Ok(Skill {
         name: metadata.name,
         description,
@@ -160,7 +166,7 @@ pub(super) fn bounded_catalog(
     let mut catalog = Vec::new();
     let mut bytes = 0;
     for skill in skills {
-        let record_bytes = serde_json::to_string(&skill_metadata(&skill))
+        let record_bytes = serde_json::to_string(&skill_metadata(&skill, skill_aliases(&skill)))
             .expect("skill catalog metadata must serialize")
             .len()
             + 1;

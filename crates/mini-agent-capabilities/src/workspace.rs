@@ -267,7 +267,49 @@ impl Workspace {
                 "path must be relative, remain in the workspace, and avoid .git".to_string(),
             ));
         }
-        Ok(self.root.join(path))
+        let workspace_candidate = self.root.join(path);
+        if workspace_candidate.exists() {
+            return Ok(workspace_candidate);
+        }
+        if let Some(skill_candidate) = self.skill_alias_path(path) {
+            return Ok(skill_candidate);
+        }
+        Ok(workspace_candidate)
+    }
+
+    /// Resolve the controlled logical locations exposed in Skill metadata to
+    /// an already-authorized global Skill root. This keeps physical user
+    /// paths out of model-visible metadata without making `read_file` guess
+    /// across arbitrary directories.
+    fn skill_alias_path(&self, path: &Path) -> Option<PathBuf> {
+        let home = std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(PathBuf::from)?;
+        let raw = path.to_string_lossy().replace('\\', "/");
+        let raw = raw.strip_prefix("./").unwrap_or(&raw);
+        for (logical, actual) in [
+            (".mini-agent/skills", home.join(".mini-agent/skills")),
+            (".agents/skills", home.join(".agents/skills")),
+        ] {
+            let Some(rest) = raw.strip_prefix(logical) else {
+                continue;
+            };
+            if !rest.is_empty() && !rest.starts_with('/') {
+                continue;
+            }
+            let candidate = actual.join(rest.trim_start_matches('/'));
+            let Ok(canonical) = candidate.canonicalize() else {
+                continue;
+            };
+            if self
+                .skill_read_roots
+                .iter()
+                .any(|root| canonical.starts_with(root))
+            {
+                return Some(canonical);
+            }
+        }
+        None
     }
 
     fn is_living_plan(&self, path: &Path) -> bool {

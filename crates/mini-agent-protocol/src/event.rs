@@ -19,6 +19,8 @@ pub enum Event {
         prompt: String,
     },
     SkillsLoaded {
+        #[serde(default)]
+        phase: SkillLoadPhase,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         activation: Option<String>,
         skills: Vec<SkillLoadRecord>,
@@ -107,6 +109,14 @@ pub struct SkillLoadRecord {
     pub group: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillLoadPhase {
+    Started,
+    #[default]
+    Loaded,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", content = "detail", rename_all = "snake_case")]
 pub enum RunFailure {
@@ -148,8 +158,19 @@ pub trait EventSink {
     fn emit(&mut self, event: EventEnvelope);
 
     /// Gives a host-backed sink a sequence-safe point to publish derived
-    /// observation events immediately before a terminal turn event.
+    /// observation events immediately before an event is delivered.
     fn before_event(
+        &mut self,
+        _thread_id: &ThreadId,
+        _turn_id: &TurnId,
+        _event: &Event,
+        _next_sequence: &mut u64,
+    ) {
+    }
+
+    /// Gives a host-backed sink a sequence-safe point to publish derived
+    /// observation events immediately after an event has been delivered.
+    fn after_event(
         &mut self,
         _thread_id: &ThreadId,
         _turn_id: &TurnId,

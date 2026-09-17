@@ -424,6 +424,12 @@ impl<S: EventSink> Observer for EnvelopeObserver<'_, S> {
         );
         envelope.item_id = item_id;
         self.sink.emit(envelope);
+        self.sink.after_event(
+            &self.thread_id,
+            &self.turn_id,
+            event,
+            &mut self.next_sequence,
+        );
     }
 }
 

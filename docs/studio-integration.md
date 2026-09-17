@@ -226,11 +226,21 @@ body limit.
 
 The ordered event stream reports `skill_group_activated` for `+` and
 `skills_loaded` for explicit or successfully observed on-demand Skill reads.
-The latter is aggregated per Turn and contains only Skill names, qualified
-names, source, and group. `skills_load_failed` contains only the bounded error
-code. These events are replayable through `GET /api/threads/{thread_id}/events`
+`skills_loaded` has `phase: "started"` before a recognized `SKILL.md` read and
+`phase: "loaded"` after success; old events without `phase` are treated as
+loaded. The event is deduplicated per Turn and contains only Skill names,
+qualified names, source, and group. `skills_load_failed` contains only the
+bounded error code. These events are replayable through
+`GET /api/threads/{thread_id}/events`
 while the App Server runtime retains its bounded replay window; no Skill body or
 filesystem path is sent to WebStudio.
+
+The runtime catalog also includes direct user Skills from
+`%USERPROFILE%/.mini-agent/skills` and `%USERPROFILE%/.agents/skills`, plus the
+synchronized builtin pstack group. Normal Turns receive metadata for all
+enabled entries and may read a matching `SKILL.md` on demand. References,
+scripts, assets, and other files below that enabled Skill root remain ordinary
+read-only `read_file` resources and do not create separate skill events.
 
 Plan and Goal are Thread-owned App Server workflows:
 

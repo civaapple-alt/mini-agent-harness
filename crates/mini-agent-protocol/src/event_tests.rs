@@ -45,6 +45,7 @@ fn tool_finished_round_trips_structured_outcome() {
 #[test]
 fn skill_activation_events_are_backward_compatible_and_namespaced() {
     let event = Event::SkillsLoaded {
+        phase: super::SkillLoadPhase::Loaded,
         activation: Some("explicit".to_string()),
         skills: vec![super::SkillLoadRecord {
             name: "how".to_string(),
@@ -55,12 +56,18 @@ fn skill_activation_events_are_backward_compatible_and_namespaced() {
     };
     let encoded = serde_json::to_value(&event).unwrap();
     assert_eq!(encoded["activation"], "explicit");
+    assert_eq!(encoded["phase"], "loaded");
     assert_eq!(encoded["skills"][0]["qualifiedName"], "pstack:how");
-    assert!(
-        serde_json::from_value::<Event>(serde_json::json!({
-            "type": "skills_loaded",
-            "skills": []
-        }))
-        .is_ok()
-    );
+    let legacy = serde_json::from_value::<Event>(serde_json::json!({
+        "type": "skills_loaded",
+        "skills": []
+    }))
+    .unwrap();
+    assert!(matches!(
+        legacy,
+        Event::SkillsLoaded {
+            phase: super::SkillLoadPhase::Loaded,
+            ..
+        }
+    ));
 }

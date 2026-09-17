@@ -24,7 +24,7 @@ pub(super) fn discover_plugins(
                 continue;
             }
         };
-        load_plugin(workspace, &plugin_root, "installed", skills, discovery);
+        load_plugin(workspace, &plugin_root, "plugin", skills, discovery);
     }
 }
 
@@ -74,6 +74,7 @@ fn load_plugin(
             group: None,
             enabled: true,
             overrides: false,
+            location_prefix: None,
         },
         skills,
         &mut discovery.diagnostics,

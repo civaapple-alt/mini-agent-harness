@@ -260,9 +260,11 @@ exclusive; when the requested cursor is older than the retained window,
 `thread/items/list` before accepting the replay as complete.
 
 When `selectedSkills` is present, the worker resolves names against the
-effective catalog before model execution. It emits `skills_loaded` after
-`turn_started` and before `run_started` when every selected body loads. Records
-contain `name`, `qualifiedName`, `source`, and optional `group`. Namespaced
+effective catalog before model execution. It emits `skills_loaded` with
+`phase: "started"` and then `phase: "loaded"` after `turn_started` and before
+`run_started` when every selected body loads. Records contain `name`,
+`qualifiedName`, `source`, and optional `group`. A missing `phase` in a legacy
+event is interpreted as `loaded`. Namespaced
 `pstack:how` is canonical; `pstack-plugin:how` is a compatibility alias and
 `how` is accepted when it is unambiguous. If validation or body loading fails,
 the worker emits `skills_load_failed` with the selected names and bounded
@@ -271,15 +273,17 @@ the worker emits `skills_load_failed` with the selected names and bounded
 When `workflow` activates a Skill Group, the worker emits
 `skill_group_activated` and adds a bounded metadata-first instruction for that
 turn. It does not read every body or invoke a routing model. The model can read
-matching `SKILL.md` files with `read_file`; Host recognizes successful reads of
-trusted Skill paths and emits one aggregated `skills_loaded` event with
-`activation: "group_auto"` before `turn_finished`. Explicit Skill activation
-uses `activation: "explicit"`. The event carries the same Thread/Turn
-identity, Core sequence, and bounded `itemId` as other `turn/event`
-notifications.
+matching `SKILL.md` files with `read_file`; Host recognizes the first read of
+each trusted Skill path and emits `skills_loaded` with `phase: "started"` before
+the tool read and `phase: "loaded"` after a successful read. Explicit Skill
+activation uses `activation: "explicit"`; ordinary metadata-first Turns use
+`activation: "on_demand"`. The event carries the same Thread/Turn identity,
+Core sequence, and bounded `itemId` as other `turn/event` notifications.
 
-启用 Skill 的根目录由 Host 作为受信任的只读根加入工具 Workspace。模型可以在
-需要时用现有 `read_file` 查看该 Skill 目录内的关联文档、脚本源码或其他文本
+启用 Skill 的根目录由 Host 作为受信任的只读根加入工具 Workspace。全局 Skill 在
+metadata 中使用受控的 `.mini-agent/skills/...` 或 `.agents/skills/...` 逻辑位置，
+Host 会把它解析到已授权的实际根目录；模型可以在需要时用现有 `read_file` 查看
+该 Skill 目录内的关联文档、脚本源码或其他文本
 资源；App Server 不递归预加载这些文件，也不把资源路径加入 capability manifest。
 当前 Turn 的 Skill 目录读取结果合计不超过 64 KiB。这个授权不改变写入、Shell
 执行或审批边界。
@@ -377,7 +381,7 @@ emitted on one ordered runtime stream.
 | Notification | Payload highlights | Use |
 | --- | --- | --- |
 | `turn/event` | `threadId`, optional `turnId`, Core `sequence`, bounded `items`, `event` | Ordered Core execution events, including turn settlement. |
-| `turn/event` with `skills_loaded` | `skills: [{name, source, group?}]` | Reports the explicit skills loaded for the current turn. |
+| `turn/event` with `skills_loaded` | `phase`, `activation`, `skills: [{name, qualifiedName?, source, group?}]` | Reports a Skill body read starting or completing for the current turn. Missing `phase` means `loaded`. |
 | `turn/event` with `skills_load_failed` | `skills: [name]`, `reason_code` | Reports a bounded activation failure before model execution. |
 | `turn/event` with `skill_group_activated` | `group`, `source` | Reports a turn-local Skill Group workflow activation. |
 | `item/started` | `threadId`, `turnId`, `item`, `startedAtMs` | One ThreadItem becomes visible. |

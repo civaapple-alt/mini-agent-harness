@@ -259,9 +259,22 @@ tools. `web_fetch` and MCP tools are explicit extensions; `write_file` and
 
 ### Skills
 
-Install one standards-strict Agent Skill at
-`.agents/skills/<skill>/SKILL.md`. Only workspace-local entries are discovered,
-and the directory name must match the bounded YAML `name` field.
+Install one standards-strict Agent Skill at any supported root below. Only
+direct child directories are scanned, and the directory name must match the
+bounded YAML `name` field.
+
+| Priority | Root | Public source and semantics |
+| --- | --- | --- |
+| 1 | `<workspace>/.agents/skills/<skill>/SKILL.md` | `project` |
+| 2 | `%USERPROFILE%/.agents/skills/<skill>/SKILL.md` | `user` Agent Skills |
+| 3 | `%USERPROFILE%/.mini-agent/skills/<skill>/SKILL.md` | `user` Mini Agent Skill |
+| 4 | `%USERPROFILE%/.mini-agent/skills/builtin/<group>/<skill>/SKILL.md` | `builtin`, grouped such as `pstack` |
+| 5 | `<workspace>/.agents/plugins/<plugin>/skills/<skill>/SKILL.md` | `plugin` |
+
+Higher-priority unqualified entries replace lower-priority entries with the
+same name and discovery diagnostics record the shadowing. A grouped Skill keeps
+its qualified name, such as `pstack:how`; it can coexist with an unqualified
+`how`, but the short form is rejected as ambiguous.
 
 WebStudio synchronizes bundled skill groups to the per-user directory
 `%USERPROFILE%/.mini-agent/skills/builtin/<group>`. The `pstack` group is enabled
@@ -271,9 +284,10 @@ An empty value disables every built-in group for that project.
 
 The environment variable is a comma-separated list of group IDs. For example,
 `MINI_AGENT_BUILTIN_SKILL_GROUPS=pstack,team-review` enables two groups. The
-runtime discovers the builtin root, project skills, plugin skills, and MCP
-configuration as separate sources. It exposes only bounded metadata in the
-capability manifest. A selected skill body is read only for its current turn.
+runtime discovers the builtin root, both user Skill roots, project skills,
+plugin skills, and MCP configuration as separate sources. It exposes only
+bounded metadata in the capability manifest. A selected Skill body is read only
+for its current turn.
 Every new WebStudio project stores `pstack` in `builtin_skill_groups`; a
 historical project without the field also defaults to enabled. Removing
 `pstack` disables both `+ pstack` workflow activation and all pstack Skill

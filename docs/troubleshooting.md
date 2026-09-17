@@ -65,9 +65,13 @@ tools, and stores only its bounded verdict in the Goal workspace.
 
 ## A workspace skill or plugin is missing
 
-Only workspace-local `.agents/skills/<skill>/SKILL.md` entries and installed
-`.agents/plugins/<plugin>` packages are discovered. Check the bounded YAML name,
-plugin manifest, and workspace path.
+The runtime discovers project `.agents/skills/<skill>/SKILL.md`, user
+`%USERPROFILE%/.agents/skills/<skill>/SKILL.md`, user
+`%USERPROFILE%/.mini-agent/skills/<skill>/SKILL.md`, synchronized builtin groups,
+and installed `.agents/plugins/<plugin>` packages. Check the bounded YAML name,
+the expected direct-child layout, plugin manifest, and project path. If a Skill
+is shown in metadata but its `SKILL.md` cannot be read, check that its enabled
+root is present in the runtime's Skill read roots.
 
 ## An MCP server is not discovered
 

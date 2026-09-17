@@ -147,14 +147,7 @@ impl RuntimeConfig {
     }
 
     pub fn extra_read_roots(&self) -> Vec<PathBuf> {
-        let mut roots = self.extra_read_roots.clone();
-        if let Some(root) = mini_agent_capabilities::builtin_skill_root()
-            && root.is_dir()
-            && !roots.contains(&root)
-        {
-            roots.push(root);
-        }
-        roots
+        self.extra_read_roots.clone()
     }
 
     pub fn extra_write_roots(&self) -> Vec<PathBuf> {
