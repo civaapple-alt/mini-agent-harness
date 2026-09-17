@@ -13,7 +13,9 @@ use mini_agent_app_server_protocol::{
 use mini_agent_core::{SteeringMode, TurnResult};
 use mini_agent_protocol::{Event, EventEnvelope, EventSink, ModelUsage};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -107,6 +109,10 @@ struct ThreadListener {
     stopping: Arc<AtomicBool>,
     pending_finish: Option<EventEnvelope>,
     tool_arguments: Vec<(String, Value)>,
+    skill_paths: Vec<mini_agent_capabilities::SkillPathRecord>,
+    pending_skill_reads: BTreeMap<String, mini_agent_protocol::SkillLoadRecord>,
+    loaded_group_skills: Vec<mini_agent_protocol::SkillLoadRecord>,
+    group_auto_active: bool,
     tokens_used: u64,
 }
 
@@ -196,7 +202,7 @@ impl ThreadListener {
                     .as_ref()
                     .map(|turn_id| status::operation("turn", turn_id.as_str())),
             ),
-            Event::SkillsLoaded { .. } => (
+            Event::SkillGroupActivated { .. } | Event::SkillsLoaded { .. } => (
                 RuntimePhase::StartingTurn,
                 event
                     .turn_id
@@ -276,6 +282,23 @@ impl EventSink for ThreadListener {
     fn emit(&mut self, event: EventEnvelope) {
         self.update_status_for_event(&event);
         if matches!(&event.event, Event::ToolStarted { .. }) {
+            if let Event::ToolStarted { call } = &event.event
+                && self.group_auto_active
+                && call.name == "read_file"
+                && let Some(path) = call.arguments.get("path").and_then(Value::as_str)
+                && let Ok(path) = PathBuf::from(path).canonicalize()
+                && let Some(skill) = self.skill_paths.iter().find(|skill| skill.path == path)
+            {
+                self.pending_skill_reads.insert(
+                    call.id.clone(),
+                    mini_agent_protocol::SkillLoadRecord {
+                        name: skill.name.clone(),
+                        qualified_name: Some(skill.qualified_name.clone()),
+                        source: skill.source.clone(),
+                        group: skill.group.clone(),
+                    },
+                );
+            }
             for item in ThreadItem::from_event(&event) {
                 if let ThreadItem::ToolCall { id, arguments, .. } = item {
                     self.tool_arguments.push((id, arguments));
@@ -287,11 +310,51 @@ impl EventSink for ThreadListener {
             | Event::ContextCompactionFinished { usage, .. } => self.record_usage(*usage),
             _ => {}
         }
+        if let Event::ToolFinished {
+            call_id,
+            is_error: false,
+            ..
+        } = &event.event
+            && let Some(skill) = self.pending_skill_reads.remove(call_id)
+            && !self
+                .loaded_group_skills
+                .iter()
+                .any(|loaded| loaded.qualified_name == skill.qualified_name)
+        {
+            self.loaded_group_skills.push(skill);
+        }
         if matches!(event.event, Event::TurnFinished { .. }) {
             self.pending_finish = Some(event);
         } else {
             self.send_event(event);
         }
+    }
+
+    fn before_event(
+        &mut self,
+        thread_id: &ThreadId,
+        turn_id: &TurnId,
+        event: &Event,
+        next_sequence: &mut u64,
+    ) {
+        if !matches!(event, Event::TurnFinished { .. }) {
+            return;
+        }
+        if self.loaded_group_skills.is_empty() {
+            return;
+        }
+        let mut envelope = EventEnvelope::new(
+            thread_id.clone(),
+            Some(turn_id.clone()),
+            *next_sequence,
+            Event::SkillsLoaded {
+                activation: Some("group_auto".to_string()),
+                skills: std::mem::take(&mut self.loaded_group_skills),
+            },
+        );
+        envelope.item_id = Some(format!("{}:skills", turn_id.as_str()));
+        self.send_event(envelope);
+        *next_sequence = (*next_sequence).saturating_add(1);
     }
 }
 
@@ -571,6 +634,7 @@ pub(super) async fn worker_loop<M>(
                         }
                         thread.harness_mut().replace_config(config);
                     }
+                    let workflow = input.workflow.clone();
                     let mut selected_skills = Vec::new();
                     for name in input
                         .selected_skills
@@ -583,7 +647,22 @@ pub(super) async fn worker_loop<M>(
                     }
                     let too_many_selected_skills =
                         input.selected_skills.len() > mini_agent_capabilities::MAX_SELECTED_SKILLS;
-                    let (loaded_skills, skill_error) = if too_many_selected_skills {
+                    let group_error = workflow.as_ref().and_then(|workflow| {
+                        let result = match workflow.kind {
+                            mini_agent_protocol::TurnWorkflowKind::SkillGroup => runtime
+                                .as_ref()
+                                .and_then(|state| state.management.skill_discovery.as_ref())
+                                .ok_or_else(|| {
+                                    "skill catalog is unavailable for this runtime".to_string()
+                                })
+                                .and_then(|discovery| discovery.activate_skill_group(&workflow.id)),
+                        };
+                        result.err()
+                    });
+                    let group_valid = group_error.is_none();
+                    let (loaded_skills, skill_error) = if let Some(error) = group_error {
+                        (Vec::new(), Some(error))
+                    } else if too_many_selected_skills {
                         (
                             Vec::new(),
                             Some(format!(
@@ -606,21 +685,30 @@ pub(super) async fn worker_loop<M>(
                             Err(error) => (Vec::new(), Some(error)),
                         }
                     };
-                    let skill_prelude = if let Some(error) = skill_error.as_ref() {
-                        vec![Event::SkillsLoadFailed {
+                    let mut skill_prelude = workflow
+                        .as_ref()
+                        .filter(|_| group_valid)
+                        .map(|workflow| {
+                            vec![Event::SkillGroupActivated {
+                                group: workflow.id.clone(),
+                                source: "builtin".to_string(),
+                            }]
+                        })
+                        .unwrap_or_default();
+                    if let Some(error) = skill_error.as_ref() {
+                        skill_prelude.push(Event::SkillsLoadFailed {
+                            activation: Some("explicit".to_string()),
                             skills: selected_skills.clone(),
                             reason_code: if error.contains("read") || error.contains("file") {
                                 "body_read_failed".to_string()
                             } else {
                                 "activation_rejected".to_string()
                             },
-                        }]
-                    } else if loaded_skills.is_empty() {
-                        Vec::new()
-                    } else {
+                        });
+                    } else if !loaded_skills.is_empty() {
                         let body = loaded_skills
                             .iter()
-                            .map(|skill| format!("### {}\n{}", skill.name, skill.body))
+                            .map(|skill| format!("### {}\n{}", skill.qualified_name, skill.body))
                             .collect::<Vec<_>>()
                             .join("\n\n");
                         let mut config = thread.harness().config().clone();
@@ -629,17 +717,30 @@ pub(super) async fn worker_loop<M>(
                             config.system_prompt, body
                         );
                         thread.harness_mut().replace_config(config);
-                        vec![Event::SkillsLoaded {
+                        skill_prelude.push(Event::SkillsLoaded {
+                            activation: Some("explicit".to_string()),
                             skills: loaded_skills
                                 .iter()
                                 .map(|skill| mini_agent_protocol::SkillLoadRecord {
                                     name: skill.name.clone(),
+                                    qualified_name: Some(skill.qualified_name.clone()),
                                     source: skill.source.clone(),
                                     group: skill.group.clone(),
                                 })
                                 .collect(),
-                        }]
-                    };
+                        });
+                    }
+                    if workflow.is_some() && skill_error.is_none() {
+                        let mut config = thread.harness().config().clone();
+                        config.system_prompt = format!(
+                            "{}\n\n## Active skill group: pstack\n\
+                             Use the available pstack Skill metadata to choose relevant \
+                             instructions, then read matching SKILL.md files with read_file \
+                             before acting. Do not load unrelated Skill bodies.",
+                            config.system_prompt
+                        );
+                        thread.harness_mut().replace_config(config);
+                    }
                     let started_at_ms = timestamp_ms();
                     let prompt = input.text.clone();
                     let previous_message_count = thread.harness().messages().len();
@@ -656,6 +757,12 @@ pub(super) async fn worker_loop<M>(
                     }
                     let mut input = TurnInput::new(TurnInputMode::Start, input.text);
                     input.selected_skills = selected_skills;
+                    input.workflow = workflow;
+                    let skill_paths = runtime
+                        .as_ref()
+                        .and_then(|state| state.management.skill_discovery.as_ref())
+                        .map(|discovery| discovery.skill_path_records())
+                        .unwrap_or_default();
                     let mut sink = ThreadListener {
                         events: events.clone(),
                         notifications: notifications.clone(),
@@ -665,6 +772,10 @@ pub(super) async fn worker_loop<M>(
                         stopping: stopping.clone(),
                         pending_finish: None,
                         tool_arguments: Vec::new(),
+                        skill_paths,
+                        pending_skill_reads: BTreeMap::new(),
+                        loaded_group_skills: Vec::new(),
+                        group_auto_active: input.workflow.is_some() && skill_error.is_none(),
                         tokens_used: 0,
                     };
                     let mut turn = Box::pin(thread.run_turn_with_events_and_preflight(

@@ -385,10 +385,18 @@ struct EnvelopeObserver<'a, S> {
 
 impl<S: EventSink> Observer for EnvelopeObserver<'_, S> {
     fn observe(&mut self, event: &Event) {
+        self.sink.before_event(
+            &self.thread_id,
+            &self.turn_id,
+            event,
+            &mut self.next_sequence,
+        );
         let sequence = self.next_sequence;
         self.next_sequence = self.next_sequence.saturating_add(1);
         let item_id = match event {
-            Event::SkillsLoaded { .. } | Event::SkillsLoadFailed { .. } => {
+            Event::SkillsLoaded { .. }
+            | Event::SkillsLoadFailed { .. }
+            | Event::SkillGroupActivated { .. } => {
                 Some(format!("{}:skills", self.turn_id.as_str()))
             }
             Event::ModelStarted { step, .. } => {

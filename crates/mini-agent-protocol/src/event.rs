@@ -19,11 +19,19 @@ pub enum Event {
         prompt: String,
     },
     SkillsLoaded {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        activation: Option<String>,
         skills: Vec<SkillLoadRecord>,
     },
     SkillsLoadFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        activation: Option<String>,
         skills: Vec<String>,
         reason_code: String,
+    },
+    SkillGroupActivated {
+        group: String,
+        source: String,
     },
     RunStarted {
         prompt: String,
@@ -92,6 +100,8 @@ pub enum Event {
 #[serde(rename_all = "camelCase")]
 pub struct SkillLoadRecord {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualified_name: Option<String>,
     pub source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
@@ -136,6 +146,17 @@ pub trait Observer {
 /// Receives ordered events emitted by a core Thread.
 pub trait EventSink {
     fn emit(&mut self, event: EventEnvelope);
+
+    /// Gives a host-backed sink a sequence-safe point to publish derived
+    /// observation events immediately before a terminal turn event.
+    fn before_event(
+        &mut self,
+        _thread_id: &ThreadId,
+        _turn_id: &TurnId,
+        _event: &Event,
+        _next_sequence: &mut u64,
+    ) {
+    }
 }
 
 #[cfg(test)]

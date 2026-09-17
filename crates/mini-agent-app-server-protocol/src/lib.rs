@@ -725,6 +725,10 @@ pub struct BuiltinSkillGroup {
 #[serde(rename_all = "camelCase")]
 pub struct AvailableSkill {
     pub name: String,
+    #[serde(default)]
+    pub qualified_name: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
     pub description: String,
     pub source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

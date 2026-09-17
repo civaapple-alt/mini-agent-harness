@@ -203,6 +203,35 @@ maps these operations to `turn/start`, `turn/read`, `turn/steer`,
 `turn/interrupt`, and the ordered notification stream described in
 [`app-server.md`](app-server.md).
 
+### pstack plugin and Skill entry points
+
+Every new WebStudio Project enables the bundled `pstack` group by default.
+The control-panel Skill tab changes `builtin_skill_groups` for the selected
+Project; changing it while a Turn or approval is active returns `409` and
+does not mutate the runtime. A successful change restarts only that Project's
+App Server and refreshes `GET /api/skills?project_id=...`.
+
+The two composer entry points have different scopes:
+
+| Input | Wire field | Scope |
+| --- | --- | --- |
+| `+ pstack 重构模块` or the plus-menu item | `workflow` | Activates the pstack Skill Group for this Turn. It contributes metadata only; the model selects and reads relevant Skills on demand. |
+| `$pstack:architect 重构模块` | `selectedSkills: ["pstack:architect"]` | Explicitly loads that Skill body for this Turn before model execution. |
+| `$pstack-plugin:how` / `$how` | canonicalized to `pstack:how` when valid | Codex-compatible alias and unqualified convenience form. |
+
+The cleaned prompt, `selectedSkills`, and `workflow` are preserved in queued
+messages. The Gateway and browser only send names; Host resolves the effective
+catalog, trusted Skill paths, enabled group, eight-Skill limit, and 32 KiB
+body limit.
+
+The ordered event stream reports `skill_group_activated` for `+` and
+`skills_loaded` for explicit or successfully observed on-demand Skill reads.
+The latter is aggregated per Turn and contains only Skill names, qualified
+names, source, and group. `skills_load_failed` contains only the bounded error
+code. These events are replayable through `GET /api/threads/{thread_id}/events`
+while the App Server runtime retains its bounded replay window; no Skill body or
+filesystem path is sent to WebStudio.
+
 Plan and Goal are Thread-owned App Server workflows:
 
 | HTTP operation | App Server operation | Meaning |

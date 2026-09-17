@@ -97,6 +97,7 @@ graph LR
 
 ### Implemented
 
+- [pstack 插件级与命名空间 Skill 双入口](implemented/feature/2026-09-17-pstack-plugin-and-namespaced-skill.zh.md)
 - [Builtin Skill 组与 Turn 级显式激活](implemented/feature/2026-09-17-builtin-skill-groups-and-explicit-activation.zh.md)
 - [Web Cookbook 恢复与投影契约](implemented/architecture/2026-09-15-web-cookbook-recovery-and-projection.zh.md)
 - [Web Cookbook Tool Outcome 契约](implemented/architecture/2026-09-15-web-cookbook-tool-outcome-contract.zh.md)

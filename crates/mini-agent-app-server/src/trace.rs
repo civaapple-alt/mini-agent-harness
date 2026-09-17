@@ -141,6 +141,7 @@ fn event_name(event: &Event) -> &'static str {
         Event::TurnStarted { .. } => "turn_started",
         Event::SkillsLoaded { .. } => "skills_loaded",
         Event::SkillsLoadFailed { .. } => "skills_load_failed",
+        Event::SkillGroupActivated { .. } => "skill_group_activated",
         Event::RunStarted { .. } => "run_started",
         Event::ModelStarted { .. } => "model_started",
         Event::AssistantReasoningDelta { .. } => "assistant_reasoning_delta",
@@ -178,6 +179,7 @@ fn output_bytes(event: &Event) -> Option<usize> {
         | Event::TurnStarted { .. }
         | Event::SkillsLoaded { .. }
         | Event::SkillsLoadFailed { .. }
+        | Event::SkillGroupActivated { .. }
         | Event::RunStarted { .. }
         | Event::ModelStarted { .. }
         | Event::ContextCompactionStarted { .. }

@@ -63,6 +63,7 @@ fn activates_typed_skill_dependencies_without_enabling_providers() {
         activation,
         SkillActivation {
             name: "review".to_string(),
+            qualified_name: "review".to_string(),
             location: ".agents/skills/review/SKILL.md".to_string(),
             dependencies: vec![
                 SkillDependency::BuiltinTool("read_file".to_string()),
@@ -262,6 +263,8 @@ fn catalogs_and_loads_selected_skills_with_bounded_activation() {
         discovery.skill_catalog(),
         vec![SkillCatalogEntry {
             name: "review".to_string(),
+            qualified_name: "review".to_string(),
+            aliases: Vec::new(),
             description: "Review Rust changes.".to_string(),
             source: "project".to_string(),
             group: None,
@@ -272,12 +275,76 @@ fn catalogs_and_loads_selected_skills_with_bounded_activation() {
         .load_skills(&["review".to_string(), "review".to_string()])
         .unwrap();
     assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].qualified_name, "review");
     assert_eq!(loaded[0].body, "REVIEW BODY\n");
 
     let too_many = (0..=MAX_SELECTED_SKILLS)
         .map(|index| format!("skill-{index}"))
         .collect::<Vec<_>>();
     assert!(discovery.load_skills(&too_many).is_err());
+    remove_test_root(&root);
+}
+
+#[test]
+fn rejects_pstack_namespace_when_the_builtin_group_is_not_enabled() {
+    let root = test_root();
+    write_skill(
+        &root.join(".agents/skills/how"),
+        "how",
+        "Explain the selected subsystem.",
+        "HOW BODY",
+    );
+    let discovery = discover_with_builtin_groups(&root, &[]);
+    let loaded = discovery.load_skills(&["how".to_string()]).unwrap();
+    assert_eq!(loaded[0].qualified_name, "how");
+    assert!(discovery.load_skills(&["pstack:how".to_string()]).is_err());
+    assert!(
+        discovery
+            .load_skills(&["pstack-plugin:how".to_string()])
+            .is_err()
+    );
+    remove_test_root(&root);
+}
+
+#[test]
+fn loads_canonical_and_codex_aliases_once_for_a_pstack_skill() {
+    let root = test_root();
+    let path = root.join("how/SKILL.md");
+    write_skill(
+        &root.join("how"),
+        "how",
+        "Explain the selected subsystem.",
+        "HOW BODY",
+    );
+    let discovery = Discovery {
+        skills: vec![Skill {
+            name: "how".to_string(),
+            description: "Explain the selected subsystem.".to_string(),
+            location: "how/SKILL.md".to_string(),
+            source: "builtin".to_string(),
+            group: Some("pstack".to_string()),
+            enabled: true,
+            path,
+            dependencies: Vec::new(),
+        }],
+        ..Discovery::default()
+    };
+
+    let catalog = discovery.skill_catalog();
+    assert_eq!(catalog[0].qualified_name, "pstack:how");
+    assert_eq!(
+        catalog[0].aliases,
+        ["pstack-plugin:how".to_string(), "how".to_string()]
+    );
+    let loaded = discovery
+        .load_skills(&[
+            "pstack:how".to_string(),
+            "pstack-plugin:how".to_string(),
+            "how".to_string(),
+        ])
+        .unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].qualified_name, "pstack:how");
     remove_test_root(&root);
 }
 

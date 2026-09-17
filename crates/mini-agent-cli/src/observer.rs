@@ -175,6 +175,7 @@ impl EventSink for RunObserver {
             Event::TurnStarted { .. }
             | Event::SkillsLoaded { .. }
             | Event::SkillsLoadFailed { .. }
+            | Event::SkillGroupActivated { .. }
             | Event::TurnFinished { .. }
             | Event::RunStarted { .. }
             | Event::ModelStarted { .. }
@@ -287,6 +288,7 @@ impl TerminalObserver {
             Event::TurnStarted { .. }
             | Event::SkillsLoaded { .. }
             | Event::SkillsLoadFailed { .. }
+            | Event::SkillGroupActivated { .. }
             | Event::TurnFinished { .. }
             | Event::RunStarted { .. }
             | Event::ModelResponded { .. }

@@ -106,6 +106,7 @@ Host tools add their own effect-side bounds before results reach core:
 | Goal verifier criteria | 32 KiB |
 | Goal verifier execution | 1 model step, 0 tool calls |
 | discovered skill or compatible plugin instructions | 64; 16 KiB combined metadata catalog |
+| explicitly activated Skill bodies | 8 Skills; 32 KiB combined per Turn |
 | skill, plugin, or MCP metadata file | 64 KiB |
 | MCP servers | 8 configured stdio or streamable HTTP servers |
 | MCP tools | 32 total; 16 KiB input schema per tool |

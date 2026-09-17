@@ -37,6 +37,27 @@ pub enum TurnInputMode {
     FollowUp,
 }
 
+/// A workflow activated for one turn without changing project configuration.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnWorkflow {
+    pub kind: TurnWorkflowKind,
+    pub id: String,
+    pub mode: TurnWorkflowMode,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnWorkflowKind {
+    SkillGroup,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnWorkflowMode {
+    Auto,
+}
+
 /// User input handed to the Thread runtime.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +66,8 @@ pub struct TurnInput {
     pub text: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<TurnWorkflow>,
 }
 
 /// Starts a protocol-visible Thread with a stable identity.
@@ -89,6 +112,7 @@ impl TurnInput {
             mode,
             text: text.into(),
             selected_skills: Vec::new(),
+            workflow: None,
         }
     }
 }

@@ -77,6 +77,7 @@ pub use skills::McpTransportConfig;
 pub use skills::SkillActivation;
 pub use skills::SkillCatalogEntry;
 pub use skills::SkillDependency;
+pub use skills::SkillPathRecord;
 pub use skills::builtin_skill_root;
 pub use skills::discover;
 pub use skills::discover_with_builtin_groups;

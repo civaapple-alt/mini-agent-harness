@@ -120,6 +120,7 @@ pub enum SkillDependency {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SkillActivation {
     pub name: String,
+    pub qualified_name: String,
     pub location: String,
     pub dependencies: Vec<SkillDependency>,
 }
@@ -186,11 +187,16 @@ pub fn builtin_skill_root() -> Option<PathBuf> {
 fn skill_metadata(skill: &Skill) -> Value {
     let mut metadata = json!({
         "name": skill.name,
+        "qualifiedName": qualified_name(skill),
         "description": skill.description,
         "location": skill.location,
         "source": skill.source,
         "enabled": skill.enabled,
     });
+    let aliases = skill_aliases(skill);
+    if !aliases.is_empty() {
+        metadata["aliases"] = json!(aliases);
+    }
     if let Some(group) = &skill.group {
         metadata["group"] = json!(group);
     }
@@ -215,6 +221,23 @@ fn skill_metadata(skill: &Skill) -> Value {
     metadata
 }
 
+fn qualified_name(skill: &Skill) -> String {
+    skill
+        .group
+        .as_deref()
+        .map(|group| format!("{group}:{}", skill.name))
+        .unwrap_or_else(|| skill.name.clone())
+}
+
+fn skill_aliases(skill: &Skill) -> Vec<String> {
+    let mut aliases = Vec::new();
+    if skill.group.as_deref() == Some("pstack") {
+        aliases.push(format!("pstack-plugin:{}", skill.name));
+        aliases.push(skill.name.clone());
+    }
+    aliases
+}
+
 impl Discovery {
     pub fn mcp_servers(&self) -> &[McpServerConfig] {
         &self.mcp_servers
@@ -233,6 +256,8 @@ impl Discovery {
             .iter()
             .map(|skill| SkillCatalogEntry {
                 name: skill.name.clone(),
+                qualified_name: qualified_name(skill),
+                aliases: skill_aliases(skill),
                 description: skill.description.clone(),
                 source: skill.source.clone(),
                 group: skill.group.clone(),
@@ -241,27 +266,61 @@ impl Discovery {
             .collect()
     }
 
+    pub fn skill_path_records(&self) -> Vec<SkillPathRecord> {
+        self.skills
+            .iter()
+            .filter(|skill| skill.enabled)
+            .map(|skill| SkillPathRecord {
+                path: skill.path.clone(),
+                name: skill.name.clone(),
+                qualified_name: qualified_name(skill),
+                source: skill.source.clone(),
+                group: skill.group.clone(),
+            })
+            .collect()
+    }
+
     /// Returns the bounded declaration for a named Skill without enabling any
     /// tool provider or reading the Skill body.
     pub fn activate_skill(&self, name: &str) -> Result<SkillActivation, String> {
-        let skill = self
-            .skills
-            .iter()
-            .find(|skill| skill.name == name && skill.enabled)
-            .ok_or_else(|| format!("skill {name:?} was not found"))?;
+        let skill = self.resolve_skill(name)?;
+        if !skill.enabled {
+            return Err(format!("skill {name:?} is disabled"));
+        }
         Ok(SkillActivation {
             name: skill.name.clone(),
+            qualified_name: qualified_name(skill),
             location: skill.location.clone(),
             dependencies: skill.dependencies.clone(),
         })
+    }
+
+    pub fn activate_skill_group(&self, group: &str) -> Result<(), String> {
+        if self
+            .skills
+            .iter()
+            .any(|skill| skill.group.as_deref() == Some(group) && skill.enabled)
+        {
+            Ok(())
+        } else if self
+            .skills
+            .iter()
+            .any(|skill| skill.group.as_deref() == Some(group))
+        {
+            Err(format!("skill group {group:?} is disabled"))
+        } else {
+            Err(format!("skill group {group:?} was not found"))
+        }
     }
 
     pub fn load_skills(&self, names: &[String]) -> Result<Vec<LoadedSkill>, String> {
         let mut unique = Vec::new();
         let mut seen = BTreeSet::new();
         for name in names {
-            if seen.insert(name.as_str()) {
-                unique.push(name);
+            let skill = self.resolve_skill(name)?;
+            let identity = qualified_name(skill);
+            if seen.insert(identity) {
+                unique.push(skill);
             }
         }
         if unique.len() > MAX_SELECTED_SKILLS {
@@ -271,14 +330,9 @@ impl Discovery {
         }
         let mut total = 0usize;
         let mut loaded = Vec::with_capacity(unique.len());
-        for name in unique {
-            let skill = self
-                .skills
-                .iter()
-                .find(|skill| skill.name == name.as_str())
-                .ok_or_else(|| format!("skill {name:?} was not found"))?;
+        for skill in unique {
             if !skill.enabled {
-                return Err(format!("skill {name:?} is disabled"));
+                return Err(format!("skill {:?} is disabled", skill.name));
             }
             let content = read_bounded(&skill.path)?;
             let body = skill_body(&content).to_string();
@@ -290,12 +344,42 @@ impl Discovery {
             }
             loaded.push(LoadedSkill {
                 name: skill.name.clone(),
+                qualified_name: qualified_name(skill),
                 source: skill.source.clone(),
                 group: skill.group.clone(),
                 body,
             });
         }
         Ok(loaded)
+    }
+
+    fn resolve_skill(&self, reference: &str) -> Result<&Skill, String> {
+        if let Some(skill) = self
+            .skills
+            .iter()
+            .find(|skill| qualified_name(skill) == reference)
+        {
+            return Ok(skill);
+        }
+        if let Some(skill) = self
+            .skills
+            .iter()
+            .find(|skill| skill_aliases(skill).iter().any(|alias| alias == reference))
+        {
+            return Ok(skill);
+        }
+        let short = self
+            .skills
+            .iter()
+            .filter(|skill| skill.name == reference)
+            .collect::<Vec<_>>();
+        match short.as_slice() {
+            [skill] => Ok(skill),
+            [] => Err(format!("skill {reference:?} was not found")),
+            _ => Err(format!(
+                "skill {reference:?} is ambiguous; use its qualified name"
+            )),
+        }
     }
 
     pub fn plugin_names(&self) -> Vec<String> {
@@ -408,6 +492,8 @@ impl Discovery {
 #[serde(rename_all = "camelCase")]
 pub struct SkillCatalogEntry {
     pub name: String,
+    pub qualified_name: String,
+    pub aliases: Vec<String>,
     pub description: String,
     pub source: String,
     pub group: Option<String>,
@@ -417,9 +503,19 @@ pub struct SkillCatalogEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadedSkill {
     pub name: String,
+    pub qualified_name: String,
     pub source: String,
     pub group: Option<String>,
     pub body: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SkillPathRecord {
+    pub path: PathBuf,
+    pub name: String,
+    pub qualified_name: String,
+    pub source: String,
+    pub group: Option<String>,
 }
 
 fn directory_children(root: &Path, kind: &str, diagnostics: &mut Vec<String>) -> Vec<PathBuf> {

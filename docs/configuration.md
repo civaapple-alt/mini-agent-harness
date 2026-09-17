@@ -274,14 +274,22 @@ The environment variable is a comma-separated list of group IDs. For example,
 runtime discovers the builtin root, project skills, plugin skills, and MCP
 configuration as separate sources. It exposes only bounded metadata in the
 capability manifest. A selected skill body is read only for its current turn.
+Every new WebStudio project stores `pstack` in `builtin_skill_groups`; a
+historical project without the field also defaults to enabled. Removing
+`pstack` disables both `+ pstack` workflow activation and all pstack Skill
+namespaces for that project after its runtime restarts.
 
 Use the `selectedSkills` field on `turn/start` to activate skills explicitly.
-The Host revalidates each name against the effective catalog, reads the trusted
-`SKILL.md`, strips its front matter, and adds the bounded body to that turn's
-temporary prompt context. One turn can activate at most eight skills, and the
-combined body size cannot exceed 32 KiB. A failed read or validation stops the
-turn before the model is called. Skill bodies are not written to later turns or
-to the global system prompt.
+The canonical pstack name is `pstack:how`; `pstack-plugin:how` is accepted as
+a compatibility alias, and the short `how` form is accepted only when
+unambiguous. The Host revalidates each name against the effective catalog,
+reads the trusted `SKILL.md`, strips its front matter, and adds the bounded
+body to that turn's temporary prompt context. One turn can activate at most
+eight skills, and the combined body size cannot exceed 32 KiB. A failed read or
+validation stops the turn before the model is called. Skill bodies are not
+written to later turns or to the global system prompt. A turn-local
+`workflow: {kind: "skill_group", id: "pstack", mode: "auto"}` activates
+only group metadata; the model chooses and reads relevant bodies on demand.
 
 ### Plugins
 

@@ -127,6 +127,7 @@ impl ThreadItem {
             Event::RunStarted { .. }
             | Event::SkillsLoaded { .. }
             | Event::SkillsLoadFailed { .. }
+            | Event::SkillGroupActivated { .. }
             | Event::ModelStarted { .. }
             | Event::AssistantReasoningDelta { .. }
             | Event::AssistantTextDelta { .. }
@@ -144,6 +145,7 @@ impl ThreadItem {
             Event::TurnStarted { .. }
             | Event::SkillsLoaded { .. }
             | Event::SkillsLoadFailed { .. }
+            | Event::SkillGroupActivated { .. }
             | Event::ToolStarted { .. }
             | Event::ContextCompactionStarted { .. } => Self::from_event(event),
             Event::ModelResponded { .. } => Self::from_event(event)
@@ -162,6 +164,7 @@ impl ThreadItem {
             Event::TurnStarted { .. }
             | Event::SkillsLoaded { .. }
             | Event::SkillsLoadFailed { .. }
+            | Event::SkillGroupActivated { .. }
             | Event::ToolFinished { .. }
             | Event::ContextCompactionFinished { .. } => Self::from_event(event),
             Event::ModelResponded { .. } => Self::from_event(event)

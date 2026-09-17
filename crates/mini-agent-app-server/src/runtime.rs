@@ -345,6 +345,8 @@ pub fn capability_manifest_to_protocol(
             .iter()
             .map(|skill| mini_agent_app_server_protocol::AvailableSkill {
                 name: skill.name.clone(),
+                qualified_name: skill.qualified_name.clone(),
+                aliases: skill.aliases.clone(),
                 description: skill.description.clone(),
                 source: skill.source.clone(),
                 group: skill.group.clone(),
