@@ -29,7 +29,7 @@ fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
     )
     .unwrap();
 
-    let discovery = discover(&root);
+    let discovery = discover_with_builtin_groups(&root, &[]);
     let prompt = discovery.augment_system_prompt("base").unwrap();
 
     assert_eq!(discovery.mcp_server_labels(), ["deploy.tools/local"]);
@@ -51,7 +51,7 @@ fn activates_typed_skill_dependencies_without_enabling_providers() {
         "  tools:\n    - type: builtin\n      value: read_file\n    - type: mcp\n      value: github\n",
     );
 
-    let discovery = discover(&root);
+    let discovery = discover_with_builtin_groups(&root, &[]);
     assert_eq!(
         discovery.skill_names(),
         ["review"],
@@ -88,7 +88,7 @@ fn rejects_unsupported_skill_dependency_types() {
         "  tools:\n    - type: process\n      value: shell\n",
     );
 
-    let discovery = discover(&root);
+    let discovery = discover_with_builtin_groups(&root, &[]);
     assert!(
         !discovery.diagnostics().is_empty(),
         "{:?}",
@@ -120,7 +120,7 @@ fn selected_extensions_keep_named_entries_and_report_missing_names() {
         "DROP BODY",
     );
 
-    let mut discovery = discover(&root);
+    let mut discovery = discover_with_builtin_groups(&root, &[]);
     discovery.retain_selected(&["keep".to_string(), "missing".to_string()]);
 
     assert_eq!(discovery.skill_names(), ["keep"]);
@@ -152,7 +152,7 @@ fn selecting_plugin_retains_its_provider_inputs() {
     )
     .unwrap();
 
-    let mut discovery = discover(&root);
+    let mut discovery = discover_with_builtin_groups(&root, &[]);
     discovery.retain_selected(&["deploy.tools".to_string()]);
 
     assert_eq!(discovery.plugin_names(), ["deploy.tools"]);
@@ -189,7 +189,7 @@ fn discovers_and_selects_bounded_mcp_transports() {
     )
     .unwrap();
 
-    let mut discovery = discover(&root);
+    let mut discovery = discover_with_builtin_groups(&root, &[]);
     discovery.retain_selected(&["keep".to_string()]);
     let loaded = crate::mcp::load(
         discovery.mcp_servers(),
@@ -228,7 +228,7 @@ fn project_skill_overrides_invalid_or_plugin_duplicate() {
         "broken",
     );
 
-    let discovery = discover(&root);
+    let discovery = discover_with_builtin_groups(&root, &[]);
     let prompt = discovery.augment_system_prompt("base").unwrap();
 
     assert!(prompt.contains("Project review"));
@@ -259,9 +259,14 @@ fn catalogs_and_loads_selected_skills_with_bounded_activation() {
     );
 
     let discovery = discover_with_builtin_groups(&root, &[]);
+    let review = discovery
+        .skill_catalog()
+        .into_iter()
+        .find(|skill| skill.name == "review")
+        .expect("project Skill should be present in the bounded catalog");
     assert_eq!(
-        discovery.skill_catalog(),
-        vec![SkillCatalogEntry {
+        review,
+        SkillCatalogEntry {
             name: "review".to_string(),
             qualified_name: "review".to_string(),
             aliases: Vec::new(),
@@ -269,7 +274,7 @@ fn catalogs_and_loads_selected_skills_with_bounded_activation() {
             source: "project".to_string(),
             group: None,
             enabled: true,
-        }]
+        }
     );
     let loaded = discovery
         .load_skills(&["review".to_string(), "review".to_string()])
@@ -282,6 +287,19 @@ fn catalogs_and_loads_selected_skills_with_bounded_activation() {
         .map(|index| format!("skill-{index}"))
         .collect::<Vec<_>>();
     assert!(discovery.load_skills(&too_many).is_err());
+    remove_test_root(&root);
+}
+
+#[test]
+fn canonicalizes_skill_root_boundaries_before_containment_checks() {
+    let root = test_root();
+    let boundary = root.join("builtin");
+    let child = boundary.join("pstack");
+    fs::create_dir_all(&child).unwrap();
+
+    let resolved = super::contained_directory(&child, &boundary.join("."));
+
+    assert_eq!(resolved.unwrap(), child.canonicalize().unwrap());
     remove_test_root(&root);
 }
 

@@ -88,7 +88,10 @@ fn parse_instruction(
     let path = path
         .canonicalize()
         .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?;
-    if !path.starts_with(boundary) || !path.is_file() {
+    let boundary = boundary
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve {}: {error}", boundary.display()))?;
+    if !path.starts_with(&boundary) || !path.is_file() {
         return Err(format!("{} escapes its package boundary", path.display()));
     }
     let content = read_instruction_prefix(&path)?;

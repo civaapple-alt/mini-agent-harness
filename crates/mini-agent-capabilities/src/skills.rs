@@ -558,7 +558,10 @@ fn contained_directory(path: &Path, boundary: &Path) -> Result<PathBuf, String> 
     let resolved = path
         .canonicalize()
         .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?;
-    if resolved.is_dir() && resolved.starts_with(boundary) {
+    let resolved_boundary = boundary
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve {}: {error}", boundary.display()))?;
+    if resolved.is_dir() && resolved.starts_with(&resolved_boundary) {
         Ok(resolved)
     } else {
         Err(format!("{} escapes its package boundary", path.display()))
@@ -569,7 +572,10 @@ fn contained_file(path: &Path, boundary: &Path) -> Result<PathBuf, String> {
     let resolved = path
         .canonicalize()
         .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?;
-    if resolved.is_file() && resolved.starts_with(boundary) {
+    let resolved_boundary = boundary
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve {}: {error}", boundary.display()))?;
+    if resolved.is_file() && resolved.starts_with(&resolved_boundary) {
         Ok(resolved)
     } else {
         Err(format!("{} escapes its package boundary", path.display()))

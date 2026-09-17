@@ -45,3 +45,8 @@ Rust、Node unit/UI/build/lint 已在本次变更中运行。
 本版本不实现 Cursor 专属 `/poteto-mode`、MCP 自动启用、hooks、多模型路由
 或并行 Agent。资源同步仍保留 MIT License 和 NOTICE，并通过版本、哈希、
 staging 与原子切换保证可恢复。
+
+Windows 路径边界补充：builtin root 和待扫描目录在 containment 比较前都必须
+canonicalize。否则合法的 `~/.mini-agent/skills/builtin/pstack` 可能因为路径
+形式差异被误报为越界，表现为 capability manifest 只有 pstack 组状态而没有
+组内 Skill catalog。
