@@ -196,6 +196,20 @@ impl ThreadListener {
                     .as_ref()
                     .map(|turn_id| status::operation("turn", turn_id.as_str())),
             ),
+            Event::SkillsLoaded { .. } => (
+                RuntimePhase::StartingTurn,
+                event
+                    .turn_id
+                    .as_ref()
+                    .map(|turn_id| status::operation("turn", turn_id.as_str())),
+            ),
+            Event::SkillsLoadFailed { .. } => (
+                RuntimePhase::Failed,
+                event
+                    .turn_id
+                    .as_ref()
+                    .map(|turn_id| status::operation("turn", turn_id.as_str())),
+            ),
             Event::RunStarted { .. } | Event::ModelStarted { .. } => (
                 RuntimePhase::Model,
                 event
@@ -557,6 +571,75 @@ pub(super) async fn worker_loop<M>(
                         }
                         thread.harness_mut().replace_config(config);
                     }
+                    let mut selected_skills = Vec::new();
+                    for name in input
+                        .selected_skills
+                        .iter()
+                        .take(mini_agent_capabilities::MAX_SELECTED_SKILLS)
+                    {
+                        if !selected_skills.contains(name) {
+                            selected_skills.push(name.clone());
+                        }
+                    }
+                    let too_many_selected_skills =
+                        input.selected_skills.len() > mini_agent_capabilities::MAX_SELECTED_SKILLS;
+                    let (loaded_skills, skill_error) = if too_many_selected_skills {
+                        (
+                            Vec::new(),
+                            Some(format!(
+                                "at most {} skills may be activated per turn",
+                                mini_agent_capabilities::MAX_SELECTED_SKILLS
+                            )),
+                        )
+                    } else if selected_skills.is_empty() {
+                        (Vec::new(), None)
+                    } else {
+                        let result = runtime
+                            .as_ref()
+                            .and_then(|state| state.management.skill_discovery.as_ref())
+                            .ok_or_else(|| {
+                                "skill catalog is unavailable for this runtime".to_string()
+                            })
+                            .and_then(|discovery| discovery.load_skills(&selected_skills));
+                        match result {
+                            Ok(skills) => (skills, None),
+                            Err(error) => (Vec::new(), Some(error)),
+                        }
+                    };
+                    let skill_prelude = if let Some(error) = skill_error.as_ref() {
+                        vec![Event::SkillsLoadFailed {
+                            skills: selected_skills.clone(),
+                            reason_code: if error.contains("read") || error.contains("file") {
+                                "body_read_failed".to_string()
+                            } else {
+                                "activation_rejected".to_string()
+                            },
+                        }]
+                    } else if loaded_skills.is_empty() {
+                        Vec::new()
+                    } else {
+                        let body = loaded_skills
+                            .iter()
+                            .map(|skill| format!("### {}\n{}", skill.name, skill.body))
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
+                        let mut config = thread.harness().config().clone();
+                        config.system_prompt = format!(
+                            "{}\n\n## Explicitly activated skills\n{}",
+                            config.system_prompt, body
+                        );
+                        thread.harness_mut().replace_config(config);
+                        vec![Event::SkillsLoaded {
+                            skills: loaded_skills
+                                .iter()
+                                .map(|skill| mini_agent_protocol::SkillLoadRecord {
+                                    name: skill.name.clone(),
+                                    source: skill.source.clone(),
+                                    group: skill.group.clone(),
+                                })
+                                .collect(),
+                        }]
+                    };
                     let started_at_ms = timestamp_ms();
                     let prompt = input.text.clone();
                     let previous_message_count = thread.harness().messages().len();
@@ -571,7 +654,8 @@ pub(super) async fn worker_loop<M>(
                             }),
                         );
                     }
-                    let input = TurnInput::new(TurnInputMode::Start, input.text);
+                    let mut input = TurnInput::new(TurnInputMode::Start, input.text);
+                    input.selected_skills = selected_skills;
                     let mut sink = ThreadListener {
                         events: events.clone(),
                         notifications: notifications.clone(),
@@ -583,11 +667,13 @@ pub(super) async fn worker_loop<M>(
                         tool_arguments: Vec::new(),
                         tokens_used: 0,
                     };
-                    let mut turn = Box::pin(thread.run_turn_with_events(
+                    let mut turn = Box::pin(thread.run_turn_with_events_and_preflight(
                         input,
                         &mut sink,
                         &control,
                         SteeringMode::StopAtCheckpoint,
+                        &skill_prelude,
+                        skill_error.as_deref(),
                     ));
                     let timeout_deadline = goal_state
                         .as_ref()

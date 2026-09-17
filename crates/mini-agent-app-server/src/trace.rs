@@ -139,6 +139,8 @@ impl<W: Write> EventSink for JsonlTrace<W> {
 fn event_name(event: &Event) -> &'static str {
     match event {
         Event::TurnStarted { .. } => "turn_started",
+        Event::SkillsLoaded { .. } => "skills_loaded",
+        Event::SkillsLoadFailed { .. } => "skills_load_failed",
         Event::RunStarted { .. } => "run_started",
         Event::ModelStarted { .. } => "model_started",
         Event::AssistantReasoningDelta { .. } => "assistant_reasoning_delta",
@@ -174,6 +176,8 @@ fn output_bytes(event: &Event) -> Option<usize> {
         Event::ToolFinished { content, .. } => Some(content.len()),
         Event::ToolStarted { .. }
         | Event::TurnStarted { .. }
+        | Event::SkillsLoaded { .. }
+        | Event::SkillsLoadFailed { .. }
         | Event::RunStarted { .. }
         | Event::ModelStarted { .. }
         | Event::ContextCompactionStarted { .. }

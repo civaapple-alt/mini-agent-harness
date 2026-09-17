@@ -26,6 +26,7 @@ pub struct HarnessBuild<M: Model> {
     pub mcp_tool_count: usize,
     pub retry_mcp_servers: Vec<McpServerConfig>,
     pub capability_manifest: CapabilityManifest,
+    pub skill_discovery: Option<mini_agent_capabilities::Discovery>,
 }
 
 /// The fully assembled application-host runtime handed to a frontend or
@@ -135,7 +136,13 @@ where
     let mut skill_discovery = (composition.extensions != ExtensionLoadDepth::None
         && (composition.regular_agent.prompts.extensions
             || composition.regular_agent.rules.extensions))
-        .then(|| registry.discover_extensions(&composition.extension_provider, &workspace))
+        .then(|| {
+            registry.discover_extensions_with_builtin_groups(
+                &composition.extension_provider,
+                &workspace,
+                &composition.builtin_skill_groups,
+            )
+        })
         .transpose()?;
     if let Some(discovery) = &mut skill_discovery {
         if let ExtensionSelection::Named(names) = &composition.extension_selection {
@@ -144,6 +151,7 @@ where
         for diagnostic in discovery.diagnostics() {
             eprintln!("warning: {diagnostic}");
         }
+        capability_manifest.available_skills = discovery.skill_catalog();
         let extension_fingerprint = discovery.prompt_fingerprint()?;
         if composition.regular_agent.prompts.extensions {
             config.system_prompt = discovery.augment_system_prompt(&config.system_prompt)?;
@@ -273,6 +281,7 @@ where
         mcp_tool_count,
         retry_mcp_servers,
         capability_manifest,
+        skill_discovery,
     })
 }
 

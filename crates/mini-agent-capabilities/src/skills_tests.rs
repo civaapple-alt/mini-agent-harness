@@ -247,6 +247,40 @@ fn project_skill_overrides_invalid_or_plugin_duplicate() {
     remove_test_root(&root);
 }
 
+#[test]
+fn catalogs_and_loads_selected_skills_with_bounded_activation() {
+    let root = test_root();
+    write_skill(
+        &root.join(".agents/skills/review"),
+        "review",
+        "Review Rust changes.",
+        "REVIEW BODY",
+    );
+
+    let discovery = discover_with_builtin_groups(&root, &[]);
+    assert_eq!(
+        discovery.skill_catalog(),
+        vec![SkillCatalogEntry {
+            name: "review".to_string(),
+            description: "Review Rust changes.".to_string(),
+            source: "project".to_string(),
+            group: None,
+            enabled: true,
+        }]
+    );
+    let loaded = discovery
+        .load_skills(&["review".to_string(), "review".to_string()])
+        .unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].body, "REVIEW BODY\n");
+
+    let too_many = (0..=MAX_SELECTED_SKILLS)
+        .map(|index| format!("skill-{index}"))
+        .collect::<Vec<_>>();
+    assert!(discovery.load_skills(&too_many).is_err());
+    remove_test_root(&root);
+}
+
 fn write_plugin_manifest(root: &Path, name: &str) {
     fs::create_dir_all(root).unwrap();
     fs::write(

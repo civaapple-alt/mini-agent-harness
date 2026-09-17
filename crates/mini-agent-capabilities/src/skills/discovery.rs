@@ -4,8 +4,7 @@ pub(super) fn discover_skill_root(
     root: &Path,
     boundary: &Path,
     workspace: &Path,
-    source: &str,
-    overrides: bool,
+    options: SkillRootOptions<'_>,
     skills: &mut BTreeMap<String, Skill>,
     diagnostics: &mut Vec<String>,
 ) {
@@ -30,8 +29,15 @@ pub(super) fn discover_skill_root(
         if !skill_path.exists() {
             continue;
         }
-        match parse_instruction(&skill_path, boundary, workspace, source) {
-            Ok(skill) => insert_skill(skill, overrides, skills, diagnostics),
+        match parse_instruction(
+            &skill_path,
+            boundary,
+            workspace,
+            options.source,
+            options.group,
+            options.enabled,
+        ) {
+            Ok(skill) => insert_skill(skill, options.overrides, skills, diagnostics),
             Err(error) => diagnostics.push(error),
         }
     }
@@ -76,6 +82,8 @@ fn parse_instruction(
     boundary: &Path,
     workspace: &Path,
     source: &str,
+    group: Option<&str>,
+    enabled: bool,
 ) -> Result<Skill, String> {
     let path = path
         .canonicalize()
@@ -135,6 +143,9 @@ fn parse_instruction(
         description,
         location,
         source: source.to_string(),
+        group: group.map(str::to_string),
+        enabled,
+        path,
         dependencies,
     })
 }

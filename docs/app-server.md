@@ -242,7 +242,7 @@ still go through `thread/settings/update`.
 
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
-| `turn/start` | `threadId`, `input: {mode, text}` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. |
+| `turn/start` | `threadId`, `input: {mode, text, selectedSkills?}` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. |
 | `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, and optional error. |
 | `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of ordered `turn/event` notifications with `nextCursor`, `oldestSequence`, and `hasGap`. |
 | `turn/steer` | `threadId`, `turnId`, `text` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. |
@@ -258,6 +258,19 @@ keeps a bounded in-memory window of Core events per process. `afterSequence` is
 exclusive; when the requested cursor is older than the retained window,
 `hasGap` is true and the client must reconcile with `thread/read` and
 `thread/items/list` before accepting the replay as complete.
+
+When `selectedSkills` is present, the worker emits one `skills_loaded` event
+after `turn_started` and before `run_started` when every selected body loads.
+The event contains each skill's name, source, and optional group. If validation
+or body loading fails, the worker emits one `skills_load_failed` event with the
+selected names and a bounded `reason_code`, then finishes the turn as failed
+without calling the model. The event carries the same Thread/Turn identity,
+Core sequence, and bounded `itemId` as other `turn/event` notifications.
+
+The capability manifest returned by `initialize` contains
+`builtinSkillGroups` and `availableSkills`. Each available-skill entry contains
+only `name`, `description`, `source`, `group`, and `enabled`. The manifest does
+not expose skill paths or bodies.
 
 #### Thread settings, Plan, and Goal
 
@@ -347,6 +360,8 @@ emitted on one ordered runtime stream.
 | Notification | Payload highlights | Use |
 | --- | --- | --- |
 | `turn/event` | `threadId`, optional `turnId`, Core `sequence`, bounded `items`, `event` | Ordered Core execution events, including turn settlement. |
+| `turn/event` with `skills_loaded` | `skills: [{name, source, group?}]` | Reports the explicit skills loaded for the current turn. |
+| `turn/event` with `skills_load_failed` | `skills: [name]`, `reason_code` | Reports a bounded activation failure before model execution. |
 | `item/started` | `threadId`, `turnId`, `item`, `startedAtMs` | One ThreadItem becomes visible. |
 | `item/completed` | `threadId`, `turnId`, `item`, `completedAtMs` | Authoritative final projection for that item. |
 | `approval/request` | Request identity, project/workspace/revision, action class, summary, structured action key, access, policy, allowed grant scopes | Requests a user decision for a sensitive action. |

@@ -173,6 +173,8 @@ impl EventSink for RunObserver {
                 }));
             }
             Event::TurnStarted { .. }
+            | Event::SkillsLoaded { .. }
+            | Event::SkillsLoadFailed { .. }
             | Event::TurnFinished { .. }
             | Event::RunStarted { .. }
             | Event::ModelStarted { .. }
@@ -283,6 +285,8 @@ impl TerminalObserver {
             )),
             Event::RunFinished { .. } => self.end_stream(),
             Event::TurnStarted { .. }
+            | Event::SkillsLoaded { .. }
+            | Event::SkillsLoadFailed { .. }
             | Event::TurnFinished { .. }
             | Event::RunStarted { .. }
             | Event::ModelResponded { .. }

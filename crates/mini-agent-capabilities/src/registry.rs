@@ -235,6 +235,19 @@ impl CapabilityRegistry {
         Ok(skills::discover(workspace))
     }
 
+    pub fn discover_extensions_with_builtin_groups(
+        &self,
+        provider_id: &str,
+        workspace: &Path,
+        enabled_groups: &[String],
+    ) -> Result<skills::Discovery, String> {
+        self.validate(CapabilityKind::Extension, provider_id)?;
+        Ok(skills::discover_with_builtin_groups(
+            workspace,
+            enabled_groups,
+        ))
+    }
+
     /// Starts selected MCP provider entries after Host policy has resolved the
     /// approval controller.
     pub fn load_mcp(

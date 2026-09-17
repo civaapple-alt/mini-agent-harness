@@ -371,6 +371,7 @@ pub enum AppServerError {
     ThreadFactoryUnavailable,
     RuntimeUnavailable,
     GoalOwnsContinuationMode,
+    SkillActivation(String),
 }
 
 /// A host-side update applied to a settled Thread by the App Server worker.
@@ -440,6 +441,7 @@ impl fmt::Display for AppServerError {
             Self::GoalOwnsContinuationMode => formatter.write_str(
                 "active Goal Runtime owns continuation mode; pause or finish the Goal before changing it",
             ),
+            Self::SkillActivation(error) => write!(formatter, "skill activation failed: {error}"),
         }
     }
 }

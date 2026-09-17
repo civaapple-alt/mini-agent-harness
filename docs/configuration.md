@@ -263,6 +263,26 @@ Install one standards-strict Agent Skill at
 `.agents/skills/<skill>/SKILL.md`. Only workspace-local entries are discovered,
 and the directory name must match the bounded YAML `name` field.
 
+WebStudio synchronizes bundled skill groups to the per-user directory
+`%USERPROFILE%/.mini-agent/skills/builtin/<group>`. The `pstack` group is enabled
+by default when `MINI_AGENT_BUILTIN_SKILL_GROUPS` is absent. The WebStudio
+project setting `builtin_skill_groups` controls the value passed to the runtime.
+An empty value disables every built-in group for that project.
+
+The environment variable is a comma-separated list of group IDs. For example,
+`MINI_AGENT_BUILTIN_SKILL_GROUPS=pstack,team-review` enables two groups. The
+runtime discovers the builtin root, project skills, plugin skills, and MCP
+configuration as separate sources. It exposes only bounded metadata in the
+capability manifest. A selected skill body is read only for its current turn.
+
+Use the `selectedSkills` field on `turn/start` to activate skills explicitly.
+The Host revalidates each name against the effective catalog, reads the trusted
+`SKILL.md`, strips its front matter, and adds the bounded body to that turn's
+temporary prompt context. One turn can activate at most eight skills, and the
+combined body size cannot exceed 32 KiB. A failed read or validation stops the
+turn before the model is called. Skill bodies are not written to later turns or
+to the global system prompt.
+
 ### Plugins
 
 Put one installed plugin in `.agents/plugins/<plugin>`. Supported package

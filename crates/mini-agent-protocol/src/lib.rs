@@ -8,6 +8,7 @@ pub use event::EventEnvelope;
 pub use event::EventSink;
 pub use event::Observer;
 pub use event::RunFailure;
+pub use event::SkillLoadRecord;
 pub use model::Message;
 pub use model::Model;
 pub use model::ModelEvent;

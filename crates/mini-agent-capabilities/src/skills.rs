@@ -27,6 +27,8 @@ const MAX_INSTRUCTION_FRONTMATTER_BYTES: usize = 16 * 1024;
 const MAX_CATALOG_BYTES: usize = 16 * 1024;
 const MAX_SKILL_DEPENDENCIES: usize = 16;
 const MAX_SKILL_DEPENDENCY_VALUE_BYTES: usize = 64;
+pub const MAX_SELECTED_SKILLS: usize = 8;
+pub const MAX_ACTIVATED_SKILL_BYTES: usize = 32 * 1024;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_CONNECT_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -69,7 +71,17 @@ struct Skill {
     description: String,
     location: String,
     source: String,
+    group: Option<String>,
+    enabled: bool,
+    path: PathBuf,
     dependencies: Vec<SkillDependency>,
+}
+
+struct SkillRootOptions<'a> {
+    source: &'a str,
+    group: Option<&'a str>,
+    enabled: bool,
+    overrides: bool,
 }
 
 #[derive(Deserialize)]
@@ -113,6 +125,10 @@ pub struct SkillActivation {
 }
 
 pub fn discover(workspace: &Path) -> Discovery {
+    discover_with_builtin_groups(workspace, &["pstack".to_string()])
+}
+
+pub fn discover_with_builtin_groups(workspace: &Path, enabled_groups: &[String]) -> Discovery {
     let workspace = match workspace.canonicalize() {
         Ok(workspace) => workspace,
         Err(error) => {
@@ -124,12 +140,33 @@ pub fn discover(workspace: &Path) -> Discovery {
     };
     let mut skills = BTreeMap::new();
     let mut discovery = Discovery::default();
+    if let Some(builtin_root) = builtin_skill_root() {
+        let pstack_root = builtin_root.join("pstack");
+        let enabled = enabled_groups.iter().any(|group| group == "pstack");
+        discovery::discover_skill_root(
+            &pstack_root,
+            &builtin_root,
+            &workspace,
+            SkillRootOptions {
+                source: "builtin",
+                group: Some("pstack"),
+                enabled,
+                overrides: false,
+            },
+            &mut skills,
+            &mut discovery.diagnostics,
+        );
+    }
     discovery::discover_skill_root(
         &workspace.join(".agents/skills"),
         &workspace,
         &workspace,
-        "project",
-        true,
+        SkillRootOptions {
+            source: "project",
+            group: None,
+            enabled: true,
+            overrides: true,
+        },
         &mut skills,
         &mut discovery.diagnostics,
     );
@@ -139,12 +176,24 @@ pub fn discover(workspace: &Path) -> Discovery {
     discovery
 }
 
+pub fn builtin_skill_root() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+        .map(|home| home.join(".mini-agent/skills/builtin"))
+}
+
 fn skill_metadata(skill: &Skill) -> Value {
     let mut metadata = json!({
         "name": skill.name,
         "description": skill.description,
         "location": skill.location,
+        "source": skill.source,
+        "enabled": skill.enabled,
     });
+    if let Some(group) = &skill.group {
+        metadata["group"] = json!(group);
+    }
     if !skill.dependencies.is_empty() {
         metadata["dependencies"] = json!(
             skill
@@ -172,7 +221,24 @@ impl Discovery {
     }
 
     pub fn skill_names(&self) -> Vec<String> {
-        self.skills.iter().map(|skill| skill.name.clone()).collect()
+        self.skills
+            .iter()
+            .filter(|skill| skill.enabled)
+            .map(|skill| skill.name.clone())
+            .collect()
+    }
+
+    pub fn skill_catalog(&self) -> Vec<SkillCatalogEntry> {
+        self.skills
+            .iter()
+            .map(|skill| SkillCatalogEntry {
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                source: skill.source.clone(),
+                group: skill.group.clone(),
+                enabled: skill.enabled,
+            })
+            .collect()
     }
 
     /// Returns the bounded declaration for a named Skill without enabling any
@@ -181,13 +247,55 @@ impl Discovery {
         let skill = self
             .skills
             .iter()
-            .find(|skill| skill.name == name)
+            .find(|skill| skill.name == name && skill.enabled)
             .ok_or_else(|| format!("skill {name:?} was not found"))?;
         Ok(SkillActivation {
             name: skill.name.clone(),
             location: skill.location.clone(),
             dependencies: skill.dependencies.clone(),
         })
+    }
+
+    pub fn load_skills(&self, names: &[String]) -> Result<Vec<LoadedSkill>, String> {
+        let mut unique = Vec::new();
+        let mut seen = BTreeSet::new();
+        for name in names {
+            if seen.insert(name.as_str()) {
+                unique.push(name);
+            }
+        }
+        if unique.len() > MAX_SELECTED_SKILLS {
+            return Err(format!(
+                "at most {MAX_SELECTED_SKILLS} skills may be activated per turn"
+            ));
+        }
+        let mut total = 0usize;
+        let mut loaded = Vec::with_capacity(unique.len());
+        for name in unique {
+            let skill = self
+                .skills
+                .iter()
+                .find(|skill| skill.name == name.as_str())
+                .ok_or_else(|| format!("skill {name:?} was not found"))?;
+            if !skill.enabled {
+                return Err(format!("skill {name:?} is disabled"));
+            }
+            let content = read_bounded(&skill.path)?;
+            let body = skill_body(&content).to_string();
+            total = total.saturating_add(body.len());
+            if total > MAX_ACTIVATED_SKILL_BYTES {
+                return Err(format!(
+                    "selected skill bodies exceed {MAX_ACTIVATED_SKILL_BYTES} bytes"
+                ));
+            }
+            loaded.push(LoadedSkill {
+                name: skill.name.clone(),
+                source: skill.source.clone(),
+                group: skill.group.clone(),
+                body,
+            });
+        }
+        Ok(loaded)
     }
 
     pub fn plugin_names(&self) -> Vec<String> {
@@ -257,7 +365,7 @@ impl Discovery {
     }
 
     pub fn prompt_fingerprint(&self) -> Result<Option<String>, String> {
-        if self.skills.is_empty() {
+        if !self.skills.iter().any(|skill| skill.enabled) {
             return Ok(None);
         }
         Ok(Some(crate::registry::stable_fingerprint(
@@ -266,7 +374,7 @@ impl Discovery {
     }
 
     pub fn augment_system_prompt(&self, base: &str) -> Result<String, String> {
-        if self.skills.is_empty() {
+        if !self.skills.iter().any(|skill| skill.enabled) {
             return Ok(base.to_string());
         }
         let catalog = self.metadata_catalog()?;
@@ -283,6 +391,9 @@ impl Discovery {
     fn metadata_catalog(&self) -> Result<String, String> {
         let mut catalog = String::new();
         for skill in &self.skills {
+            if !skill.enabled {
+                continue;
+            }
             catalog.push_str(
                 &serde_json::to_string(&skill_metadata(skill))
                     .map_err(|error| format!("cannot serialize skill catalog: {error}"))?,
@@ -291,6 +402,24 @@ impl Discovery {
         }
         Ok(catalog)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillCatalogEntry {
+    pub name: String,
+    pub description: String,
+    pub source: String,
+    pub group: Option<String>,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoadedSkill {
+    pub name: String,
+    pub source: String,
+    pub group: Option<String>,
+    pub body: String,
 }
 
 fn directory_children(root: &Path, kind: &str, diagnostics: &mut Vec<String>) -> Vec<PathBuf> {
@@ -394,6 +523,24 @@ fn frontmatter(content: &str) -> Option<&str> {
         offset += line.len();
     }
     None
+}
+
+fn skill_body(content: &str) -> &str {
+    let Some(opening_end) = content.find('\n').map(|index| index + 1) else {
+        return content;
+    };
+    if content[..opening_end].trim_end_matches(['\r', '\n']) != "---" {
+        return content;
+    }
+    let rest = &content[opening_end..];
+    let mut offset = 0;
+    for line in rest.split_inclusive('\n') {
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            return rest[offset + line.len()..].trim_start_matches(['\r', '\n']);
+        }
+        offset += line.len();
+    }
+    content
 }
 
 fn validate_skill_name(name: &str) -> Result<(), String> {

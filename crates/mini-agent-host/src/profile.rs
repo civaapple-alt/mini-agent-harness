@@ -9,6 +9,7 @@ use mini_agent_capabilities::SecurityPreset;
 #[path = "profile_manifest.rs"]
 mod profile_manifest;
 
+pub use profile_manifest::BuiltinSkillGroup;
 pub use profile_manifest::CapabilityManifest;
 pub use profile_manifest::ContextLimits;
 pub use profile_manifest::RulePolicy;
@@ -176,6 +177,9 @@ pub struct RuntimeComposition {
     pub tools: ToolScope,
     pub extensions: ExtensionLoadDepth,
     pub extension_selection: ExtensionSelection,
+    /// Built-in Skill groups admitted for this project. Skill activation is
+    /// still turn-scoped; this list only controls the effective catalog.
+    pub builtin_skill_groups: Vec<String>,
     pub agent: AgentKind,
     pub persona: PersonaKind,
     pub workflows: WorkflowScope,
@@ -199,6 +203,11 @@ impl RuntimeComposition {
 
     pub fn with_security(mut self, security: SecurityPreset) -> Self {
         self.security = security;
+        self
+    }
+
+    pub fn with_builtin_skill_groups(mut self, groups: Vec<String>) -> Self {
+        self.builtin_skill_groups = groups;
         self
     }
 
@@ -233,6 +242,7 @@ impl Default for RuntimeComposition {
             tools: ToolScope::All,
             extensions: ExtensionLoadDepth::Enabled,
             extension_selection: ExtensionSelection::All,
+            builtin_skill_groups: vec!["pstack".to_string()],
             agent: AgentKind::General,
             persona: PersonaKind::None,
             workflows: WorkflowScope::PlanAndGoal,

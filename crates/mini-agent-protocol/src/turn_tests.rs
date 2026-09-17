@@ -34,3 +34,14 @@ fn control_contracts_round_trip_with_typed_ids() {
         submission
     );
 }
+
+#[test]
+fn turn_input_uses_camel_case_for_explicit_skills() {
+    let mut input = TurnInput::new(TurnInputMode::Start, "inspect");
+    input.selected_skills = vec!["architect".to_string()];
+
+    let value = serde_json::to_value(&input).unwrap();
+    assert_eq!(value["selectedSkills"], serde_json::json!(["architect"]));
+    assert!(value.get("selected_skills").is_none());
+    assert_eq!(serde_json::from_value::<TurnInput>(value).unwrap(), input);
+}

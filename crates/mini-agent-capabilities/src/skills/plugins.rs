@@ -65,13 +65,16 @@ fn load_plugin(
         }
     };
     discovery.plugins.push(plugin_name.clone());
-    let source = format!("{source} plugin {plugin_name}");
     super::discovery::discover_skill_root(
         &plugin_root.join("skills"),
         plugin_root,
         workspace,
-        &source,
-        false,
+        SkillRootOptions {
+            source,
+            group: None,
+            enabled: true,
+            overrides: false,
+        },
         skills,
         &mut discovery.diagnostics,
     );

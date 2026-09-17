@@ -342,6 +342,35 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
 }
 
 #[tokio::test]
+async fn explicit_skill_activation_failure_precedes_model_execution() {
+    let server = server(DoneModel);
+    let mut events = server.subscribe();
+    let mut input = TurnInput::new(TurnInputMode::Start, "inspect");
+    input.selected_skills = vec!["architect".to_string()];
+    let submission = server
+        .turn_start_for(ThreadId::new("thread-1"), TurnStart::new(input))
+        .await
+        .unwrap();
+    assert!(matches!(submission, TurnSubmission::Started { .. }));
+
+    let mut received = Vec::new();
+    while !received
+        .iter()
+        .any(|event| matches!(event, Event::TurnFinished { .. }))
+    {
+        received.push(events.recv().await.unwrap().event);
+    }
+    assert!(matches!(received[0], Event::TurnStarted { .. }));
+    assert!(matches!(received[1], Event::SkillsLoadFailed { .. }));
+    assert!(matches!(received[2], Event::TurnFinished { .. }));
+    assert!(
+        !received
+            .iter()
+            .any(|event| matches!(event, Event::RunStarted { .. }))
+    );
+}
+
+#[tokio::test]
 async fn projects_structured_approval_denial_through_public_app_server() {
     let harness = Harness::new(
         ApprovalModel,

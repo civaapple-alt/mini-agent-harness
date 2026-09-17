@@ -56,6 +56,7 @@ pub(crate) struct RuntimeManagementState {
     mcp: McpRuntimeState,
     local_checkpoint_seq: u64,
     pub(crate) base_harness_config: HarnessConfig,
+    pub(crate) skill_discovery: Option<mini_agent_capabilities::Discovery>,
 }
 
 struct McpRuntimeState {
@@ -137,6 +138,31 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         approval: ApprovalController,
         base_harness_config: HarnessConfig,
     ) -> Self {
+        Self::new_with_harness_config_and_skills(
+            server,
+            session,
+            world,
+            enabled_mcp_servers,
+            mcp_tool_count,
+            retry_mcp_servers,
+            approval,
+            base_harness_config,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_harness_config_and_skills(
+        server: AppServer<M>,
+        session: Option<OpenedSession>,
+        world: WorldState,
+        enabled_mcp_servers: Vec<String>,
+        mcp_tool_count: usize,
+        retry_mcp_servers: Vec<McpServerConfig>,
+        approval: ApprovalController,
+        base_harness_config: HarnessConfig,
+        skill_discovery: Option<mini_agent_capabilities::Discovery>,
+    ) -> Self {
         let active_thread_id = server.thread_id().clone();
         let local_checkpoint_seq = 0;
         let (goal_notifications, _) = broadcast::channel(64);
@@ -159,6 +185,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 },
                 local_checkpoint_seq,
                 base_harness_config,
+                skill_discovery,
             }),
             approval,
             goal_notifications,

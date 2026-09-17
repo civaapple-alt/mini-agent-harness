@@ -170,6 +170,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             mcp_tool_count,
             retry_mcp_servers,
             capability_manifest,
+            skill_discovery,
         } = prepare_harness_with_model_factory(
             &runtime_config,
             approval.clone(),
@@ -212,7 +213,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             goal_limits,
         )
         .with_verifier_config(runtime_config.clone());
-        let management = RuntimeManagementService::new_with_harness_config(
+        let management = RuntimeManagementService::new_with_harness_config_and_skills(
             server.clone(),
             session,
             world,
@@ -221,6 +222,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             retry_mcp_servers,
             approval.clone(),
             base_harness_config,
+            skill_discovery,
         );
         let services = RuntimeServices::new(management, thread_settings, goals)
             .map_err(|error| format!("cannot bind runtime services: {error}"))?;
@@ -329,6 +331,26 @@ pub fn capability_manifest_to_protocol(
         },
         sandbox: manifest.sandbox.clone(),
         security: manifest.security.clone(),
+        builtin_skill_groups: manifest
+            .builtin_skill_groups
+            .iter()
+            .map(|group| mini_agent_app_server_protocol::BuiltinSkillGroup {
+                id: group.id.clone(),
+                version: group.version.clone(),
+                enabled: group.enabled,
+            })
+            .collect(),
+        available_skills: manifest
+            .available_skills
+            .iter()
+            .map(|skill| mini_agent_app_server_protocol::AvailableSkill {
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                source: skill.source.clone(),
+                group: skill.group.clone(),
+                enabled: skill.enabled,
+            })
+            .collect(),
     }
 }
 

@@ -53,7 +53,8 @@ pub fn prepare(request: LocalRuntimeRequest) -> Result<LocalRuntimeLaunch, Strin
     if let Some(enabled) = request.web_search_override {
         runtime_config = runtime_config.with_web_search(enabled);
     }
-    let mut composition = RuntimeComposition::default();
+    let mut composition = RuntimeComposition::default()
+        .with_builtin_skill_groups(runtime_config.builtin_skill_groups());
     if request.no_tools {
         composition = composition.without_tools();
     }

@@ -42,6 +42,7 @@ pub use harness_builder::HostRuntime;
 pub use harness_builder::ModelProviderFactory;
 pub use harness_builder::prepare_harness_with_model_factory;
 pub use runtime_composition::AgentKind;
+pub use runtime_composition::BuiltinSkillGroup;
 pub use runtime_composition::CapabilityManifest;
 pub use runtime_composition::ContextLimits;
 pub use runtime_composition::ExtensionLoadDepth;

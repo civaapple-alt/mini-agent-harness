@@ -97,6 +97,7 @@ graph LR
 
 ### Implemented
 
+- [Builtin Skill 组与 Turn 级显式激活](implemented/feature/2026-09-17-builtin-skill-groups-and-explicit-activation.zh.md)
 - [Web Cookbook 恢复与投影契约](implemented/architecture/2026-09-15-web-cookbook-recovery-and-projection.zh.md)
 - [Web Cookbook Tool Outcome 契约](implemented/architecture/2026-09-15-web-cookbook-tool-outcome-contract.zh.md)
 - [安全边界与硬限制证据](implemented/architecture/2026-09-15-security-boundaries-and-hard-limits.zh.md)

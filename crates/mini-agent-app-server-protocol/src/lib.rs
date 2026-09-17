@@ -707,6 +707,29 @@ pub struct CapabilityManifest {
     pub context_limits: ContextLimits,
     pub sandbox: String,
     pub security: String,
+    #[serde(default)]
+    pub builtin_skill_groups: Vec<BuiltinSkillGroup>,
+    #[serde(default)]
+    pub available_skills: Vec<AvailableSkill>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltinSkillGroup {
+    pub id: String,
+    pub version: String,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailableSkill {
+    pub name: String,
+    pub description: String,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    pub enabled: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

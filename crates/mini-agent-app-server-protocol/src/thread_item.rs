@@ -125,6 +125,8 @@ impl ThreadItem {
                 status: ItemStatus::Completed,
             }],
             Event::RunStarted { .. }
+            | Event::SkillsLoaded { .. }
+            | Event::SkillsLoadFailed { .. }
             | Event::ModelStarted { .. }
             | Event::AssistantReasoningDelta { .. }
             | Event::AssistantTextDelta { .. }
@@ -140,6 +142,8 @@ impl ThreadItem {
     pub fn started_from_event(event: &EventEnvelope) -> Vec<Self> {
         match &event.event {
             Event::TurnStarted { .. }
+            | Event::SkillsLoaded { .. }
+            | Event::SkillsLoadFailed { .. }
             | Event::ToolStarted { .. }
             | Event::ContextCompactionStarted { .. } => Self::from_event(event),
             Event::ModelResponded { .. } => Self::from_event(event)
@@ -156,6 +160,8 @@ impl ThreadItem {
     pub fn completed_from_event(event: &EventEnvelope) -> Vec<Self> {
         match &event.event {
             Event::TurnStarted { .. }
+            | Event::SkillsLoaded { .. }
+            | Event::SkillsLoadFailed { .. }
             | Event::ToolFinished { .. }
             | Event::ContextCompactionFinished { .. } => Self::from_event(event),
             Event::ModelResponded { .. } => Self::from_event(event)

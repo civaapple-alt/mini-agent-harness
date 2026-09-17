@@ -18,6 +18,13 @@ pub enum Event {
         mode: TurnInputMode,
         prompt: String,
     },
+    SkillsLoaded {
+        skills: Vec<SkillLoadRecord>,
+    },
+    SkillsLoadFailed {
+        skills: Vec<String>,
+        reason_code: String,
+    },
     RunStarted {
         prompt: String,
     },
@@ -79,6 +86,15 @@ pub enum Event {
     RunFailed {
         reason: RunFailure,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillLoadRecord {
+    pub name: String,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]

@@ -28,6 +28,7 @@ pub struct RuntimeConfig {
     project_id: Option<String>,
     extra_read_roots: Vec<PathBuf>,
     extra_write_roots: Vec<PathBuf>,
+    builtin_skill_groups: Vec<String>,
 }
 
 pub struct ProviderSettings {
@@ -90,6 +91,8 @@ impl RuntimeConfig {
             .filter(|value| !value.trim().is_empty());
         let extra_read_roots = env_path_list("MINI_AGENT_EXTRA_READ_ROOTS");
         let extra_write_roots = env_path_list("MINI_AGENT_EXTRA_WRITE_ROOTS");
+        let builtin_skill_groups =
+            parse_builtin_skill_groups(env::var("MINI_AGENT_BUILTIN_SKILL_GROUPS").ok());
         Ok(Self {
             workspace,
             api_key,
@@ -103,6 +106,7 @@ impl RuntimeConfig {
             project_id,
             extra_read_roots,
             extra_write_roots,
+            builtin_skill_groups,
         })
     }
 
@@ -143,17 +147,29 @@ impl RuntimeConfig {
     }
 
     pub fn extra_read_roots(&self) -> Vec<PathBuf> {
-        self.extra_read_roots.clone()
+        let mut roots = self.extra_read_roots.clone();
+        if let Some(root) = mini_agent_capabilities::builtin_skill_root()
+            && root.is_dir()
+            && !roots.contains(&root)
+        {
+            roots.push(root);
+        }
+        roots
     }
 
     pub fn extra_write_roots(&self) -> Vec<PathBuf> {
         self.extra_write_roots.clone()
     }
 
+    pub fn builtin_skill_groups(&self) -> Vec<String> {
+        self.builtin_skill_groups.clone()
+    }
+
     pub fn workspace_revision(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.workspace.hash(&mut hasher);
         self.extra_read_roots.hash(&mut hasher);
+        self.builtin_skill_groups.hash(&mut hasher);
         self.extra_write_roots.hash(&mut hasher);
         hasher.finish()
     }
@@ -282,6 +298,19 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+fn parse_builtin_skill_groups(value: Option<String>) -> Vec<String> {
+    value
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|group| !group.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| vec!["pstack".to_string()])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,6 +419,20 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.contains("MINI_AGENT_GOAL_TIMEOUT_SECS"));
+    }
+
+    #[test]
+    fn builtin_skill_group_config_distinguishes_empty_from_absent() {
+        assert_eq!(parse_builtin_skill_groups(None), vec!["pstack".to_string()]);
+        assert!(parse_builtin_skill_groups(Some(String::new())).is_empty());
+        assert_eq!(
+            parse_builtin_skill_groups(Some("pstack, other, pstack".to_string())),
+            vec![
+                "pstack".to_string(),
+                "other".to_string(),
+                "pstack".to_string()
+            ]
+        );
     }
 
     fn unique_dir(label: &str) -> PathBuf {

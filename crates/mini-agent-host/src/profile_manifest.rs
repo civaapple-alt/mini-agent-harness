@@ -4,6 +4,7 @@ use serde::Serialize;
 use super::WorkflowScope;
 use super::{ExtensionLoadDepth, ExtensionSelection, PersonaKind, RuntimeComposition, ToolScope};
 use mini_agent_capabilities::SecurityPreset;
+use mini_agent_capabilities::SkillCatalogEntry;
 
 const PROMPT_RULE_PRECEDENCE: [&str; 7] = [
     "core-safety",
@@ -50,6 +51,14 @@ pub enum RuleSourceState {
 pub struct SourceFingerprint {
     pub source: String,
     pub fingerprint: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltinSkillGroup {
+    pub id: String,
+    pub version: String,
+    pub enabled: bool,
 }
 
 pub(crate) fn stable_fingerprint(bytes: &[u8]) -> String {
@@ -261,6 +270,20 @@ impl RuntimeComposition {
             context_limits: ContextLimits::default(),
             sandbox: self.sandbox.name().to_string(),
             security: self.security.name().to_string(),
+            builtin_skill_groups: self
+                .builtin_skill_groups
+                .iter()
+                .map(|id| BuiltinSkillGroup {
+                    id: id.clone(),
+                    version: if id == "pstack" {
+                        "0.2.0".to_string()
+                    } else {
+                        "unknown".to_string()
+                    },
+                    enabled: true,
+                })
+                .collect(),
+            available_skills: Vec::new(),
         }
     }
 
@@ -301,6 +324,8 @@ pub struct CapabilityManifest {
     pub context_limits: ContextLimits,
     pub sandbox: String,
     pub security: String,
+    pub builtin_skill_groups: Vec<BuiltinSkillGroup>,
+    pub available_skills: Vec<SkillCatalogEntry>,
 }
 
 /// Bounded context limits visible to clients without exposing prompt content.

@@ -31,6 +31,7 @@ pub enum ThreadError<E> {
     NoActiveTurn,
     TurnNotActive(TurnId),
     InvalidInputMode(TurnInputMode),
+    SkillActivation(String),
 }
 
 impl<E: fmt::Display> fmt::Display for ThreadError<E> {
@@ -44,6 +45,7 @@ impl<E: fmt::Display> fmt::Display for ThreadError<E> {
                 write!(formatter, "turn {} is not active", turn_id.as_str())
             }
             Self::InvalidInputMode(mode) => write!(formatter, "cannot start turn with {mode:?}"),
+            Self::SkillActivation(error) => write!(formatter, "skill activation failed: {error}"),
         }
     }
 }
@@ -243,6 +245,31 @@ impl<M: Model> Thread<M> {
         control: &RunControl,
         steering_mode: SteeringMode,
     ) -> Result<TurnResult, ThreadError<M::Error>> {
+        self.run_turn_with_events_and_prelude(input, sink, control, steering_mode, &[])
+            .await
+    }
+
+    pub async fn run_turn_with_events_and_prelude<S: EventSink + Send>(
+        &mut self,
+        input: TurnInput,
+        sink: &mut S,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+        prelude: &[Event],
+    ) -> Result<TurnResult, ThreadError<M::Error>> {
+        self.run_turn_with_events_and_preflight(input, sink, control, steering_mode, prelude, None)
+            .await
+    }
+
+    pub async fn run_turn_with_events_and_preflight<S: EventSink + Send>(
+        &mut self,
+        input: TurnInput,
+        sink: &mut S,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+        prelude: &[Event],
+        preflight_error: Option<&str>,
+    ) -> Result<TurnResult, ThreadError<M::Error>> {
         let id = self.begin_turn(&input)?;
         let mut observer = EnvelopeObserver {
             sink,
@@ -256,6 +283,17 @@ impl<M: Model> Thread<M> {
             mode: input.mode,
             prompt: input.text.clone(),
         });
+        for event in prelude {
+            observer.observe(event);
+        }
+        if let Some(error) = preflight_error {
+            observer.observe(&Event::TurnFinished {
+                status: TurnStatus::Failed,
+            });
+            self.next_event_sequence = observer.next_sequence;
+            self.status = ThreadStatus::Idle;
+            return Err(ThreadError::SkillActivation(error.to_string()));
+        }
         let outcome = self
             .harness
             .run_with_control_mode_and_tool_context(
@@ -350,6 +388,9 @@ impl<S: EventSink> Observer for EnvelopeObserver<'_, S> {
         let sequence = self.next_sequence;
         self.next_sequence = self.next_sequence.saturating_add(1);
         let item_id = match event {
+            Event::SkillsLoaded { .. } | Event::SkillsLoadFailed { .. } => {
+                Some(format!("{}:skills", self.turn_id.as_str()))
+            }
             Event::ModelStarted { step, .. } => {
                 let item_id = format!("{}:model:{}", self.turn_id.as_str(), step);
                 self.active_model_item_id = Some(item_id.clone());

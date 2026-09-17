@@ -38,7 +38,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ApprovalPolicy::Interactive,
         AccessScope::Project,
     );
-    let base_composition = RuntimeComposition::default();
+    let base_composition = RuntimeComposition::default()
+        .with_builtin_skill_groups(runtime_config.builtin_skill_groups());
     let startup_config = runtime_config.clone();
     let stdin = BufReader::new(tokio::io::stdin());
     let stdout = tokio::io::stdout();
@@ -81,7 +82,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             retry_mcp_servers,
             stable_system_prompt,
             capability_manifest,
-            ..
+            skill_discovery,
         } = runtime;
         let mut harness = harness;
         if let Some(opened) = &session {
@@ -131,7 +132,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Ok(Thread::new(thread_id, runtime.harness))
             },
         );
-        let management = RuntimeManagementService::new_with_harness_config(
+        let management = RuntimeManagementService::new_with_harness_config_and_skills(
             server.clone(),
             session,
             world,
@@ -140,6 +141,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             retry_mcp_servers,
             management_approval,
             HarnessConfig::default(),
+            skill_discovery,
         );
         let thread_settings = mini_agent_app_server::ThreadSettingsService::new()
             .with_stable_system_prompt(stable_system_prompt);

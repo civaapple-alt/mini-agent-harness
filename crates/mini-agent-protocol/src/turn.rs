@@ -39,9 +39,12 @@ pub enum TurnInputMode {
 
 /// User input handed to the Thread runtime.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TurnInput {
     pub mode: TurnInputMode,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_skills: Vec<String>,
 }
 
 /// Starts a protocol-visible Thread with a stable identity.
@@ -85,6 +88,7 @@ impl TurnInput {
         Self {
             mode,
             text: text.into(),
+            selected_skills: Vec::new(),
         }
     }
 }
