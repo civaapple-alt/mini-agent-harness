@@ -94,6 +94,7 @@ graph LR
 
 ### Proposed
 
+- [Session 状态、Notebook 与 Subagent 执行策略](proposed/architecture/2026-09-17-session-state-notebook-and-subagent-execution-policy.zh.md)
 - [时间上延展、结构上并发：Agent Harness Charter](proposed/architecture/2026-09-17-time-extended-structural-concurrency.zh.md)
 - [Result-Oriented Long-Term Bot Agents](proposed/architecture/2026-09-04-result-oriented-long-term-bot-agents.zh.md)
 - [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
