@@ -11,6 +11,7 @@
 当前相关决策：
 
 - [全局 Skill 发现、按需加载与阶段事件](implemented/feature/2026-09-17-global-skill-discovery-and-observability.zh.md)
+- [时间上延展、结构上并发：Agent Harness Charter](proposed/architecture/2026-09-17-time-extended-structural-concurrency.zh.md)
 
 ## 1. 目录语义与布局
 
@@ -93,6 +94,7 @@ graph LR
 
 ### Proposed
 
+- [时间上延展、结构上并发：Agent Harness Charter](proposed/architecture/2026-09-17-time-extended-structural-concurrency.zh.md)
 - [Result-Oriented Long-Term Bot Agents](proposed/architecture/2026-09-04-result-oriented-long-term-bot-agents.zh.md)
 - [Docker Sandbox Isolation Policy](proposed/architecture/2026-08-31-docker-sandbox-isolation-policy.md)
 - [CLI Through App Server](proposed/architecture/2026-08-28-cli-through-app-server-unified-runtime.md)
@@ -101,6 +103,7 @@ graph LR
 
 ### Implemented
 
+- [独立 Child Session 控制接缝](implemented/architecture/2026-09-17-independent-child-session-control-seam.zh.md)
 - [Skill 启用目录只读放行](implemented/architecture/2026-09-17-skill-associated-resources.zh.md)
 - [pstack 插件级与命名空间 Skill 双入口](implemented/feature/2026-09-17-pstack-plugin-and-namespaced-skill.zh.md)
 - [Builtin Skill 组与 Turn 级显式激活](implemented/feature/2026-09-17-builtin-skill-groups-and-explicit-activation.zh.md)

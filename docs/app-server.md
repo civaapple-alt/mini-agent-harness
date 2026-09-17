@@ -217,7 +217,7 @@ Thread returned by `thread/start`.
 | `thread/close` | `threadId` | Closes the Thread; the action value is `{closed: true}`. |
 | `thread/items/list` | `threadId`; optional `turnId`, `cursor`, `limit`, `sortDirection` | Returns cursor-bounded `data` entries, `nextCursor`, and `backwardsCursor`. |
 | `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
-| `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`) | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. The source Thread must be idle. `exact` never invokes the model; the child owns any later normal-turn compaction. Repeating the same request returns the existing child; reusing the child ID with another context policy is rejected. |
+| `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`) | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. `exact` may read the latest settled checkpoint while the source Thread has an active Turn; `compact` still requires an idle source because it prepares context through the source runtime. `exact` never invokes the model; the child owns any later normal-turn compaction. Repeating the same request returns the existing child; reusing the child ID with another context policy is rejected. |
 
 `thread/resume` is a controlled checkpoint install, not a second persistence
 format. The Session store and App Server remain the authorities for the
@@ -328,16 +328,22 @@ The App Server worker admits commands in one sequence. While a Turn is active,
 `turn/interrupt`, `thread/fork`, `session/fork`, Thread mutations, and runtime
 mutations are checked against the active identity. `turn/interrupt` sets the
 cooperative stop request and returns before tool/model cleanup finishes. A
-fork that is admitted before an interrupt is rejected as busy; a fork that
-arrives after the interrupt is also rejected while the source Turn is
-stopping, and must be retried after `turn_finished`. Neither fork path copies
-an in-flight Turn or approval wait. After stopping is accepted, new
+`thread/fork` or compact `session/fork` is rejected as busy while the source
+Turn is active; an exact `session/fork` is admitted by reading the last
+complete persisted checkpoint. A fork that arrives after an interrupt is
+accepted remains rejected while the source Turn is stopping, and must be
+retried after `turn_finished`. Neither fork path copies an in-flight Turn or
+approval wait. After stopping is accepted, new
 steer/follow-up input and runtime mutations are rejected until the same Turn
 reaches `turn_finished`; read-only observation remains available.
 
 `thread/fork` remains an in-process logical Thread fork. `session/fork` creates
-an independent Session from the latest settled checkpoint and therefore only
-admits when the source Thread is idle. Gateway `attach` reuses an existing
+an independent Session from the latest settled checkpoint. The exact variant
+reads the last complete persisted checkpoint without borrowing mutable Core
+state, so a Host can create a child Session while the source Turn is running;
+the in-flight prompt, tool calls, and approval wait are intentionally not
+copied. The compact variant still requires an idle source and may prepare
+context through the source runtime. Gateway `attach` reuses an existing
 local client when possible, reports the local active Turn in its response, and
 returns a locked external Session as read-only. It never steals a Session lock
 or starts a competing writer. Consumers should keep the active identity until

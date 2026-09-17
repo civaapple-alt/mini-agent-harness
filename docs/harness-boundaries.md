@@ -27,6 +27,13 @@ Host 不通过 `content` 的错误文本猜测 `NeedsApproval`、`Deferred` 或 
 `ToolError(String)` 仅是旧工具兼容边界，Legacy 工具必须自行返回明确的 outcome。
 因此 `content` 是有界诊断信息，不是跨层状态协议。
 
+Child Session 也留在这个边界之外：Core 只运行当前 Thread 的一个显式
+Turn，Host/App Server 通过独立 Session/runtime 表达结构并发。创建 exact
+child 时，Host 只能从父 Session 读取最近一次完整持久化 checkpoint，不得
+复制或修改父 Core 的可变上下文；child 重新经过自己的 Host admission、
+Approval、ToolRuntime 和 event replay。这里不引入 Core 内多租户调度器，也不
+把 Gateway 的 client/task map 当成历史或授权的第二权威。
+
 App Server 的 `ThreadItem.ToolCall` 保留两个正交字段：`status` 表示 Item
 生命周期，`outcome` 表示 Core 工具结果。`needs_approval`、`deferred` 和
 `retryable` 不能被折叠成一个 `completed/failed` 布尔判断；旧 Session 没有

@@ -153,6 +153,8 @@ Use these endpoints:
 | `POST /api/threads` | Start a new Thread or attach a selected Thread. |
 | `POST /api/threads/{thread_id}/attach` | Attach a historical or paused Session. |
 | `POST /api/threads/fork` | Fork a Thread through the canonical App Server boundary. |
+| `GET /api/threads/{thread_id}/children` | List child Sessions derived from a parent Thread. |
+| `POST /api/threads/{thread_id}/children` | Start one bounded Turn in an independent child Session/runtime. |
 | `POST /api/threads/{thread_id}/close` | Close an active Thread and release resources. |
 | `PATCH /api/threads/{thread_id}/summary` | Update Web display metadata only. |
 | `PATCH /api/threads/{thread_id}/rename` | Update the Web display title only. |
@@ -180,6 +182,15 @@ diagnostics; a complete checkpoint makes it recoverable. A completed Plan Turn
 sets the persisted `plan_review_pending` confirmation. It survives reload and
 restore in Session-owned `plan_mode.json`, and selecting implementation clears
 the pending state and returns the Thread to default mode.
+
+Child task execution uses the same split. The Gateway first asks the parent
+App Server for an exact Session fork; that control path reads the last complete
+persisted checkpoint even when the parent Turn is active. It then starts the
+child Turn through a separate App Server client/process. The parent’s in-flight
+input, mutable Core context, tool calls, and approvals are not copied. Child
+history and status remain addressable by the child Thread and are observed
+through the existing event and canonical Session projections. This is
+structural concurrency through independent runtimes, not a Core scheduler.
 
 If a live process owns the Session lock, `attach` returns a conflict or an
 `attached: false` lock description. The Gateway must not delete the lock or

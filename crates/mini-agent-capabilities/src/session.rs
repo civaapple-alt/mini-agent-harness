@@ -231,6 +231,33 @@ impl SessionStore {
         &self.path
     }
 
+    /// Reads the latest committed checkpoint without acquiring the Session's
+    /// live writer lock.
+    ///
+    /// An active runtime may still be appending a Turn, so the file can end in
+    /// an incomplete record. `load_records` deliberately ignores that trailing
+    /// record and returns the last complete checkpoint. This read-only seam is
+    /// what lets an App Server create an exact child Session while the parent
+    /// Turn is still running; it never reads mutable Core state.
+    pub fn read_settled_checkpoint(
+        workspace: &Path,
+        session_id: &str,
+    ) -> Result<(u64, Vec<Message>), String> {
+        validate_session_id(session_id)?;
+        let (_, path) = resolve_session_file(workspace, session_id)?;
+        let metadata = fs::metadata(&path)
+            .map_err(|error| format!("cannot open Session {session_id}: {error}"))?;
+        if metadata.len() > MAX_SESSION_BYTES {
+            return Err(format!(
+                "Session {session_id} exceeds {MAX_SESSION_BYTES} byte limit"
+            ));
+        }
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("cannot read Session {session_id}: {error}"))?;
+        let loaded = load_records(session_id, &bytes)?;
+        Ok((loaded.checkpoint_seq, loaded.messages))
+    }
+
     /// Returns the persisted continuation preference for the current Thread.
     ///
     /// The value is intentionally represented as a bounded storage string at
@@ -1370,6 +1397,40 @@ mod tests {
         assert_eq!(child.store.thread_id(), "child-thread");
         assert_eq!(child.state, SessionState::from_messages(messages));
         drop(child);
+        drop(parent);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn settled_checkpoint_can_be_read_while_parent_session_is_open() {
+        let root = crate::test_support::test_root();
+        let mut parent = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let parent_id = parent.store.session_id().to_string();
+        let messages = vec![Message::User {
+            text: "parent question".to_string(),
+        }];
+        parent
+            .store
+            .record_turn_with_id(
+                "turn-1",
+                TurnCommit {
+                    started_at_ms: timestamp_ms(),
+                    prompt: "parent question",
+                    status: TurnStatus::Completed,
+                    steps: 1,
+                    error: None,
+                    messages: &messages,
+                    tool_arguments: &[],
+                    checkpoint: &messages,
+                },
+            )
+            .unwrap();
+
+        let (checkpoint_seq, checkpoint) =
+            SessionStore::read_settled_checkpoint(&root, &parent_id).unwrap();
+        assert_eq!(checkpoint_seq, parent.store.checkpoint_seq());
+        assert_eq!(checkpoint, messages);
+
         drop(parent);
         crate::test_support::remove_test_root(&root);
     }

@@ -747,6 +747,60 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
 }
 
 #[tokio::test]
+async fn exact_session_fork_can_prepare_from_an_active_parent_turn() {
+    let root = rpc_root("active-session-fork");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let source_thread_id = opened.store.thread_id().to_string();
+    let initial_checkpoint_seq = opened.store.checkpoint_seq();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let mut connection = managed_connection_with_session(
+        ScenarioModel::Timeout(release.clone()),
+        root.clone(),
+        opened,
+    );
+    initialize_connection(&mut connection, "active-session-fork-test").await;
+
+    let _ = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
+            2,
+            METHOD_TURN_START,
+            serde_json::json!(TurnStartParams {
+                thread_id: ThreadId::new(source_thread_id.clone()),
+                input: TurnInput::new(TurnInputMode::Start, "active parent"),
+            }),
+        ),
+    )
+    .await;
+    loop {
+        let event = next_turn_event(&mut connection).await;
+        if matches!(event.event, mini_agent_protocol::Event::TurnStarted { .. }) {
+            break;
+        }
+    }
+
+    let fork = rpc_call(
+        &mut connection,
+        3,
+        METHOD_SESSION_FORK,
+        serde_json::json!({
+            "sourceThreadId": source_thread_id,
+            "newThreadId": "active-child-thread",
+            "contextPolicy": "exact"
+        }),
+    )
+    .await;
+    assert_eq!(fork["value"]["threadId"], "active-child-thread");
+    assert_eq!(fork["value"]["method"], "exact");
+    assert_eq!(fork["value"]["parentCheckpointSeq"], initial_checkpoint_seq);
+
+    release.notify_one();
+    wait_for_turn_finished(&mut connection).await;
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn rejects_thread_continuation_updates_while_goal_runtime_is_active() {
     let (mut connection, root) = managed_connection("goal-owns-continuation");
     initialize_connection(&mut connection, "goal-continuation-test").await;

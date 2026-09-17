@@ -621,6 +621,18 @@ pub(super) fn handle_running<M>(
         reject_runtime(request.command, receipt, error);
         return;
     }
+    if !stopping
+        && matches!(
+            &request.command,
+            RuntimeCommand::PrepareSessionFork {
+                context_policy: mini_agent_app_server_protocol::ForkContextPolicy::Exact,
+                ..
+            }
+        )
+    {
+        handle_active_session_fork(request, receipt, runtime);
+        return;
+    }
     let command = request.command;
     if (stopping && command.is_mutation())
         || (command.is_mutation() && !is_safe_goal_mutation_while_running(&command))
@@ -629,6 +641,71 @@ pub(super) fn handle_running<M>(
     } else {
         handle(command, receipt, runtime, threads, runtime_revision);
     }
+}
+
+fn handle_active_session_fork(
+    request: RuntimeRequest,
+    receipt: ActionReceipt,
+    runtime: &mut Option<RuntimeActorState>,
+) {
+    let RuntimeCommand::PrepareSessionFork {
+        source_thread_id,
+        new_thread_id,
+        context_policy,
+        reply,
+    } = request.command
+    else {
+        unreachable!("active session fork handler received another runtime command");
+    };
+    let result =
+        prepare_active_session_fork(source_thread_id, new_thread_id, context_policy, runtime);
+    respond(reply, receipt, result);
+}
+
+fn prepare_active_session_fork(
+    source_thread_id: ThreadId,
+    new_thread_id: ThreadId,
+    context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+    runtime: &Option<RuntimeActorState>,
+) -> Result<mini_agent_app_server_protocol::SessionForkResult, AppServerError> {
+    if context_policy != mini_agent_app_server_protocol::ForkContextPolicy::Exact {
+        return Err(AppServerError::Busy);
+    }
+    let state = runtime.as_ref().ok_or(AppServerError::RuntimeUnavailable)?;
+    if state.management.thread_id() != source_thread_id {
+        return Err(AppServerError::ThreadNotFound(source_thread_id));
+    }
+    let parent = state
+        .management
+        .session_info()
+        .ok_or_else(|| AppServerError::Checkpoint("session persistence is disabled".to_string()))?;
+    let workspace = state.management.world().workspace().to_path_buf();
+    let (parent_checkpoint_seq, checkpoint) =
+        mini_agent_capabilities::SessionStore::read_settled_checkpoint(
+            &workspace,
+            &parent.session_id,
+        )
+        .map_err(AppServerError::Checkpoint)?;
+    let context_bytes = serde_json::to_vec(&checkpoint)
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?
+        .len();
+    let metadata = mini_agent_capabilities::SessionForkMetadata {
+        context_policy: "exact".to_string(),
+        context_before_bytes: context_bytes,
+        context_after_bytes: context_bytes,
+        compacted: false,
+        method: "exact".to_string(),
+    };
+    let child = mini_agent_capabilities::SessionStore::fork_from_checkpoint(
+        &workspace,
+        &parent.session_id,
+        parent_checkpoint_seq,
+        new_thread_id.as_str(),
+        &checkpoint,
+        metadata,
+    )
+    .map_err(map_session_fork_error)?;
+    session_fork_result(child, None)
 }
 
 fn is_safe_goal_mutation_while_running(command: &RuntimeCommand) -> bool {
