@@ -1,4 +1,7 @@
 use super::*;
+use mini_agent_app_server_protocol::{
+    ScheduledTaskListParams, ScheduledTaskListResult, ScheduledTaskParams,
+};
 
 impl<M> AppServerConnection<M>
 where
