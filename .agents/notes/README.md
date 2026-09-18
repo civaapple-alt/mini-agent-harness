@@ -97,6 +97,7 @@ graph LR
 ### Proposed
 
 - [跨 Turn 的后台 Shell 任务](proposed/architecture/2026-09-18-background-shell-task.zh.md)
+- [跨 Turn 的定时唤醒任务](proposed/architecture/2026-09-18-scheduled-task.zh.md)
 - [Session 状态、Notebook 与 Subagent 执行策略](proposed/architecture/2026-09-17-session-state-notebook-and-subagent-execution-policy.zh.md)
 - [时间上延展、结构上并发：Agent Harness Charter](proposed/architecture/2026-09-17-time-extended-structural-concurrency.zh.md)
 - [Result-Oriented Long-Term Bot Agents](proposed/architecture/2026-09-04-result-oriented-long-term-bot-agents.zh.md)

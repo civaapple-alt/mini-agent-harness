@@ -26,19 +26,22 @@ use mini_agent_app_server_protocol::{
     METHOD_GOAL_VERIFICATION_STARTED, METHOD_INITIALIZE, METHOD_INITIALIZED, METHOD_MCP_RETRY,
     METHOD_MCP_STATUS, METHOD_PLAN_CLEANUP_COMPLETED, METHOD_PLAN_CLEANUP_FAILED,
     METHOD_PLAN_CLEANUP_STARTED, METHOD_PLAN_UPDATED, METHOD_RUNTIME_STATUS,
-    METHOD_RUNTIME_STATUS_UPDATED, METHOD_SESSION_FORK, METHOD_SESSION_INFO,
-    METHOD_SESSION_NOTEBOOK_FORGET, METHOD_SESSION_NOTEBOOK_READ, METHOD_SESSION_NOTEBOOK_WRITE,
-    METHOD_THREAD_CLOSE, METHOD_THREAD_FORK, METHOD_THREAD_GOAL_CLEAR, METHOD_THREAD_GOAL_GET,
-    METHOD_THREAD_GOAL_SET, METHOD_THREAD_ITEMS_LIST, METHOD_THREAD_LIST, METHOD_THREAD_READ,
-    METHOD_THREAD_RESUME, METHOD_THREAD_SETTINGS_UPDATE, METHOD_THREAD_START, METHOD_TURN_EVENT,
-    METHOD_TURN_EVENTS, METHOD_TURN_INTERRUPT, METHOD_TURN_READ, METHOD_TURN_START,
-    METHOD_TURN_STEER, METHOD_WORLD_REFRESH, METHOD_WORLD_SET_EXECUTION, METHOD_WORLD_STATE,
+    METHOD_RUNTIME_STATUS_UPDATED, METHOD_SCHEDULED_TASK_CANCEL, METHOD_SCHEDULED_TASK_LIST,
+    METHOD_SCHEDULED_TASK_READ, METHOD_SCHEDULED_TASK_UPDATED, METHOD_SESSION_FORK,
+    METHOD_SESSION_INFO, METHOD_SESSION_NOTEBOOK_FORGET, METHOD_SESSION_NOTEBOOK_READ,
+    METHOD_SESSION_NOTEBOOK_WRITE, METHOD_THREAD_CLOSE, METHOD_THREAD_FORK,
+    METHOD_THREAD_GOAL_CLEAR, METHOD_THREAD_GOAL_GET, METHOD_THREAD_GOAL_SET,
+    METHOD_THREAD_ITEMS_LIST, METHOD_THREAD_LIST, METHOD_THREAD_READ, METHOD_THREAD_RESUME,
+    METHOD_THREAD_SETTINGS_UPDATE, METHOD_THREAD_START, METHOD_TURN_EVENT, METHOD_TURN_EVENTS,
+    METHOD_TURN_INTERRUPT, METHOD_TURN_READ, METHOD_TURN_START, METHOD_TURN_STEER,
+    METHOD_WORLD_REFRESH, METHOD_WORLD_SET_EXECUTION, METHOD_WORLD_STATE,
     McpRetryResult as ProtocolMcpRetryResult, McpStatusResult, PROTOCOL_VERSION,
-    RuntimeStatusParams, ServerCapabilities, SessionForkConflictData, SessionForkParams,
-    SessionInfoResult, SessionNotebookForgetParams, SessionNotebookReadParams,
-    SessionNotebookWriteParams, ThreadCloseParams, ThreadForkParams, ThreadForkResult,
-    ThreadGoalClearParams, ThreadGoalClearResponse, ThreadGoalClearedNotification,
-    ThreadGoalGetParams, ThreadGoalGetResponse, ThreadGoalSetParams, ThreadGoalSetResponse,
+    RuntimeStatusParams, ScheduledTaskListParams, ScheduledTaskListResult, ScheduledTaskParams,
+    ServerCapabilities, SessionForkConflictData, SessionForkParams, SessionInfoResult,
+    SessionNotebookForgetParams, SessionNotebookReadParams, SessionNotebookWriteParams,
+    ThreadCloseParams, ThreadForkParams, ThreadForkResult, ThreadGoalClearParams,
+    ThreadGoalClearResponse, ThreadGoalClearedNotification, ThreadGoalGetParams,
+    ThreadGoalGetResponse, ThreadGoalSetParams, ThreadGoalSetResponse,
     ThreadGoalUpdatedNotification, ThreadItemsListParams, ThreadListParams, ThreadListResult,
     ThreadReadParams, ThreadReadResult, ThreadResumeParams, ThreadResumeResult,
     ThreadSettingsUpdateParams, ThreadSettingsUpdateResult, ThreadSettingsUpdatedNotification,
@@ -60,6 +63,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::broadcast;
 
 mod background;
+mod scheduled_task;
 mod thread;
 mod transport;
 mod turn;
@@ -280,6 +284,9 @@ where
             METHOD_BACKGROUND_TASK_LOGS => self.handle_background_task_logs(request).await,
             METHOD_BACKGROUND_TASK_STOP => self.handle_background_task_stop(request).await,
             METHOD_BACKGROUND_TASK_RESTART => self.handle_background_task_restart(request).await,
+            METHOD_SCHEDULED_TASK_LIST => self.handle_scheduled_task_list(request).await,
+            METHOD_SCHEDULED_TASK_READ => self.handle_scheduled_task_read(request).await,
+            METHOD_SCHEDULED_TASK_CANCEL => self.handle_scheduled_task_cancel(request).await,
             _ => response_error(id, JsonRpcError::method_not_found(request.method)),
         }
     }
@@ -376,6 +383,7 @@ where
                 event_replay: true,
                 workflow_lifecycle_notifications: self.runtime.is_some(),
                 background_tasks: self.runtime.is_some(),
+                scheduled_tasks: self.runtime.is_some(),
             },
             capability_manifest: self.capability_manifest.clone(),
         };
@@ -607,6 +615,10 @@ pub(super) fn runtime_notification_request(event: RuntimeNotification) -> JsonRp
         RuntimeNotification::BackgroundTaskUpdated(event) => JsonRpcRequest::notification(
             METHOD_BACKGROUND_TASK_UPDATED,
             Some(serde_json::to_value(event).expect("background task update is serializable")),
+        ),
+        RuntimeNotification::ScheduledTaskUpdated(event) => JsonRpcRequest::notification(
+            METHOD_SCHEDULED_TASK_UPDATED,
+            Some(serde_json::to_value(event).expect("scheduled task update is serializable")),
         ),
         RuntimeNotification::Workflow(event) => workflow_notification_request(event),
     }

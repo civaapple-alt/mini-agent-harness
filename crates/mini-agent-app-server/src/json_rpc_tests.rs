@@ -130,6 +130,28 @@ async fn exposes_empty_background_shell_task_list_and_capability() {
 }
 
 #[tokio::test]
+async fn exposes_empty_scheduled_task_list_and_capability() {
+    let (mut connection, root) = managed_connection("scheduled-task-list");
+    let initialize = connection
+        .handle_request(initialize_request(1, "scheduled-task-test"))
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(initialize["capabilities"]["scheduledTasks"], true);
+    let result = rpc_call(
+        &mut connection,
+        2,
+        METHOD_SCHEDULED_TASK_LIST,
+        serde_json::json!({"threadId": "thread-1"}),
+    )
+    .await;
+    assert_eq!(result["value"]["data"], serde_json::json!([]));
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
     let root = rpc_root("background-shell-lifecycle");
     let background_shells = BackgroundShellManager::new();

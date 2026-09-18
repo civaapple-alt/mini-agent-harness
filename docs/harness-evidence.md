@@ -94,6 +94,18 @@ Gateway 重启恢复、远程 GitHub Action 等待、跨平台 Job Object 等价
 浏览器端的视觉质量。Web Gateway/Studio 的后台任务投影和 Child 只读路由仍由
 各自的 SDK、Gateway 和 UI 回归测试覆盖。
 
+## Scheduled wake-up task evidence（2026-09-18）
+
+该能力用于替代当前 Turn 内的长时间 `sleep` 轮询。它只创建一个有界 delay 标记，
+让当前 Turn 结束；到期后下一轮读取 `ready` 状态，再显式查询远程 Action。它不
+执行 Shell、不自动续跑模型，也不证明远程 Provider 的最终结果。
+
+| 场景 | 公共路径 | 可观察结果 |
+| :--- | :--- | :--- |
+| 有界延时变为 ready | `scheduled_task::tests::delay_task_becomes_ready_without_blocking_a_turn` | 创建立即返回；读取到期标记后状态为 `ready`，没有等待 worker 或前台 Shell |
+| task_id 幂等与本地取消 | `scheduled_task::tests::duplicate_task_id_is_idempotent_and_cancel_is_local` | 重复创建不产生第二条记录，取消后为 `cancelled`，不涉及远程任务 |
+| Child/禁用 runtime fail closed | `scheduled_task::tests::child_or_disabled_runtime_cannot_create_task` | 创建请求被拒绝；Child 的只读投影和控制拒绝由 App Server/Gateway 边界覆盖 |
+
 ## Control Plane boundary evidence（2026-09-07）
 
 line gate 的后续计划要求 Permission、Sandbox、Recovery、Audit 不能只停留在

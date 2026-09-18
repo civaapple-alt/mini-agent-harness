@@ -16,7 +16,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Add explicit background Shell mode for local processes that must span Turns.
   App Server owns bounded task snapshots and process-group cleanup; Gateway and
   Web Studio expose read/log/stop/restart controls. Remote waits such as GitHub
-  Actions remain a separate future operation type.
+  Actions use the separate bounded scheduled-task marker below.
+- Add a bounded `scheduled_task` wake-up marker for remote status polling. It ends
+  the current Turn without running Shell or automatically resuming the model;
+  a later Turn explicitly reads the marker and performs the remote query.
 - Add an independent Child Session control seam. Child Sessions use exact
   persisted checkpoints and their own runtime, history, approvals, and replay;
   Core remains a single-Thread Turn loop.

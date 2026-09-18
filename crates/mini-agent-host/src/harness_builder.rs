@@ -28,6 +28,7 @@ pub struct HarnessBuild<M: Model> {
     pub capability_manifest: CapabilityManifest,
     pub skill_discovery: Option<mini_agent_capabilities::Discovery>,
     pub background_shells: mini_agent_capabilities::BackgroundShellManager,
+    pub scheduled_tasks: mini_agent_capabilities::ScheduledTaskManager,
 }
 
 /// The fully assembled application-host runtime handed to a frontend or
@@ -116,6 +117,7 @@ where
     )?;
     let workspace = runtime_config.workspace();
     let background_shells = mini_agent_capabilities::BackgroundShellManager::new();
+    let scheduled_tasks = mini_agent_capabilities::ScheduledTaskManager::new();
     let mut capability_manifest = composition.manifest_with_config(&config);
     let composition_overlay = composition.prompt_overlay();
     if !composition_overlay.is_empty() {
@@ -210,6 +212,7 @@ where
             images: images.clone(),
             results,
             background_shells: background_shells.clone(),
+            scheduled_tasks: scheduled_tasks.clone(),
         }) {
             Ok(tools) => tools,
             Err(error) => return Err(error.to_string()),
@@ -293,6 +296,7 @@ where
         capability_manifest,
         skill_discovery,
         background_shells,
+        scheduled_tasks,
     })
 }
 

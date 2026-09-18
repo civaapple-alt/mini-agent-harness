@@ -73,6 +73,10 @@ pub const METHOD_BACKGROUND_TASK_LOGS: &str = "background-task/logs";
 pub const METHOD_BACKGROUND_TASK_STOP: &str = "background-task/stop";
 pub const METHOD_BACKGROUND_TASK_RESTART: &str = "background-task/restart";
 pub const METHOD_BACKGROUND_TASK_UPDATED: &str = "background-task/updated";
+pub const METHOD_SCHEDULED_TASK_LIST: &str = "scheduled-task/list";
+pub const METHOD_SCHEDULED_TASK_READ: &str = "scheduled-task/read";
+pub const METHOD_SCHEDULED_TASK_CANCEL: &str = "scheduled-task/cancel";
+pub const METHOD_SCHEDULED_TASK_UPDATED: &str = "scheduled-task/updated";
 pub const METHOD_CHECKPOINT_COMMITTED: &str = "checkpoint/committed";
 pub const METHOD_GOAL_VERIFICATION_STARTED: &str = "goal/verification_started";
 pub const METHOD_GOAL_VERIFICATION_COMPLETED: &str = "goal/verification_completed";
@@ -299,6 +303,48 @@ pub struct BackgroundTaskUpdatedNotification {
     pub state_revision: u64,
 }
 
+/// A bounded wake-up marker for a later model turn.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledTask {
+    pub task_id: String,
+    pub owner_thread_id: ThreadId,
+    pub state: String,
+    pub trigger_type: String,
+    pub summary: String,
+    pub created_at: u64,
+    pub due_at: u64,
+    pub ready_at: Option<u64>,
+    pub cancelled_at: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledTaskListParams {
+    pub thread_id: ThreadId,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledTaskParams {
+    pub thread_id: ThreadId,
+    pub task_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledTaskListResult {
+    pub data: Vec<ScheduledTask>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledTaskUpdatedNotification {
+    pub thread_id: ThreadId,
+    pub task: ScheduledTask,
+    pub state_revision: u64,
+}
+
 /// A bounded workflow lifecycle record. The method name identifies the
 /// transition; optional fields carry only the correlation data needed to
 /// reconcile a live client with the canonical runtime.
@@ -455,6 +501,8 @@ pub struct ServerCapabilities {
     pub workflow_lifecycle_notifications: bool,
     #[serde(default)]
     pub background_tasks: bool,
+    #[serde(default)]
+    pub scheduled_tasks: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

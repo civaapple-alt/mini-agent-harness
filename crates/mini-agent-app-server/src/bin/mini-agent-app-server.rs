@@ -84,6 +84,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             capability_manifest,
             skill_discovery,
             background_shells,
+            scheduled_tasks,
         } = runtime;
         let mut harness = harness;
         if let Some(opened) = &session {
@@ -142,6 +143,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .map(|opened| ThreadId::new(opened.store.thread_id().to_string()))
             .unwrap_or_else(|| ThreadId::new("default"));
         background_shells.bind_owner(thread_id.as_str());
+        scheduled_tasks.bind_owner(thread_id.as_str());
         if let Some(opened) = &session {
             broker.bind_thread_trace(thread_id.as_str().to_string(), opened.store.path());
         }
@@ -174,11 +176,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .build(thread_composition, Default::default())
                         .map_err(AppServerError::Checkpoint)?;
                 runtime.background_shells.disable();
+                runtime.scheduled_tasks.disable();
                 Ok(Thread::new(thread_id, runtime.harness))
             },
         );
         let management =
-            RuntimeManagementService::new_with_harness_config_and_skills_and_background_shells(
+            RuntimeManagementService::new_with_harness_config_and_skills_and_task_managers(
                 server.clone(),
                 session,
                 world,
@@ -189,6 +192,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 HarnessConfig::default(),
                 skill_discovery,
                 background_shells,
+                scheduled_tasks,
             );
         let thread_settings = mini_agent_app_server::ThreadSettingsService::new()
             .with_stable_system_prompt(stable_system_prompt);

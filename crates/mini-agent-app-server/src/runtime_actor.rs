@@ -626,6 +626,51 @@ pub(super) fn handle<M>(
             notify_background_task(runtime, &result);
             respond(reply, receipt, result);
         }
+        RuntimeCommand::ScheduledTaskList { reply } => respond(
+            reply,
+            receipt,
+            runtime
+                .as_ref()
+                .ok_or(AppServerError::RuntimeUnavailable)
+                .and_then(|state| {
+                    state
+                        .scheduled_tasks
+                        .list(state.management.thread_id().as_str())
+                        .map(|tasks| {
+                            tasks
+                                .into_iter()
+                                .map(crate::management::project_scheduled_task)
+                                .collect()
+                        })
+                        .map_err(scheduled_task_error)
+                }),
+        ),
+        RuntimeCommand::ScheduledTaskRead { task_id, reply } => respond(
+            reply,
+            receipt,
+            runtime
+                .as_ref()
+                .ok_or(AppServerError::RuntimeUnavailable)
+                .and_then(|state| {
+                    state
+                        .scheduled_tasks
+                        .read(state.management.thread_id().as_str(), &task_id)
+                        .map(crate::management::project_scheduled_task)
+                        .map_err(scheduled_task_error)
+                }),
+        ),
+        RuntimeCommand::ScheduledTaskCancel { task_id, reply } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .scheduled_tasks
+                    .cancel(state.management.thread_id().as_str(), &task_id)
+                    .map(crate::management::project_scheduled_task)
+                    .map(|task| (task, true))
+                    .map_err(scheduled_task_error)
+            });
+            notify_scheduled_task(runtime, &result);
+            respond(reply, receipt, result);
+        }
         RuntimeCommand::RetryMcp { approval, reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 retry_mcp(threads, state, approval)
@@ -780,6 +825,9 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::BackgroundTaskLogs { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::BackgroundTaskStop { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::BackgroundTaskRestart { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::ScheduledTaskList { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::ScheduledTaskRead { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::ScheduledTaskCancel { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::RetryMcp { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ReadCheckpoint { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::StartNewThread { reply } => respond(reply, receipt, Err(error)),
@@ -932,6 +980,7 @@ fn is_safe_goal_mutation_while_running(command: &RuntimeCommand) -> bool {
         command,
         RuntimeCommand::BackgroundTaskStop { .. }
             | RuntimeCommand::BackgroundTaskRestart { .. }
+            | RuntimeCommand::ScheduledTaskCancel { .. }
             | RuntimeCommand::ThreadGoalClear { .. }
             | RuntimeCommand::ThreadGoalSet {
                 objective: None,
@@ -1668,12 +1717,17 @@ where
         .background_shells
         .close_all()
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
+    state
+        .scheduled_tasks
+        .close_all()
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
     if let Err(error) = session.store.start_thread() {
         return Err(AppServerError::Checkpoint(error));
     }
     let new_thread_id = ThreadId::new(session.store.thread_id().to_string());
     threads.rename(&old_thread_id, new_thread_id.clone(), 1)?;
     state.background_shells.bind_owner(new_thread_id.as_str());
+    state.scheduled_tasks.bind_owner(new_thread_id.as_str());
     Ok(())
 }
 
@@ -1683,6 +1737,10 @@ fn workflow_error(error: std::io::Error) -> AppServerError {
 
 fn background_task_error(error: String) -> AppServerError {
     AppServerError::Checkpoint(format!("background shell task failed: {error}"))
+}
+
+fn scheduled_task_error(error: String) -> AppServerError {
+    AppServerError::Checkpoint(format!("scheduled task failed: {error}"))
 }
 
 fn notify_background_task(
@@ -1696,6 +1754,25 @@ fn notify_background_task(
             .notifications
             .send(crate::RuntimeNotification::BackgroundTaskUpdated(
                 mini_agent_app_server_protocol::BackgroundTaskUpdatedNotification {
+                    thread_id: state.management.thread_id(),
+                    task: task.clone(),
+                    state_revision: state.revision().value(),
+                },
+            ));
+    }
+}
+
+fn notify_scheduled_task(
+    runtime: &Option<RuntimeActorState>,
+    result: &Result<mini_agent_app_server_protocol::ScheduledTask, AppServerError>,
+) {
+    if let Ok(task) = result
+        && let Some(state) = runtime.as_ref()
+    {
+        let _ = state
+            .notifications
+            .send(crate::RuntimeNotification::ScheduledTaskUpdated(
+                mini_agent_app_server_protocol::ScheduledTaskUpdatedNotification {
                     thread_id: state.management.thread_id(),
                     task: task.clone(),
                     state_revision: state.revision().value(),

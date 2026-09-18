@@ -93,6 +93,17 @@ pub(super) enum RuntimeCommand {
         task_id: String,
         reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::BackgroundTask>>,
     },
+    ScheduledTaskList {
+        reply: oneshot::Sender<ActionResult<Vec<mini_agent_app_server_protocol::ScheduledTask>>>,
+    },
+    ScheduledTaskRead {
+        task_id: String,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::ScheduledTask>>,
+    },
+    ScheduledTaskCancel {
+        task_id: String,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::ScheduledTask>>,
+    },
     RetryMcp {
         approval: ApprovalController,
         reply: oneshot::Sender<ActionResult<crate::McpRetryResult>>,
@@ -140,6 +151,7 @@ impl RuntimeCommand {
                 | Self::ForgetNotebook { .. }
                 | Self::BackgroundTaskStop { .. }
                 | Self::BackgroundTaskRestart { .. }
+                | Self::ScheduledTaskCancel { .. }
         )
     }
 }

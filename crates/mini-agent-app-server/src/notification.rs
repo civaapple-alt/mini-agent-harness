@@ -4,7 +4,8 @@ use mini_agent_app_server_protocol::ItemCompletedNotification;
 use mini_agent_app_server_protocol::ItemStartedNotification;
 use mini_agent_app_server_protocol::NotebookUpdatedNotification;
 use mini_agent_app_server_protocol::{
-    BackgroundTaskUpdatedNotification, RuntimeStatus, WorkflowLifecycleNotification,
+    BackgroundTaskUpdatedNotification, RuntimeStatus, ScheduledTaskUpdatedNotification,
+    WorkflowLifecycleNotification,
 };
 use mini_agent_protocol::EventEnvelope;
 
@@ -37,5 +38,6 @@ pub(crate) enum RuntimeNotification {
     Settings(SettingsRuntimeEvent),
     Status(RuntimeStatus),
     BackgroundTaskUpdated(BackgroundTaskUpdatedNotification),
+    ScheduledTaskUpdated(ScheduledTaskUpdatedNotification),
     Workflow(WorkflowRuntimeEvent),
 }

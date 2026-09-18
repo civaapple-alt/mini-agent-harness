@@ -7,6 +7,7 @@ pub(crate) use shell::shell_command;
 
 use crate::result_store::ResultStore;
 use crate::sandbox::{ProcessSandbox, SandboxKind};
+use crate::scheduled_task::ScheduledTaskManager;
 use crate::security::{SecurityDecision, SecurityPolicy, SecurityPreset};
 pub use approval::{ApprovalController, ApprovalFailure};
 #[cfg(test)]
@@ -86,6 +87,7 @@ pub fn workspace_tools_with_read_roots_results_and_background_shells(
             extra_write_roots,
             sandbox,
             background_shells,
+            scheduled_tasks: ScheduledTaskManager::new(),
         },
         images,
         results,
@@ -101,6 +103,7 @@ pub(crate) struct WorkspaceToolConfig {
     pub(crate) extra_write_roots: Vec<PathBuf>,
     pub(crate) sandbox: SandboxKind,
     pub(crate) background_shells: crate::background_shell::BackgroundShellManager,
+    pub(crate) scheduled_tasks: ScheduledTaskManager,
 }
 
 pub(crate) fn workspace_tools_with_config(
@@ -131,6 +134,9 @@ pub(crate) fn workspace_tools_with_config(
         workspace: Arc::clone(&workspace),
         store: images,
     }));
+    tools.extend(crate::scheduled_task::scheduled_task_tools(
+        config.scheduled_tasks,
+    ));
     Ok(tools)
 }
 

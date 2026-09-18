@@ -10,12 +10,12 @@ use crate::status::RuntimeStatusHandle;
 use crate::thread_settings::ThreadSettingsService;
 use crate::worker::Command;
 use crate::{AppServer, AppServerError, McpRetryResult, RuntimeSessionInfo, RuntimeTurnResult};
-use mini_agent_capabilities::BackgroundShellManager;
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
 use mini_agent_capabilities::{
     ApprovalController, ApprovalPolicy, McpServerConfig, OpenedSession, SecurityPreset,
     SessionItem, TurnCommit,
 };
+use mini_agent_capabilities::{BackgroundShellManager, ScheduledTaskManager};
 use mini_agent_core::{HarnessConfig, ThreadCheckpoint};
 use mini_agent_host::WorldState;
 use mini_agent_protocol::{Message, Model, ThreadId, TurnStatus};
@@ -33,6 +33,7 @@ pub(crate) struct RuntimeActorState {
     pub(crate) notifications: broadcast::Sender<RuntimeNotification>,
     pub(crate) status: RuntimeStatusHandle,
     pub(crate) background_shells: BackgroundShellManager,
+    pub(crate) scheduled_tasks: ScheduledTaskManager,
     revision: crate::action::RuntimeRevision,
 }
 
@@ -60,6 +61,7 @@ pub(crate) struct RuntimeManagementState {
     pub(crate) base_harness_config: HarnessConfig,
     pub(crate) skill_discovery: Option<mini_agent_capabilities::Discovery>,
     pub(crate) background_shells: BackgroundShellManager,
+    pub(crate) scheduled_tasks: ScheduledTaskManager,
 }
 
 struct McpRuntimeState {
@@ -193,6 +195,35 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         skill_discovery: Option<mini_agent_capabilities::Discovery>,
         background_shells: BackgroundShellManager,
     ) -> Self {
+        Self::new_with_harness_config_and_skills_and_task_managers(
+            server,
+            session,
+            world,
+            enabled_mcp_servers,
+            mcp_tool_count,
+            retry_mcp_servers,
+            approval,
+            base_harness_config,
+            skill_discovery,
+            background_shells,
+            ScheduledTaskManager::new(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_harness_config_and_skills_and_task_managers(
+        server: AppServer<M>,
+        session: Option<OpenedSession>,
+        world: WorldState,
+        enabled_mcp_servers: Vec<String>,
+        mcp_tool_count: usize,
+        retry_mcp_servers: Vec<McpServerConfig>,
+        approval: ApprovalController,
+        base_harness_config: HarnessConfig,
+        skill_discovery: Option<mini_agent_capabilities::Discovery>,
+        background_shells: BackgroundShellManager,
+        scheduled_tasks: ScheduledTaskManager,
+    ) -> Self {
         let active_thread_id = server.thread_id().clone();
         let local_checkpoint_seq = 0;
         let (goal_notifications, _) = broadcast::channel(64);
@@ -217,6 +248,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 base_harness_config,
                 skill_discovery,
                 background_shells,
+                scheduled_tasks,
             }),
             approval,
             goal_notifications,
@@ -267,6 +299,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         );
         let commands = server.command_sender();
         let background_shells = management.background_shells.clone();
+        let scheduled_tasks = management.scheduled_tasks.clone();
         server
             .install_runtime_state(RuntimeActorState {
                 management,
@@ -280,6 +313,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 notifications: notifications.clone(),
                 status: status.clone(),
                 background_shells,
+                scheduled_tasks,
                 revision: crate::action::RuntimeRevision::default(),
             })
             .map_err(|error| error.to_string())?;
@@ -477,6 +511,33 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
+    pub(crate) async fn scheduled_task_list_action(
+        &self,
+    ) -> Result<ActionResponse<Vec<mini_agent_app_server_protocol::ScheduledTask>>, ActionFailure>
+    {
+        self.client
+            .request_action(|reply| RuntimeCommand::ScheduledTaskList { reply })
+            .await
+    }
+
+    pub(crate) async fn scheduled_task_read_action(
+        &self,
+        task_id: String,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::ScheduledTask>, ActionFailure> {
+        self.client
+            .request_action(|reply| RuntimeCommand::ScheduledTaskRead { task_id, reply })
+            .await
+    }
+
+    pub(crate) async fn scheduled_task_cancel_action(
+        &self,
+        task_id: String,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::ScheduledTask>, ActionFailure> {
+        self.client
+            .request_action(|reply| RuntimeCommand::ScheduledTaskCancel { task_id, reply })
+            .await
+    }
+
     pub(crate) async fn retry_mcp_action(
         &self,
     ) -> Result<ActionResponse<McpRetryResult>, ActionFailure> {
@@ -541,6 +602,22 @@ pub(crate) fn project_background_logs(
         text: logs.text,
         bytes: logs.bytes,
         truncated: logs.truncated,
+    }
+}
+
+pub(crate) fn project_scheduled_task(
+    task: mini_agent_capabilities::ScheduledTask,
+) -> mini_agent_app_server_protocol::ScheduledTask {
+    mini_agent_app_server_protocol::ScheduledTask {
+        task_id: task.task_id,
+        owner_thread_id: ThreadId::new(task.owner_thread_id),
+        state: task.state,
+        trigger_type: task.trigger_type,
+        summary: task.summary,
+        created_at: task.created_at,
+        due_at: task.due_at,
+        ready_at: task.ready_at,
+        cancelled_at: task.cancelled_at,
     }
 }
 

@@ -18,9 +18,10 @@ shell
 `ManagedService`、健康检查、端口声明、通用 Scheduler、Service Registry 或隐式
 自动重启策略。
 
-GitHub Action 状态查询、云端构建和部署状态等待等远程长任务不属于本提案。它们
-没有本地进程可终止，应另行建模为 `ExternalWaitOperation`：保存远程引用和最近
-状态，停止只停止本地轮询，不取消远程操作。
+GitHub Action 状态查询、云端构建和部署状态等待等远程长任务不属于本提案。第一版
+使用独立的 `ScheduledTask` 有界延时标记，让下一轮模型继续查询；它不保存供应商
+取消协议，也不取消远程操作。详见
+`2026-09-18-scheduled-task.zh.md`，不要把远程等待伪装成后台 Shell。
 
 ## Shell 接口
 
@@ -77,7 +78,8 @@ background-task/updated
 `runtime/status` 仍只描述当前 Turn，不混入后台 Shell 状态。Gateway 只转发主
 Thread runtime 的权威结果，不维护第二份进程注册表。Web Studio 运行面板展示任务
 ID、状态、PID、工作目录、命令摘要和 hash、运行时长、退出码以及有界日志尾部，
-并为主 Thread 提供停止和重启操作，为 Child 显示只读标识。
+并为主 Thread 提供停止和重启操作，为 Child 显示只读标识。远程等待的定时标记由
+单独的 `scheduled-task/list/read/cancel` 控制面展示，不混入本地进程卡片。
 
 后续 Turn 修改代码后，由模型显式调用 `restart`。第一版不根据文件变化猜测哪个
 任务应该重启。
@@ -87,8 +89,8 @@ ID、状态、PID、工作目录、命令摘要和 hash、运行时长、退出�
 保留
 `.agents/notes/implemented/architecture/2026-09-17-time-extended-child-session-and-notebook.zh.md`。
 该提案描述 Child Session、operation 和时间延展；本提案只补充本地 Shell 进程的
-跨 Turn 生命周期，不把它扩展成通用服务管理框架。远程等待任务另行建立
-`ExternalWaitOperation` 提案，不复用 `BackgroundShellTask`。
+跨 Turn 生命周期，不把它扩展成通用服务管理框架。远程等待任务使用独立的
+`ScheduledTask` 提案，不复用 `BackgroundShellTask`。
 
 ## 六问准入
 

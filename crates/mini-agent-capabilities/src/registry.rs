@@ -1,6 +1,7 @@
 use crate::BackgroundShellManager;
 use crate::ImageStore;
 use crate::SandboxKind;
+use crate::ScheduledTaskManager;
 use crate::result_store::ResultStore;
 use crate::security::{SecurityPolicy, SecurityPreset};
 use crate::skills;
@@ -50,6 +51,7 @@ pub struct ToolBuildRequest {
     pub images: ImageStore,
     pub results: ResultStore,
     pub background_shells: BackgroundShellManager,
+    pub scheduled_tasks: ScheduledTaskManager,
 }
 
 /// A host-embedded tool provider.
@@ -107,6 +109,7 @@ impl ToolProvider for BuiltinToolProvider {
                 extra_write_roots: request.extra_write_roots,
                 sandbox: request.sandbox,
                 background_shells: request.background_shells,
+                scheduled_tasks: request.scheduled_tasks,
             },
             request.images,
             request.results,

@@ -509,6 +509,11 @@ pub(super) async fn worker_loop<M>(
             {
                 eprintln!("warning: failed to stop background Shell tasks: {error}");
             }
+            if let Some(state) = runtime.as_ref()
+                && let Err(error) = state.scheduled_tasks.close_all()
+            {
+                eprintln!("warning: failed to clear scheduled tasks: {error}");
+            }
             let _ = reply.send(Ok(()));
             break;
         }
@@ -1405,6 +1410,17 @@ pub(super) async fn worker_loop<M>(
                 {
                     result = Err(AppServerError::Checkpoint(format!(
                         "failed to stop background Shell tasks: {error}"
+                    )));
+                }
+                if result.is_ok()
+                    && runtime
+                        .as_ref()
+                        .is_some_and(|state| state.management.thread_id() == active_thread_id)
+                    && let Some(state) = runtime.as_ref()
+                    && let Err(error) = state.scheduled_tasks.close_all()
+                {
+                    result = Err(AppServerError::Checkpoint(format!(
+                        "failed to clear scheduled tasks: {error}"
                     )));
                 }
                 respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);

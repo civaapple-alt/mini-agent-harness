@@ -173,6 +173,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             capability_manifest,
             skill_discovery,
             background_shells,
+            scheduled_tasks,
         } = prepare_harness_with_model_factory(
             &runtime_config,
             approval.clone(),
@@ -241,6 +242,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             .map(|opened| ThreadId::new(opened.store.thread_id().to_string()))
             .unwrap_or_else(|| ThreadId::new("default"));
         background_shells.bind_owner(thread_id.as_str());
+        scheduled_tasks.bind_owner(thread_id.as_str());
         let mut thread = Thread::new(thread_id.clone(), harness);
         if let Some(opened) = &session {
             thread.set_next_turn_number(opened.store.thread_turn_count() as u64 + 1);
@@ -261,7 +263,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         )
         .with_verifier_config(runtime_config.clone());
         let management =
-            RuntimeManagementService::new_with_harness_config_and_skills_and_background_shells(
+            RuntimeManagementService::new_with_harness_config_and_skills_and_task_managers(
                 server.clone(),
                 session,
                 world,
@@ -272,6 +274,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
                 base_harness_config,
                 skill_discovery,
                 background_shells,
+                scheduled_tasks,
             );
         let services = RuntimeServices::new(management, thread_settings, goals)
             .map_err(|error| format!("cannot bind runtime services: {error}"))?;
