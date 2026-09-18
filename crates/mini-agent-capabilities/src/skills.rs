@@ -159,22 +159,34 @@ pub(super) fn discover_with_roots(
     let mut discovery = Discovery::default();
     if let Some(mini_agent_skills_root) = mini_agent_skills_root.as_deref() {
         let builtin_root = mini_agent_skills_root.join("builtin");
-        let pstack_root = builtin_root.join("pstack");
-        let enabled = enabled_groups.iter().any(|group| group == "pstack");
-        discovery::discover_skill_root(
-            &pstack_root,
-            &builtin_root,
-            &workspace,
-            SkillRootOptions {
-                source: "builtin",
-                group: Some("pstack"),
-                enabled,
-                overrides: false,
-                location_prefix: Some(".mini-agent/skills/builtin/pstack"),
-            },
-            &mut skills,
-            &mut discovery.diagnostics,
-        );
+        let mut seen_builtin_groups = BTreeSet::new();
+        for group in enabled_groups {
+            if !valid_builtin_group_id(group) {
+                discovery.diagnostics.push(format!(
+                    "invalid builtin Skill group {group:?}; group disabled"
+                ));
+                continue;
+            }
+            if !seen_builtin_groups.insert(group.as_str()) {
+                continue;
+            }
+            let builtin_group_root = builtin_root.join(group);
+            let location_prefix = format!(".mini-agent/skills/builtin/{group}");
+            discovery::discover_skill_root(
+                &builtin_group_root,
+                &builtin_root,
+                &workspace,
+                SkillRootOptions {
+                    source: "builtin",
+                    group: Some(group),
+                    enabled: true,
+                    overrides: false,
+                    location_prefix: Some(&location_prefix),
+                },
+                &mut skills,
+                &mut discovery.diagnostics,
+            );
+        }
         discovery::discover_skill_root(
             mini_agent_skills_root,
             mini_agent_skills_root,
@@ -224,6 +236,17 @@ pub(super) fn discover_with_roots(
     mcp_config::discover_project_mcp(&workspace, &mut discovery);
     discovery.skills = discovery::bounded_catalog(skills.into_values(), &mut discovery.diagnostics);
     discovery
+}
+
+fn valid_builtin_group_id(group: &str) -> bool {
+    !group.is_empty()
+        && group.len() <= 64
+        && group
+            .as_bytes()
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+        && !group.starts_with('-')
+        && !group.ends_with('-')
 }
 
 pub fn builtin_skill_root() -> Option<PathBuf> {

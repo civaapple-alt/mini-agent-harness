@@ -445,6 +445,82 @@ fn discovers_builtin_and_global_skill_roots_with_fixed_precedence() {
     remove_test_root(&home);
 }
 
+#[test]
+fn discovers_each_enabled_builtin_skill_group() {
+    let workspace = test_root();
+    let home = test_root();
+    write_skill(
+        &home.join(".mini-agent/skills/builtin/pstack/how"),
+        "how",
+        "Explain pstack behavior.",
+        "PSTACK HOW",
+    );
+    write_skill(
+        &home.join(".mini-agent/skills/builtin/knowledge-work/data"),
+        "data",
+        "Prepare a local data analysis.",
+        "KNOWLEDGE WORK DATA",
+    );
+
+    let discovery = super::discover_with_roots(
+        &workspace,
+        &["pstack".to_string(), "knowledge-work".to_string()],
+        Some(home.join(".mini-agent/skills")),
+        None,
+    );
+    let catalog = discovery.skill_catalog();
+
+    assert!(catalog.iter().any(|skill| {
+        skill.qualified_name == "pstack:how"
+            && skill.group.as_deref() == Some("pstack")
+            && skill.enabled
+    }));
+    assert!(catalog.iter().any(|skill| {
+        skill.qualified_name == "knowledge-work:data"
+            && skill.group.as_deref() == Some("knowledge-work")
+            && skill.enabled
+    }));
+    assert!(
+        discovery
+            .load_skills(&["knowledge-work:data".to_string()])
+            .is_ok()
+    );
+
+    remove_test_root(&workspace);
+    remove_test_root(&home);
+}
+
+#[test]
+fn rejects_invalid_builtin_group_ids_before_path_resolution() {
+    let workspace = test_root();
+    let home = test_root();
+    write_skill(
+        &home.join(".mini-agent/skills/builtin/pstack/how"),
+        "how",
+        "Explain pstack behavior.",
+        "PSTACK HOW",
+    );
+
+    let discovery = super::discover_with_roots(
+        &workspace,
+        &["../outside".to_string(), "knowledge_work".to_string()],
+        Some(home.join(".mini-agent/skills")),
+        None,
+    );
+
+    assert!(discovery.skill_catalog().is_empty());
+    assert_eq!(discovery.diagnostics().len(), 2);
+    assert!(
+        discovery
+            .diagnostics()
+            .iter()
+            .all(|diagnostic| diagnostic.contains("invalid builtin Skill group"))
+    );
+
+    remove_test_root(&workspace);
+    remove_test_root(&home);
+}
+
 fn write_plugin_manifest(root: &Path, name: &str) {
     fs::create_dir_all(root).unwrap();
     fs::write(

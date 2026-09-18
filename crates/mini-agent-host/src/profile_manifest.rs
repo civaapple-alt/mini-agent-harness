@@ -275,10 +275,10 @@ impl RuntimeComposition {
                 .iter()
                 .map(|id| BuiltinSkillGroup {
                     id: id.clone(),
-                    version: if id == "pstack" {
-                        "0.2.0".to_string()
-                    } else {
-                        "unknown".to_string()
+                    version: match id.as_str() {
+                        "pstack" => "0.2.0".to_string(),
+                        "knowledge-work" => "0.1.0".to_string(),
+                        _ => "unknown".to_string(),
                     },
                     enabled: true,
                 })
