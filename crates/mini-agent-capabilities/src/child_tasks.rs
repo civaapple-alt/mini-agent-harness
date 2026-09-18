@@ -20,7 +20,7 @@ impl ToolHandler for DelegateTaskTool {
             description: "Queue one bounded task for an independent child Session. Choose parallel for independent work or sequential with a group_id and optional sequence for dependent work. The child runs with the same Host permissions and can be queried with task_read.".to_string(),
             parameters: json!({
                 "type": "object",
-                "required": ["child_thread_id", "prompt"],
+                "required": ["child_thread_id", "prompt", "execution_mode"],
                 "properties": {
                     "child_thread_id": {"type": "string"},
                     "prompt": {"type": "string"},
@@ -56,7 +56,7 @@ impl ToolRuntime for DelegateTaskTool {
         let execution_mode = arguments
             .get("execution_mode")
             .and_then(Value::as_str)
-            .unwrap_or("parallel");
+            .ok_or_else(|| ToolError("delegate_task requires execution_mode".to_string()))?;
         if !matches!(execution_mode, "parallel" | "sequential") {
             return Err(ToolError(
                 "delegate_task execution_mode must be parallel or sequential".to_string(),
@@ -266,7 +266,8 @@ mod tests {
         let result = tool
             .execute(&json!({
                 "child_thread_id": "child-1",
-                "prompt": "inspect the module"
+                "prompt": "inspect the module",
+                "execution_mode": "parallel"
             }))
             .unwrap();
         let value: Value = serde_json::from_str(&result).unwrap();
@@ -291,5 +292,16 @@ mod tests {
         assert_eq!(value["group_id"], "refactor");
         assert_eq!(value["execution_mode"], "sequential");
         assert_eq!(value["sequence"], 2);
+    }
+
+    #[test]
+    fn delegate_task_rejects_missing_execution_mode() {
+        let error = DelegateTaskTool
+            .execute(&json!({
+                "child_thread_id": "child-3",
+                "prompt": "inspect the module"
+            }))
+            .expect_err("delegation must declare its scheduling mode");
+        assert_eq!(error.0, "delegate_task requires execution_mode");
     }
 }

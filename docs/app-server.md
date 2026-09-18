@@ -314,7 +314,8 @@ The setting controls only the active-child capacity. The Main Thread chooses the
 per-operation `execution_mode` (`parallel` or `sequential`) and may include a
 `group_id` and `sequence` when it delegates work; the Host validates and persists
 that intent without changing Core's loop. Older requests without the field use
-`parallel` as a compatibility fallback.
+`execution_mode` is required for Child delegation; requests that omit it are
+rejected instead of receiving an implicit scheduling policy.
 
 The Session store appends operation lifecycle records (`queued`, `running`,
 `awaiting_approval`, `completed`, `failed`, or `cancelled`) to the existing

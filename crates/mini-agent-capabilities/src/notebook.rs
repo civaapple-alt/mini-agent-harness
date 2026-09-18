@@ -44,13 +44,6 @@ impl NotebookLimits {
             256,
             MAX_NOTEBOOK_ENTRY_BYTES,
         )
-        .or_else(|| {
-            env_limit(
-                "MINI_AGENT_NOTEBOOK_MAX_ENTRY_CHARS",
-                256,
-                MAX_NOTEBOOK_ENTRY_BYTES,
-            )
-        })
         .unwrap_or(MAX_NOTEBOOK_ENTRY_BYTES);
         Self {
             max_entries,

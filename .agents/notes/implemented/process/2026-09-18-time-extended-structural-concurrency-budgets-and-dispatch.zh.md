@@ -16,8 +16,8 @@ Child Session 的并发容量和单次任务的调度意图是两个不同维度
 - `parallel` 表示任务独立时可以占用可用槽位，`sequential` 表示同一 operation
   group 按顺序等待；
 - Host 负责校验和执行约束，不根据项目配置猜测当前任务的调度方式；
-- 旧客户端不传 `execution_mode` 时兼容回退为 `parallel`，但不再把它写入全局或
-  项目配置。
+- `execution_mode` 不写入全局或项目配置，且必须由 Main Thread 在每次 delegation
+  中显式提供；缺少该字段的请求直接拒绝。
 
 这保持了“时间上延展”的 operation、Session 和恢复状态，也保持了“结构上并发”
 的独立 Child runtime；Core 不新增 Scheduler，Gateway 不建立第二份生命周期权威。

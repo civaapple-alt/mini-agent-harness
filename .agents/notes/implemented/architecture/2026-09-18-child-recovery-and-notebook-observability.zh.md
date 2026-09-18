@@ -39,13 +39,17 @@ Thread、状态、执行模式、group/sequence 和有限错误码，不内联 C
 
 - `notebook_write` 和 `notebook_forget` 发送 `session/notebook/updated`，只携带
   `threadId`、`revision` 和 `changedKeys`；WebStudio 收到后重新读取 Notebook。
-- 全局默认与项目覆盖统一使用 `max_entries`、`max_entry_bytes`。旧的
-  `max_entry_chars` 与环境变量仍兼容，但按 UTF-8 字节解释；新字段优先。
+- 全局默认与项目覆盖统一使用 `max_entries`、`max_entry_bytes`。不存在旧字段
+  别名或旧环境变量双写；Runtime 只读取
+  `MINI_AGENT_NOTEBOOK_MAX_ENTRY_BYTES`。
 - 有效总大小由条数、单条上限和固定元数据预算计算，并封顶 64 KiB。
 - `evidence` 是调用方声明的来源元数据，不宣称已由 Git 或文件系统验证。
 
 `lastUsedAtMs`、自动过期、权重衰减和 Git 自动 evidence 校验不属于本批次，继续
 作为后续提案，避免把 Notebook 变成新的运行时调度系统。
+
+Child delegation 同样不保留隐式模式：`execution_mode` 由 Main Thread 每次
+显式选择，缺少该字段的请求直接拒绝，不回退到 `parallel`。
 
 ## 验证
 

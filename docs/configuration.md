@@ -333,8 +333,8 @@ optional operation group and sequence. `parallel` starts independent children
 when capacity is available; `sequential` orders one operation group by its
 sequence and waits for the prior child to settle. Queue and group metadata are
 persisted with the operation so a restart does not infer scheduling state from
-an in-memory map. Older callers that omit the per-request mode use `parallel`
-as the compatibility fallback.
+an in-memory map. `execution_mode` is required for Child delegation; requests
+that omit it are rejected instead of receiving an implicit scheduling policy.
 
 Each Session may also contain a bounded `notebook.json`. It is owned by the
 Session store, survives compaction and runtime restart, and is accessed through
@@ -355,9 +355,10 @@ parent snapshot, but cannot mutate it. Notebook access does not grant any
 
   `max_entries` is bounded to `1..=64` and `max_entry_bytes` to `256..=4096`.
   The effective file limit is derived from these values and a fixed metadata
-  budget, then capped at the runtime hard ceiling of 64 KiB. The legacy
-  `max_entry_chars` field and `MINI_AGENT_NOTEBOOK_MAX_ENTRY_CHARS` environment
-  variable remain accepted as byte limits, but `max_entry_bytes` takes priority.
+  budget, then capped at the runtime hard ceiling of 64 KiB.
+  `max_entry_bytes` is the only accepted single-entry size field and the only
+  Notebook size environment variable is
+  `MINI_AGENT_NOTEBOOK_MAX_ENTRY_BYTES`.
   Evidence count, keyword count, and commit-subject limit remain fixed safety
   ceilings. Evidence is caller-supplied provenance metadata; it is not claimed
   to have been revalidated against Git or the file system.

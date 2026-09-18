@@ -233,8 +233,7 @@ as read-only. A child cannot use the parent scope to write or forget.
 Notebook writes may include bounded `keywords` and `evidence`. Evidence is
 caller-supplied provenance metadata and is not automatically verified against
 Git or the file system. Project or global settings expose
-`notebook.max_entries` and `notebook.max_entry_bytes`; the legacy
-`max_entry_chars` name remains accepted as a UTF-8 byte limit. A successful
+`notebook.max_entries` and `notebook.max_entry_bytes`. A successful
 Notebook write or forget emits a bounded `session/notebook/updated` notification
 with the revision and changed keys, so WebStudio refreshes the canonical
 projection without placing Notebook content in the event.
