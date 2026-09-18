@@ -3,8 +3,16 @@ use super::AppServerConnection;
 use super::AppServerError;
 use super::JsonlTrace;
 use super::LocalAppServerClient;
+use super::RuntimeManagementService;
+use super::RuntimeServices;
+use super::ThreadSettingsService;
 use super::ThreadUpdate;
 use super::worker::Command;
+use crate::goal_service::ThreadGoalRequestProcessor;
+use mini_agent_capabilities::ApprovalController;
+use mini_agent_capabilities::ApprovalPolicy;
+use mini_agent_capabilities::SandboxKind;
+use mini_agent_capabilities::SecurityPreset;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
@@ -15,6 +23,7 @@ use mini_agent_protocol::Model;
 use mini_agent_protocol::ModelEventSink;
 use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::SkillLoadPhase;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
 use mini_agent_protocol::ToolCall;
@@ -29,11 +38,18 @@ use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 use mini_agent_protocol::TurnStart;
 use mini_agent_protocol::TurnSubmission;
+use mini_agent_protocol::TurnWorkflow;
+use mini_agent_protocol::TurnWorkflowKind;
+use mini_agent_protocol::TurnWorkflowMode;
 use serde_json::Value;
 use serde_json::from_str;
 use serde_json::json;
 use std::convert::Infallible;
-use std::sync::Arc;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 use tokio::sync::oneshot;
 
@@ -63,6 +79,112 @@ struct BlockingModel {
 struct ApprovalModel;
 
 struct McpTimeoutModel;
+
+#[derive(Clone, Debug)]
+struct KnowledgeWorkObservation {
+    system_prompt: String,
+    tool_count: usize,
+    messages: Vec<Message>,
+}
+
+#[derive(Clone)]
+struct KnowledgeWorkMockModel {
+    observations: Arc<Mutex<Vec<KnowledgeWorkObservation>>>,
+}
+
+struct ReferenceReadFixtureTool {
+    root: PathBuf,
+}
+
+impl ToolHandler for ReferenceReadFixtureTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "read_file".to_string(),
+            description: "Read the selected local Skill reference fixture.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"]
+            }),
+        }
+    }
+}
+
+impl ToolRuntime for ReferenceReadFixtureTool {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let path = arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ToolError("read_file path is required".to_string()))?;
+        if path != "references/needed.md" {
+            return Err(ToolError(format!("fixture path is not allowed: {path}")));
+        }
+        fs::read_to_string(self.root.join("needed.md"))
+            .map_err(|error| ToolError(format!("fixture reference read failed: {error}")))
+    }
+}
+
+impl Model for KnowledgeWorkMockModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        let prompt = request
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::User { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        self.observations
+            .lock()
+            .unwrap()
+            .push(KnowledgeWorkObservation {
+                system_prompt: request.system_prompt.to_string(),
+                tool_count: request.tools.len(),
+                messages: request.messages.to_vec(),
+            });
+        if !request.messages.iter().any(|message| {
+            matches!(
+                message,
+                Message::Tool {
+                    name,
+                    is_error: false,
+                    ..
+                } if name == "read_file"
+            )
+        }) {
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "knowledge-work-reference".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: json!({"path": "references/needed.md"}),
+                }],
+                usage: None,
+            });
+        }
+        let text = if prompt.contains("统一搜索") {
+            "Goals\n- 统一搜索\n\nNon-goals\n- 不自动创建任务\n\nUser Stories\n- 用户可以搜索\n\nAcceptance Criteria\n- 搜索结果可验证\n\nOpen Questions\n- 数据源范围是什么？"
+        } else if prompt.contains("任务") {
+            "Tasks\n- 整理输入任务\n\nBlockers\n- 会议记录缺少负责人\n\nFollow-ups\n- 确认下一步\n\nMissing Information\n- 截止时间未提供"
+        } else {
+            "SQL Draft\nSELECT 1;\n\nDefinitions\n- 指标口径待确认\n\nValidation Checks\n- 检查空值和重复值\n\nLimitations\n- 没有直接数据源"
+        };
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: text.to_string(),
+            tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
 
 impl Model for ApprovalModel {
     type Error = Infallible;
@@ -251,6 +373,107 @@ async fn run_turn_to_finished<M: Model + Send + 'static>(
     received
 }
 
+fn knowledge_work_client(
+    model: KnowledgeWorkMockModel,
+    workspace: &Path,
+    builtin_root: &Path,
+    enabled_groups: &[String],
+) -> LocalAppServerClient<KnowledgeWorkMockModel> {
+    let discovery = mini_agent_capabilities::discover_with_builtin_root(
+        workspace,
+        builtin_root,
+        enabled_groups,
+    );
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(
+            ThreadId::new("initial"),
+            Harness::new(
+                model,
+                ToolRouter::new(vec![Box::new(ReferenceReadFixtureTool {
+                    root: workspace.join("references"),
+                })]),
+                HarnessConfig::default(),
+            ),
+        ),
+    );
+    let management = RuntimeManagementService::new_with_harness_config_and_skills(
+        server.clone(),
+        None,
+        mini_agent_host::WorldState::detect_with_roots(
+            workspace,
+            Vec::new(),
+            SecurityPreset::Default,
+            ApprovalPolicy::Automatic,
+            SandboxKind::Native,
+        ),
+        Vec::new(),
+        0,
+        Vec::new(),
+        ApprovalController::with_preset(ApprovalPolicy::Automatic, Default::default()),
+        HarnessConfig::default(),
+        Some(discovery),
+    );
+    let services = RuntimeServices::new(
+        management,
+        ThreadSettingsService::new(),
+        ThreadGoalRequestProcessor::new(
+            workspace.to_path_buf(),
+            crate::goal_service::GoalLimits::default(),
+        ),
+    )
+    .unwrap();
+    LocalAppServerClient::new(AppServerConnection::new(server).with_runtime_services(services))
+}
+
+async fn run_turn_input(
+    client: &mut LocalAppServerClient<KnowledgeWorkMockModel>,
+    input: TurnInput,
+) -> (mini_agent_app_server_protocol::TurnReadResult, Vec<Event>) {
+    let submission = client
+        .start_turn(ThreadId::new("thread-1"), input)
+        .await
+        .unwrap();
+    let turn_id = match submission {
+        TurnSubmission::Started { turn_id } => turn_id,
+        other => panic!("unexpected turn submission: {other:?}"),
+    };
+    let mut events = Vec::new();
+    loop {
+        let envelope = client.next_event().await.unwrap();
+        let finished = matches!(&envelope.event, Event::TurnFinished { .. });
+        events.push(envelope.event);
+        if finished {
+            break;
+        }
+    }
+    let result = client.read_turn(turn_id).await.unwrap();
+    (result, events)
+}
+
+fn write_builtin_skill(builtin_root: &Path, name: &str, description: &str, body: &str) {
+    let path = builtin_root.join("knowledge-work").join(name);
+    fs::create_dir_all(&path).unwrap();
+    fs::write(
+        path.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: {description}\n---\n{body}\n"),
+    )
+    .unwrap();
+}
+
+fn test_root(label: &str) -> PathBuf {
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let sequence = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
+    let root =
+        std::env::temp_dir().join(format!("mini-agent-app-server-{label}-{nonce}-{sequence}"));
+    fs::create_dir_all(&root).unwrap();
+    root
+}
+
 #[tokio::test]
 async fn concurrent_commands_receive_unique_server_admission_metadata() {
     let server = server(DoneModel);
@@ -368,6 +591,223 @@ async fn explicit_skill_activation_failure_precedes_model_execution() {
             .iter()
             .any(|event| matches!(event, Event::RunStarted { .. }))
     );
+}
+
+#[tokio::test]
+async fn knowledge_work_mock_provider_covers_structured_read_only_scenarios() {
+    let root = test_root("knowledge-work-scenarios");
+    let builtin_root = root.join("builtin");
+    fs::create_dir_all(root.join("references")).unwrap();
+    fs::write(
+        root.join("references/needed.md"),
+        "REFERENCE BODY USED BY THE MOCK PROVIDER\n",
+    )
+    .unwrap();
+    write_builtin_skill(
+        &builtin_root,
+        "product-management",
+        "Create product specifications from local input.",
+        "PRODUCT MANAGEMENT ENTRY",
+    );
+    write_builtin_skill(
+        &builtin_root,
+        "productivity",
+        "Organize local tasks and meeting input.",
+        "PRODUCTIVITY ENTRY",
+    );
+    write_builtin_skill(
+        &builtin_root,
+        "data",
+        "Draft SQL and analyze user-provided data.",
+        "DATA ENTRY",
+    );
+
+    let scenarios = [
+        (
+            "product-management",
+            "为团队做一个统一搜索功能",
+            vec![
+                "Goals",
+                "Non-goals",
+                "User Stories",
+                "Acceptance Criteria",
+                "Open Questions",
+            ],
+            "PRODUCT MANAGEMENT ENTRY",
+        ),
+        (
+            "productivity",
+            "整理任务和会议记录",
+            vec!["Tasks", "Blockers", "Follow-ups", "Missing Information"],
+            "PRODUCTIVITY ENTRY",
+        ),
+        (
+            "data",
+            "根据业务问题和 CSV 摘要准备 SQL 分析",
+            vec![
+                "SQL Draft",
+                "Definitions",
+                "Validation Checks",
+                "Limitations",
+            ],
+            "DATA ENTRY",
+        ),
+    ];
+
+    for (skill, prompt, required_sections, marker) in scenarios {
+        let observations = Arc::new(Mutex::new(Vec::new()));
+        let model = KnowledgeWorkMockModel {
+            observations: observations.clone(),
+        };
+        let mut client =
+            knowledge_work_client(model, &root, &builtin_root, &["knowledge-work".to_string()]);
+        client
+            .initialize("knowledge-work-test", "0.1")
+            .await
+            .unwrap();
+        let mut input = TurnInput::new(TurnInputMode::Start, prompt);
+        input.selected_skills = vec![format!("knowledge-work:{skill}")];
+        let (result, events) = run_turn_input(&mut client, input).await;
+        let qualified_name = format!("knowledge-work:{skill}");
+
+        assert_eq!(result.status, mini_agent_protocol::TurnStatus::Completed);
+        let output = result.final_text.as_deref().unwrap_or_default();
+        for section in required_sections {
+            assert!(
+                output.contains(section),
+                "{skill} output missing {section}: {output}"
+            );
+        }
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::SkillsLoaded {
+                phase: SkillLoadPhase::Loaded,
+                skills,
+                ..
+            } if skills.iter().any(|record| record.qualified_name.as_deref()
+                == Some(qualified_name.as_str()))
+        )));
+        {
+            let observations = observations.lock().unwrap();
+            let observation = observations.last().expect("mock provider was not called");
+            assert!(observation.system_prompt.contains(marker));
+            assert_eq!(observation.tool_count, 1);
+            assert!(observation.messages.iter().any(|message| matches!(
+                message,
+                Message::Tool {
+                    name,
+                    content,
+                    is_error: false,
+                    ..
+                } if name == "read_file" && content.contains("REFERENCE BODY USED")
+            )));
+        }
+        client.shutdown().await.unwrap();
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn knowledge_work_group_workflow_uses_requested_group_in_prompt() {
+    let root = test_root("knowledge-work-group");
+    let builtin_root = root.join("builtin");
+    fs::create_dir_all(root.join("references")).unwrap();
+    fs::write(
+        root.join("references/needed.md"),
+        "REFERENCE BODY USED BY THE MOCK PROVIDER\n",
+    )
+    .unwrap();
+    write_builtin_skill(
+        &builtin_root,
+        "data",
+        "Draft SQL and analyze user-provided data.",
+        "DATA ENTRY",
+    );
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let mut client = knowledge_work_client(
+        KnowledgeWorkMockModel {
+            observations: observations.clone(),
+        },
+        &root,
+        &builtin_root,
+        &["knowledge-work".to_string()],
+    );
+    client
+        .initialize("knowledge-work-workflow-test", "0.1")
+        .await
+        .unwrap();
+    let mut input = TurnInput::new(TurnInputMode::Start, "使用 data 工作流准备分析");
+    input.workflow = Some(TurnWorkflow {
+        kind: TurnWorkflowKind::SkillGroup,
+        id: "knowledge-work".to_string(),
+        mode: TurnWorkflowMode::Auto,
+    });
+    let (result, events) = run_turn_input(&mut client, input).await;
+
+    assert_eq!(result.status, mini_agent_protocol::TurnStatus::Completed);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::SkillGroupActivated { group, source }
+            if group == "knowledge-work" && source == "builtin"
+    )));
+    {
+        let observations = observations.lock().unwrap();
+        let system_prompt = &observations.last().unwrap().system_prompt;
+        assert!(system_prompt.contains("## Active skill group: knowledge-work"));
+        assert!(!system_prompt.contains("Active skill group: pstack"));
+    }
+    client.shutdown().await.unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn disabled_knowledge_work_group_fails_closed_before_model_execution() {
+    let root = test_root("knowledge-work-disabled");
+    let builtin_root = root.join("builtin");
+    write_builtin_skill(
+        &builtin_root,
+        "data",
+        "Draft SQL and analyze user-provided data.",
+        "DATA ENTRY",
+    );
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let mut client = knowledge_work_client(
+        KnowledgeWorkMockModel {
+            observations: observations.clone(),
+        },
+        &root,
+        &builtin_root,
+        &[],
+    );
+    client
+        .initialize("knowledge-work-disabled-test", "0.1")
+        .await
+        .unwrap();
+    let mut input = TurnInput::new(TurnInputMode::Start, "分析数据");
+    input.selected_skills = vec!["knowledge-work:data".to_string()];
+    let (result, events) = run_turn_input(&mut client, input).await;
+
+    assert_eq!(result.status, mini_agent_protocol::TurnStatus::Failed);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::SkillsLoadFailed {
+            activation,
+            skills,
+            reason_code,
+            ..
+        } if activation.as_deref() == Some("explicit")
+            && reason_code == "activation_rejected"
+            && skills == &["knowledge-work:data".to_string()]
+    )));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::RunStarted { .. }))
+    );
+    assert!(observations.lock().unwrap().is_empty());
+    client.shutdown().await.unwrap();
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]

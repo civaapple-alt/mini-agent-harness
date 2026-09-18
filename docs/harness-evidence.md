@@ -40,6 +40,36 @@ cargo test -p mini-agent-cli --test interactive <scenario> -- --exact
 尚未覆盖的跨文件重构、CLI 工具失败恢复、MCP/approval/sandbox 拒绝或独立
 provider 对比倒填为基线；后续补充结果应以新的 dated note 记录。
 
+## Knowledge Work P1 bounded scenarios（2026-09-18）
+
+本批使用 App Server 的本地 deterministic mock-provider 和临时 builtin root，
+不调用付费 Provider 或真实 MCP。mock provider 先请求一个受限的本地
+`read_file` reference，再根据固定输入返回结构化草稿；fixture tool 只允许读取
+`references/needed.md`，没有写工具或外部连接。
+
+| 场景 | 公共路径 | 可观察结果 |
+| :--- | :--- | :--- |
+| product-management PRD | `tests::knowledge_work_mock_provider_covers_structured_read_only_scenarios` | 输出包含 Goals、Non-goals、User Stories、Acceptance Criteria、Open Questions；只加载 `knowledge-work:product-management`，并完成一次受限 reference read |
+| productivity 本地整理 | 同上 | 输出包含 Tasks、Blockers、Follow-ups、Missing Information；工具面只有本地 `read_file`，没有外部写入 |
+| data 分析草稿 | 同上 | 输出包含 SQL Draft、Definitions、Validation Checks、Limitations；没有把缺少数据源当成确定性结论 |
+| 非 pstack group workflow | `tests::knowledge_work_group_workflow_uses_requested_group_in_prompt` | system prompt 使用实际的 `knowledge-work` group，不残留 `pstack` 提示 |
+| 关闭 group fail closed | `tests::disabled_knowledge_work_group_fails_closed_before_model_execution` | 产生 `SkillsLoadFailed`，不产生 `RunStarted`，mock provider 不被调用 |
+| 激活正文预算 | `skills::tests::rejects_selected_skill_bodies_over_activation_budget` | 超过 32 KiB 的 Skill 正文被拒绝，不截断后继续执行 |
+| 导入器追溯与失败 | `tests/gateway/test_knowledge_work_import.py` | source commit、许可证和幂等输出可复核；dirty source 或缺失 LICENSE 时失败 |
+
+命令：
+
+```text
+cargo test -p mini-agent-app-server --lib tests::knowledge_work
+cargo test -p mini-agent-app-server --lib tests::disabled_knowledge_work_group_fails_closed_before_model_execution
+cargo test -p mini-agent-capabilities --lib skills::tests::rejects_selected_skill_bodies_over_activation_budget
+uv run pytest -q tests/gateway/test_knowledge_work_import.py
+```
+
+这些场景证明的是 builtin group 发现、显式激活、正文边界和本地只读工作流的
+Harness 控制流，不证明真实 Provider 的回答质量、真实连接器权限或完整源仓库
+reference 选择质量。
+
 ## Control Plane boundary evidence（2026-09-07）
 
 line gate 的后续计划要求 Permission、Sandbox、Recovery、Audit 不能只停留在

@@ -92,6 +92,7 @@ pub use skills::SkillPathRecord;
 pub use skills::builtin_skill_root;
 pub use skills::discover;
 pub use skills::discover_with_builtin_groups;
+pub use skills::discover_with_builtin_root;
 pub use workspace::ApprovalController;
 pub use workspace::ApprovalFailure;
 pub use workspace::MAX_SKILL_READ_BYTES;

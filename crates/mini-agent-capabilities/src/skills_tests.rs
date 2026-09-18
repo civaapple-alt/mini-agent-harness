@@ -295,6 +295,24 @@ fn catalogs_and_loads_selected_skills_with_bounded_activation() {
 }
 
 #[test]
+fn rejects_selected_skill_bodies_over_activation_budget() {
+    let root = test_root();
+    write_skill(
+        &root.join(".agents/skills/oversized"),
+        "oversized",
+        "An oversized Skill.",
+        &"x".repeat(MAX_ACTIVATED_SKILL_BYTES),
+    );
+
+    let discovery = discover_for_tests(&root, &[]);
+    let error = discovery
+        .load_skills(&["oversized".to_string()])
+        .expect_err("oversized Skill bodies must fail closed");
+    assert!(error.contains("selected skill bodies exceed"), "{error}");
+    remove_test_root(&root);
+}
+
+#[test]
 fn skill_read_roots_include_only_enabled_discovered_skills() {
     let root = test_root();
     let enabled = root.join(".agents/skills/enabled");

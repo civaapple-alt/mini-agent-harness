@@ -140,11 +140,46 @@ pub fn discover_with_builtin_groups(workspace: &Path, enabled_groups: &[String])
     )
 }
 
+/// Discovers builtin Skills from an explicit root.
+///
+/// Host normally uses [`discover_with_builtin_groups`] so the root comes from
+/// the configured user home. Embedding callers and deterministic harnesses can
+/// provide an isolated root without mutating process-wide home environment.
+pub fn discover_with_builtin_root(
+    workspace: &Path,
+    builtin_root: &Path,
+    enabled_groups: &[String],
+) -> Discovery {
+    discover_with_roots_at(
+        workspace,
+        enabled_groups,
+        None,
+        None,
+        Some(builtin_root.to_path_buf()),
+    )
+}
+
 pub(super) fn discover_with_roots(
     workspace: &Path,
     enabled_groups: &[String],
     mini_agent_skills_root: Option<PathBuf>,
     agents_skills_root: Option<PathBuf>,
+) -> Discovery {
+    discover_with_roots_at(
+        workspace,
+        enabled_groups,
+        mini_agent_skills_root,
+        agents_skills_root,
+        None,
+    )
+}
+
+fn discover_with_roots_at(
+    workspace: &Path,
+    enabled_groups: &[String],
+    mini_agent_skills_root: Option<PathBuf>,
+    agents_skills_root: Option<PathBuf>,
+    builtin_root_override: Option<PathBuf>,
 ) -> Discovery {
     let workspace = match workspace.canonicalize() {
         Ok(workspace) => workspace,
@@ -157,8 +192,12 @@ pub(super) fn discover_with_roots(
     };
     let mut skills = BTreeMap::new();
     let mut discovery = Discovery::default();
-    if let Some(mini_agent_skills_root) = mini_agent_skills_root.as_deref() {
-        let builtin_root = mini_agent_skills_root.join("builtin");
+    let builtin_root = builtin_root_override.or_else(|| {
+        mini_agent_skills_root
+            .as_deref()
+            .map(|root| root.join("builtin"))
+    });
+    if let Some(builtin_root) = builtin_root.as_deref() {
         let mut seen_builtin_groups = BTreeSet::new();
         for group in enabled_groups {
             if !valid_builtin_group_id(group) {
@@ -174,7 +213,7 @@ pub(super) fn discover_with_roots(
             let location_prefix = format!(".mini-agent/skills/builtin/{group}");
             discovery::discover_skill_root(
                 &builtin_group_root,
-                &builtin_root,
+                builtin_root,
                 &workspace,
                 SkillRootOptions {
                     source: "builtin",
@@ -187,6 +226,8 @@ pub(super) fn discover_with_roots(
                 &mut discovery.diagnostics,
             );
         }
+    }
+    if let Some(mini_agent_skills_root) = mini_agent_skills_root.as_deref() {
         discovery::discover_skill_root(
             mini_agent_skills_root,
             mini_agent_skills_root,

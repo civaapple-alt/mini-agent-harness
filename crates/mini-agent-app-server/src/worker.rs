@@ -845,14 +845,16 @@ pub(super) async fn worker_loop<M>(
                             skills: records,
                         });
                     }
-                    if workflow.is_some() && skill_error.is_none() {
+                    if let Some(workflow) = workflow.as_ref()
+                        && skill_error.is_none()
+                    {
                         let mut config = thread.harness().config().clone();
                         config.system_prompt = format!(
-                            "{}\n\n## Active skill group: pstack\n\
-                             Use the available pstack Skill metadata to choose relevant \
+                            "{}\n\n## Active skill group: {}\n\
+                             Use the available {} Skill metadata to choose relevant \
                              instructions, then read matching SKILL.md files with read_file \
                              before acting. Do not load unrelated Skill bodies.",
-                            config.system_prompt
+                            config.system_prompt, workflow.id, workflow.id
                         );
                         thread.harness_mut().replace_config(config);
                     }
