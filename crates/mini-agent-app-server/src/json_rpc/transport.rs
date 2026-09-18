@@ -194,9 +194,9 @@ where
                             call_id: request.call_id,
                             tool_name: request.tool_name,
                             action_class: request.action_class,
-                            action_summary: request.action,
+                            action_summary: request.action_summary,
                             action_key: request.action_key,
-                            path_scope: approval_path_scope(request.access),
+                            path_scope: approval_path_scope(request.access, request.target_paths),
                             access: request.access,
                             policy: request.policy,
                             allowed_grant_scopes: request.allowed_grant_scopes,
@@ -228,7 +228,7 @@ where
                             call_id: resolution.call_id,
                             tool_name: resolution.tool_name,
                             action_class: resolution.action_class,
-                            action_summary: resolution.action,
+                            action_summary: resolution.action_summary,
                             })
                             .expect("approval resolution is serializable"),
                         )
@@ -352,6 +352,7 @@ enum OutgoingMessage {
 
 fn approval_path_scope(
     access: mini_agent_app_server_protocol::AccessScope,
+    paths: Vec<String>,
 ) -> mini_agent_app_server_protocol::ApprovalPathScope {
     mini_agent_app_server_protocol::ApprovalPathScope {
         kind: if access == mini_agent_app_server_protocol::AccessScope::FullMachine {
@@ -359,7 +360,7 @@ fn approval_path_scope(
         } else {
             mini_agent_app_server_protocol::ApprovalPathKind::Project
         },
-        paths: Vec::new(),
+        paths,
     }
 }
 

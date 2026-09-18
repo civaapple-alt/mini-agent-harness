@@ -131,6 +131,7 @@ mod tests {
         let request = ApprovalRequest {
             request_id: "approval-1".to_string(),
             action: "shell command `rg -n \"install|plugin\" README.md`".to_string(),
+            action_summary: "shell command `rg -n \"install|plugin\" README.md`".to_string(),
             project_id: Some("project".to_string()),
             workspace_id: Some("workspace".to_string()),
             workspace_revision: Some(1),
@@ -144,6 +145,7 @@ mod tests {
             access: mini_agent_app_server_protocol::AccessScope::Project,
             policy: mini_agent_app_server_protocol::ApprovalPolicy::Trusted,
             allowed_grant_scopes: vec![mini_agent_app_server_protocol::ActionGrantScope::Once],
+            target_paths: Vec::new(),
         };
 
         trace.requested(&request);

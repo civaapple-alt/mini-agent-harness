@@ -81,7 +81,38 @@ impl ToolHandler for ApplyPatch {
         Ok(ToolAdmission::ApprovalRequired {
             action: "apply_patch".to_string(),
             target_paths: plan.paths,
+            action_summary: Some(patch_action_summary(&plan.effects)),
         })
+    }
+}
+
+fn patch_action_summary(effects: &[FileEffect]) -> String {
+    let added = effects
+        .iter()
+        .filter(|effect| effect.before.is_none() && effect.after.is_some())
+        .count();
+    let updated = effects
+        .iter()
+        .filter(|effect| effect.before.is_some() && effect.after.is_some())
+        .count();
+    let deleted = effects
+        .iter()
+        .filter(|effect| effect.after.is_none())
+        .count();
+    let mut parts = Vec::new();
+    if added > 0 {
+        parts.push(format!("新增 {added} 个文件"));
+    }
+    if updated > 0 {
+        parts.push(format!("修改 {updated} 个文件"));
+    }
+    if deleted > 0 {
+        parts.push(format!("删除 {deleted} 个文件"));
+    }
+    if parts.is_empty() {
+        "apply_patch".to_string()
+    } else {
+        format!("apply_patch · {}", parts.join(" · "))
     }
 }
 

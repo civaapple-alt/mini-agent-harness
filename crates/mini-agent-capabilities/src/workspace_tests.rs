@@ -254,6 +254,7 @@ fn apply_patch_denial_is_explicit_and_has_no_effect() {
         ToolAdmission::ApprovalRequired {
             action: "apply_patch".to_string(),
             target_paths: vec!["note.txt".to_string()],
+            action_summary: Some("apply_patch · 修改 1 个文件".to_string()),
         }
     );
     let error = patch.execute(&request.arguments).unwrap_err();
@@ -286,10 +287,20 @@ fn trusted_policy_directly_admits_non_destructive_patches_but_not_deletes() {
         "apply_patch",
         json!({"patch": "*** Begin Patch\n*** Delete File: note.txt\n*** End Patch"}),
     );
-    assert!(matches!(
-        patch.admission(&delete).unwrap(),
-        ToolAdmission::ApprovalRequired { .. }
-    ));
+    match patch.admission(&delete).unwrap() {
+        ToolAdmission::ApprovalRequired {
+            action_summary,
+            target_paths,
+            ..
+        } => {
+            assert_eq!(
+                action_summary.as_deref(),
+                Some("apply_patch · 删除 1 个文件")
+            );
+            assert_eq!(target_paths, vec!["note.txt"]);
+        }
+        other => panic!("expected delete approval, got {other:?}"),
+    }
 
     let shell = Shell(Arc::clone(&workspace), ResultStore::default());
     let high_risk = ToolExecutionRequest::new(

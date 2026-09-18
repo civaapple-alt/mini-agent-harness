@@ -183,6 +183,7 @@ impl ToolHandler for McpTool {
         Ok(ToolAdmission::ApprovalRequired {
             action: self.action(),
             target_paths: Vec::new(),
+            action_summary: None,
         })
     }
 }

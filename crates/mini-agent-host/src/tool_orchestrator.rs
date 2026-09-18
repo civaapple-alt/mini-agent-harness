@@ -27,9 +27,14 @@ impl ToolExecutionDelegate for ToolOrchestrator {
             Ok(ToolAdmission::ApprovalRequired {
                 action,
                 target_paths,
+                action_summary,
             }) => {
-                let approval_request =
-                    ToolApprovalRequest::from_execution(action, target_paths, request);
+                let approval_request = ToolApprovalRequest::from_execution_with_summary(
+                    action,
+                    action_summary,
+                    target_paths,
+                    request,
+                );
                 match self
                     .approval
                     .approve_request_with_classification(&approval_request)
@@ -120,6 +125,7 @@ mod tests {
                 admission: ToolAdmission::ApprovalRequired {
                     action: "run fixture".to_string(),
                     target_paths: Vec::new(),
+                    action_summary: None,
                 },
                 outcome: ToolExecutionOutcome::completed("must not run"),
             },

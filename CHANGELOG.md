@@ -5,6 +5,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+- Project approval notifications now carry the structured action summary and
+  bounded target paths already available in the protocol. `apply_patch` can
+  therefore identify added, modified, and deleted files before approval while
+  preserving `action` as the authorization identity.
 - Add an independent Child Session control seam. Child Sessions use exact
   persisted checkpoints and their own runtime, history, approvals, and replay;
   Core remains a single-Thread Turn loop.

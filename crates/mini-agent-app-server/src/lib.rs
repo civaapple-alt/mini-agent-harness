@@ -48,6 +48,7 @@ struct ApprovalState {
 pub struct ApprovalRequest {
     pub request_id: String,
     pub action: String,
+    pub action_summary: String,
     pub project_id: Option<String>,
     pub workspace_id: Option<String>,
     pub workspace_revision: Option<u64>,
@@ -61,12 +62,14 @@ pub struct ApprovalRequest {
     pub access: AccessScope,
     pub policy: ApprovalPolicy,
     pub allowed_grant_scopes: Vec<ActionGrantScope>,
+    pub target_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApprovalResolution {
     pub request_id: String,
     pub action: String,
+    pub action_summary: String,
     pub project_id: Option<String>,
     pub workspace_id: Option<String>,
     pub workspace_revision: Option<u64>,
@@ -179,6 +182,10 @@ impl ApprovalBroker {
         let request = ApprovalRequest {
             request_id: request_id.clone(),
             action: approval.action.clone(),
+            action_summary: approval
+                .action_summary
+                .clone()
+                .unwrap_or_else(|| approval.action.clone()),
             project_id: approval.project_id.clone(),
             workspace_id: approval.workspace_id.clone(),
             workspace_revision: approval.workspace_revision,
@@ -202,6 +209,7 @@ impl ApprovalBroker {
                     ActionGrantScope::Project,
                 ])
                 .unwrap_or_else(|| vec![ActionGrantScope::Once]),
+            target_paths: approval.target_paths.clone(),
         };
         {
             let mut state = self.state.lock().unwrap();
@@ -274,6 +282,7 @@ impl ApprovalBroker {
         let resolution = ApprovalResolution {
             request_id: request.request_id.clone(),
             action: request.action.clone(),
+            action_summary: request.action_summary.clone(),
             project_id: request.project_id.clone(),
             workspace_id: request.workspace_id,
             workspace_revision: request.workspace_revision,

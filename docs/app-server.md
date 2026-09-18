@@ -75,9 +75,13 @@ the host runtime is wired with
 an `ApprovalBroker`, sensitive tool calls emit an `approval/request`
 notification, then emit `approval/resolved` after the client replies with
 `approval/respond`. The request carries typed access, policy, a structured
-action key, and allowed grant scopes; the resolution carries its outcome,
-selected grant scope, and optional reason. Both carry bounded workspace
-identity and the optional `turnId` and `callId` for the built-in Shell path.
+action key, action summary, bounded target paths, and allowed grant scopes; the
+resolution carries the same action summary, its outcome, selected grant scope,
+and optional reason. For example, `apply_patch` can report counts for added,
+modified, and deleted files without exposing the complete patch in the
+approval card. `action` remains the authorization identity and must not be
+replaced by the human-facing summary. Both carry bounded workspace identity
+and the optional `turnId` and `callId` for the built-in Shell path.
 Clients can correlate
 `requestId`/`turnId`/`callId` from `approval/request` through
 `approval/respond`, `approval/resolved`, and the matching `turn/event`, without

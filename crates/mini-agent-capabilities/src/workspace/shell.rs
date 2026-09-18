@@ -31,6 +31,7 @@ impl ToolHandler for Shell {
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("shell command `{command}`"),
             target_paths: Vec::new(),
+            action_summary: None,
         })
     }
 }

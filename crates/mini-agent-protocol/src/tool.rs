@@ -126,6 +126,7 @@ impl ToolApprovalResolution {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ToolApprovalRequest {
     pub action: String,
+    pub action_summary: Option<String>,
     pub tool_name: Option<String>,
     pub call_id: Option<String>,
     pub thread_id: Option<ThreadId>,
@@ -150,9 +151,19 @@ impl ToolApprovalRequest {
         target_paths: Vec<String>,
         request: &ToolExecutionRequest,
     ) -> Self {
+        Self::from_execution_with_summary(action, None, target_paths, request)
+    }
+
+    pub fn from_execution_with_summary(
+        action: impl Into<String>,
+        action_summary: Option<String>,
+        target_paths: Vec<String>,
+        request: &ToolExecutionRequest,
+    ) -> Self {
         let context = request.context.as_ref();
         Self {
             action: action.into(),
+            action_summary,
             tool_name: Some(request.name.clone()),
             call_id: Some(request.call_id.clone()),
             thread_id: context.map(|context| context.thread_id.clone()),
@@ -244,6 +255,7 @@ pub enum ToolAdmission {
     ApprovalRequired {
         action: String,
         target_paths: Vec<String>,
+        action_summary: Option<String>,
     },
 }
 

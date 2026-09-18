@@ -100,6 +100,7 @@ impl ToolHandler for WebFetch {
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("fetch URL {url}"),
             target_paths: Vec::new(),
+            action_summary: None,
         })
     }
 }
@@ -702,6 +703,7 @@ mod tests {
             ToolAdmission::ApprovalRequired {
                 action: "fetch URL https://example.com/docs".to_string(),
                 target_paths: Vec::new(),
+                action_summary: None,
             }
         );
 
