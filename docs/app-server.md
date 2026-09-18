@@ -217,7 +217,10 @@ Thread returned by `thread/start`.
 | `thread/close` | `threadId` | Closes the Thread; the action value is `{closed: true}`. |
 | `thread/items/list` | `threadId`; optional `turnId`, `cursor`, `limit`, `sortDirection` | Returns cursor-bounded `data` entries, `nextCursor`, and `backwardsCursor`. |
 | `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
-| `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`), `operationId`, `operationAttempt` | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. `exact` may read the latest settled checkpoint while the source Thread has an active Turn; `compact` still requires an idle source because it prepares context through the source runtime. `exact` never invokes the model; the child owns any later normal-turn compaction. When operation metadata is supplied, the child Session also records a durable `queued` operation before the fork result is returned. Repeating the same request returns the existing child; reusing the child ID with another context policy is rejected. |
+| `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`), `operationId`, `operationAttempt`, `operationPrompt`, `operationGroupId`, `executionMode`, `groupSequence` | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. Fork metadata is a bounded operation projection only; it does not make Core a scheduler. |
+| `session/notebook/read` | `threadId`, optional `scope` (`self` or `parent`) | Reads the current Session notebook or a Host-validated parent snapshot. Parent scope is read-only and cannot select an arbitrary Session or path. |
+| `session/notebook/write` | `threadId`, `key`, `content`, optional `append`, `importance` (`critical`, `high`, `normal`, `temporary`) | Upserts the current Session's bounded Notebook entry and returns the new snapshot. |
+| `session/notebook/forget` | `threadId`, `key` | Removes one current-Session entry and advances the Notebook revision without rewriting checkpoint history. |
 
 `thread/resume` is a controlled checkpoint install, not a second persistence
 format. The Session store and App Server remain the authorities for the
@@ -300,8 +303,9 @@ returns a bounded queue request; the surrounding Host/App Server control seam
 creates an exact child Session and starts a separate child runtime. `task_read`
 reads the child’s canonical Session projection and returns only bounded status,
 attempt, result, and error fields. Neither tool adds a scheduler or a second
-history authority to Core. Child execution is limited to one level and two
-active children per parent in the current WebStudio integration.
+history authority to Core. WebStudio defaults to two active children per parent,
+with a Host setting bounded to `1..=8`; overflow is durable `queued` state.
+Operation groups may run `parallel` or `sequential` without changing Core's loop.
 
 The Session store appends operation lifecycle records (`queued`, `running`,
 `awaiting_approval`, `completed`, `failed`, or `cancelled`) to the existing
@@ -312,11 +316,12 @@ WebStudio child projection may expose the latest operation identity without
 copying child history into the parent.
 
 The Session-owned `notebook.json` is a separate bounded persistence surface.
-`notebook_read` and `notebook_write` are Host/Capabilities tools; after resume,
-App Server injects only a bounded notebook summary, while full entries remain
-available through explicit reads. Notebook data is not Core state, is not
-shared with child Sessions in the first version, and is never an unbounded
-system-prompt replacement.
+`notebook_read` and `notebook_write` are Host/Capabilities tools; the matching
+session methods expose the same authority to WebStudio. Entries have an explicit
+importance level, are deterministically summarized, and can be forgotten. After
+resume, App Server injects only a bounded notebook summary, while full entries
+remain available through explicit reads. Child Sessions do not copy parent entries;
+they may read a validated parent snapshot but cannot write or forget it.
 
 #### Thread settings, Plan, and Goal
 

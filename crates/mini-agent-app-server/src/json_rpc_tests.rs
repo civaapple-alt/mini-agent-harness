@@ -49,6 +49,9 @@ fn turn_start_request(id: u64, prompt: &str) -> JsonRpcRequest {
             input: TurnInput::new(TurnInputMode::Start, prompt),
             operation_id: None,
             operation_attempt: None,
+            operation_group_id: None,
+            execution_mode: None,
+            group_sequence: None,
         }),
     )
 }
@@ -701,6 +704,9 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
                 input: TurnInput::new(TurnInputMode::Start, "seed fork checkpoint"),
                 operation_id: None,
                 operation_attempt: None,
+                operation_group_id: None,
+                execution_mode: None,
+                group_sequence: None,
             }),
         ),
     )
@@ -782,6 +788,9 @@ async fn exact_session_fork_can_prepare_from_an_active_parent_turn() {
                 input: TurnInput::new(TurnInputMode::Start, "active parent"),
                 operation_id: None,
                 operation_attempt: None,
+                operation_group_id: None,
+                execution_mode: None,
+                group_sequence: None,
             }),
         ),
     )

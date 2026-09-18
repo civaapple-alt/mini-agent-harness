@@ -7,15 +7,50 @@ use std::sync::{Arc, Mutex};
 
 pub const NOTEBOOK_FILE_NAME: &str = "notebook.json";
 pub const MAX_NOTEBOOK_BYTES: usize = 64 * 1024;
-const MAX_NOTEBOOK_ENTRIES: usize = 32;
+pub const MAX_NOTEBOOK_ENTRIES: usize = 64;
 const MAX_NOTEBOOK_KEY_BYTES: usize = 96;
 const MAX_NOTEBOOK_ENTRY_BYTES: usize = 4 * 1024;
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotebookImportance {
+    Critical,
+    High,
+    #[default]
+    Normal,
+    Temporary,
+}
+
+impl NotebookImportance {
+    fn rank(&self) -> u8 {
+        match self {
+            Self::Critical => 4,
+            Self::High => 3,
+            Self::Normal => 2,
+            Self::Temporary => 1,
+        }
+    }
+
+    pub fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value.unwrap_or("normal") {
+            "critical" => Ok(Self::Critical),
+            "high" => Ok(Self::High),
+            "normal" => Ok(Self::Normal),
+            "temporary" => Ok(Self::Temporary),
+            _ => {
+                Err("notebook importance must be critical, high, normal, or temporary".to_string())
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotebookEntry {
     pub key: String,
     pub content: String,
+    #[serde(default)]
+    pub importance: NotebookImportance,
     pub updated_at_ms: u64,
 }
 
@@ -30,8 +65,16 @@ pub struct NotebookSnapshot {
 
 impl NotebookSnapshot {
     pub fn summary(&self, max_bytes: usize) -> String {
-        let full = self
-            .entries
+        let mut entries = self.entries.clone();
+        entries.sort_by(|left, right| {
+            right
+                .importance
+                .rank()
+                .cmp(&left.importance.rank())
+                .then_with(|| right.updated_at_ms.cmp(&left.updated_at_ms))
+                .then_with(|| left.key.cmp(&right.key))
+        });
+        let full = entries
             .iter()
             .map(|entry| format!("{}: {}", entry.key, entry.content))
             .collect::<Vec<_>>()
@@ -71,11 +114,31 @@ pub fn read_notebook(path: &Path) -> Result<NotebookSnapshot, String> {
     Ok(snapshot)
 }
 
+pub fn read_notebook_scope(session_dir: &Path, scope: &str) -> Result<NotebookSnapshot, String> {
+    let path = match scope {
+        "self" => session_dir.join(NOTEBOOK_FILE_NAME),
+        "parent" => parent_notebook_path(session_dir)
+            .ok_or_else(|| "parent notebook scope is unavailable".to_string())?,
+        _ => return Err("notebook scope must be self or parent".to_string()),
+    };
+    read_notebook(&path)
+}
+
 pub fn upsert_notebook(
     path: &Path,
     key: &str,
     content: &str,
     append: bool,
+) -> Result<NotebookSnapshot, String> {
+    upsert_notebook_with_importance(path, key, content, append, NotebookImportance::Normal)
+}
+
+pub fn upsert_notebook_with_importance(
+    path: &Path,
+    key: &str,
+    content: &str,
+    append: bool,
+    importance: NotebookImportance,
 ) -> Result<NotebookSnapshot, String> {
     validate_key(key)?;
     validate_content(content)?;
@@ -91,6 +154,7 @@ pub fn upsert_notebook(
             entry.content = content.to_string();
         }
         validate_content(&entry.content)?;
+        entry.importance = importance;
         entry.updated_at_ms = now;
     } else {
         if snapshot.entries.len() >= MAX_NOTEBOOK_ENTRIES {
@@ -99,12 +163,25 @@ pub fn upsert_notebook(
         snapshot.entries.push(NotebookEntry {
             key: key.to_string(),
             content: content.to_string(),
+            importance,
             updated_at_ms: now,
         });
     }
     snapshot.version = 1;
     snapshot.revision = snapshot.revision.saturating_add(1);
     snapshot.updated_at_ms = now;
+    validate_snapshot(&snapshot)?;
+    write_snapshot(path, &snapshot)?;
+    Ok(snapshot)
+}
+
+pub fn forget_notebook(path: &Path, key: &str) -> Result<NotebookSnapshot, String> {
+    validate_key(key)?;
+    let mut snapshot = read_notebook(path)?;
+    snapshot.entries.retain(|entry| entry.key != key);
+    snapshot.version = 1;
+    snapshot.revision = snapshot.revision.saturating_add(1);
+    snapshot.updated_at_ms = timestamp_ms();
     validate_snapshot(&snapshot)?;
     write_snapshot(path, &snapshot)?;
     Ok(snapshot)
@@ -179,10 +256,12 @@ fn timestamp_ms() -> u64 {
 enum NotebookMode {
     Read,
     Write,
+    Forget,
 }
 
 struct NotebookTool {
     path: PathBuf,
+    parent_path: Option<PathBuf>,
     mode: NotebookMode,
     lock: Arc<Mutex<()>>,
 }
@@ -192,24 +271,38 @@ impl ToolHandler for NotebookTool {
         match self.mode {
             NotebookMode::Read => ToolSpec {
                 name: "notebook_read".to_string(),
-                description: "Read the bounded Session notebook. Use it for durable facts across turns and context compaction; omit key to read all entries.".to_string(),
+                description: "Read the bounded Session notebook. Use scope=parent only when a Child needs a verified, read-only fact from its parent Session. Omit key to read all entries.".to_string(),
                 parameters: json!({
                     "type": "object",
-                    "properties": {"key": {"type": "string"}},
+                    "properties": {
+                        "key": {"type": "string"},
+                        "scope": {"type": "string", "enum": ["self", "parent"]}
+                    },
                     "additionalProperties": false
                 }),
             },
             NotebookMode::Write => ToolSpec {
                 name: "notebook_write".to_string(),
-                description: "Write one bounded fact to the Session notebook. Use a stable key; set append=true to add to an existing entry. This is durable Session state, not a workspace file.".to_string(),
+                description: "Write one bounded fact to this Session notebook. Use a stable key; set append=true to add to an existing entry. Importance controls future summary ordering.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "required": ["key", "content"],
                     "properties": {
                         "key": {"type": "string"},
                         "content": {"type": "string"},
-                        "append": {"type": "boolean"}
+                        "append": {"type": "boolean"},
+                        "importance": {"type": "string", "enum": ["critical", "high", "normal", "temporary"]}
                     },
+                    "additionalProperties": false
+                }),
+            },
+            NotebookMode::Forget => ToolSpec {
+                name: "notebook_forget".to_string(),
+                description: "Forget one key from this Session notebook. This changes future memory projections but does not erase Checkpoint history.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "required": ["key"],
+                    "properties": {"key": {"type": "string"}},
                     "additionalProperties": false
                 }),
             },
@@ -222,7 +315,22 @@ impl ToolRuntime for NotebookTool {
         let _guard = self.lock.lock().unwrap();
         match self.mode {
             NotebookMode::Read => {
-                let snapshot = read_notebook(&self.path).map_err(ToolError)?;
+                let scope = arguments
+                    .get("scope")
+                    .and_then(Value::as_str)
+                    .unwrap_or("self");
+                let path = match scope {
+                    "self" => &self.path,
+                    "parent" => self.parent_path.as_ref().ok_or_else(|| {
+                        ToolError("parent notebook scope is unavailable".to_string())
+                    })?,
+                    _ => {
+                        return Err(ToolError(
+                            "notebook_read scope must be self or parent".to_string(),
+                        ));
+                    }
+                };
+                let snapshot = read_notebook(path).map_err(ToolError)?;
                 let key = arguments.get("key").and_then(Value::as_str);
                 if let Some(key) = key {
                     let entry = snapshot.entries.iter().find(|entry| entry.key == key);
@@ -244,12 +352,29 @@ impl ToolRuntime for NotebookTool {
                     .get("append")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
+                let importance =
+                    NotebookImportance::parse(arguments.get("importance").and_then(Value::as_str))
+                        .map_err(ToolError)?;
                 let snapshot =
-                    upsert_notebook(&self.path, key, content, append).map_err(ToolError)?;
+                    upsert_notebook_with_importance(&self.path, key, content, append, importance)
+                        .map_err(ToolError)?;
                 serde_json::to_string(&json!({
                     "key": key,
                     "revision": snapshot.revision,
                     "entries": snapshot.entries.len()
+                }))
+                .map_err(|error| ToolError(error.to_string()))
+            }
+            NotebookMode::Forget => {
+                let key = arguments
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError("notebook_forget requires key".to_string()))?;
+                let snapshot = forget_notebook(&self.path, key).map_err(ToolError)?;
+                serde_json::to_string(&json!({
+                    "key": key,
+                    "revision": snapshot.revision,
+                    "entries": snapshot.entries.len(),
                 }))
                 .map_err(|error| ToolError(error.to_string()))
             }
@@ -259,19 +384,59 @@ impl ToolRuntime for NotebookTool {
 
 pub fn notebook_tools(session_dir: PathBuf) -> Vec<Box<dyn Tool>> {
     let path = session_dir.join(NOTEBOOK_FILE_NAME);
+    let parent_path = parent_notebook_path(&session_dir);
     let lock = Arc::new(Mutex::new(()));
     vec![
         Box::new(NotebookTool {
             path: path.clone(),
+            parent_path: parent_path.clone(),
             mode: NotebookMode::Read,
             lock: Arc::clone(&lock),
         }),
         Box::new(NotebookTool {
             path,
+            parent_path: None,
             mode: NotebookMode::Write,
+            lock: Arc::clone(&lock),
+        }),
+        Box::new(NotebookTool {
+            path: session_dir.join(NOTEBOOK_FILE_NAME),
+            parent_path: None,
+            mode: NotebookMode::Forget,
             lock,
         }),
     ]
+}
+
+fn parent_notebook_path(session_dir: &Path) -> Option<PathBuf> {
+    let session_path = session_dir.join("session.jsonl");
+    let first_line = fs::read_to_string(session_path)
+        .ok()?
+        .lines()
+        .next()?
+        .to_string();
+    let header: Value = serde_json::from_str(&first_line).ok()?;
+    if header.get("kind").and_then(Value::as_str) != Some("session_created") {
+        return None;
+    }
+    let parent_id = header
+        .get("forked_from")
+        .and_then(|value| value.get("parent_session_id"))
+        .and_then(Value::as_str)?;
+    if parent_id.is_empty()
+        || parent_id.len() > 128
+        || !parent_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return None;
+    }
+    let sessions_root = session_dir.parent()?.canonicalize().ok()?;
+    let parent_dir = sessions_root.join(parent_id).canonicalize().ok()?;
+    if !parent_dir.starts_with(&sessions_root) || !parent_dir.is_dir() {
+        return None;
+    }
+    Some(parent_dir.join(NOTEBOOK_FILE_NAME))
 }
 
 #[cfg(test)]
@@ -307,6 +472,79 @@ mod tests {
         let path = root.join(NOTEBOOK_FILE_NAME);
         let content = "x".repeat(MAX_NOTEBOOK_ENTRY_BYTES + 1);
         assert!(upsert_notebook(&path, "facts", &content, false).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn importance_is_persisted_and_controls_summary_order() {
+        let root = temp_path();
+        let path = root.join(NOTEBOOK_FILE_NAME);
+        upsert_notebook_with_importance(
+            &path,
+            "normal-fact",
+            "normal",
+            false,
+            NotebookImportance::Normal,
+        )
+        .unwrap();
+        upsert_notebook_with_importance(
+            &path,
+            "critical-fact",
+            "critical",
+            false,
+            NotebookImportance::Critical,
+        )
+        .unwrap();
+        let snapshot = read_notebook(&path).unwrap();
+        assert_eq!(snapshot.entries[1].importance, NotebookImportance::Critical);
+        assert!(
+            snapshot
+                .summary(1024)
+                .starts_with("critical-fact: critical")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn forgetting_a_key_keeps_checkpoint_independent_revision() {
+        let root = temp_path();
+        let path = root.join(NOTEBOOK_FILE_NAME);
+        let first = upsert_notebook(&path, "facts", "one", false).unwrap();
+        let second = forget_notebook(&path, "facts").unwrap();
+        assert_eq!(second.revision, first.revision + 1);
+        assert!(second.entries.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn child_notebook_scope_resolves_only_verified_parent_lineage() {
+        let root = temp_path();
+        let parent_dir = root.join("parent");
+        let child_dir = root.join("child");
+        fs::create_dir_all(&parent_dir).unwrap();
+        fs::create_dir_all(&child_dir).unwrap();
+        fs::write(
+            parent_dir.join(NOTEBOOK_FILE_NAME),
+            serde_json::to_vec(
+                &upsert_notebook(&parent_dir.join(NOTEBOOK_FILE_NAME), "fact", "one", false)
+                    .unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            child_dir.join("session.jsonl"),
+            serde_json::json!({
+                "kind": "session_created",
+                "forked_from": {"parent_session_id": "parent"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            parent_notebook_path(&child_dir),
+            Some(parent_dir.canonicalize().unwrap().join(NOTEBOOK_FILE_NAME))
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

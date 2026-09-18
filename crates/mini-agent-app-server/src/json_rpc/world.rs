@@ -24,6 +24,10 @@ where
                 params.context_policy,
                 params.operation_id,
                 params.operation_attempt,
+                params.operation_prompt,
+                params.operation_group_id,
+                params.execution_mode,
+                params.group_sequence,
             ),
             Clone::clone,
         )
@@ -46,6 +50,85 @@ where
                 resumed: info.resumed,
             })
         })
+        .await
+    }
+
+    pub(super) async fn handle_session_notebook_read(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<SessionNotebookReadParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        let scope = if params.scope.is_empty() {
+            "self".to_string()
+        } else {
+            params.scope
+        };
+        action_response(
+            request.id,
+            management.read_notebook_action(scope),
+            Clone::clone,
+        )
+        .await
+    }
+
+    pub(super) async fn handle_session_notebook_write(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<SessionNotebookWriteParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        action_response(
+            request.id,
+            management.write_notebook_action(
+                params.key,
+                params.content,
+                params.append,
+                params.importance,
+            ),
+            Clone::clone,
+        )
+        .await
+    }
+
+    pub(super) async fn handle_session_notebook_forget(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<SessionNotebookForgetParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        action_response(
+            request.id,
+            management.forget_notebook_action(params.key),
+            Clone::clone,
+        )
         .await
     }
 

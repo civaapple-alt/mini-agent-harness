@@ -24,6 +24,7 @@ use tokio::time::Instant;
 
 const EVENT_REPLAY_BUFFER: usize = 512;
 
+#[allow(clippy::too_many_arguments)]
 fn operation_record(
     operation_id: &str,
     status: &str,
@@ -31,6 +32,10 @@ fn operation_record(
     attempt: u32,
     result: Option<&str>,
     error: Option<&str>,
+    group_id: Option<&str>,
+    execution_mode: Option<&str>,
+    sequence: Option<u32>,
+    prompt: Option<&str>,
 ) -> mini_agent_capabilities::SessionOperation {
     let mut operation = mini_agent_capabilities::SessionOperation::new(
         operation_id.to_string(),
@@ -41,6 +46,10 @@ fn operation_record(
     operation.attempt = attempt;
     operation.result = result.map(str::to_string);
     operation.error = error.map(str::to_string);
+    operation.group_id = group_id.map(str::to_string);
+    operation.execution_mode = execution_mode.map(str::to_string);
+    operation.sequence = sequence;
+    operation.prompt = prompt.map(str::to_string);
     operation
 }
 
@@ -643,6 +652,9 @@ pub(super) async fn worker_loop<M>(
                 let mut next_input = Some(request.input);
                 let mut operation_id = request.operation_id.clone();
                 let operation_attempt = request.operation_attempt.unwrap_or(1);
+                let operation_group_id = request.operation_group_id.clone();
+                let execution_mode = request.execution_mode.clone();
+                let group_sequence = request.group_sequence;
                 let mut initial_reply = Some(reply);
                 let mut origin = origin;
                 let goal_turn = matches!(&origin, TurnOrigin::Goal { .. });
@@ -857,6 +869,10 @@ pub(super) async fn worker_loop<M>(
                                 operation_attempt,
                                 None,
                                 None,
+                                operation_group_id.as_deref(),
+                                execution_mode.as_deref(),
+                                group_sequence,
+                                Some(prompt.as_str()),
                             ),
                         )
                     {
@@ -1009,6 +1025,10 @@ pub(super) async fn worker_loop<M>(
                                         operation_attempt,
                                         operation_result,
                                         persistence_error.as_deref(),
+                                        operation_group_id.as_deref(),
+                                        execution_mode.as_deref(),
+                                        group_sequence,
+                                        Some(prompt.as_str()),
                                     ),
                                 ) {
                                     eprintln!(
@@ -1085,6 +1105,10 @@ pub(super) async fn worker_loop<M>(
                                         operation_attempt,
                                         None,
                                         persistence_error.as_deref(),
+                                        operation_group_id.as_deref(),
+                                        execution_mode.as_deref(),
+                                        group_sequence,
+                                        Some(prompt.as_str()),
                                     ),
                                 )
                             {

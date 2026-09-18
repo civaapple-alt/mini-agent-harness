@@ -169,6 +169,40 @@ where
                 context_policy,
                 operation_id,
                 operation_attempt,
+                operation_prompt: None,
+                operation_group_id: None,
+                execution_mode: None,
+                group_sequence: None,
+            },
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn fork_session_with_child_operation(
+        &mut self,
+        source_thread_id: ThreadId,
+        new_thread_id: ThreadId,
+        context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
+        operation_id: Option<String>,
+        operation_attempt: Option<u32>,
+        operation_prompt: Option<String>,
+        operation_group_id: Option<String>,
+        execution_mode: Option<String>,
+        group_sequence: Option<u32>,
+    ) -> Result<SessionForkResult, JsonRpcError> {
+        self.call(
+            METHOD_SESSION_FORK,
+            SessionForkParams {
+                source_thread_id,
+                new_thread_id,
+                context_policy,
+                operation_id,
+                operation_attempt,
+                operation_prompt,
+                operation_group_id,
+                execution_mode,
+                group_sequence,
             },
         )
         .await
@@ -201,6 +235,9 @@ where
                 input,
                 operation_id: None,
                 operation_attempt: None,
+                operation_group_id: None,
+                execution_mode: None,
+                group_sequence: None,
             },
         )
         .await

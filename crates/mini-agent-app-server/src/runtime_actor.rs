@@ -49,6 +49,10 @@ pub(super) async fn handle_session_fork_request<M>(
         context_policy,
         operation_id,
         operation_attempt,
+        operation_prompt,
+        operation_group_id,
+        execution_mode,
+        group_sequence,
         reply,
     } = request.command
     else {
@@ -61,6 +65,10 @@ pub(super) async fn handle_session_fork_request<M>(
         context_policy,
         operation_id,
         operation_attempt,
+        operation_prompt,
+        operation_group_id,
+        execution_mode,
+        group_sequence,
         runtime,
         threads,
     )
@@ -68,12 +76,17 @@ pub(super) async fn handle_session_fork_request<M>(
     respond(reply, receipt, result);
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn prepare_session_fork<M>(
     source_thread_id: ThreadId,
     new_thread_id: ThreadId,
     context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
     operation_id: Option<String>,
     operation_attempt: Option<u32>,
+    operation_prompt: Option<String>,
+    operation_group_id: Option<String>,
+    execution_mode: Option<String>,
+    group_sequence: Option<u32>,
     runtime: &Option<RuntimeActorState>,
     threads: &mut ThreadManager<M>,
 ) -> Result<mini_agent_app_server_protocol::SessionForkResult, AppServerError>
@@ -138,6 +151,10 @@ where
             mini_agent_capabilities::SessionOperation::new(operation_id, "child_task", "queued");
         operation.parent_thread_id = Some(source_thread_id.as_str().to_string());
         operation.attempt = operation_attempt.unwrap_or(1);
+        operation.prompt = operation_prompt;
+        operation.group_id = operation_group_id;
+        operation.execution_mode = execution_mode;
+        operation.sequence = group_sequence;
         operation
     });
     let child = mini_agent_capabilities::SessionStore::fork_from_checkpoint_with_operation(
@@ -391,6 +408,38 @@ pub(super) fn handle<M>(
                 .map(|state| Ok(state.management.session_info()))
                 .unwrap_or(Err(AppServerError::RuntimeUnavailable)),
         ),
+        RuntimeCommand::ReadNotebook { scope, reply } => respond(
+            reply,
+            receipt,
+            runtime
+                .as_ref()
+                .ok_or(AppServerError::RuntimeUnavailable)
+                .and_then(|state| state.management.read_notebook(&scope)),
+        ),
+        RuntimeCommand::WriteNotebook {
+            key,
+            content,
+            append,
+            importance,
+            reply,
+        } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .management
+                    .write_notebook(&key, &content, append, &importance)
+                    .map(|value| (value, true))
+            });
+            respond(reply, receipt, result);
+        }
+        RuntimeCommand::ForgetNotebook { key, reply } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .management
+                    .forget_notebook(&key)
+                    .map(|value| (value, true))
+            });
+            respond(reply, receipt, result);
+        }
         RuntimeCommand::CheckpointSeq { reply } => respond(
             reply,
             receipt,
@@ -603,6 +652,9 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
     match command {
         RuntimeCommand::SessionInfo { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::PrepareSessionFork { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::ReadNotebook { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::WriteNotebook { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::ForgetNotebook { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::CheckpointSeq { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ThreadId { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::World { reply } => respond(reply, receipt, Err(error)),
@@ -668,6 +720,10 @@ fn handle_active_session_fork(
         context_policy,
         operation_id,
         operation_attempt,
+        operation_prompt,
+        operation_group_id,
+        execution_mode,
+        group_sequence,
         reply,
     } = request.command
     else {
@@ -679,17 +735,26 @@ fn handle_active_session_fork(
         context_policy,
         operation_id,
         operation_attempt,
+        operation_prompt,
+        operation_group_id,
+        execution_mode,
+        group_sequence,
         runtime,
     );
     respond(reply, receipt, result);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_active_session_fork(
     source_thread_id: ThreadId,
     new_thread_id: ThreadId,
     context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
     operation_id: Option<String>,
     operation_attempt: Option<u32>,
+    operation_prompt: Option<String>,
+    operation_group_id: Option<String>,
+    execution_mode: Option<String>,
+    group_sequence: Option<u32>,
     runtime: &Option<RuntimeActorState>,
 ) -> Result<mini_agent_app_server_protocol::SessionForkResult, AppServerError> {
     if context_policy != mini_agent_app_server_protocol::ForkContextPolicy::Exact {
@@ -725,6 +790,10 @@ fn prepare_active_session_fork(
             mini_agent_capabilities::SessionOperation::new(operation_id, "child_task", "queued");
         operation.parent_thread_id = Some(source_thread_id.as_str().to_string());
         operation.attempt = operation_attempt.unwrap_or(1);
+        operation.prompt = operation_prompt;
+        operation.group_id = operation_group_id;
+        operation.execution_mode = execution_mode;
+        operation.sequence = group_sequence;
         operation
     });
     let child = mini_agent_capabilities::SessionStore::fork_from_checkpoint_with_operation(

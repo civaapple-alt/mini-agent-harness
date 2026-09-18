@@ -92,6 +92,12 @@ pub struct TurnStart {
     pub operation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_attempt: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_sequence: Option<u32>,
 }
 
 impl TurnStart {
@@ -100,6 +106,9 @@ impl TurnStart {
             input,
             operation_id: None,
             operation_attempt: None,
+            operation_group_id: None,
+            execution_mode: None,
+            group_sequence: None,
         }
     }
 }

@@ -158,6 +158,8 @@ Use these endpoints:
 | `POST /api/threads/{thread_id}/children/{child_thread_id}/cancel` | Request cooperative cancellation of an active child Turn. |
 | `POST /api/threads/{thread_id}/children/{child_thread_id}/retry` | Start a bounded new attempt for a settled failed or cancelled child. |
 | `GET /api/threads/{thread_id}/notebook` | Read the bounded Session-owned notebook projection. |
+| `POST /api/threads/{thread_id}/notebook` | Write one bounded current-Session Notebook entry. |
+| `DELETE /api/threads/{thread_id}/notebook` | Forget one current-Session Notebook entry. |
 | `POST /api/threads/{thread_id}/close` | Close an active Thread and release resources. |
 | `PATCH /api/threads/{thread_id}/summary` | Update Web display metadata only. |
 | `PATCH /api/threads/{thread_id}/rename` | Update the Web display title only. |
@@ -194,6 +196,9 @@ input, mutable Core context, tool calls, and approvals are not copied. Child
 history and status remain addressable by the child Thread and are observed
 through the existing event and canonical Session projections. This is
 structural concurrency through independent runtimes, not a Core scheduler.
+The parent project setting limits active children to `1..=8` (default `2`), and
+operation groups may be `parallel` or `sequential`; queued operations remain
+durable and are drained by the Gateway when a slot becomes available.
 
 The child projection is recoverable because `session.jsonl` is the authority for
 the latest `operation` record. `queued`, `running`, `awaiting_approval`,
@@ -206,6 +211,8 @@ recovery or re-attach is required instead of fabricating a completed result.
 The Session notebook is read through the dedicated projection endpoint. The
 Gateway does not cache it as a second authority: the App Server/SessionStore
 owns the bounded entries, and resume injects only a summary into the runtime.
+WebStudio's Memory tab edits the current Session and displays the parent snapshot
+as read-only. A child cannot use the parent scope to write or forget.
 
 If a live process owns the Session lock, `attach` returns a conflict or an
 `attached: false` lock description. The Gateway must not delete the lock or

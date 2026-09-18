@@ -56,6 +56,9 @@ pub const METHOD_THREAD_GOAL_UPDATED: &str = "thread/goal/updated";
 pub const METHOD_THREAD_GOAL_CLEARED: &str = "thread/goal/cleared";
 pub const METHOD_SESSION_INFO: &str = "session/info";
 pub const METHOD_SESSION_FORK: &str = "session/fork";
+pub const METHOD_SESSION_NOTEBOOK_READ: &str = "session/notebook/read";
+pub const METHOD_SESSION_NOTEBOOK_WRITE: &str = "session/notebook/write";
+pub const METHOD_SESSION_NOTEBOOK_FORGET: &str = "session/notebook/forget";
 pub const METHOD_WORLD_STATE: &str = "world/state";
 pub const METHOD_WORLD_REFRESH: &str = "world/refresh";
 pub const METHOD_WORLD_SET_EXECUTION: &str = "world/set_execution";
@@ -612,6 +615,14 @@ pub struct SessionForkParams {
     pub operation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_attempt: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_sequence: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -627,6 +638,33 @@ pub struct SessionForkResult {
     pub context_after_bytes: usize,
     pub compacted: bool,
     pub method: ForkCompactionMethod,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionNotebookReadParams {
+    pub thread_id: ThreadId,
+    #[serde(default)]
+    pub scope: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionNotebookWriteParams {
+    pub thread_id: ThreadId,
+    pub key: String,
+    pub content: String,
+    #[serde(default)]
+    pub append: bool,
+    #[serde(default)]
+    pub importance: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionNotebookForgetParams {
+    pub thread_id: ThreadId,
+    pub key: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -869,6 +907,12 @@ pub struct TurnStartParams {
     pub operation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_attempt: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_sequence: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -1221,6 +1265,10 @@ mod tests {
             context_policy: ForkContextPolicy::Compact,
             operation_id: None,
             operation_attempt: None,
+            operation_prompt: None,
+            operation_group_id: None,
+            execution_mode: None,
+            group_sequence: None,
         })
         .unwrap();
         assert_eq!(params["sourceThreadId"], "source");

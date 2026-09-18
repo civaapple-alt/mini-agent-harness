@@ -276,6 +276,43 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
+    pub(crate) async fn read_notebook_action(
+        &self,
+        scope: String,
+    ) -> Result<ActionResponse<serde_json::Value>, ActionFailure> {
+        self.client
+            .request_action(|reply| RuntimeCommand::ReadNotebook { scope, reply })
+            .await
+    }
+
+    pub(crate) async fn write_notebook_action(
+        &self,
+        key: String,
+        content: String,
+        append: bool,
+        importance: String,
+    ) -> Result<ActionResponse<serde_json::Value>, ActionFailure> {
+        self.client
+            .request_action(|reply| RuntimeCommand::WriteNotebook {
+                key,
+                content,
+                append,
+                importance,
+                reply,
+            })
+            .await
+    }
+
+    pub(crate) async fn forget_notebook_action(
+        &self,
+        key: String,
+    ) -> Result<ActionResponse<serde_json::Value>, ActionFailure> {
+        self.client
+            .request_action(|reply| RuntimeCommand::ForgetNotebook { key, reply })
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn fork_session_action(
         &self,
         source_thread_id: ThreadId,
@@ -283,6 +320,10 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
         operation_id: Option<String>,
         operation_attempt: Option<u32>,
+        operation_prompt: Option<String>,
+        operation_group_id: Option<String>,
+        execution_mode: Option<String>,
+        group_sequence: Option<u32>,
     ) -> Result<ActionResponse<mini_agent_app_server_protocol::SessionForkResult>, ActionFailure>
     {
         self.client
@@ -292,6 +333,10 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 context_policy,
                 operation_id,
                 operation_attempt,
+                operation_prompt,
+                operation_group_id,
+                execution_mode,
+                group_sequence,
                 reply,
             })
             .await
@@ -468,6 +513,72 @@ impl RuntimeManagementState {
 
     pub(crate) fn session_mut(&mut self) -> Option<&mut OpenedSession> {
         self.session.as_mut()
+    }
+
+    pub(crate) fn read_notebook(&self, scope: &str) -> Result<serde_json::Value, AppServerError> {
+        let session_dir = self
+            .session
+            .as_ref()
+            .and_then(|opened| opened.store.path().parent())
+            .ok_or_else(|| {
+                AppServerError::Checkpoint("session persistence is disabled".to_string())
+            })?;
+        let snapshot = mini_agent_capabilities::read_notebook_scope(session_dir, scope)
+            .map_err(AppServerError::Checkpoint)?;
+        serde_json::to_value(snapshot)
+            .map_err(|error| AppServerError::Checkpoint(error.to_string()))
+    }
+
+    pub(crate) fn write_notebook(
+        &mut self,
+        key: &str,
+        content: &str,
+        append: bool,
+        importance: &str,
+    ) -> Result<serde_json::Value, AppServerError> {
+        let session_dir = self
+            .session
+            .as_ref()
+            .and_then(|opened| opened.store.path().parent())
+            .ok_or_else(|| {
+                AppServerError::Checkpoint("session persistence is disabled".to_string())
+            })?
+            .to_path_buf();
+        let importance = mini_agent_capabilities::NotebookImportance::parse(
+            (!importance.is_empty()).then_some(importance),
+        )
+        .map_err(AppServerError::Checkpoint)?;
+        let snapshot = mini_agent_capabilities::upsert_notebook_with_importance(
+            &session_dir.join(mini_agent_capabilities::NOTEBOOK_FILE_NAME),
+            key,
+            content,
+            append,
+            importance,
+        )
+        .map_err(AppServerError::Checkpoint)?;
+        serde_json::to_value(snapshot)
+            .map_err(|error| AppServerError::Checkpoint(error.to_string()))
+    }
+
+    pub(crate) fn forget_notebook(
+        &mut self,
+        key: &str,
+    ) -> Result<serde_json::Value, AppServerError> {
+        let session_dir = self
+            .session
+            .as_ref()
+            .and_then(|opened| opened.store.path().parent())
+            .ok_or_else(|| {
+                AppServerError::Checkpoint("session persistence is disabled".to_string())
+            })?
+            .to_path_buf();
+        let snapshot = mini_agent_capabilities::forget_notebook(
+            &session_dir.join(mini_agent_capabilities::NOTEBOOK_FILE_NAME),
+            key,
+        )
+        .map_err(AppServerError::Checkpoint)?;
+        serde_json::to_value(snapshot)
+            .map_err(|error| AppServerError::Checkpoint(error.to_string()))
     }
 
     pub(crate) fn persist_continuation_mode(

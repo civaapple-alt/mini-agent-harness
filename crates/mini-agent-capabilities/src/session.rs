@@ -29,6 +29,7 @@ const MAX_OPERATION_ID_BYTES: usize = 128;
 const MAX_OPERATION_KIND_BYTES: usize = 64;
 const MAX_OPERATION_ERROR_BYTES: usize = 4096;
 const MAX_OPERATION_RESULT_BYTES: usize = 16 * 1024;
+const MAX_OPERATION_PROMPT_BYTES: usize = 32 * 1024;
 const SESSION_FILE_NAME: &str = "session.jsonl";
 const SESSION_LOCK_NAME: &str = "session";
 pub const SUMMARY_FILE_NAME: &str = "summary.json";
@@ -196,6 +197,14 @@ pub struct SessionOperation {
     pub turn_id: Option<String>,
     pub attempt: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -215,6 +224,10 @@ impl SessionOperation {
             parent_thread_id: None,
             turn_id: None,
             attempt: 1,
+            group_id: None,
+            execution_mode: None,
+            sequence: None,
+            prompt: None,
             result: None,
             error: None,
             timestamp_ms: timestamp_ms(),
@@ -233,6 +246,14 @@ impl SessionOperation {
         if self.attempt == 0 {
             return Err("operation attempt must be positive".to_string());
         }
+        if let Some(group_id) = self.group_id.as_deref() {
+            validate_operation_text(group_id, MAX_OPERATION_ID_BYTES, "operation group id")?;
+        }
+        if let Some(execution_mode) = self.execution_mode.as_deref()
+            && !matches!(execution_mode, "parallel" | "sequential")
+        {
+            return Err("invalid operation execution mode".to_string());
+        }
         for (value, limit, label) in [
             (
                 self.parent_thread_id.as_deref(),
@@ -240,6 +261,11 @@ impl SessionOperation {
                 "parent thread id",
             ),
             (self.turn_id.as_deref(), MAX_OPERATION_ID_BYTES, "turn id"),
+            (
+                self.prompt.as_deref(),
+                MAX_OPERATION_PROMPT_BYTES,
+                "operation prompt",
+            ),
             (
                 self.result.as_deref(),
                 MAX_OPERATION_RESULT_BYTES,
@@ -416,6 +442,10 @@ impl SessionStore {
             "parent_thread_id": operation.parent_thread_id,
             "turn_id": operation.turn_id,
             "attempt": operation.attempt,
+            "operation_group_id": operation.group_id,
+            "execution_mode": operation.execution_mode,
+            "group_sequence": operation.sequence,
+            "prompt": operation.prompt,
             "result": operation.result,
             "error": operation.error,
             "timestamp_ms": operation.timestamp_ms,
@@ -1004,12 +1034,12 @@ impl SessionStore {
             );
             let store = match initialized {
                 Ok(mut store) => {
-                    if let Some(operation) = operation.clone() {
-                        if let Err(error) = store.record_operation(operation) {
-                            drop(store);
-                            let _ = fs::remove_dir_all(&session_dir);
-                            return Err(SessionForkError::Storage(error));
-                        }
+                    if let Some(operation) = operation.clone()
+                        && let Err(error) = store.record_operation(operation)
+                    {
+                        drop(store);
+                        let _ = fs::remove_dir_all(&session_dir);
+                        return Err(SessionForkError::Storage(error));
                     }
                     store
                 }

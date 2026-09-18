@@ -171,10 +171,29 @@ fn read_child_operation(path: &Path, parent_session_id: &str) -> Result<Option<V
         }
         if valid_lineage && record.get("kind").and_then(Value::as_str) == Some("operation") {
             let mut bounded = serde_json::Map::new();
-            for key in ["operation_id", "operation_kind", "status", "turn_id"] {
+            for key in [
+                "operation_id",
+                "operation_kind",
+                "status",
+                "turn_id",
+                "operation_group_id",
+                "execution_mode",
+                "prompt",
+            ] {
                 if let Some(value) = record.get(key).and_then(Value::as_str) {
+                    let value = if key == "prompt" {
+                        value
+                            .chars()
+                            .take(MAX_CHILD_PROMPT_BYTES)
+                            .collect::<String>()
+                    } else {
+                        value.to_string()
+                    };
                     bounded.insert(key.to_string(), json!(value));
                 }
+            }
+            if let Some(sequence) = record.get("group_sequence").and_then(Value::as_u64) {
+                bounded.insert("group_sequence".to_string(), json!(sequence));
             }
             if let Some(attempt) = record.get("attempt").and_then(Value::as_u64) {
                 bounded.insert("attempt".to_string(), json!(attempt));

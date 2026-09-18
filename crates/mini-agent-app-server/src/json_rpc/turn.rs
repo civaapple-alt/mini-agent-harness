@@ -74,6 +74,9 @@ where
         let mut turn = TurnStart::new(params.input);
         turn.operation_id = params.operation_id;
         turn.operation_attempt = params.operation_attempt;
+        turn.operation_group_id = params.operation_group_id;
+        turn.execution_mode = params.execution_mode;
+        turn.group_sequence = params.group_sequence;
         action_response(
             request.id,
             self.server

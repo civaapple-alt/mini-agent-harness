@@ -27,7 +27,26 @@ pub(super) enum RuntimeCommand {
         context_policy: mini_agent_app_server_protocol::ForkContextPolicy,
         operation_id: Option<String>,
         operation_attempt: Option<u32>,
+        operation_prompt: Option<String>,
+        operation_group_id: Option<String>,
+        execution_mode: Option<String>,
+        group_sequence: Option<u32>,
         reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::SessionForkResult>>,
+    },
+    ReadNotebook {
+        scope: String,
+        reply: oneshot::Sender<ActionResult<serde_json::Value>>,
+    },
+    WriteNotebook {
+        key: String,
+        content: String,
+        append: bool,
+        importance: String,
+        reply: oneshot::Sender<ActionResult<serde_json::Value>>,
+    },
+    ForgetNotebook {
+        key: String,
+        reply: oneshot::Sender<ActionResult<serde_json::Value>>,
     },
     CheckpointSeq {
         reply: oneshot::Sender<ActionResult<Option<u64>>>,
@@ -96,6 +115,8 @@ impl RuntimeCommand {
                 | Self::ThreadGoalSet { .. }
                 | Self::ThreadGoalClear { .. }
                 | Self::PrepareSessionFork { .. }
+                | Self::WriteNotebook { .. }
+                | Self::ForgetNotebook { .. }
         )
     }
 }

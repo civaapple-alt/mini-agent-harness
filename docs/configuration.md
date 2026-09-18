@@ -320,13 +320,26 @@ bounded `operation` records with the lifecycle states `queued`, `running`,
 `awaiting_approval`, `completed`, `failed`, and `cancelled`. The latest record
 is the recoverable operation projection after a runtime restart. Child Sessions
 are exact-checkpoint branches with independent locks and runtimes; the current
-control seam allows depth one and at most two active children per parent.
+control seam allows depth one. WebStudio defaults to two active children per
+parent and accepts a bounded project setting:
+
+```json
+{"subagent":{"maxConcurrentChildren":2,"defaultExecutionMode":"parallel"}}
+```
+
+The maximum is `1..=8`. `parallel` starts independent children when capacity is
+available; `sequential` orders one operation group by its sequence and waits for
+the prior child to settle. Queue and group metadata are persisted with the
+operation so a restart does not infer scheduling state from an in-memory map.
 
 Each Session may also contain a bounded `notebook.json`. It is owned by the
 Session store, survives compaction and runtime restart, and is accessed through
-`notebook_read`/`notebook_write`. Resume injects only a bounded summary into the
-turn context. Notebook entries are not copied into child Sessions and do not
-grant any additional workspace, shell, approval, or write access.
+`notebook_read`/`notebook_write` plus `notebook_forget`. Entries use
+`critical|high|normal|temporary` importance and the current implementation
+allows at most 64 entries within the existing byte budget. Resume injects only
+a bounded summary into the turn context. Child Sessions can read a validated
+parent snapshot, but cannot mutate it. Notebook access does not grant any
+additional workspace, shell, approval, or write access.
 
 ### Plugins
 
