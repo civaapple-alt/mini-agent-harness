@@ -658,6 +658,10 @@ pub struct SessionNotebookWriteParams {
     pub append: bool,
     #[serde(default)]
     pub importance: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keywords: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<Vec<Value>>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

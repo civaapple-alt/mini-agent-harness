@@ -71,9 +71,10 @@ pub use mini_agent_protocol::ApprovalPolicy;
 pub use model::ModelProviderSettings;
 pub use model::build_model;
 pub use notebook::{
-    MAX_NOTEBOOK_BYTES, MAX_NOTEBOOK_ENTRIES, NOTEBOOK_FILE_NAME, NotebookEntry,
-    NotebookImportance, NotebookSnapshot, forget_notebook, notebook_tools, read_notebook,
-    read_notebook_scope, upsert_notebook, upsert_notebook_with_importance,
+    MAX_EVIDENCE_SUBJECT_CHARS, MAX_NOTEBOOK_BYTES, MAX_NOTEBOOK_ENTRIES, MAX_NOTEBOOK_EVIDENCE,
+    MAX_NOTEBOOK_KEYWORDS, NOTEBOOK_FILE_NAME, NotebookEntry, NotebookImportance, NotebookLimits,
+    NotebookSnapshot, forget_notebook, notebook_tools, read_notebook, read_notebook_scope,
+    upsert_notebook, upsert_notebook_with_importance, upsert_notebook_with_metadata,
 };
 pub use openai::OpenAiError;
 pub use openai::OpenAiModel;

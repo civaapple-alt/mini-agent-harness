@@ -291,6 +291,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         content: String,
         append: bool,
         importance: String,
+        keywords: Option<Vec<String>>,
+        evidence: Option<Vec<serde_json::Value>>,
     ) -> Result<ActionResponse<serde_json::Value>, ActionFailure> {
         self.client
             .request_action(|reply| RuntimeCommand::WriteNotebook {
@@ -298,6 +300,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 content,
                 append,
                 importance,
+                keywords,
+                evidence,
                 reply,
             })
             .await
@@ -535,6 +539,8 @@ impl RuntimeManagementState {
         content: &str,
         append: bool,
         importance: &str,
+        keywords: Option<Vec<String>>,
+        evidence: Option<Vec<serde_json::Value>>,
     ) -> Result<serde_json::Value, AppServerError> {
         let session_dir = self
             .session
@@ -548,12 +554,14 @@ impl RuntimeManagementState {
             (!importance.is_empty()).then_some(importance),
         )
         .map_err(AppServerError::Checkpoint)?;
-        let snapshot = mini_agent_capabilities::upsert_notebook_with_importance(
+        let snapshot = mini_agent_capabilities::upsert_notebook_with_metadata(
             &session_dir.join(mini_agent_capabilities::NOTEBOOK_FILE_NAME),
             key,
             content,
             append,
             importance,
+            keywords,
+            evidence,
         )
         .map_err(AppServerError::Checkpoint)?;
         serde_json::to_value(snapshot)

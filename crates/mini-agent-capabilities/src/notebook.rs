@@ -8,8 +8,57 @@ use std::sync::{Arc, Mutex};
 pub const NOTEBOOK_FILE_NAME: &str = "notebook.json";
 pub const MAX_NOTEBOOK_BYTES: usize = 64 * 1024;
 pub const MAX_NOTEBOOK_ENTRIES: usize = 64;
+pub const MAX_NOTEBOOK_KEYWORDS: usize = 12;
+pub const MAX_NOTEBOOK_EVIDENCE: usize = 8;
+pub const MAX_EVIDENCE_SUBJECT_CHARS: usize = 160;
 const MAX_NOTEBOOK_KEY_BYTES: usize = 96;
 const MAX_NOTEBOOK_ENTRY_BYTES: usize = 4 * 1024;
+const MAX_NOTEBOOK_KEYWORD_BYTES: usize = 64;
+const MAX_EVIDENCE_FIELD_BYTES: usize = 256;
+const MAX_EVIDENCE_SUBJECT_BYTES: usize = 1024;
+const NOTEBOOK_METADATA_BUDGET_BYTES: usize = 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotebookLimits {
+    pub max_entries: usize,
+    pub max_entry_bytes: usize,
+    pub max_bytes: usize,
+}
+
+impl Default for NotebookLimits {
+    fn default() -> Self {
+        Self {
+            max_entries: MAX_NOTEBOOK_ENTRIES,
+            max_entry_bytes: MAX_NOTEBOOK_ENTRY_BYTES,
+            max_bytes: MAX_NOTEBOOK_BYTES,
+        }
+    }
+}
+
+impl NotebookLimits {
+    pub fn from_env() -> Self {
+        let max_entries = env_limit("MINI_AGENT_NOTEBOOK_MAX_ENTRIES", 1, MAX_NOTEBOOK_ENTRIES);
+        let max_entry_bytes = env_limit(
+            "MINI_AGENT_NOTEBOOK_MAX_ENTRY_CHARS",
+            256,
+            MAX_NOTEBOOK_ENTRY_BYTES,
+        );
+        Self {
+            max_entries,
+            max_entry_bytes,
+            max_bytes: (max_entries * (max_entry_bytes + NOTEBOOK_METADATA_BUDGET_BYTES))
+                .min(MAX_NOTEBOOK_BYTES),
+        }
+    }
+}
+
+fn env_limit(name: &str, minimum: usize, maximum: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(maximum)
+        .clamp(minimum, maximum)
+}
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -52,6 +101,10 @@ pub struct NotebookEntry {
     #[serde(default)]
     pub importance: NotebookImportance,
     pub updated_at_ms: u64,
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    pub evidence: Vec<Value>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -101,16 +154,17 @@ impl NotebookSnapshot {
 }
 
 pub fn read_notebook(path: &Path) -> Result<NotebookSnapshot, String> {
+    let limits = NotebookLimits::from_env();
     if !path.is_file() {
         return Ok(empty_snapshot());
     }
     let bytes = fs::read(path).map_err(|error| format!("cannot read notebook: {error}"))?;
-    if bytes.len() > MAX_NOTEBOOK_BYTES {
-        return Err(format!("notebook exceeds {MAX_NOTEBOOK_BYTES} byte limit"));
+    if bytes.len() > limits.max_bytes {
+        return Err(format!("notebook exceeds {} byte limit", limits.max_bytes));
     }
     let snapshot: NotebookSnapshot =
         serde_json::from_slice(&bytes).map_err(|error| format!("invalid notebook: {error}"))?;
-    validate_snapshot(&snapshot)?;
+    validate_snapshot_with_limits(&snapshot, limits)?;
     Ok(snapshot)
 }
 
@@ -140,8 +194,23 @@ pub fn upsert_notebook_with_importance(
     append: bool,
     importance: NotebookImportance,
 ) -> Result<NotebookSnapshot, String> {
+    upsert_notebook_with_metadata(path, key, content, append, importance, None, None)
+}
+
+pub fn upsert_notebook_with_metadata(
+    path: &Path,
+    key: &str,
+    content: &str,
+    append: bool,
+    importance: NotebookImportance,
+    keywords: Option<Vec<String>>,
+    evidence: Option<Vec<Value>>,
+) -> Result<NotebookSnapshot, String> {
+    let limits = NotebookLimits::from_env();
     validate_key(key)?;
-    validate_content(content)?;
+    validate_content(content, limits.max_entry_bytes)?;
+    let keywords = keywords.map(validate_keywords).transpose()?;
+    let evidence = evidence.map(validate_evidence).transpose()?;
     let mut snapshot = read_notebook(path)?;
     let now = timestamp_ms();
     if let Some(entry) = snapshot.entries.iter_mut().find(|entry| entry.key == key) {
@@ -153,36 +222,45 @@ pub fn upsert_notebook_with_importance(
         } else {
             entry.content = content.to_string();
         }
-        validate_content(&entry.content)?;
+        validate_content(&entry.content, limits.max_entry_bytes)?;
         entry.importance = importance;
         entry.updated_at_ms = now;
+        if let Some(keywords) = keywords {
+            entry.keywords = keywords;
+        }
+        if let Some(evidence) = evidence {
+            entry.evidence = evidence;
+        }
     } else {
-        if snapshot.entries.len() >= MAX_NOTEBOOK_ENTRIES {
-            return Err(format!("notebook exceeds {MAX_NOTEBOOK_ENTRIES} entries"));
+        if snapshot.entries.len() >= limits.max_entries {
+            return Err(format!("notebook exceeds {} entries", limits.max_entries));
         }
         snapshot.entries.push(NotebookEntry {
             key: key.to_string(),
             content: content.to_string(),
             importance,
             updated_at_ms: now,
+            keywords: keywords.unwrap_or_default(),
+            evidence: evidence.unwrap_or_default(),
         });
     }
     snapshot.version = 1;
     snapshot.revision = snapshot.revision.saturating_add(1);
     snapshot.updated_at_ms = now;
-    validate_snapshot(&snapshot)?;
+    validate_snapshot_with_limits(&snapshot, limits)?;
     write_snapshot(path, &snapshot)?;
     Ok(snapshot)
 }
 
 pub fn forget_notebook(path: &Path, key: &str) -> Result<NotebookSnapshot, String> {
+    let limits = NotebookLimits::from_env();
     validate_key(key)?;
     let mut snapshot = read_notebook(path)?;
     snapshot.entries.retain(|entry| entry.key != key);
     snapshot.version = 1;
     snapshot.revision = snapshot.revision.saturating_add(1);
     snapshot.updated_at_ms = timestamp_ms();
-    validate_snapshot(&snapshot)?;
+    validate_snapshot_with_limits(&snapshot, limits)?;
     write_snapshot(path, &snapshot)?;
     Ok(snapshot)
 }
@@ -194,22 +272,122 @@ fn empty_snapshot() -> NotebookSnapshot {
     }
 }
 
-fn validate_snapshot(snapshot: &NotebookSnapshot) -> Result<(), String> {
+fn validate_snapshot_with_limits(
+    snapshot: &NotebookSnapshot,
+    limits: NotebookLimits,
+) -> Result<(), String> {
     if snapshot.version != 1 {
         return Err("unsupported notebook version".to_string());
     }
-    if snapshot.entries.len() > MAX_NOTEBOOK_ENTRIES {
-        return Err(format!("notebook exceeds {MAX_NOTEBOOK_ENTRIES} entries"));
+    if snapshot.entries.len() > limits.max_entries {
+        return Err(format!("notebook exceeds {} entries", limits.max_entries));
     }
     for entry in &snapshot.entries {
         validate_key(&entry.key)?;
-        validate_content(&entry.content)?;
+        validate_content(&entry.content, limits.max_entry_bytes)?;
+        validate_keywords(entry.keywords.clone())?;
+        validate_evidence(entry.evidence.clone())?;
     }
     let encoded = serde_json::to_vec(snapshot).map_err(|error| error.to_string())?;
-    if encoded.len() > MAX_NOTEBOOK_BYTES {
-        return Err(format!("notebook exceeds {MAX_NOTEBOOK_BYTES} byte limit"));
+    if encoded.len() > limits.max_bytes {
+        return Err(format!("notebook exceeds {} byte limit", limits.max_bytes));
     }
     Ok(())
+}
+
+fn validate_keywords(keywords: Vec<String>) -> Result<Vec<String>, String> {
+    if keywords.len() > MAX_NOTEBOOK_KEYWORDS {
+        return Err(format!(
+            "notebook entry exceeds {MAX_NOTEBOOK_KEYWORDS} keywords"
+        ));
+    }
+    let mut normalized = Vec::with_capacity(keywords.len());
+    for keyword in keywords {
+        let keyword = keyword.trim();
+        if keyword.is_empty() || keyword.len() > MAX_NOTEBOOK_KEYWORD_BYTES {
+            return Err(format!(
+                "notebook keyword must be 1..={MAX_NOTEBOOK_KEYWORD_BYTES} bytes"
+            ));
+        }
+        if !normalized.iter().any(|existing| existing == keyword) {
+            normalized.push(keyword.to_string());
+        }
+    }
+    Ok(normalized)
+}
+
+fn validate_evidence(evidence: Vec<Value>) -> Result<Vec<Value>, String> {
+    if evidence.len() > MAX_NOTEBOOK_EVIDENCE {
+        return Err(format!(
+            "notebook entry exceeds {MAX_NOTEBOOK_EVIDENCE} evidence records"
+        ));
+    }
+    let mut evidence = evidence;
+    for item in &mut evidence {
+        let object = item
+            .as_object_mut()
+            .ok_or_else(|| "notebook evidence must be an object".to_string())?;
+        let kind = object
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if kind != "commit" && kind != "file" {
+            return Err("notebook evidence kind must be commit or file".to_string());
+        }
+        for name in [
+            "project",
+            "commit",
+            "path",
+            "authorAt",
+            "committedAt",
+            "contentSha256",
+        ] {
+            if let Some(field) = object.get(name).and_then(Value::as_str)
+                && (field.trim().is_empty() || field.len() > MAX_EVIDENCE_FIELD_BYTES)
+            {
+                return Err(format!(
+                    "notebook evidence fields must be 1..={MAX_EVIDENCE_FIELD_BYTES} bytes"
+                ));
+            }
+        }
+        if object
+            .get("lines")
+            .and_then(Value::as_array)
+            .is_some_and(|lines| lines.len() > 2)
+        {
+            return Err("notebook evidence lines must contain at most two values".to_string());
+        }
+        if let Some(subject) = object
+            .remove("subject")
+            .and_then(|value| value.as_str().map(str::to_string))
+        {
+            let normalized_subject = subject.split_whitespace().collect::<Vec<_>>().join(" ");
+            let mut chars = normalized_subject.chars();
+            let mut bounded = chars
+                .by_ref()
+                .take(MAX_EVIDENCE_SUBJECT_CHARS)
+                .collect::<String>();
+            object.insert(
+                "subjectTruncated".to_string(),
+                Value::Bool(chars.next().is_some()),
+            );
+            while bounded.len() > MAX_EVIDENCE_SUBJECT_BYTES {
+                bounded.pop();
+            }
+            if !bounded.is_empty() {
+                object.insert("subject".to_string(), Value::String(bounded));
+            }
+        }
+        if object
+            .get("recordedAtMs")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+            == 0
+        {
+            object.insert("recordedAtMs".to_string(), json!(timestamp_ms()));
+        }
+    }
+    Ok(evidence)
 }
 
 fn validate_key(key: &str) -> Result<(), String> {
@@ -221,11 +399,9 @@ fn validate_key(key: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_content(content: &str) -> Result<(), String> {
-    if content.len() > MAX_NOTEBOOK_ENTRY_BYTES {
-        return Err(format!(
-            "notebook entry exceeds {MAX_NOTEBOOK_ENTRY_BYTES} bytes"
-        ));
+fn validate_content(content: &str, max_bytes: usize) -> Result<(), String> {
+    if content.len() > max_bytes {
+        return Err(format!("notebook entry exceeds {max_bytes} bytes"));
     }
     Ok(())
 }
@@ -291,7 +467,9 @@ impl ToolHandler for NotebookTool {
                         "key": {"type": "string"},
                         "content": {"type": "string"},
                         "append": {"type": "boolean"},
-                        "importance": {"type": "string", "enum": ["critical", "high", "normal", "temporary"]}
+                        "importance": {"type": "string", "enum": ["critical", "high", "normal", "temporary"]},
+                        "keywords": {"type": "array", "maxItems": 12, "items": {"type": "string"}},
+                        "evidence": {"type": "array", "maxItems": 8, "items": {"type": "object"}}
                     },
                     "additionalProperties": false
                 }),
@@ -355,9 +533,37 @@ impl ToolRuntime for NotebookTool {
                 let importance =
                     NotebookImportance::parse(arguments.get("importance").and_then(Value::as_str))
                         .map_err(ToolError)?;
-                let snapshot =
-                    upsert_notebook_with_importance(&self.path, key, content, append, importance)
-                        .map_err(ToolError)?;
+                let keywords = arguments
+                    .get("keywords")
+                    .map(|value| {
+                        value
+                            .as_array()
+                            .ok_or_else(|| "notebook_write keywords must be an array".to_string())
+                            .and_then(|items| {
+                                items
+                                    .iter()
+                                    .map(|item| {
+                                        item.as_str().map(str::to_string).ok_or_else(|| {
+                                            "notebook keyword must be a string".to_string()
+                                        })
+                                    })
+                                    .collect()
+                            })
+                    })
+                    .transpose()
+                    .map_err(ToolError)?;
+                let evidence = arguments
+                    .get("evidence")
+                    .map(|value| {
+                        serde_json::from_value::<Vec<Value>>(value.clone())
+                            .map_err(|error| format!("notebook evidence is invalid: {error}"))
+                    })
+                    .transpose()
+                    .map_err(ToolError)?;
+                let snapshot = upsert_notebook_with_metadata(
+                    &self.path, key, content, append, importance, keywords, evidence,
+                )
+                .map_err(ToolError)?;
                 serde_json::to_string(&json!({
                     "key": key,
                     "revision": snapshot.revision,
@@ -394,13 +600,13 @@ pub fn notebook_tools(session_dir: PathBuf) -> Vec<Box<dyn Tool>> {
             lock: Arc::clone(&lock),
         }),
         Box::new(NotebookTool {
-            path,
+            path: path.clone(),
             parent_path: None,
             mode: NotebookMode::Write,
             lock: Arc::clone(&lock),
         }),
         Box::new(NotebookTool {
-            path: session_dir.join(NOTEBOOK_FILE_NAME),
+            path: path.clone(),
             parent_path: None,
             mode: NotebookMode::Forget,
             lock,
@@ -546,5 +752,47 @@ mod tests {
             Some(parent_dir.canonicalize().unwrap().join(NOTEBOOK_FILE_NAME))
         );
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn evidence_normalizes_subject_and_persists_keywords() {
+        let root = temp_path();
+        let path = root.join(NOTEBOOK_FILE_NAME);
+        let subject = format!("  feat: add   cached commit metadata {}", "x".repeat(180));
+        let snapshot = upsert_notebook_with_metadata(
+            &path,
+            "architecture",
+            "remember the session boundary",
+            false,
+            NotebookImportance::High,
+            Some(vec!["checkpoint".to_string(), "memory".to_string()]),
+            Some(vec![json!({
+                "kind": "commit",
+                "project": "mini-codex",
+                "commit": "3941fcc",
+                "subject": subject,
+                "committedAt": "2026-09-18T10:00:00Z"
+            })]),
+        )
+        .unwrap();
+        let evidence = &snapshot.entries[0].evidence[0];
+        assert_eq!(evidence["subjectTruncated"], true);
+        assert!(evidence["subject"].as_str().unwrap().len() <= MAX_EVIDENCE_SUBJECT_BYTES);
+        assert_eq!(snapshot.entries[0].keywords, ["checkpoint", "memory"]);
+        assert_eq!(evidence["commit"], "3941fcc");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn old_notebook_entries_default_new_metadata() {
+        let snapshot: NotebookSnapshot = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "revision": 1,
+            "updatedAtMs": 1,
+            "entries": [{"key": "fact", "content": "old", "updatedAtMs": 1}]
+        }))
+        .unwrap();
+        assert!(snapshot.entries[0].keywords.is_empty());
+        assert!(snapshot.entries[0].evidence.is_empty());
     }
 }

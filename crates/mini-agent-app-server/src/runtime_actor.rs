@@ -421,12 +421,14 @@ pub(super) fn handle<M>(
             content,
             append,
             importance,
+            keywords,
+            evidence,
             reply,
         } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 state
                     .management
-                    .write_notebook(&key, &content, append, &importance)
+                    .write_notebook(&key, &content, append, &importance, keywords, evidence)
                     .map(|value| (value, true))
             });
             respond(reply, receipt, result);

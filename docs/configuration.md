@@ -339,7 +339,20 @@ Session store, survives compaction and runtime restart, and is accessed through
 allows at most 64 entries within the existing byte budget. Resume injects only
 a bounded summary into the turn context. Child Sessions can read a validated
 parent snapshot, but cannot mutate it. Notebook access does not grant any
-additional workspace, shell, approval, or write access.
+  additional workspace, shell, approval, or write access.
+
+  Web Studio exposes only two Notebook sizing settings:
+
+  ```json
+  {"notebook":{"max_entries":64,"max_entry_chars":4096}}
+  ```
+
+  `maxEntries` is bounded to `1..=64` and `maxEntryChars` to `256..=4096`.
+  The effective file limit is derived from these values and a fixed metadata
+  budget, then capped at the runtime hard ceiling of 64 KiB. Evidence count,
+  keyword count, and commit-subject limit remain fixed safety ceilings. Commit evidence stores
+  the commit identity, normalized subject, author/commit time, and record time,
+  so reads do not repeat Git history queries.
 
 ### Plugins
 

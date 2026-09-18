@@ -219,7 +219,7 @@ Thread returned by `thread/start`.
 | `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
 | `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`), `operationId`, `operationAttempt`, `operationPrompt`, `operationGroupId`, `executionMode`, `groupSequence` | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. Fork metadata is a bounded operation projection only; it does not make Core a scheduler. |
 | `session/notebook/read` | `threadId`, optional `scope` (`self` or `parent`) | Reads the current Session notebook or a Host-validated parent snapshot. Parent scope is read-only and cannot select an arbitrary Session or path. |
-| `session/notebook/write` | `threadId`, `key`, `content`, optional `append`, `importance` (`critical`, `high`, `normal`, `temporary`) | Upserts the current Session's bounded Notebook entry and returns the new snapshot. |
+| `session/notebook/write` | `threadId`, `key`, `content`, optional `append`, `importance` (`critical`, `high`, `normal`, `temporary`), `keywords`, and bounded `evidence` | Upserts the current Session's bounded Notebook entry and returns the new snapshot. Commit evidence caches a normalized subject (160 Unicode characters max) and timestamps. |
 | `session/notebook/forget` | `threadId`, `key` | Removes one current-Session entry and advances the Notebook revision without rewriting checkpoint history. |
 
 `thread/resume` is a controlled checkpoint install, not a second persistence

@@ -159,6 +159,7 @@ Use these endpoints:
 | `POST /api/threads/{thread_id}/children/{child_thread_id}/retry` | Start a bounded new attempt for a settled failed or cancelled child. |
 | `GET /api/threads/{thread_id}/notebook` | Read the bounded Session-owned notebook projection. |
 | `POST /api/threads/{thread_id}/notebook` | Write one bounded current-Session Notebook entry. |
+| `GET /api/threads/{thread_id}/notebook/search?q=...` | Search bounded Notebook keys, keywords, content, and cached evidence metadata. |
 | `DELETE /api/threads/{thread_id}/notebook` | Forget one current-Session Notebook entry. |
 | `POST /api/threads/{thread_id}/close` | Close an active Thread and release resources. |
 | `PATCH /api/threads/{thread_id}/summary` | Update Web display metadata only. |
@@ -213,6 +214,11 @@ Gateway does not cache it as a second authority: the App Server/SessionStore
 owns the bounded entries, and resume injects only a summary into the runtime.
 WebStudio's Memory tab edits the current Session and displays the parent snapshot
 as read-only. A child cannot use the parent scope to write or forget.
+
+Notebook writes may include bounded `keywords` and `evidence`. Commit evidence
+is cached at write time (`commit`, `subject`, `authorAt`, `committedAt`, and
+`recordedAtMs`); the search/read path does not invoke Git. Project or global
+settings expose only `notebook.max_entries` and `notebook.max_entry_chars`.
 
 If a live process owns the Session lock, `attach` returns a conflict or an
 `attached: false` lock description. The Gateway must not delete the lock or

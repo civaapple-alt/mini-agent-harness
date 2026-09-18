@@ -103,6 +103,8 @@ where
                 params.content,
                 params.append,
                 params.importance,
+                params.keywords,
+                params.evidence,
             ),
             Clone::clone,
         )

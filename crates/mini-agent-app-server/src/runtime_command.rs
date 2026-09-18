@@ -42,6 +42,8 @@ pub(super) enum RuntimeCommand {
         content: String,
         append: bool,
         importance: String,
+        keywords: Option<Vec<String>>,
+        evidence: Option<Vec<serde_json::Value>>,
         reply: oneshot::Sender<ActionResult<serde_json::Value>>,
     },
     ForgetNotebook {
