@@ -8,16 +8,22 @@
 ## 决策
 
 - 条目保留 `importance`，并增加有界 `keywords` 和 `evidence`。
-- 证据只支持 `commit` 和 `file` 两类。Commit 证据在写入时保存 hash、项目、
-  规范化 subject、author/commit 时间和记录时间；读取或检索不再次查询 Git。
+- 证据只支持 `commit` 和 `file` 两类。它是调用方声明的有界来源元数据，写入时
+  保存 hash、项目、规范化 subject、author/commit 时间和记录时间；实现不宣称已
+  自动向 Git 或文件系统重新校验，读取或检索也不再次查询 Git。
 - subject 先压缩空白，再限制为最多 160 个 Unicode 字符，并通过
   `subjectTruncated` 保留截断事实。不保存完整 commit body。
 - WebStudio 的 Notebook search API 搜索 key、正文、关键词和缓存的证据元数据，
   最多返回 8 条；Mini Agent 运行时仍只暴露有界 Notebook read/write 工具。
-- WebStudio 的可调配置只保留两项：`max_entries` 和 `max_entry_chars`。
+- WebStudio 的可调配置只保留两项：`max_entries` 和 `max_entry_bytes`。
   默认值分别是 64 和 4096，允许范围分别是 `1..=64` 与 `256..=4096`。
   有效文件上限按条数、单条上限和固定元数据预算计算，再封顶为 64 KiB；
-  关键词/证据数量和 subject 长度保持固定硬上限。
+  关键词/证据数量和 subject 长度保持固定硬上限。旧的
+  `max_entry_chars` 仍兼容，但按 UTF-8 字节解释，且被 `max_entry_bytes` 覆盖。
+
+- Notebook 写入和遗忘会发送只包含 `revision` 与 `changedKeys` 的
+  `session/notebook/updated` 通知；前端收到后重新读取权威投影，不把正文复制到
+  事件。`lastUsedAtMs`、自动过期、权重衰减和 Git 自动验证仍是 deferred。
 
 ## 边界
 

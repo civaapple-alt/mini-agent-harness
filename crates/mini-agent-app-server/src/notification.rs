@@ -2,6 +2,7 @@ use crate::goal_runtime::GoalRuntimeEvent;
 use crate::management::SettingsRuntimeEvent;
 use mini_agent_app_server_protocol::ItemCompletedNotification;
 use mini_agent_app_server_protocol::ItemStartedNotification;
+use mini_agent_app_server_protocol::NotebookUpdatedNotification;
 use mini_agent_app_server_protocol::{RuntimeStatus, WorkflowLifecycleNotification};
 use mini_agent_protocol::EventEnvelope;
 
@@ -29,6 +30,7 @@ pub(crate) enum RuntimeNotification {
     Event(EventEnvelope),
     ItemStarted(ItemStartedNotification),
     ItemCompleted(ItemCompletedNotification),
+    NotebookUpdated(NotebookUpdatedNotification),
     Goal(GoalRuntimeEvent),
     Settings(SettingsRuntimeEvent),
     Status(RuntimeStatus),

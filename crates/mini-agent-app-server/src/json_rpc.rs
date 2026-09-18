@@ -584,6 +584,10 @@ pub(super) fn runtime_notification_request(event: RuntimeNotification) -> JsonRp
                 .expect("item completed notification is serializable"),
             ),
         ),
+        RuntimeNotification::NotebookUpdated(event) => JsonRpcRequest::notification(
+            mini_agent_app_server_protocol::METHOD_SESSION_NOTEBOOK_UPDATED,
+            Some(serde_json::to_value(event).expect("notebook update is serializable")),
+        ),
         RuntimeNotification::Goal(event) => goal_notification_request(event),
         RuntimeNotification::Settings(event) => settings_notification_request(event),
         RuntimeNotification::Status(status) => JsonRpcRequest::notification(

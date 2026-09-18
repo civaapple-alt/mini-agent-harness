@@ -345,18 +345,22 @@ a bounded summary into the turn context. Child Sessions can read a validated
 parent snapshot, but cannot mutate it. Notebook access does not grant any
   additional workspace, shell, approval, or write access.
 
-  Web Studio exposes only two Notebook sizing settings:
+  Web Studio exposes only two Notebook sizing settings. Global defaults apply to
+  every Runtime; a project may override either value without changing other
+  projects:
 
   ```json
-  {"notebook":{"max_entries":64,"max_entry_chars":4096}}
+  {"notebook":{"max_entries":64,"max_entry_bytes":4096}}
   ```
 
-  `maxEntries` is bounded to `1..=64` and `maxEntryChars` to `256..=4096`.
+  `max_entries` is bounded to `1..=64` and `max_entry_bytes` to `256..=4096`.
   The effective file limit is derived from these values and a fixed metadata
-  budget, then capped at the runtime hard ceiling of 64 KiB. Evidence count,
-  keyword count, and commit-subject limit remain fixed safety ceilings. Commit evidence stores
-  the commit identity, normalized subject, author/commit time, and record time,
-  so reads do not repeat Git history queries.
+  budget, then capped at the runtime hard ceiling of 64 KiB. The legacy
+  `max_entry_chars` field and `MINI_AGENT_NOTEBOOK_MAX_ENTRY_CHARS` environment
+  variable remain accepted as byte limits, but `max_entry_bytes` takes priority.
+  Evidence count, keyword count, and commit-subject limit remain fixed safety
+  ceilings. Evidence is caller-supplied provenance metadata; it is not claimed
+  to have been revalidated against Git or the file system.
 
 ### Plugins
 

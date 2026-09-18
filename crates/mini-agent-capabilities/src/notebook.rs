@@ -37,12 +37,21 @@ impl Default for NotebookLimits {
 
 impl NotebookLimits {
     pub fn from_env() -> Self {
-        let max_entries = env_limit("MINI_AGENT_NOTEBOOK_MAX_ENTRIES", 1, MAX_NOTEBOOK_ENTRIES);
+        let max_entries = env_limit("MINI_AGENT_NOTEBOOK_MAX_ENTRIES", 1, MAX_NOTEBOOK_ENTRIES)
+            .unwrap_or(MAX_NOTEBOOK_ENTRIES);
         let max_entry_bytes = env_limit(
-            "MINI_AGENT_NOTEBOOK_MAX_ENTRY_CHARS",
+            "MINI_AGENT_NOTEBOOK_MAX_ENTRY_BYTES",
             256,
             MAX_NOTEBOOK_ENTRY_BYTES,
-        );
+        )
+        .or_else(|| {
+            env_limit(
+                "MINI_AGENT_NOTEBOOK_MAX_ENTRY_CHARS",
+                256,
+                MAX_NOTEBOOK_ENTRY_BYTES,
+            )
+        })
+        .unwrap_or(MAX_NOTEBOOK_ENTRY_BYTES);
         Self {
             max_entries,
             max_entry_bytes,
@@ -52,12 +61,11 @@ impl NotebookLimits {
     }
 }
 
-fn env_limit(name: &str, minimum: usize, maximum: usize) -> usize {
+fn env_limit(name: &str, minimum: usize, maximum: usize) -> Option<usize> {
     std::env::var(name)
         .ok()
         .and_then(|value| value.parse().ok())
-        .unwrap_or(maximum)
-        .clamp(minimum, maximum)
+        .map(|value: usize| value.clamp(minimum, maximum))
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]

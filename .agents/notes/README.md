@@ -108,6 +108,7 @@ graph LR
 - [Child Session、operation 与 Session notebook](implemented/architecture/2026-09-17-time-extended-child-session-and-notebook.zh.md)
 - [Session Notebook 与 Subagent 执行策略落地记录](implemented/architecture/2026-09-18-session-notebook-and-subagent-policy.zh.md)
 - [Session Notebook 证据、检索与简化配置](implemented/architecture/2026-09-18-session-notebook-evidence-search-and-config.zh.md)
+- [Child 恢复与 Notebook 可观测性补全](implemented/architecture/2026-09-18-child-recovery-and-notebook-observability.zh.md)
 - [独立 Child Session 控制接缝](implemented/architecture/2026-09-17-independent-child-session-control-seam.zh.md)
 - [Skill 启用目录只读放行](implemented/architecture/2026-09-17-skill-associated-resources.zh.md)
 - [pstack 插件级与命名空间 Skill 双入口](implemented/feature/2026-09-17-pstack-plugin-and-namespaced-skill.zh.md)

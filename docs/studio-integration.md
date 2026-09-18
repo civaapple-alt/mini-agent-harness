@@ -201,7 +201,20 @@ The global or parent project setting limits active children to `1..=8` (default
 `2`). The Main Thread chooses `parallel` or `sequential` for each delegation
 and can attach an operation group and sequence; queued operations remain
 durable and are drained by the Gateway when a slot becomes available. The
-Gateway does not infer scheduling mode from project settings.
+Gateway does not infer scheduling mode from project settings. On Gateway
+startup, Runtime attach, Session restore, and relevant configuration changes it
+reconciles the persisted operation projection: queued operations without a
+Turn are drained, while operations with an existing Turn are reattached for
+observation rather than duplicated. A durable delegation receipt is written
+before Child materialization, so a crash between `delegate_task` observation and
+Child creation can be retried idempotently.
+
+The Gateway also sends a bounded `child_operation_updated` projection to the
+parent Thread. It contains only operation/Child IDs, status, execution mode,
+group sequence, and a finite error code. WebStudio uses it to refresh a compact
+parent status list and uses `listChildTasks()` as the canonical source on first
+load, polling, and reconnect; Child transcript and tool output remain in the
+separate Child Thread.
 
 The child projection is recoverable because `session.jsonl` is the authority for
 the latest `operation` record. `queued`, `running`, `awaiting_approval`,
@@ -217,10 +230,14 @@ owns the bounded entries, and resume injects only a summary into the runtime.
 WebStudio's Memory tab edits the current Session and displays the parent snapshot
 as read-only. A child cannot use the parent scope to write or forget.
 
-Notebook writes may include bounded `keywords` and `evidence`. Commit evidence
-is cached at write time (`commit`, `subject`, `authorAt`, `committedAt`, and
-`recordedAtMs`); the search/read path does not invoke Git. Project or global
-settings expose only `notebook.max_entries` and `notebook.max_entry_chars`.
+Notebook writes may include bounded `keywords` and `evidence`. Evidence is
+caller-supplied provenance metadata and is not automatically verified against
+Git or the file system. Project or global settings expose
+`notebook.max_entries` and `notebook.max_entry_bytes`; the legacy
+`max_entry_chars` name remains accepted as a UTF-8 byte limit. A successful
+Notebook write or forget emits a bounded `session/notebook/updated` notification
+with the revision and changed keys, so WebStudio refreshes the canonical
+projection without placing Notebook content in the event.
 
 If a live process owns the Session lock, `attach` returns a conflict or an
 `attached: false` lock description. The Gateway must not delete the lock or

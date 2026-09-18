@@ -59,6 +59,7 @@ pub const METHOD_SESSION_FORK: &str = "session/fork";
 pub const METHOD_SESSION_NOTEBOOK_READ: &str = "session/notebook/read";
 pub const METHOD_SESSION_NOTEBOOK_WRITE: &str = "session/notebook/write";
 pub const METHOD_SESSION_NOTEBOOK_FORGET: &str = "session/notebook/forget";
+pub const METHOD_SESSION_NOTEBOOK_UPDATED: &str = "session/notebook/updated";
 pub const METHOD_WORLD_STATE: &str = "world/state";
 pub const METHOD_WORLD_REFRESH: &str = "world/refresh";
 pub const METHOD_WORLD_SET_EXECUTION: &str = "world/set_execution";
@@ -965,6 +966,16 @@ pub struct ItemCompletedNotification {
     pub completed_at_ms: u64,
 }
 
+/// A bounded invalidation notice for a Notebook mutation. The contents stay
+/// behind the existing notebook read API and are never copied into the event.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotebookUpdatedNotification {
+    pub thread_id: ThreadId,
+    pub revision: u64,
+    pub changed_keys: Vec<String>,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ItemSortDirection {
@@ -1152,6 +1163,20 @@ mod tests {
         let request = JsonRpcRequest::notification(METHOD_INITIALIZED, None);
         let value = serde_json::to_value(request).unwrap();
         assert!(value.get("id").is_none());
+    }
+
+    #[test]
+    fn notebook_update_notification_is_bounded_and_camel_case() {
+        let value = serde_json::to_value(NotebookUpdatedNotification {
+            thread_id: ThreadId::new("thread-1"),
+            revision: 4,
+            changed_keys: vec!["architecture_decision".to_string()],
+        })
+        .unwrap();
+        assert_eq!(value["threadId"], "thread-1");
+        assert_eq!(value["revision"], 4);
+        assert_eq!(value["changedKeys"][0], "architecture_decision");
+        assert!(value.get("content").is_none());
     }
 
     #[test]

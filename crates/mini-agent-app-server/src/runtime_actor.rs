@@ -431,6 +431,23 @@ pub(super) fn handle<M>(
                     .write_notebook(&key, &content, append, &importance, keywords, evidence)
                     .map(|value| (value, true))
             });
+            if let Ok(snapshot) = &result
+                && let Some(state) = runtime.as_ref()
+            {
+                let revision = snapshot
+                    .get("revision")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or_default();
+                let _ = state
+                    .notifications
+                    .send(crate::RuntimeNotification::NotebookUpdated(
+                        mini_agent_app_server_protocol::NotebookUpdatedNotification {
+                            thread_id: state.management.thread_id(),
+                            revision,
+                            changed_keys: vec![key.clone()],
+                        },
+                    ));
+            }
             respond(reply, receipt, result);
         }
         RuntimeCommand::ForgetNotebook { key, reply } => {
@@ -440,6 +457,23 @@ pub(super) fn handle<M>(
                     .forget_notebook(&key)
                     .map(|value| (value, true))
             });
+            if let Ok(snapshot) = &result
+                && let Some(state) = runtime.as_ref()
+            {
+                let revision = snapshot
+                    .get("revision")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or_default();
+                let _ = state
+                    .notifications
+                    .send(crate::RuntimeNotification::NotebookUpdated(
+                        mini_agent_app_server_protocol::NotebookUpdatedNotification {
+                            thread_id: state.management.thread_id(),
+                            revision,
+                            changed_keys: vec![key.clone()],
+                        },
+                    ));
+            }
             respond(reply, receipt, result);
         }
         RuntimeCommand::CheckpointSeq { reply } => respond(
