@@ -283,6 +283,13 @@ notifications while the turn is running, then use `turn/read` for the settled
 result. Steering and interruption are requests to the runtime; they do not
 force an immediate stop before the runtime reaches a cancellation boundary.
 
+When a Turn is waiting for tool approval, the control plane queues
+`turn/interrupt` before it releases the approval wait. The App Server worker
+prioritizes the queued stop command, so the Turn observes cancellation before it
+can start another model or tool step. The approval resolves as denied. Clients
+must still wait for `turn_finished`; an accepted interrupt is not a settled
+result.
+
 `turn/events` is a reconnect aid, not a second history store. The App Server
 keeps a bounded in-memory window of Core events per process. `afterSequence` is
 exclusive; when the requested cursor is older than the retained window,

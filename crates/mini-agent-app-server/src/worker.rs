@@ -938,11 +938,7 @@ pub(super) async fn worker_loop<M>(
                     let turn_result = loop {
                         let timeout_active = timeout_configured && !timeout_requested;
                         tokio::select! {
-                            result = &mut turn => break result,
-                            _ = tokio::time::sleep_until(timeout_deadline), if timeout_active => {
-                                timeout_requested = true;
-                                control.request_cancel();
-                            },
+                            biased;
                             Some(command) = commands.recv() => {
                                 let base_revision = runtime
                                     .as_ref()
@@ -968,6 +964,11 @@ pub(super) async fn worker_loop<M>(
                                         stopping: &stopping,
                                     },
                                 );
+                            },
+                            result = &mut turn => break result,
+                            _ = tokio::time::sleep_until(timeout_deadline), if timeout_active => {
+                                timeout_requested = true;
+                                control.request_cancel();
                             },
                             else => {
                                 drop(turn);
