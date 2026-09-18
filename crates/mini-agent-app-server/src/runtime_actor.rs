@@ -503,9 +503,11 @@ pub(super) fn handle<M>(
         RuntimeCommand::RefreshWorld { reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 let current = state.management.world();
-                let refreshed = mini_agent_host::WorldState::detect_with_roots(
+                let refreshed = mini_agent_host::WorldState::detect_with_root_sets(
                     current.workspace(),
-                    current.extra_roots().to_vec(),
+                    current.associated_read_roots().to_vec(),
+                    current.associated_write_roots().to_vec(),
+                    current.session_read_roots().to_vec(),
                     current.access(),
                     current.policy(),
                     current.sandbox(),
@@ -1013,7 +1015,7 @@ where
     let context = updated
         .model_context()
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-    append_context_and_persist(threads, state, context)?;
+    replace_context_and_persist(threads, state, "world_state", context)?;
     state.management.set_world(updated);
     Ok(true)
 }
@@ -1432,6 +1434,55 @@ where
         .checkpoint()
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
     if let Err(error) = state.management.record_context(&checkpoint) {
+        if let Err(rollback) = thread.restore_checkpoint(previous) {
+            return Err(AppServerError::Checkpoint(format!(
+                "{error}; Thread rollback failed: {rollback}"
+            )));
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn replace_context_and_persist<M>(
+    threads: &mut ThreadManager<M>,
+    state: &mut RuntimeActorState,
+    slot: &str,
+    context: String,
+) -> Result<(), AppServerError>
+where
+    M: Model + 'static,
+{
+    let thread_id = state.management.thread_id();
+    let thread = threads
+        .get_mut(thread_id.as_str())
+        .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
+    let previous = thread
+        .checkpoint()
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
+    crate::worker::apply_thread_update(
+        thread,
+        crate::ThreadUpdate::ReplaceContext {
+            slot: slot.to_string(),
+            text: context,
+        },
+    )?;
+    let checkpoint = thread
+        .checkpoint()
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
+    let context = checkpoint
+        .session
+        .messages()
+        .iter()
+        .rev()
+        .find(|message| {
+            matches!(message, Message::Context { text } if text.starts_with(&format!("<{slot}")))
+        })
+        .ok_or_else(|| AppServerError::Checkpoint(format!("context slot {slot} was not stored")))?;
+    if let Err(error) = state
+        .management
+        .record_context_message(context, &checkpoint)
+    {
         if let Err(rollback) = thread.restore_checkpoint(previous) {
             return Err(AppServerError::Checkpoint(format!(
                 "{error}; Thread rollback failed: {rollback}"

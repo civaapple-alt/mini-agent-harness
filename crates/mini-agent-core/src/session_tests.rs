@@ -44,6 +44,66 @@ fn replacing_messages_advances_context_revision() {
 }
 
 #[test]
+fn replacing_context_slot_removes_stale_duplicates() {
+    let mut state = SessionState::from_messages(vec![
+        Message::User {
+            text: "hello".to_string(),
+        },
+        Message::Context {
+            text: "<world_state><old /></world_state>".to_string(),
+        },
+        Message::Context {
+            text: "<world_state><stale /></world_state>".to_string(),
+        },
+    ]);
+
+    assert!(state.replace_context_slot(
+        "world_state",
+        "<world_state><new /></world_state>".to_string()
+    ));
+    assert_eq!(
+        state.messages(),
+        [
+            Message::User {
+                text: "hello".to_string()
+            },
+            Message::Context {
+                text: "<world_state><new /></world_state>".to_string()
+            },
+        ]
+    );
+    let revision = state.context_revision();
+    assert!(!state.replace_context_slot(
+        "world_state",
+        "<world_state><new /></world_state>".to_string()
+    ));
+    assert_eq!(state.context_revision(), revision);
+}
+
+#[test]
+fn missing_context_slot_is_inserted_before_turn_history() {
+    let mut state = SessionState::from_messages(vec![
+        Message::User {
+            text: "old turn".to_string(),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: "reply".to_string(),
+            tool_calls: Vec::new(),
+        },
+    ]);
+
+    state.replace_context_slot(
+        "session_capabilities",
+        "<session_capabilities />".to_string(),
+    );
+    assert!(matches!(
+        state.messages().first(),
+        Some(Message::Context { text }) if text == "<session_capabilities />"
+    ));
+}
+
+#[test]
 fn repairs_an_incomplete_tool_group_before_retry() {
     let mut state = SessionState::from_messages(vec![
         Message::User {

@@ -189,6 +189,20 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
                     .restore_session(opened.state.clone())
                     .map_err(|error| format!("cannot restore session: {error}"))?;
             }
+            if !harness.messages().iter().any(|message| {
+                matches!(
+                    message,
+                    mini_agent_protocol::Message::Context { text }
+                        if text.starts_with("<session_capabilities>")
+                )
+            }) {
+                harness
+                    .replace_context_slot(
+                        "session_capabilities",
+                        mini_agent_host::world::session_capabilities_context().to_string(),
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
         }
         if include_session_tools
             && let Some(session_dir) = session

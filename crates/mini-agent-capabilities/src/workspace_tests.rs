@@ -25,6 +25,7 @@ fn workspace(
             extra_read_roots,
             Vec::new(),
             Vec::new(),
+            Vec::new(),
             sandbox,
         )
         .unwrap(),
@@ -45,6 +46,7 @@ fn skill_workspace(root: PathBuf, skill_root: PathBuf) -> Arc<Workspace> {
         Workspace::with_read_roots_and_skill_roots(
             root,
             approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Denied),
+            Vec::new(),
             Vec::new(),
             vec![skill_root],
             Vec::new(),
@@ -568,6 +570,96 @@ fn enabled_skill_roots_are_readable_without_approval_but_not_writable() {
     assert_eq!(fs::read_to_string(&path).unwrap(), "reference pattern\n");
 
     remove_test_root(&skill_root);
+    remove_test_root(&root);
+}
+
+#[test]
+fn session_attachment_roots_are_read_only_and_do_not_open_session_log() {
+    let root = test_root();
+    let session = test_root();
+    let attachments = session.join("attachments");
+    fs::create_dir_all(&attachments).unwrap();
+    fs::write(attachments.join("note.txt"), "attachment\n").unwrap();
+    fs::write(session.join("session.jsonl"), "private\n").unwrap();
+    let workspace = Arc::new(
+        Workspace::with_read_roots_and_skill_roots(
+            root.clone(),
+            approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Denied),
+            Vec::new(),
+            vec![attachments.clone()],
+            Vec::new(),
+            Vec::new(),
+            SandboxKind::Native,
+        )
+        .unwrap(),
+    );
+    let read = ReadFile(Arc::clone(&workspace));
+    let attachment = attachments.join("note.txt");
+    let request = ToolExecutionRequest::new(
+        "session-attachment",
+        "read_file",
+        json!({"path": attachment.to_string_lossy().to_string()}),
+    )
+    .with_context(turn_context("turn-session"));
+    assert_eq!(read.admission(&request).unwrap(), ToolAdmission::Allowed);
+    assert!(
+        read.execute_after_admission(&request)
+            .content
+            .contains("attachment")
+    );
+
+    let private = session.join("session.jsonl");
+    assert!(
+        read.execute(&json!({"path": private.to_string_lossy().to_string()}))
+            .is_err()
+    );
+    let patch = ApplyPatch(Arc::clone(&workspace));
+    assert!(patch
+        .execute(&json!({
+            "patch": format!(
+                "*** Begin Patch\n*** Update File: {}\n@@\n-attachment\n+changed\n*** End Patch",
+                attachment.display()
+            )
+        }))
+        .is_err());
+    assert_eq!(fs::read_to_string(&attachment).unwrap(), "attachment\n");
+
+    remove_test_root(&session);
+    remove_test_root(&root);
+}
+
+#[test]
+fn external_patch_requires_approval_and_can_use_an_explicit_grant() {
+    let root = test_root();
+    let outside = test_root();
+    let path = outside.join("external.txt");
+    fs::write(&path, "before\n").unwrap();
+    let workspace = workspace(
+        root.clone(),
+        approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Approved),
+        Vec::new(),
+        SandboxKind::Native,
+    );
+    let patch = ApplyPatch(Arc::clone(&workspace));
+    let request = ToolExecutionRequest::new(
+        "external-patch",
+        "apply_patch",
+        json!({
+            "patch": format!(
+                "*** Begin Patch\n*** Update File: {}\n@@\n-before\n+after\n*** End Patch",
+                path.display()
+            )
+        }),
+    )
+    .with_context(turn_context("turn-external"));
+    assert!(matches!(
+        patch.admission(&request).unwrap(),
+        ToolAdmission::ApprovalRequired { .. }
+    ));
+    patch.execute(&request.arguments).unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), "after\n");
+
+    remove_test_root(&outside);
     remove_test_root(&root);
 }
 

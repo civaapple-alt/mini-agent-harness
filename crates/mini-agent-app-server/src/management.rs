@@ -614,10 +614,6 @@ impl RuntimeManagementState {
         &mut self,
         checkpoint: &ThreadCheckpoint,
     ) -> Result<(), AppServerError> {
-        let Some(session) = self.session.as_mut() else {
-            self.local_checkpoint_seq = self.local_checkpoint_seq.saturating_add(1);
-            return Ok(());
-        };
         let context = checkpoint
             .session
             .messages()
@@ -627,6 +623,18 @@ impl RuntimeManagementState {
             .ok_or_else(|| {
                 AppServerError::Checkpoint("no context item is available to persist".to_string())
             })?;
+        self.record_context_message(context, checkpoint)
+    }
+
+    pub(crate) fn record_context_message(
+        &mut self,
+        context: &Message,
+        checkpoint: &ThreadCheckpoint,
+    ) -> Result<(), AppServerError> {
+        let Some(session) = self.session.as_mut() else {
+            self.local_checkpoint_seq = self.local_checkpoint_seq.saturating_add(1);
+            return Ok(());
+        };
         session
             .store
             .record_context(context, checkpoint.session.messages())

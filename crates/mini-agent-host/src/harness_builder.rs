@@ -199,6 +199,7 @@ where
             workspace: workspace.clone(),
             approval: approval.clone(),
             extra_read_roots: runtime_config.extra_read_roots(),
+            session_read_roots: runtime_config.session_read_roots(),
             skill_read_roots: skill_discovery
                 .as_ref()
                 .map_or_else(Vec::new, |discovery| discovery.skill_read_roots()),
@@ -256,13 +257,11 @@ where
         })
         .collect();
     let stable_system_prompt = config.system_prompt.clone();
-    let mut extra_roots = runtime_config.extra_write_roots();
-    extra_roots.extend(runtime_config.extra_read_roots());
-    extra_roots.sort();
-    extra_roots.dedup();
-    let world = WorldState::detect_with_roots(
+    let world = WorldState::detect_with_root_sets(
         &workspace,
-        extra_roots,
+        runtime_config.extra_read_roots(),
+        runtime_config.extra_write_roots(),
+        runtime_config.session_read_roots(),
         composition.security,
         approval.approval_policy(),
         composition.sandbox,
@@ -275,6 +274,11 @@ where
     harness
         .append_context(world_context)
         .map_err(|error| error.to_string())?;
+    if approval.session_dir().is_some() {
+        harness
+            .append_context(crate::world::session_capabilities_context().to_string())
+            .map_err(|error| error.to_string())?;
+    }
     Ok(HarnessBuild {
         harness,
         images,

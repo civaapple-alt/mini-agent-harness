@@ -1520,6 +1520,12 @@ where
             .harness_mut()
             .append_context(text)
             .map_err(|error| AppServerError::Checkpoint(error.to_string()))?,
+        ThreadUpdate::ReplaceContext { slot, text } => {
+            thread
+                .harness_mut()
+                .replace_context_slot(&slot, text)
+                .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
+        }
         ThreadUpdate::ReplaceConfig(config) => thread.harness_mut().replace_config(config),
         ThreadUpdate::ExtendTools(tools) => thread.harness_mut().extend_tools(tools),
     }

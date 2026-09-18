@@ -19,7 +19,10 @@ const COMMANDS: &[&str] = &[
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldState {
     workspace: PathBuf,
-    extra_roots: Vec<PathBuf>,
+    associated_read_roots: Vec<PathBuf>,
+    associated_write_roots: Vec<PathBuf>,
+    session_read_roots: Vec<PathBuf>,
+    root_fingerprint: String,
     os: &'static str,
     arch: &'static str,
     shell: &'static str,
@@ -40,6 +43,32 @@ impl WorldState {
         policy: ApprovalPolicy,
         sandbox: SandboxKind,
     ) -> Self {
+        Self::detect_with_root_sets(
+            workspace,
+            extra_roots,
+            Vec::new(),
+            Vec::new(),
+            access,
+            policy,
+            sandbox,
+        )
+    }
+
+    pub fn detect_with_root_sets(
+        workspace: &Path,
+        associated_read_roots: Vec<PathBuf>,
+        associated_write_roots: Vec<PathBuf>,
+        session_read_roots: Vec<PathBuf>,
+        access: SecurityPreset,
+        policy: ApprovalPolicy,
+        sandbox: SandboxKind,
+    ) -> Self {
+        let associated_write_roots = normalize_roots(associated_write_roots);
+        let associated_read_roots = normalize_roots(associated_read_roots)
+            .into_iter()
+            .filter(|root| !associated_write_roots.contains(root))
+            .collect::<Vec<_>>();
+        let session_read_roots = normalize_roots(session_read_roots);
         let search_paths = env::var_os("PATH")
             .map(|path| env::split_paths(&path).collect::<Vec<_>>())
             .unwrap_or_default();
@@ -53,12 +82,22 @@ impl WorldState {
             .filter(|name| workspace_command_available(workspace, name))
             .collect();
         let mut project_kinds = detect_project_kinds(workspace);
-        project_kinds.extend(extra_roots.iter().flat_map(|r| detect_project_kinds(r)));
+        project_kinds.extend(
+            associated_read_roots
+                .iter()
+                .chain(associated_write_roots.iter())
+                .flat_map(|r| detect_project_kinds(r)),
+        );
         project_kinds.sort();
         project_kinds.dedup();
+        let root_fingerprint =
+            root_fingerprint(workspace, &associated_read_roots, &associated_write_roots);
         Self {
             workspace: workspace.to_path_buf(),
-            extra_roots,
+            associated_read_roots,
+            associated_write_roots,
+            session_read_roots,
+            root_fingerprint,
             os: env::consts::OS,
             arch: env::consts::ARCH,
             shell: if cfg!(windows) { "pwsh" } else { "sh" },
@@ -101,8 +140,25 @@ impl WorldState {
         &self.workspace
     }
 
+    pub fn associated_read_roots(&self) -> &[PathBuf] {
+        &self.associated_read_roots
+    }
+
+    pub fn associated_write_roots(&self) -> &[PathBuf] {
+        &self.associated_write_roots
+    }
+
+    pub fn session_read_roots(&self) -> &[PathBuf] {
+        &self.session_read_roots
+    }
+
+    pub fn root_fingerprint(&self) -> &str {
+        &self.root_fingerprint
+    }
+
+    /// Compatibility view for callers that have not yet classified associated roots.
     pub fn extra_roots(&self) -> &[PathBuf] {
-        &self.extra_roots
+        &self.associated_read_roots
     }
 
     pub fn model_context(&self) -> Result<String, String> {
@@ -128,25 +184,17 @@ impl WorldState {
         context.push_str("\" command_sandbox=\"");
         context.push_str(self.sandbox.name());
         context.push_str("\" direct_file_scope=\"workspace\" />");
-        if !self.extra_roots.is_empty() {
-            context.push_str("<workspace_roots>");
-            let push_root = |buf: &mut String, path: &Path, primary: bool| {
-                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                buf.push_str("<root name=\"");
-                push_xml_escaped(buf, name);
-                buf.push_str("\" path=\"");
-                push_xml_escaped(buf, &path.to_string_lossy());
-                let pri = if primary { "true" } else { "false" };
-                buf.push_str("\" primary=\"");
-                buf.push_str(pri);
-                buf.push_str("\" />");
-            };
-            push_root(&mut context, &self.workspace, true);
-            for root in &self.extra_roots {
-                push_root(&mut context, root, false);
-            }
-            context.push_str("</workspace_roots>");
+        context.push_str("<workspace_roots revision=\"");
+        push_xml_escaped(&mut context, &self.root_fingerprint);
+        context.push_str("\">");
+        push_root(&mut context, &self.workspace, "primary", "read_write");
+        for root in &self.associated_read_roots {
+            push_root(&mut context, root, "associated", "read_only");
         }
+        for root in &self.associated_write_roots {
+            push_root(&mut context, root, "associated", "read_write");
+        }
+        context.push_str("</workspace_roots>");
         for (tag, list) in [
             ("project_kinds", &self.project_kinds),
             ("available_commands", &self.available_commands),
@@ -156,8 +204,8 @@ impl WorldState {
             push_list_element(&mut context, tag, list);
         }
         context.push_str("<execution_guidance>");
-        if !self.extra_roots.is_empty() {
-            context.push_str("Multiple workspace directories configured. All roots in <workspace_roots> are part of this project; inspect and modify files across these roots using absolute paths or paths relative to cwd. ");
+        if !self.associated_read_roots.is_empty() || !self.associated_write_roots.is_empty() {
+            context.push_str("Associated roots are part of this project. Read-only roots may be inspected but not modified; read-write roots may be modified within the normal approval and sandbox rules. ");
         }
         context.push_str(match self.policy {
             ApprovalPolicy::Interactive => "Sensitive actions pause for an explicit decision; the decision may be remembered only for its returned action grant scope.",
@@ -180,10 +228,21 @@ impl WorldState {
                 "name": p.file_name().and_then(|n| n.to_str()).unwrap_or(""),
                 "path": p.to_string_lossy(),
                 "primary": primary,
+                "role": if primary { "primary" } else { "associated" },
+                "access": if primary { "read_write" } else { "read_only" },
             })
         };
         let mut roots = vec![entry(&self.workspace, true)];
-        roots.extend(self.extra_roots.iter().map(|r| entry(r, false)));
+        roots.extend(self.associated_read_roots.iter().map(|r| entry(r, false)));
+        roots.extend(self.associated_write_roots.iter().map(|path| {
+            json!({
+                "name": path.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+                "path": path.to_string_lossy(),
+                "primary": false,
+                "role": "associated",
+                "access": "read_write",
+            })
+        }));
         json!({
             "os": self.os,
             "arch": self.arch,
@@ -193,7 +252,14 @@ impl WorldState {
             "policy": self.policy_name(),
             "command_sandbox": self.sandbox.name(),
             "direct_file_scope": "workspace",
+            "root_fingerprint": self.root_fingerprint,
             "workspace_roots": roots,
+            "session_read_roots": self.session_read_roots.iter().map(|path| json!({
+                "name": path.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+                "path": path.to_string_lossy(),
+                "access": "read_only",
+                "role": "session_attachment",
+            })).collect::<Vec<_>>(),
             "project_kinds": self.project_kinds,
             "available_commands": self.available_commands,
             "unavailable_commands": self.unavailable_commands,
@@ -227,6 +293,59 @@ impl WorldState {
             ApprovalPolicy::Trusted => "trusted",
         }
     }
+}
+
+pub fn session_capabilities_context() -> &'static str {
+    "<session_capabilities><artifact id=\"session.plan\" logical_path=\"plan.md\" access=\"read_write\" owner=\"plan_runtime\" /><artifact id=\"session.goal\" logical_path=\"goal/\" access=\"controlled\" owner=\"goal_runtime\" /><artifact id=\"session.notebook\" logical_path=\"notebook\" access=\"managed\" owner=\"notebook_runtime\" /><artifact id=\"session.attachments\" logical_path=\"current_turn_attachments\" access=\"read_only\" owner=\"gateway\" /></session_capabilities>"
+}
+
+fn push_root(output: &mut String, path: &Path, role: &str, access: &str) {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    output.push_str("<root name=\"");
+    push_xml_escaped(output, name);
+    output.push_str("\" path=\"");
+    push_xml_escaped(output, &path.to_string_lossy());
+    output.push_str("\" role=\"");
+    push_xml_escaped(output, role);
+    output.push_str("\" access=\"");
+    push_xml_escaped(output, access);
+    output.push_str("\" primary=\"");
+    output.push_str(if role == "primary" { "true" } else { "false" });
+    output.push_str("\" />");
+}
+
+fn normalize_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    roots.retain(|path| !path.as_os_str().is_empty());
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
+fn root_fingerprint(
+    workspace: &Path,
+    associated_read_roots: &[PathBuf],
+    associated_write_roots: &[PathBuf],
+) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    let mut add = |value: &str| {
+        for byte in value.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x100000001b3);
+    };
+    add("primary:read_write");
+    add(&workspace.to_string_lossy());
+    for root in associated_read_roots {
+        add("associated:read_only");
+        add(&root.to_string_lossy());
+    }
+    for root in associated_write_roots {
+        add("associated:read_write");
+        add(&root.to_string_lossy());
+    }
+    format!("{hash:016x}")
 }
 
 fn detect_project_kinds(workspace: &Path) -> Vec<&'static str> {
@@ -359,12 +478,37 @@ mod tests {
         assert!(world.project_kinds.contains(&"rust") && world.project_kinds.contains(&"python"));
         let ctx = world.model_context().unwrap();
         assert!(
-            ctx.contains("<workspace_roots>") && ctx.contains("Multiple workspace directories")
+            ctx.contains("<workspace_roots revision=")
+                && ctx.contains("Associated roots are part of this project")
         );
         let roots = world.status_json()["workspace_roots"]
             .as_array()
             .unwrap()
             .len();
         assert_eq!(roots, 2);
+    }
+
+    #[test]
+    fn session_roots_are_status_only_and_capabilities_are_path_free() {
+        let workspace = test_root();
+        let attachment_root = test_root();
+        let world = WorldState::detect_with_root_sets(
+            &workspace,
+            Vec::new(),
+            Vec::new(),
+            vec![attachment_root.clone()],
+            SecurityPreset::Default,
+            ApprovalPolicy::Interactive,
+            SandboxKind::Native,
+        );
+        let context = world.model_context().unwrap();
+        assert!(!context.contains(attachment_root.to_string_lossy().as_ref()));
+        assert!(context.contains("<workspace_roots revision="));
+        assert!(session_capabilities_context().contains("session.attachments"));
+        assert!(!session_capabilities_context().contains("mini-agent"));
+        assert_eq!(
+            world.status_json()["session_read_roots"][0]["role"],
+            "session_attachment"
+        );
     }
 }

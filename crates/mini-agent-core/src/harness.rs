@@ -196,6 +196,22 @@ impl<M: Model> Harness<M> {
         Ok(())
     }
 
+    pub fn replace_context_slot(
+        &mut self,
+        slot: &str,
+        text: impl Into<String>,
+    ) -> Result<bool, LimitExceeded> {
+        let text = text.into();
+        if text.len() > self.config.max_context_item_bytes {
+            return Err(LimitExceeded {
+                kind: LimitKind::ContextItemBytes,
+                limit: self.config.max_context_item_bytes,
+                actual: text.len(),
+            });
+        }
+        Ok(self.session.replace_context_slot(slot, text))
+    }
+
     pub fn restore_history(&mut self, messages: Vec<Message>) -> Result<(), LimitExceeded> {
         self.restore_session(SessionState::from_messages(messages))
     }

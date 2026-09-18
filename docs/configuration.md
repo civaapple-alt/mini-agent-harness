@@ -165,6 +165,32 @@ core REPL keeps the snapshot in the model context but does not duplicate this
 management dashboard. World-state items are bounded and contain no environment
 values or command output.
 
+Workspace roots and Session artifacts are separate capabilities. The primary
+Project directory is a read/write root. Project-associated directories are
+classified independently as `read_only` or `read_write` roots; the Host keeps
+that classification through tool admission and does not flatten them into one
+`extra_roots` list. Session attachments use
+`MINI_AGENT_SESSION_READ_ROOTS` and are read-only. This variable must contain
+only the Gateway-owned attachment directory for the current Thread, not the
+whole `~/.mini-agent/sessions` tree. `MINI_AGENT_EXTRA_READ_ROOTS` and
+`MINI_AGENT_EXTRA_WRITE_ROOTS` remain reserved for Project-associated roots.
+
+The model receives stable logical Session capabilities rather than the physical
+Session directory. `plan.md` resolves to the living Plan artifact,
+`goal/...` resolves to the controlled Goal area, `notebook` is accessed only
+through Notebook tools, and current-turn attachments are read-only. The raw
+`session.jsonl`, `summary.json`, approval trace, prompt snapshot, and runtime
+sidecars are not ordinary model-readable files. WebStudio may show physical
+paths for diagnostics, but Prompt Context does not inject them.
+
+Host-owned `world_state` and `session_capabilities` are replaceable context
+slots. A root-set change creates a new stable root fingerprint and replaces the
+old world slot after Runtime rebinding; ordinary Turns do not append another
+copy. Attachment paths and one-time external paths remain turn-local. This
+keeps the stable model-request prefix byte-for-byte reusable for providers that
+support prompt caching while still allowing dynamic user inputs and tool output
+to change.
+
 ## Durable sessions
 
 REPL and one-shot `run` sessions always persist; there is no

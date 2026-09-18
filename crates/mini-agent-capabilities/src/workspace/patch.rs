@@ -42,7 +42,7 @@ impl ToolHandler for ApplyPatch {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "apply_patch".to_string(),
-            description: "Apply a bounded Codex-style patch to workspace files. Use relative paths only. A patch may add, update, move, or delete files; validate the complete patch before relying on its result. Update hunks use context lines prefixed with a space, removed lines with -, and added lines with +. Session-owned Goal files such as goal/plan.md already exist; use *** Update File rather than *** Add File for them. All affected files are validated before any write.".to_string(),
+            description: "Apply a bounded Codex-style patch to workspace files. Use relative paths for registered roots; an absolute external path requires explicit approval. A patch may add, update, move, or delete files; validate the complete patch before relying on its result. Update hunks use context lines prefixed with a space, removed lines with -, and added lines with +. Session-owned Goal files such as goal/plan.md already exist; use *** Update File rather than *** Add File for them. All affected files are validated before any write.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -63,7 +63,12 @@ impl ToolHandler for ApplyPatch {
             return Ok(ToolAdmission::Deferred { reason });
         }
         let plan = self.prepare(&request.arguments)?;
-        if self.0.approval.approval_policy() == mini_agent_protocol::ApprovalPolicy::Trusted
+        let has_external_path = plan
+            .effects
+            .iter()
+            .any(|effect| !self.0.is_write_path(&effect.path));
+        if !has_external_path
+            && self.0.approval.approval_policy() == mini_agent_protocol::ApprovalPolicy::Trusted
             && plan.effects.iter().all(|effect| effect.after.is_some())
         {
             for effect in &plan.effects {
@@ -363,17 +368,15 @@ fn is_file_operation_header(line: &str) -> bool {
 fn validate_patch_path(path: &str) -> Result<(), ToolError> {
     let path = Path::new(path);
     if path.as_os_str().is_empty()
-        || path.is_absolute()
         || has_git_component(path)
         || path.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
+            matches!(component, Component::ParentDir)
+                || (!path.is_absolute()
+                    && matches!(component, Component::RootDir | Component::Prefix(_)))
         })
     {
         return Err(ToolError(
-            "patch paths must be relative, remain in the workspace, and avoid .git".to_string(),
+            "patch paths must be relative registered roots or an absolute explicitly approved path, and avoid .git".to_string(),
         ));
     }
     Ok(())

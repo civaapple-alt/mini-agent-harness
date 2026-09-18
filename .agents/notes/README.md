@@ -10,6 +10,7 @@
 
 当前相关决策：
 
+- [Workspace Roots、Session Artifacts 与 Prompt Cache](implemented/architecture/2026-09-18-workspace-roots-session-artifacts-and-prompt-cache.zh.md)
 - [全局 Skill 发现、按需加载与阶段事件](implemented/feature/2026-09-17-global-skill-discovery-and-observability.zh.md)
 - [时间上延展、结构上并发：预算与 Child 分派意图](implemented/process/2026-09-18-time-extended-structural-concurrency-budgets-and-dispatch.zh.md)
 - [时间上延展、结构上并发：Agent Harness Charter](proposed/architecture/2026-09-17-time-extended-structural-concurrency.zh.md)

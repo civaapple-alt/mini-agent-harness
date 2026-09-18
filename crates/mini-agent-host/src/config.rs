@@ -28,6 +28,7 @@ pub struct RuntimeConfig {
     project_id: Option<String>,
     extra_read_roots: Vec<PathBuf>,
     extra_write_roots: Vec<PathBuf>,
+    session_read_roots: Vec<PathBuf>,
     builtin_skill_groups: Vec<String>,
 }
 
@@ -91,6 +92,7 @@ impl RuntimeConfig {
             .filter(|value| !value.trim().is_empty());
         let extra_read_roots = env_path_list("MINI_AGENT_EXTRA_READ_ROOTS");
         let extra_write_roots = env_path_list("MINI_AGENT_EXTRA_WRITE_ROOTS");
+        let session_read_roots = env_path_list("MINI_AGENT_SESSION_READ_ROOTS");
         let builtin_skill_groups =
             parse_builtin_skill_groups(env::var("MINI_AGENT_BUILTIN_SKILL_GROUPS").ok());
         Ok(Self {
@@ -106,6 +108,7 @@ impl RuntimeConfig {
             project_id,
             extra_read_roots,
             extra_write_roots,
+            session_read_roots,
             builtin_skill_groups,
         })
     }
@@ -154,6 +157,10 @@ impl RuntimeConfig {
         self.extra_write_roots.clone()
     }
 
+    pub fn session_read_roots(&self) -> Vec<PathBuf> {
+        self.session_read_roots.clone()
+    }
+
     pub fn builtin_skill_groups(&self) -> Vec<String> {
         self.builtin_skill_groups.clone()
     }
@@ -164,6 +171,7 @@ impl RuntimeConfig {
         self.extra_read_roots.hash(&mut hasher);
         self.builtin_skill_groups.hash(&mut hasher);
         self.extra_write_roots.hash(&mut hasher);
+        self.session_read_roots.hash(&mut hasher);
         hasher.finish()
     }
 
@@ -220,7 +228,11 @@ fn is_official_search_endpoint(base_url: &str) -> bool {
 
 fn env_path_list(name: &str) -> Vec<PathBuf> {
     env::var_os(name)
-        .map(|value| env::split_paths(&value).collect())
+        .map(|value| {
+            env::split_paths(&value)
+                .filter(|path| !path.as_os_str().is_empty())
+                .collect()
+        })
         .unwrap_or_default()
 }
 

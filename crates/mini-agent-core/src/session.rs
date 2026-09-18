@@ -56,6 +56,45 @@ impl SessionState {
         self.context_revision = self.context_revision.saturating_add(1);
     }
 
+    /// Replaces a bounded, host-owned context slot without accumulating stale
+    /// snapshots in the conversation history. Slots are identified by the
+    /// XML root element at the start of a Context message (for example,
+    /// `world_state`).
+    pub fn replace_context_slot(&mut self, slot: &str, text: String) -> bool {
+        let prefix = format!("<{slot}");
+        let mut replacement = None;
+        let mut changed = false;
+        let mut messages = Vec::with_capacity(self.messages.len());
+        for message in self.messages.drain(..) {
+            if let Message::Context { text: current } = &message
+                && context_slot_matches(current, &prefix)
+            {
+                if replacement.is_none() {
+                    changed |= current != &text;
+                    replacement = Some(message.clone());
+                    messages.push(Message::Context { text: text.clone() });
+                } else {
+                    changed = true;
+                }
+            } else {
+                messages.push(message);
+            }
+        }
+        if replacement.is_none() {
+            let insert_at = messages
+                .iter()
+                .position(|message| !matches!(message, Message::Context { .. }))
+                .unwrap_or(messages.len());
+            messages.insert(insert_at, Message::Context { text });
+            changed = true;
+        }
+        self.messages = messages;
+        if changed {
+            self.context_revision = self.context_revision.saturating_add(1);
+        }
+        changed
+    }
+
     pub(crate) fn context_bytes(&self, system_prompt: &str, tool_specs: &[ToolSpec]) -> usize {
         context_bytes_for(system_prompt, &self.messages, tool_specs)
     }
@@ -87,6 +126,12 @@ impl SessionState {
         }
         removed
     }
+}
+
+fn context_slot_matches(text: &str, prefix: &str) -> bool {
+    text.strip_prefix(prefix).is_some_and(|rest| {
+        rest.starts_with('>') || rest.chars().next().is_some_and(char::is_whitespace)
+    })
 }
 
 fn repair_tool_groups(messages: &[Message]) -> Vec<Message> {

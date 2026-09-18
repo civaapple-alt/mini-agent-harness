@@ -246,6 +246,28 @@ Turn or disabling Plan clears it. Web Studio can therefore restore the
 restore. This is a workflow/UI projection, not a second authority; mode changes
 still go through `thread/settings/update`.
 
+#### Workspace roots and Session capabilities
+
+`world/state` reports the primary Project root and associated roots with an
+explicit role and access (`primary/read_write`, `associated/read_only`, or
+`associated/read_write`). The App Server never treats a Session directory as a
+normal `workspace_root`. The Host instead injects a stable logical
+`session_capabilities` context containing the Plan, Goal, Notebook, and
+current-turn attachment capabilities without an absolute Session path.
+
+`plan.md` and `goal/...` are Host-resolved logical aliases. Notebook state is
+available only through the bounded Notebook methods/tools. A Gateway-owned
+attachment root may be read by `read_file` or `read_image`, but it cannot be
+modified. `session.jsonl`, `summary.json`, approval evidence, and other
+SessionStore sidecars are not opened through ordinary file tools; history must
+use the bounded Session APIs.
+
+The Host maintains separate read/write/Session-root sets and replaces the
+`world_state` context slot when the Project root set changes. It does not keep
+appending snapshots on every Turn. Session IDs, attachment IDs, mtimes, and
+sidecar sizes are excluded from the stable prompt prefix; current-turn
+attachment references and explicit external paths remain dynamic input.
+
 #### Turn execution
 
 | Method | Parameters | Result / effect |

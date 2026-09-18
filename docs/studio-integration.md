@@ -72,6 +72,7 @@ not be copied manually into the Web `.env`:
 | `MINI_AGENT_PROJECT_ID` | Web Project identity used by scoped approval matching. |
 | `MINI_AGENT_EXTRA_READ_ROOTS` | `os.pathsep`-separated associated roots available as read-only references. |
 | `MINI_AGENT_EXTRA_WRITE_ROOTS` | `os.pathsep`-separated associated roots admitted for edits. |
+| `MINI_AGENT_SESSION_READ_ROOTS` | Gateway-owned current-Thread attachment roots; read-only and never the whole Session directory. |
 | `MINI_AGENT_SESSION_MODE` | `new` for a new Session, `resume` for a canonical resumable Session. |
 | `MINI_AGENT_SESSION_ID` | Existing Session identity for `resume`. |
 | `MINI_AGENT_THREAD_ID` | Thread identity assigned to the child process. |
@@ -87,6 +88,22 @@ A Web Project has one primary directory and zero or more associated source
 folders. The primary folder is the App Server working directory. For every
 associated folder, set `editable: false` when it is reference-only; editable
 folders are passed as extra write roots as well as read roots.
+
+The Session directory is deliberately not another Project folder. Host and
+Capabilities keep five distinct boundaries: primary root, associated read
+roots, associated write roots, Session attachment roots, and enabled Skill
+roots. Only the attachment root for the current Thread is passed as
+`MINI_AGENT_SESSION_READ_ROOTS`; `session.jsonl` and other SessionStore files
+remain behind the Session API. The Prompt Context panel may show the physical
+attachment root for diagnostics, while the model sees only logical
+`session_capabilities`.
+
+When a user names an external path, that text is an instruction, not a new
+permission. Host first checks the primary and associated roots, then the
+current-turn attachment root. A registered read-only root cannot be modified;
+an unregistered file may require one-time read approval and an unregistered
+write is denied unless the user explicitly grants that bounded action. Adding a
+directory to the Project changes the root fingerprint and rebinds the Runtime.
 
 The relevant Gateway operations are:
 

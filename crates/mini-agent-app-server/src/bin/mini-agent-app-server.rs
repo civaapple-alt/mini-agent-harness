@@ -92,6 +92,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .restore_session(opened.state.clone())
                     .map_err(|error| error.to_string())?;
             }
+            if !harness.messages().iter().any(|message| {
+                matches!(
+                    message,
+                    mini_agent_protocol::Message::Context { text }
+                        if text.starts_with("<session_capabilities>")
+                )
+            }) {
+                harness
+                    .replace_context_slot(
+                        "session_capabilities",
+                        mini_agent_host::world::session_capabilities_context().to_string(),
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
             if let Some(session_dir) = opened.store.path().parent() {
                 harness.extend_tools(mini_agent_capabilities::notebook_tools(
                     session_dir.to_path_buf(),

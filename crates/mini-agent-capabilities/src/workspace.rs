@@ -56,6 +56,7 @@ pub fn workspace_tools_with_read_roots_and_results(
             root,
             approval,
             extra_read_roots,
+            session_read_roots: Vec::new(),
             skill_read_roots: Vec::new(),
             extra_write_roots,
             sandbox,
@@ -69,6 +70,7 @@ pub(crate) struct WorkspaceToolConfig {
     pub(crate) root: PathBuf,
     pub(crate) approval: ApprovalController,
     pub(crate) extra_read_roots: Vec<PathBuf>,
+    pub(crate) session_read_roots: Vec<PathBuf>,
     pub(crate) skill_read_roots: Vec<PathBuf>,
     pub(crate) extra_write_roots: Vec<PathBuf>,
     pub(crate) sandbox: SandboxKind,
@@ -83,6 +85,7 @@ pub(crate) fn workspace_tools_with_config(
         config.root,
         config.approval,
         config.extra_read_roots,
+        config.session_read_roots,
         config.skill_read_roots,
         config.extra_write_roots,
         config.sandbox,
@@ -103,6 +106,7 @@ pub(crate) fn workspace_tools_with_config(
 struct Workspace {
     root: PathBuf,
     extra_read_roots: Vec<PathBuf>,
+    session_read_roots: Vec<PathBuf>,
     skill_read_roots: Vec<PathBuf>,
     extra_write_roots: Vec<PathBuf>,
     approval: ApprovalController,
@@ -115,6 +119,7 @@ impl Workspace {
         root: PathBuf,
         approval: ApprovalController,
         extra_read_roots: Vec<PathBuf>,
+        session_read_roots: Vec<PathBuf>,
         skill_read_roots: Vec<PathBuf>,
         extra_write_roots: Vec<PathBuf>,
         sandbox: SandboxKind,
@@ -126,6 +131,11 @@ impl Workspace {
             .into_iter()
             .filter_map(|path| path.canonicalize().ok())
             .filter(|path| path.is_dir() && !path.starts_with(&root))
+            .collect();
+        let session_read_roots = session_read_roots
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok())
+            .filter(|path| path.is_dir())
             .collect();
         let mut skill_read_roots = skill_read_roots
             .into_iter()
@@ -142,6 +152,7 @@ impl Workspace {
         Ok(Self {
             root,
             extra_read_roots,
+            session_read_roots,
             skill_read_roots,
             extra_write_roots,
             approval,
@@ -191,8 +202,15 @@ impl Workspace {
         if self.is_session_artifact(&resolved) {
             return Ok(resolved);
         }
+        if self.is_read_only_path(&resolved) {
+            return Err(ToolError("path is read-only".to_string()));
+        }
         self.ensure_plan_mode_unlocked()?;
-        self.ensure_inside(resolved)
+        if self.allows_outside_paths() || self.is_write_path(&resolved) || resolved.is_absolute() {
+            Ok(resolved)
+        } else {
+            Err(ToolError("path escapes the workspace".to_string()))
+        }
     }
 
     fn existing_path(&self, value: &Value) -> Result<PathBuf, ToolError> {
@@ -216,12 +234,19 @@ impl Workspace {
         if !session_artifact {
             self.ensure_plan_mode_unlocked()?;
         }
+        if !session_artifact && self.is_read_only_path(&candidate) {
+            return Err(ToolError("path is read-only".to_string()));
+        }
         let parent = candidate
             .parent()
             .ok_or_else(|| ToolError("path has no parent".to_string()))?
             .canonicalize()
             .map_err(|error| ToolError(format!("parent directory must exist: {error}")))?;
-        if !session_artifact && !self.allows_outside_paths() && !self.is_write_path(&parent) {
+        if !session_artifact
+            && !self.allows_outside_paths()
+            && !self.is_write_path(&parent)
+            && !candidate.is_absolute()
+        {
             return Err(ToolError("path escapes the workspace".to_string()));
         }
         let file_name = candidate
@@ -480,6 +505,21 @@ impl Workspace {
                 .any(|root| path.starts_with(root))
     }
 
+    fn is_read_only_path(&self, path: &Path) -> bool {
+        self.session_read_roots
+            .iter()
+            .any(|root| path.starts_with(root))
+            || self
+                .skill_read_roots
+                .iter()
+                .any(|root| path.starts_with(root))
+            || (self
+                .extra_read_roots
+                .iter()
+                .any(|root| path.starts_with(root))
+                && !self.is_write_path(path))
+    }
+
     fn ensure_readable(&self, path: PathBuf) -> Result<PathBuf, ToolError> {
         if has_git_component(&path) {
             return Err(ToolError("path escapes the workspace".to_string()));
@@ -494,6 +534,10 @@ impl Workspace {
             .extra_read_roots
             .iter()
             .any(|root| path.starts_with(root) && path != *root)
+            || self
+                .session_read_roots
+                .iter()
+                .any(|root| path.starts_with(root) && path != *root)
             || self
                 .skill_read_roots
                 .iter()
