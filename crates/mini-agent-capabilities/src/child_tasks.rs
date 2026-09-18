@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 const MAX_CHILD_ID_BYTES: usize = 64;
 const MAX_CHILD_PROMPT_BYTES: usize = 32 * 1024;
 const MAX_CHILD_RESULT_BYTES: usize = 16 * 1024;
+const MAX_OPERATION_GROUP_ID_BYTES: usize = 128;
 
 /// Host-side request for WebStudio to create an independent child runtime.
 /// The tool only returns a bounded request; the Gateway observes the event and
@@ -16,14 +17,17 @@ impl ToolHandler for DelegateTaskTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "delegate_task".to_string(),
-            description: "Queue one bounded task for an independent child Session. The child runs with the same Host permissions and can be queried with task_read.".to_string(),
+            description: "Queue one bounded task for an independent child Session. Choose parallel for independent work or sequential with a group_id and optional sequence for dependent work. The child runs with the same Host permissions and can be queried with task_read.".to_string(),
             parameters: json!({
                 "type": "object",
                 "required": ["child_thread_id", "prompt"],
                 "properties": {
                     "child_thread_id": {"type": "string"},
                     "prompt": {"type": "string"},
-                    "title": {"type": "string"}
+                    "title": {"type": "string"},
+                    "group_id": {"type": "string"},
+                    "execution_mode": {"type": "string", "enum": ["parallel", "sequential"]},
+                    "sequence": {"type": "integer", "minimum": 0}
                 },
                 "additionalProperties": false
             }),
@@ -41,19 +45,54 @@ impl ToolRuntime for DelegateTaskTool {
             .get("prompt")
             .and_then(Value::as_str)
             .ok_or_else(|| ToolError("delegate_task requires prompt".to_string()))?;
+        let group_id = arguments.get("group_id").and_then(Value::as_str);
+        if let Some(group_id) = group_id
+            && (group_id.trim().is_empty() || group_id.len() > MAX_OPERATION_GROUP_ID_BYTES)
+        {
+            return Err(ToolError(
+                "delegate_task group_id must be non-empty and bounded".to_string(),
+            ));
+        }
+        let execution_mode = arguments
+            .get("execution_mode")
+            .and_then(Value::as_str)
+            .unwrap_or("parallel");
+        if !matches!(execution_mode, "parallel" | "sequential") {
+            return Err(ToolError(
+                "delegate_task execution_mode must be parallel or sequential".to_string(),
+            ));
+        }
+        if execution_mode == "sequential" && group_id.is_none() {
+            return Err(ToolError(
+                "delegate_task sequential mode requires group_id".to_string(),
+            ));
+        }
+        let sequence = arguments.get("sequence").and_then(Value::as_u64);
+        if arguments.get("sequence").is_some() && sequence.is_none() {
+            return Err(ToolError(
+                "delegate_task sequence must be a non-negative integer".to_string(),
+            ));
+        }
         validate_child_id(child_thread_id).map_err(ToolError)?;
         if prompt.trim().is_empty() || prompt.len() > MAX_CHILD_PROMPT_BYTES {
             return Err(ToolError(
                 "delegate_task prompt must be non-empty and bounded".to_string(),
             ));
         }
-        serde_json::to_string(&json!({
+        let mut result = json!({
             "status": "queued",
             "operation_id": format!("child:{child_thread_id}"),
             "child_thread_id": child_thread_id,
             "prompt": prompt,
-        }))
-        .map_err(|error| ToolError(error.to_string()))
+            "execution_mode": execution_mode,
+        });
+        if let Some(group_id) = group_id {
+            result["group_id"] = json!(group_id);
+        }
+        if let Some(sequence) = sequence {
+            result["sequence"] = json!(sequence);
+        }
+        serde_json::to_string(&result).map_err(|error| ToolError(error.to_string()))
     }
 }
 
@@ -233,5 +272,24 @@ mod tests {
         let value: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(value["status"], "queued");
         assert_eq!(value["operation_id"], "child:child-1");
+        assert_eq!(value["execution_mode"], "parallel");
+    }
+
+    #[test]
+    fn delegate_task_preserves_main_thread_scheduling_intent() {
+        let tool = DelegateTaskTool;
+        let result = tool
+            .execute(&json!({
+                "child_thread_id": "child-2",
+                "prompt": "apply the reviewed change",
+                "group_id": "refactor",
+                "execution_mode": "sequential",
+                "sequence": 2
+            }))
+            .unwrap();
+        let value: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(value["group_id"], "refactor");
+        assert_eq!(value["execution_mode"], "sequential");
+        assert_eq!(value["sequence"], 2);
     }
 }

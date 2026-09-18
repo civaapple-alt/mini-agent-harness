@@ -126,49 +126,45 @@ class LineBudgetTests(unittest.TestCase):
                 line_budget.category_counts(root)
 
     def test_delta_gate_allows_bounded_growth_in_amber_band(self):
-        current = {"runtime": 24_200, "release": 34_400, "control_plane": 1}
-        base = {"runtime": 24_000, "release": 34_100, "control_plane": 1}
+        current = {"kernel": 5_200, "runtime": 24_200, "release": 39_400, "control_plane": 1}
+        base = {"kernel": 5_000, "runtime": 24_000, "release": 39_100, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(
-            deltas, {"runtime": 200, "release": 300, "control_plane": 0}
+            deltas, {"kernel": 200, "release": 300, "control_plane": 0}
         )
         self.assertEqual(violations, [])
 
     def test_delta_gate_rejects_growth_above_non_red_limit(self):
-        current = {"runtime": 24_201, "release": 34_401, "control_plane": 1}
-        base = {"runtime": 24_000, "release": 34_100, "control_plane": 1}
+        current = {"kernel": 5_201, "runtime": 24_201, "release": 39_401, "control_plane": 1}
+        base = {"kernel": 5_000, "runtime": 24_000, "release": 39_100, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(
-            deltas, {"runtime": 201, "release": 301, "control_plane": 0}
+            deltas, {"kernel": 201, "release": 301, "control_plane": 0}
         )
-        self.assertIn("runtime grew by 201 lines, above non-red limit 200", violations)
         self.assertIn("release grew by 301 lines, above non-red limit 300", violations)
 
     def test_delta_gate_freezes_growth_in_red_band(self):
-        current = {"runtime": 24_501, "release": 34_997, "control_plane": 1}
-        base = {"runtime": 24_500, "release": 34_996, "control_plane": 1}
+        current = {"kernel": 5_501, "runtime": 24_501, "release": 39_997, "control_plane": 1}
+        base = {"kernel": 5_500, "runtime": 24_500, "release": 39_996, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(
-            deltas, {"runtime": 1, "release": 1, "control_plane": 0}
+            deltas, {"kernel": 1, "release": 1, "control_plane": 0}
         )
-        self.assertIn("runtime is in red band and cannot grow", violations)
         self.assertIn("release is in red band and cannot grow", violations)
 
     def test_delta_gate_allows_zero_growth_when_checkout_is_red(self):
-        current = {"runtime": 24_887, "release": 34_997, "control_plane": 1}
-        base = {"runtime": 24_887, "release": 34_997, "control_plane": 1}
+        current = {"kernel": 5_887, "runtime": 24_887, "release": 39_997, "control_plane": 1}
+        base = {"kernel": 5_887, "runtime": 24_887, "release": 39_997, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
-        self.assertEqual(
-            deltas, {"runtime": 0, "release": 0, "control_plane": 0}
-        )
+        self.assertEqual(deltas, {"kernel": 0, "release": 0, "control_plane": 0})
         self.assertEqual(violations, [])
 
     def test_check_reports_success_for_a_small_workspace(self):
@@ -180,16 +176,18 @@ class LineBudgetTests(unittest.TestCase):
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 self.assertEqual(line_budget.check(root), 0)
-            self.assertIn("production 1, unit 0, integration 0", output.getvalue())
-            self.assertIn("Control Plane: 0/25000 effective code lines", output.getvalue())
+            self.assertIn("line-budget: PASS", output.getvalue())
+            self.assertIn("core+protocol", output.getvalue())
+            self.assertIn("1/6000", output.getvalue())
+            self.assertIn("control-plane", output.getvalue())
+            self.assertIn("0/28000", output.getvalue())
             self.assertIn(
-                "runtime (core + protocol + host + app-server): "
-                "1/25000 effective code lines",
+                "release             1/40000",
                 output.getvalue(),
             )
+            self.assertNotIn("runtime (core + protocol + host + app-server)", output.getvalue())
             self.assertIn(
-                "release Rust source (excluding experimental CLI/REPL): "
-                "1/35000 effective code lines",
+                "1/6000",
                 output.getvalue(),
             )
 
@@ -209,7 +207,7 @@ class LineBudgetTests(unittest.TestCase):
 
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                self.assertEqual(line_budget.check(root), 0)
+                self.assertEqual(line_budget.check(root, verbose=True), 0)
 
             self.assertIn("capabilities: 3 effective code lines", output.getvalue())
             self.assertIn(
@@ -217,20 +215,35 @@ class LineBudgetTests(unittest.TestCase):
             )
             self.assertIn(
                 "runtime (core + protocol + host + app-server): "
-                "1/25000 effective code lines",
+                "1 effective code lines (informational; no aggregate hard limit)",
                 output.getvalue(),
             )
 
     def test_control_plane_hard_limit_is_enforced(self):
-        current = {"runtime": 1, "release": 1, "control_plane": 25_001}
-        base = {"runtime": 1, "release": 1, "control_plane": 25_000}
+        current = {"kernel": 1, "runtime": 1, "release": 1, "control_plane": 28_001}
+        base = {"kernel": 1, "runtime": 1, "release": 1, "control_plane": 28_000}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(deltas["control_plane"], 1)
         self.assertIn(
-            "control-plane exceeds hard limit (25001/25000)", violations
+            "control-plane exceeds hard limit (28001/28000)", violations
         )
+
+    def test_core_protocol_hard_limit_is_enforced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package_root = root / "crates" / "mini-agent-core" / "src"
+            package_root.mkdir(parents=True)
+            (package_root / "lib.rs").write_text("fn core() {}\n", encoding="utf-8")
+
+            output = io.StringIO()
+            with mock.patch.object(line_budget, "KERNEL_LIMIT", 0):
+                with contextlib.redirect_stdout(output):
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        self.assertEqual(line_budget.check(root), 1)
+            self.assertIn("core+protocol", output.getvalue())
+            self.assertIn("1/0", output.getvalue())
 
     def test_experimental_cli_is_reported_but_excluded_from_release_gate(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -245,7 +258,7 @@ class LineBudgetTests(unittest.TestCase):
             output = io.StringIO()
             with mock.patch.object(line_budget, "PROJECT_LIMIT", 1):
                 with contextlib.redirect_stdout(output):
-                    self.assertEqual(line_budget.check(root), 0)
+                    self.assertEqual(line_budget.check(root, verbose=True), 0)
             self.assertIn("cli: 20 effective code lines", output.getvalue())
             self.assertIn(
                 "release Rust source (excluding experimental CLI/REPL): "
@@ -265,9 +278,9 @@ class LineBudgetTests(unittest.TestCase):
                 with contextlib.redirect_stdout(output):
                     with contextlib.redirect_stderr(io.StringIO()):
                         self.assertEqual(line_budget.check(root), 1)
+            self.assertIn("line-budget: FAIL", output.getvalue())
             self.assertIn(
-                "release Rust source (excluding experimental CLI/REPL): "
-                "1/0 effective code lines",
+                "release             1/0",
                 output.getvalue(),
             )
 

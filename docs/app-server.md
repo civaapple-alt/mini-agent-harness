@@ -305,7 +305,11 @@ reads the child’s canonical Session projection and returns only bounded status
 attempt, result, and error fields. Neither tool adds a scheduler or a second
 history authority to Core. WebStudio defaults to two active children per parent,
 with a Host setting bounded to `1..=8`; overflow is durable `queued` state.
-Operation groups may run `parallel` or `sequential` without changing Core's loop.
+The setting controls only the active-child capacity. The Main Thread chooses the
+per-operation `execution_mode` (`parallel` or `sequential`) and may include a
+`group_id` and `sequence` when it delegates work; the Host validates and persists
+that intent without changing Core's loop. Older requests without the field use
+`parallel` as a compatibility fallback.
 
 The Session store appends operation lifecycle records (`queued`, `running`,
 `awaiting_approval`, `completed`, `failed`, or `cancelled`) to the existing

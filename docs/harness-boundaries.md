@@ -19,6 +19,41 @@ Core 只拥有可移植的 model/tool contract、显式 run loop、limits、stop
 classification 和 observation events。Provider、文件、进程、approval UI、
 persistence 和 terminal output 留在 Core 外。被动 observer 不改变执行。
 
+## Thin Loop、厚 Control Plane
+
+“薄 Agent Loop、厚 Control Plane”是责任划分，不是让某一层无限增长。行数预算只
+是早期预警和交付门禁，还必须用结构性证据确认责任没有跨层泄漏。
+
+当前 crate 对应关系如下：
+
+| 概念 | 实际 crate / 统计分类 | 责任 |
+| --- | --- | --- |
+| Thin Loop / Execution Kernel | `mini-agent-core`、`mini-agent-protocol`；`execution-kernel` | portable model/tool contract、显式 turn loop、context/limit、stop classification、observation event 和公共协议 |
+| Control Plane | `mini-agent-host`、`mini-agent-app-server`、`mini-agent-app-server-protocol`，加上 `mini-agent-capabilities` 中明确列出的 control-plane 文件；`host-control-plane + capability-control-plane` | admission、approval、sandbox/tool orchestration、Session/operation 生命周期、并发/恢复和对外 runtime projection |
+| gateway-control | `mini-agent-app-server`、`mini-agent-app-server-protocol`；当前作为 `host-control-plane` 的子集统计 | JSON-RPC、Thread/Turn 投影、runtime/session 控制和 Gateway 边界；不拥有 Core history 或独立授权真相源 |
+| Release Rust source | `mini-agent-core`、`mini-agent-protocol`、`mini-agent-capabilities`、`mini-agent-host`、`mini-agent-app-server`、`mini-agent-app-server-protocol` | 发布包完整 Rust 源码与测试；不含实验性 `mini-agent-cli` |
+
+`mini-agent-capabilities` 中未列入 control-plane 的 provider 实现仍计入
+`capability-provider`，并计入 Release Rust source。`gateway-control` 当前没有单独的
+硬门禁，避免把同一批 App Server 文件重复计数；如果未来要区分 transport-edge，必须
+先按文件责任拆出互斥分类，再新增统计或门禁。
+
+结构性验收至少包括：
+
+- Core 不新增 Scheduler、ApprovalStore、Provider、持久化或 Gateway task map；Child
+  Session 由 Host/App Server 通过独立 runtime 表达。
+- Host/Capabilities 是 admission、approval、执行副作用、路径边界和并发限制的权威；
+  Gateway 只做协议转换、Session/runtime 投影和事件转发。
+- `Protocol → Core → Capabilities → Host → App Server → CLI` 的依赖方向保持为有向无环图，
+  并通过 `cargo_boundary.py` 检查。
+- 涉及 Child、operation、notebook、approval、replay 或恢复的变更，必须有对应的
+  bounded scenario/test evidence；通过行数门禁不能替代这些证据。
+- 涉及 prompt、tool schema、loop-control、context、event 或 persistence 的变更，必须
+  补充 Harness Scenario/Eval，证明模型可见面和生命周期行为没有退化。
+
+`python scripts/line_budget.py` 默认只输出三个关键预算；`--verbose` 查看 crate、layer
+和 production/test 拆分，`--json` 提供 CI 和审计所需的完整报告。
+
 工具结果沿着主执行链保持结构化状态：Core 解析并调用 ToolRouter，Host 根据
 `ToolAdmission` 编排准入与审批，Capabilities 的 `ToolRuntime` 返回带有
 `ToolExecutionStatus` 的 `ToolExecutionOutcome`，最后由 Core 写入

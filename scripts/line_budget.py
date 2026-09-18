@@ -8,21 +8,19 @@ from pathlib import PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME_LIMIT = 25_000
+KERNEL_LIMIT = 6_000
 # The release-source total includes production code and tests from the supported
 # runtime packages. The experimental CLI/REPL is reported separately and is not
 # part of this hard release gate.
-PROJECT_LIMIT = 35_000
-CONTROL_PLANE_LIMIT = 25_000
+PROJECT_LIMIT = 40_000
+CONTROL_PLANE_LIMIT = 28_000
 
-# The hard ceilings remain the emergency release boundary. Operating limits
-# leave room for ordinary maintenance; the delta gate below permits bounded
-# growth through the amber band and freezes positive growth in the red band.
-RUNTIME_OPERATING_LIMIT = 24_000
-PROJECT_OPERATING_LIMIT = 34_000
-RUNTIME_RED_LIMIT = 24_500
-PROJECT_RED_LIMIT = 34_500
-RUNTIME_NON_RED_DELTA_LIMIT = 200
+# The hard ceilings remain the emergency release boundary. The release-source
+# operating limit leaves room for ordinary maintenance; the delta gate below
+# permits bounded growth through the amber band and freezes positive growth in
+# the red band. Runtime is reported for visibility but has no aggregate gate.
+PROJECT_OPERATING_LIMIT = 39_000
+PROJECT_RED_LIMIT = 39_500
 PROJECT_NON_RED_DELTA_LIMIT = 300
 
 # Keep the report aligned with the conceptual runtime layers. Capabilities are
@@ -308,11 +306,13 @@ def _report_from_categories(
     release = runtime + categories["capability-control-plane"][0] + categories[
         "capability-provider"
     ][0]
+    kernel = categories["execution-kernel"][0]
     control_plane = categories["host-control-plane"][0] + categories[
         "capability-control-plane"
     ][0]
     return {
         "categories": categories,
+        "kernel": kernel,
         "runtime": runtime,
         "release": release,
         "control_plane": control_plane,
@@ -387,11 +387,11 @@ def _budget_band(total: int, operating: int, red: int, hard: int) -> str:
 
 def _status(report: dict[str, object]) -> dict[str, str]:
     return {
-        "runtime": _budget_band(
-            int(report["runtime"]),
-            RUNTIME_OPERATING_LIMIT,
-            RUNTIME_RED_LIMIT,
-            RUNTIME_LIMIT,
+        "kernel": "fail" if int(report["kernel"]) > KERNEL_LIMIT else "green",
+        "control_plane": (
+            "fail"
+            if int(report["control_plane"]) > CONTROL_PLANE_LIMIT
+            else "green"
         ),
         "release": _budget_band(
             int(report["release"]),
@@ -407,19 +407,12 @@ def _delta_gate_violations(
 ) -> tuple[list[str], dict[str, int]]:
     violations = []
     deltas = {
-        "runtime": int(current["runtime"]) - int(base["runtime"]),
+        "kernel": int(current["kernel"]) - int(base["kernel"]),
         "release": int(current["release"]) - int(base["release"]),
         "control_plane": int(current["control_plane"])
         - int(base["control_plane"]),
     }
     policies = (
-        (
-            "runtime",
-            RUNTIME_OPERATING_LIMIT,
-            RUNTIME_RED_LIMIT,
-            RUNTIME_LIMIT,
-            RUNTIME_NON_RED_DELTA_LIMIT,
-        ),
         (
             "release",
             PROJECT_OPERATING_LIMIT,
@@ -439,6 +432,11 @@ def _delta_gate_violations(
             )
         if total > red and delta > 0:
             violations.append(f"{name} is in red band and cannot grow")
+    kernel_total = int(current["kernel"])
+    if kernel_total > KERNEL_LIMIT:
+        violations.append(
+            f"core+protocol exceeds hard limit ({kernel_total}/{KERNEL_LIMIT})"
+        )
     control_plane_total = int(current["control_plane"])
     if control_plane_total > CONTROL_PLANE_LIMIT:
         violations.append(
@@ -460,6 +458,7 @@ def _json_counts(counts: tuple[int, int, int, int]) -> dict[str, int]:
 
 def _json_report(report: dict[str, object]) -> dict[str, object]:
     return {
+        "kernel": report["kernel"],
         "runtime": report["runtime"],
         "release": report["release"],
         "control_plane": report["control_plane"],
@@ -475,60 +474,95 @@ def _json_report(report: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _print_report(report: dict[str, object], root: Path = ROOT) -> None:
-    for name, packages in LAYERS:
-        package_list = ", ".join(packages)
-        total, production, unit, integration = report["layers"][name]
-        print(
-            f"{name}: {total} effective code lines "
-            f"(production {production}, unit {unit}, integration {integration}) "
-            f"[{package_list}]"
-        )
-        if len(packages) > 1:
-            for package in packages:
-                package_total, package_production, package_unit, package_integration = (
-                    package_counts(root, package)
-                )
-                print(
-                    f"  {package}: {package_total} effective code lines "
-                    f"(production {package_production}, unit {package_unit}, "
-                    f"integration {package_integration})"
-                )
-    for name in CATEGORY_ORDER:
-        total, production, unit, integration = report["categories"][name]
-        print(
-            f"  category/{name}: {total} effective code lines "
-            f"(production {production}, unit {unit}, integration {integration})"
-        )
-    print(
-        f"Control Plane: {report['control_plane']}/{CONTROL_PLANE_LIMIT} "
-        "effective code lines (host-control-plane + capability-control-plane)"
-    )
-    runtime_total = int(report["runtime"])
-    release_total = int(report["release"])
-    runtime_counts = report["categories"]["execution-kernel"]
-    host_counts = report["categories"]["host-control-plane"]
-    print(
-        f"runtime (core + protocol + host + app-server): "
-        f"{runtime_total}/{RUNTIME_LIMIT} effective code lines "
-        f"(production {runtime_counts[1] + host_counts[1]}, "
-        f"unit {runtime_counts[2] + host_counts[2]}, "
-        f"integration {runtime_counts[3] + host_counts[3]})"
-    )
-    release_counts = [0, 0, 0, 0]
-    for name in CATEGORY_ORDER[:-1]:
-        _add_counts(release_counts, report["categories"][name])
-    print(
-        f"release Rust source (excluding experimental CLI/REPL): "
-        f"{release_total}/{PROJECT_LIMIT} effective code lines "
-        f"(production {release_counts[1]}, unit {release_counts[2]}, "
-        f"integration {release_counts[3]})"
-    )
+def _percentage(total: int, limit: int) -> str:
+    if limit == 0:
+        return "100.0%" if total else "0.0%"
+    return f"{total * 100 / limit:.1f}%"
+
+
+def _compact_status(report: dict[str, object]) -> dict[str, str]:
     statuses = _status(report)
-    print(
-        f"budget band: runtime={statuses['runtime']}, "
-        f"release={statuses['release']}"
+    return {
+        "kernel": "FAIL" if statuses["kernel"] == "fail" else "PASS",
+        "control_plane": "FAIL"
+        if statuses["control_plane"] == "fail"
+        else "PASS",
+        "release": {
+            "green": "PASS",
+            "amber": "WARN",
+            "red": "FREEZE",
+            "fail": "FAIL",
+        }[statuses["release"]],
+    }
+
+
+def _print_report(
+    report: dict[str, object], root: Path = ROOT, verbose: bool = False
+) -> None:
+    if verbose:
+        for name, packages in LAYERS:
+            package_list = ", ".join(packages)
+            total, production, unit, integration = report["layers"][name]
+            print(
+                f"{name}: {total} effective code lines "
+                f"(production {production}, unit {unit}, integration {integration}) "
+                f"[{package_list}]"
+            )
+            if len(packages) > 1:
+                for package in packages:
+                    package_total, package_production, package_unit, package_integration = (
+                        package_counts(root, package)
+                    )
+                    print(
+                        f"  {package}: {package_total} effective code lines "
+                        f"(production {package_production}, unit {package_unit}, "
+                        f"integration {package_integration})"
+                    )
+        for name in CATEGORY_ORDER:
+            total, production, unit, integration = report["categories"][name]
+            print(
+                f"  category/{name}: {total} effective code lines "
+                f"(production {production}, unit {unit}, integration {integration})"
+            )
+        runtime_total = int(report["runtime"])
+        runtime_counts = report["categories"]["execution-kernel"]
+        host_counts = report["categories"]["host-control-plane"]
+        print(
+            f"runtime (core + protocol + host + app-server): "
+            f"{runtime_total} effective code lines "
+            "(informational; no aggregate hard limit) "
+            f"(production {runtime_counts[1] + host_counts[1]}, "
+            f"unit {runtime_counts[2] + host_counts[2]}, "
+            f"integration {runtime_counts[3] + host_counts[3]})"
+        )
+        release_counts = [0, 0, 0, 0]
+        for name in CATEGORY_ORDER[:-1]:
+            _add_counts(release_counts, report["categories"][name])
+        print(
+            "release Rust source (excluding experimental CLI/REPL): "
+            f"{report['release']}/{PROJECT_LIMIT} effective code lines "
+            f"(production {release_counts[1]}, unit {release_counts[2]}, "
+            f"integration {release_counts[3]})"
+        )
+
+    statuses = _compact_status(report)
+    metrics = (
+        ("core+protocol", int(report["kernel"]), KERNEL_LIMIT, statuses["kernel"]),
+        (
+            "control-plane",
+            int(report["control_plane"]),
+            CONTROL_PLANE_LIMIT,
+            statuses["control_plane"],
+        ),
+        ("release", int(report["release"]), PROJECT_LIMIT, statuses["release"]),
     )
+    for name, total, limit, status in metrics:
+        remaining = max(limit - total, 0)
+        print(
+            f"{name:<15} {total:>5}/{limit:<5} "
+            f"{_percentage(total, limit):>6} "
+            f"remain {remaining:>5} {status}"
+        )
 
 
 def check(
@@ -536,6 +570,7 @@ def check(
     base: str | None = None,
     enforce_delta: bool = False,
     json_output: bool = False,
+    verbose: bool = False,
 ) -> int:
     if enforce_delta and base is None:
         print("--check-delta requires --base", file=sys.stderr)
@@ -548,9 +583,9 @@ def check(
         return 2
 
     violations = []
-    if int(current["runtime"]) > RUNTIME_LIMIT:
+    if int(current["kernel"]) > KERNEL_LIMIT:
         violations.append(
-            f"runtime exceeds hard limit ({current['runtime']}/{RUNTIME_LIMIT})"
+            f"core+protocol exceeds hard limit ({current['kernel']}/{KERNEL_LIMIT})"
         )
     if int(current["release"]) > PROJECT_LIMIT:
         violations.append(
@@ -570,14 +605,11 @@ def check(
     if json_output:
         payload = {
             "limits": {
-                "runtime_hard": RUNTIME_LIMIT,
+                "core_protocol_hard": KERNEL_LIMIT,
                 "release_hard": PROJECT_LIMIT,
                 "control_plane_hard": CONTROL_PLANE_LIMIT,
-                "runtime_operating": RUNTIME_OPERATING_LIMIT,
                 "release_operating": PROJECT_OPERATING_LIMIT,
-                "runtime_red": RUNTIME_RED_LIMIT,
                 "release_red": PROJECT_RED_LIMIT,
-                "runtime_non_red_delta": RUNTIME_NON_RED_DELTA_LIMIT,
                 "release_non_red_delta": PROJECT_NON_RED_DELTA_LIMIT,
             },
             "current": _json_report(current),
@@ -588,10 +620,11 @@ def check(
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        _print_report(current, root)
+        print(f"line-budget: {'FAIL' if violations else 'PASS'}")
+        _print_report(current, root, verbose=verbose)
         if deltas is not None:
             print(
-                f"delta from {base}: runtime {deltas['runtime']:+d}, "
+                f"delta: core+protocol {deltas['kernel']:+d}, "
                 f"release {deltas['release']:+d}, "
                 f"control-plane {deltas['control_plane']:+d}"
             )
@@ -616,11 +649,15 @@ def main() -> int:
     parser.add_argument(
         "--json", action="store_true", help="emit machine-readable JSON"
     )
+    parser.add_argument(
+        "--verbose", action="store_true", help="include layer and category details"
+    )
     args = parser.parse_args()
     return check(
         base=args.base,
         enforce_delta=args.check_delta,
         json_output=args.json,
+        verbose=args.verbose,
     )
 
 

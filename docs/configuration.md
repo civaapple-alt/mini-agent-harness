@@ -321,16 +321,20 @@ bounded `operation` records with the lifecycle states `queued`, `running`,
 is the recoverable operation projection after a runtime restart. Child Sessions
 are exact-checkpoint branches with independent locks and runtimes; the current
 control seam allows depth one. WebStudio defaults to two active children per
-parent and accepts a bounded project setting:
+parent and accepts a bounded global or project setting for the capacity only:
 
 ```json
-{"subagent":{"maxConcurrentChildren":2,"defaultExecutionMode":"parallel"}}
+{"subagent":{"max_concurrent_children":2}}
 ```
 
-The maximum is `1..=8`. `parallel` starts independent children when capacity is
-available; `sequential` orders one operation group by its sequence and waits for
-the prior child to settle. Queue and group metadata are persisted with the
-operation so a restart does not infer scheduling state from an in-memory map.
+The maximum is `1..=8`. Execution mode is not a project policy: the Main Thread
+chooses `parallel` or `sequential` for each `delegate_task`/child request, with an
+optional operation group and sequence. `parallel` starts independent children
+when capacity is available; `sequential` orders one operation group by its
+sequence and waits for the prior child to settle. Queue and group metadata are
+persisted with the operation so a restart does not infer scheduling state from
+an in-memory map. Older callers that omit the per-request mode use `parallel`
+as the compatibility fallback.
 
 Each Session may also contain a bounded `notebook.json`. It is owned by the
 Session store, survives compaction and runtime restart, and is accessed through

@@ -197,9 +197,11 @@ input, mutable Core context, tool calls, and approvals are not copied. Child
 history and status remain addressable by the child Thread and are observed
 through the existing event and canonical Session projections. This is
 structural concurrency through independent runtimes, not a Core scheduler.
-The parent project setting limits active children to `1..=8` (default `2`), and
-operation groups may be `parallel` or `sequential`; queued operations remain
-durable and are drained by the Gateway when a slot becomes available.
+The global or parent project setting limits active children to `1..=8` (default
+`2`). The Main Thread chooses `parallel` or `sequential` for each delegation
+and can attach an operation group and sequence; queued operations remain
+durable and are drained by the Gateway when a slot becomes available. The
+Gateway does not infer scheduling mode from project settings.
 
 The child projection is recoverable because `session.jsonl` is the authority for
 the latest `operation` record. `queued`, `running`, `awaiting_approval`,

@@ -9,6 +9,39 @@ multi-line block comments, are excluded. A line containing code and a trailing
 comment still counts once. Production, unit-test, and integration-test totals
 use the same effective-line rule.
 
+## Rust source budget
+
+预算按互斥文件分类统计；同一个文件只能进入一个 category。当前硬门禁是：
+
+| 指标 | 统计范围 | 硬上限 |
+| --- | --- | ---: |
+| Core + Protocol | `mini-agent-core` + `mini-agent-protocol` | 6,000 |
+| Control Plane | Host/App Server control slice + Capabilities control slice | 28,000 |
+| Release Rust source | 支持的运行时 crate 与测试，排除实验性 CLI/REPL | 40,000 |
+
+Runtime 聚合值仍可在 JSON 中用于诊断，但不再设置 `25,000` 行硬门禁。Release Rust
+source 的 operating limit 为 `39,000`，red band 为 `39,500`；非 red 区间单次 PR
+默认最多增长 `300` 行，进入 red band 后禁止继续正增长。Core + Protocol 和
+Control Plane 当前先执行绝对硬上限，不额外增加过细的增量门禁。
+
+默认报告只回答是否可交付：
+
+```text
+line-budget: PASS
+core+protocol   4518/6000    75.3% remain  1482 PASS
+control-plane  23603/28000  84.3% remain  4397 PASS
+release        34809/40000  87.0% remain  5191 PASS
+```
+
+使用 `--base <merge-base> --check-delta` 时追加三项增量；使用 `--verbose` 查看 crate
+和 production/unit/integration 拆分；使用 `--json` 获取完整的 categories、layers、
+limits、status 和 violations。详细统计用于诊断，不能绕过硬门禁或结构性验收。
+
+行数门禁之外，交付门禁还要求受影响 Rust 包测试、Clippy、fmt、Cargo boundary 检查
+通过；如果变更影响 prompt、tool schema、loop-control、context、event 或 persistence，
+还必须提供 bounded Harness Scenario/Eval。这样可以避免用减少测试、压缩边界类型或把
+Control Plane 责任塞进 Thin Loop 的方式“通过”预算。
+
 | Boundary | Default | Behavior at limit |
 | --- | ---: | --- |
 | one host context item | 8 KiB | reject before retaining the item |

@@ -23,9 +23,9 @@
 4. **行数预算**：预计 runtime 和全 Rust 各净增/净减多少行？实际结果是多少？
 
    ```text
-   runtime:       before -> after (delta)
-   all Rust:      before -> after (delta)
+   core+protocol: before -> after (delta)
    control-plane: before -> after (delta)
+   release Rust:  before -> after (delta)
    ```
 
    PR 分支还应记录：
@@ -52,7 +52,7 @@
 
 ### 准入确认
 
-- [ ] 我已确认有效代码行数：runtime 不超过 `25,000` 行，control-plane 不超过 `25,000` 行，全 Rust 不超过 `35,000` 行。
+- [ ] 我已确认有效代码行数：core + protocol 不超过 `6,000` 行，control-plane 不超过 `28,000` 行，全 Rust 不超过 `40,000` 行。
 - [ ] 我已确认当前预算区间和 PR 增量门禁没有触发增量上限或 Red 区间冻结规则。
 - [ ] 新增代码默认满足净零增长，或已列出明确抵扣项/预算取舍。
 - [ ] 我没有为了行数删除 Core 核心测试、Actor/CAS/Session 单一权威或公共协议行为。

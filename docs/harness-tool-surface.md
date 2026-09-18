@@ -68,9 +68,9 @@ Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk �
    aggregate.
 3. Replace vs add: replace the old file mutation pair with one bounded patch
    protocol; keep the four-tool default and do not retain compatibility entries.
-4. Net line delta: runtime/release budget measured after implementation by
-   scripts/line_budget.py; removed file tools do not have a second or compatibility
-   path.
+4. Net line delta: Core + Protocol, Control Plane, and release-source budgets are
+   measured after implementation by scripts/line_budget.py; removed file tools do
+   not have a second or compatibility path.
 5. Visible surface: default tool manifest, read_file pagination and apply_patch
    schema changed; all payloads remain bounded; Thread settings expose the
    allowlisted selection, not arbitrary prompt replacement.

@@ -98,8 +98,8 @@ git diff --check
 git status --short
 ```
 
-For the 0.8.0 release, the 25,000-effective-line runtime budget, the
-25,000-effective-line Control Plane budget, and the 35,000-effective-line
+For the 0.8.0 release, the 6,000-effective-line Core + Protocol budget, the
+28,000-effective-line Control Plane budget, and the 40,000-effective-line
 release-source total, including tests in supported packages, are hard gates.
 The budget excludes blank and comment-only lines;
 code-bearing lines with trailing comments count once.
