@@ -493,11 +493,11 @@ pub(super) async fn worker_loop<M>(
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
     runtime_revision: Arc<AtomicU64>,
     factory: Option<Arc<dyn ThreadFactory<M>>>,
+    action_sequencer: ActionSequencer,
     control: Arc<RunControl>,
 ) where
     M: Model + Send + 'static,
 {
-    let mut action_sequencer = ActionSequencer::new();
     let mut runtime = None;
     let mut threads = ThreadManager::new(threads, thread_ids.clone(), factory.clone());
     let mut settled_turns = HashMap::new();

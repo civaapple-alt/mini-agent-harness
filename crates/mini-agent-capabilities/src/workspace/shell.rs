@@ -52,17 +52,20 @@ impl ToolRuntime for Shell {
             Ok(command) => command,
             Err(error) => return ToolExecutionOutcome::failed(error.to_string()),
         };
-        let output = match run_shell(
+        let output = match run_shell_with_cancel(
             command,
             &self.0.shell_root(command),
             self.0.sandbox,
             COMMAND_TIMEOUT,
+            request.cancellation.clone(),
         ) {
             Ok(output) => output,
             Err(error) => return ToolExecutionOutcome::failed(error.to_string()),
         };
         let timed_out = output.timed_out;
+        let cancelled = output.cancelled;
         match self.render_command_output(&output) {
+            Ok(content) if cancelled => ToolExecutionOutcome::failed(content),
             Ok(content) if timed_out => ToolExecutionOutcome::retryable(content),
             Ok(content) => ToolExecutionOutcome::completed(content),
             Err(error) => ToolExecutionOutcome::failed(error.to_string()),
@@ -300,6 +303,7 @@ pub(super) struct CommandOutput {
     pub(super) source_bytes: usize,
     pub(super) source_truncated: bool,
     pub(super) timed_out: bool,
+    pub(super) cancelled: bool,
 }
 
 fn run_sandboxed_command(
@@ -307,6 +311,7 @@ fn run_sandboxed_command(
     root: &Path,
     sandbox_kind: SandboxKind,
     timeout: Duration,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<CommandOutput, ToolError> {
     let sandbox = ProcessSandbox::new(sandbox_kind);
     apply_child_process_env(&mut cmd);
@@ -330,12 +335,26 @@ fn run_sandboxed_command(
     let stdout = thread::spawn(move || capture_bounded(stdout, stream_limit));
     let stderr = thread::spawn(move || capture_bounded(stderr, stream_limit));
     let started = Instant::now();
-    let (status, timed_out) = loop {
+    let (status, timed_out, cancelled) = loop {
         if let Some(status) = child.try_wait().map_err(io_error)? {
-            break (status, false);
+            break (status, false, false);
+        }
+        if cancellation
+            .as_ref()
+            .is_some_and(|token| token.load(Ordering::Acquire))
+        {
+            break (
+                sandbox.terminate(&mut child).map_err(io_error)?,
+                false,
+                true,
+            );
         }
         if started.elapsed() >= timeout {
-            break (sandbox.terminate(&mut child).map_err(io_error)?, true);
+            break (
+                sandbox.terminate(&mut child).map_err(io_error)?,
+                true,
+                false,
+            );
         }
         thread::sleep(Duration::from_millis(10));
     };
@@ -347,7 +366,9 @@ fn run_sandboxed_command(
         .join()
         .map_err(|_| ToolError("stderr reader panicked".to_string()))?
         .map_err(io_error)?;
-    let status_str = if timed_out {
+    let status_str = if cancelled {
+        "cancelled by user".to_string()
+    } else if timed_out {
         format!("timed out after {} seconds", timeout.as_secs_f64())
     } else {
         status.code().map_or_else(
@@ -364,6 +385,7 @@ fn run_sandboxed_command(
         source_bytes,
         source_truncated,
         timed_out,
+        cancelled,
     })
 }
 
@@ -372,6 +394,16 @@ pub(super) fn run_shell(
     root: &Path,
     sandbox_kind: SandboxKind,
     timeout: Duration,
+) -> Result<CommandOutput, ToolError> {
+    run_shell_with_cancel(command, root, sandbox_kind, timeout, None)
+}
+
+pub(super) fn run_shell_with_cancel(
+    command: &str,
+    root: &Path,
+    sandbox_kind: SandboxKind,
+    timeout: Duration,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<CommandOutput, ToolError> {
     if sandbox_kind == SandboxKind::Docker {
         let docker_available = Command::new("docker")
@@ -405,7 +437,7 @@ pub(super) fn run_shell(
     } else {
         shell_command(command)
     };
-    run_sandboxed_command(cmd, root, sandbox_kind, timeout)
+    run_sandboxed_command(cmd, root, sandbox_kind, timeout, cancellation)
 }
 
 pub(super) struct CapturedOutput {

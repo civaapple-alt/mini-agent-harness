@@ -17,7 +17,7 @@ use mini_agent_protocol::{
 use patch::ApplyPatch;
 use serde_json::{Value, json};
 #[cfg(test)]
-use shell::{Shell, is_read_only_shell_command, run_shell};
+use shell::{Shell, is_read_only_shell_command, run_shell, run_shell_with_cancel};
 #[cfg(test)]
 #[path = "workspace_tests.rs"]
 mod tests;

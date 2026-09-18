@@ -43,6 +43,15 @@ impl RunControl {
         self.cancel_requested.store(false, Ordering::Release);
     }
 
+    /// Returns the host-local cancellation state used by blocking tools.
+    ///
+    /// The token is deliberately an atomic handle rather than a protocol
+    /// field. A Host can use it to stop a concrete side effect while the
+    /// Core turn loop is still waiting for that tool to return.
+    pub fn cancellation_token(&self) -> Arc<AtomicBool> {
+        self.cancel_requested.clone()
+    }
+
     pub fn submit(&self, input: TurnInput) -> Result<(), InputQueueError> {
         let is_steer = input.mode == mini_agent_protocol::TurnInputMode::Steer;
         self.pending_inputs.submit(input)?;

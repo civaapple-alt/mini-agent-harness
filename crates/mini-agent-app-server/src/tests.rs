@@ -26,9 +26,12 @@ use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::SkillLoadPhase;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
+use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolCall;
 use mini_agent_protocol::ToolError;
+use mini_agent_protocol::ToolExecutionDelegate;
 use mini_agent_protocol::ToolExecutionOutcome;
+use mini_agent_protocol::ToolExecutionRequest;
 use mini_agent_protocol::ToolExecutionStatus;
 use mini_agent_protocol::ToolHandler;
 use mini_agent_protocol::ToolRuntime;
@@ -266,6 +269,81 @@ struct SensitiveFixtureTool;
 
 struct McpTimeoutFixtureTool;
 
+struct BlockingExecution {
+    started: Arc<Notify>,
+}
+
+struct BlockingFixtureTool;
+
+impl ToolHandler for BlockingFixtureTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "blocking_fixture".to_string(),
+            description: "A synchronous tool that waits for cancellation.".to_string(),
+            parameters: json!({"type": "object"}),
+        }
+    }
+}
+
+impl ToolRuntime for BlockingFixtureTool {
+    fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
+        Err(ToolError(
+            "blocking fixture requires its delegate".to_string(),
+        ))
+    }
+}
+
+impl ToolExecutionDelegate for BlockingExecution {
+    fn execute(&self, _tool: &dyn Tool, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+        self.started.notify_one();
+        loop {
+            if request
+                .cancellation
+                .as_ref()
+                .is_some_and(|token| token.load(Ordering::Acquire))
+            {
+                return ToolExecutionOutcome::failed("cancelled");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+}
+
+struct BlockingToolModel;
+
+impl Model for BlockingToolModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        if request
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::Tool { .. }))
+        {
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "cancelled".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "blocking-call".to_string(),
+                name: "blocking_fixture".to_string(),
+                arguments: json!({}),
+            }],
+            usage: None,
+        })
+    }
+}
+
 impl ToolHandler for SensitiveFixtureTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -344,6 +422,18 @@ pub(crate) fn server_with_config<M: Model + Send + 'static>(
 
 pub(crate) fn server<M: Model + Send + 'static>(model: M) -> AppServer<M> {
     server_with_config(model, HarnessConfig::default())
+}
+
+fn blocking_tool_server(started: Arc<Notify>) -> AppServer<BlockingToolModel> {
+    let tools = ToolRouter::with_executor(
+        vec![Box::new(BlockingFixtureTool)],
+        Arc::new(BlockingExecution { started }),
+    );
+    let harness = Harness::new(BlockingToolModel, tools, HarnessConfig::default());
+    AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(ThreadId::new("initial"), harness),
+    )
 }
 
 async fn run_turn_to_finished<M: Model + Send + 'static>(
@@ -1094,6 +1184,41 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
         server.runtime_status().phase,
         mini_agent_app_server_protocol::RuntimePhase::Completed
     );
+}
+
+#[tokio::test]
+async fn interrupt_reaches_a_synchronous_tool_before_the_request_timeout() {
+    let started = Arc::new(Notify::new());
+    let server = blocking_tool_server(started.clone());
+    let mut events = server.subscribe();
+    let started_submission = server
+        .turn_start_for(
+            ThreadId::new("thread-1"),
+            TurnStart::new(TurnInput::new(TurnInputMode::Start, "long shell")),
+        )
+        .await
+        .unwrap();
+    let turn_id = match started_submission {
+        TurnSubmission::Started { turn_id } => turn_id,
+        other => panic!("unexpected submission: {other:?}"),
+    };
+
+    started.notified().await;
+    let cancel = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        server.turn_cancel_for(ThreadId::new("thread-1"), TurnCancel::new(turn_id.clone())),
+    )
+    .await
+    .expect("interrupt should not wait for the blocking tool deadline");
+    cancel.unwrap();
+
+    let mut finished = None;
+    while finished.is_none() {
+        if let Event::TurnFinished { status } = events.recv().await.unwrap().event {
+            finished = Some(status);
+        }
+    }
+    assert_eq!(finished, Some(mini_agent_protocol::TurnStatus::Cancelled));
 }
 
 #[tokio::test]

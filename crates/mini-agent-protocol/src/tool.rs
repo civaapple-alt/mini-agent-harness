@@ -3,6 +3,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::ThreadId;
 use crate::TurnId;
@@ -15,13 +17,26 @@ pub struct ToolSpec {
 }
 
 /// A model-requested invocation handed to a host tool executor.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ToolExecutionRequest {
     pub call_id: String,
     pub name: String,
     pub arguments: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<ToolExecutionContext>,
+    /// Host-local cancellation state. This is intentionally not part of the
+    /// wire contract or model-visible request data.
+    #[serde(skip)]
+    pub cancellation: Option<Arc<AtomicBool>>,
+}
+
+impl PartialEq for ToolExecutionRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.call_id == other.call_id
+            && self.name == other.name
+            && self.arguments == other.arguments
+            && self.context == other.context
+    }
 }
 
 impl ToolExecutionRequest {
@@ -31,11 +46,17 @@ impl ToolExecutionRequest {
             name: name.into(),
             arguments,
             context: None,
+            cancellation: None,
         }
     }
 
     pub fn with_context(mut self, context: ToolExecutionContext) -> Self {
         self.context = Some(context);
+        self
+    }
+
+    pub fn with_cancellation(mut self, cancellation: Arc<AtomicBool>) -> Self {
+        self.cancellation = Some(cancellation);
         self
     }
 }

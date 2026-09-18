@@ -357,6 +357,7 @@ mod worker;
 use action::ActionFailure;
 use action::ActionResponse;
 use action::ActionResult;
+use action::ActionSequencer;
 use management::RuntimeActorState;
 use worker::{Command, worker_loop};
 
@@ -470,6 +471,7 @@ pub struct AppServer<M> {
     event_replay: Arc<Mutex<VecDeque<EventEnvelope>>>,
     runtime_status: Arc<Mutex<mini_agent_app_server_protocol::RuntimeStatus>>,
     control: Arc<RunControl>,
+    action_sequencer: ActionSequencer,
     thread_id: ThreadId,
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
     runtime_revision: Arc<AtomicU64>,
@@ -486,6 +488,7 @@ impl<M> Clone for AppServer<M> {
             event_replay: self.event_replay.clone(),
             runtime_status: self.runtime_status.clone(),
             control: self.control.clone(),
+            action_sequencer: self.action_sequencer.clone(),
             thread_id: self.thread_id.clone(),
             thread_ids: self.thread_ids.clone(),
             runtime_revision: self.runtime_revision.clone(),
@@ -589,6 +592,8 @@ where
         let worker_revision = runtime_revision.clone();
         let worker_factory = factory.clone();
         let worker_control = control.clone();
+        let action_sequencer = ActionSequencer::new();
+        let worker_action_sequencer = action_sequencer.clone();
         thread::Builder::new()
             .name("mini-agent-app-server".to_string())
             .spawn(move || {
@@ -606,6 +611,7 @@ where
                     worker_thread_ids,
                     worker_revision,
                     worker_factory,
+                    worker_action_sequencer,
                     worker_control,
                 ));
             })
@@ -617,6 +623,7 @@ where
             event_replay,
             runtime_status,
             control,
+            action_sequencer,
             thread_id: start.thread_id,
             thread_ids,
             runtime_revision,
@@ -952,6 +959,22 @@ where
         request: TurnStart,
         expected_turn_id: Option<TurnId>,
     ) -> Result<ActionResponse<TurnSubmission>, ActionFailure> {
+        if request.input.mode == TurnInputMode::Steer
+            && let Some(expected_turn_id) = expected_turn_id.as_ref()
+            && self.active_turn_matches(&thread_id, expected_turn_id)
+        {
+            let turn_id = expected_turn_id.clone();
+            self.control.submit(request.input).map_err(|error| {
+                ActionFailure::without_receipt(AppServerError::InputQueue(error.to_string()))
+            })?;
+            let receipt = self.action_sequencer.receipt(self.runtime_revision.clone());
+            let state_revision = receipt.current_revision();
+            return Ok(ActionResponse {
+                value: TurnSubmission::Steered { turn_id },
+                receipt,
+                state_revision,
+            });
+        }
         self.request_action(|reply| Command::Start {
             thread_id,
             request,
@@ -977,11 +1000,43 @@ where
         thread_id: ThreadId,
         request: TurnCancel,
     ) -> Result<ActionResponse<()>, ActionFailure> {
+        if self.active_turn_matches(&thread_id, &request.turn_id) {
+            // The worker owns command ordering, but a blocking tool may keep
+            // it from receiving this command. Set the shared stop token first
+            // so cancellation-aware tools can terminate immediately.
+            self.control.request_cancel();
+            let (reply, _response) = oneshot::channel();
+            let _ = self.commands.try_send(Command::Cancel {
+                thread_id,
+                request,
+                reply,
+            });
+            let receipt = self.action_sequencer.receipt(self.runtime_revision.clone());
+            let state_revision = receipt.current_revision();
+            return Ok(ActionResponse {
+                value: (),
+                receipt,
+                state_revision,
+            });
+        }
         self.request_action(|reply| Command::Cancel {
             thread_id,
             request,
             reply,
         })
         .await
+    }
+
+    fn active_turn_matches(&self, thread_id: &ThreadId, turn_id: &TurnId) -> bool {
+        let status = self.runtime_status.lock().unwrap();
+        status.thread_id == *thread_id
+            && status.turn_id.as_ref() == Some(turn_id)
+            && !matches!(
+                status.phase,
+                mini_agent_app_server_protocol::RuntimePhase::Idle
+                    | mini_agent_app_server_protocol::RuntimePhase::Completed
+                    | mini_agent_app_server_protocol::RuntimePhase::Failed
+                    | mini_agent_app_server_protocol::RuntimePhase::Stopping
+            )
     }
 }

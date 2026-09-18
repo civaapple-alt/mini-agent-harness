@@ -1039,6 +1039,36 @@ fn shell_process_has_a_timeout() {
 }
 
 #[test]
+fn shell_process_can_be_cancelled_before_its_deadline() {
+    let root = test_root();
+    let command = if cfg!(windows) {
+        "Start-Sleep -Seconds 5"
+    } else {
+        "sleep 5"
+    };
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let cancellation_for_thread = cancellation.clone();
+    let trigger = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(50));
+        cancellation_for_thread.store(true, Ordering::Release);
+    });
+
+    let output = run_shell_with_cancel(
+        command,
+        &root,
+        SandboxKind::Native,
+        Duration::from_secs(5),
+        Some(cancellation),
+    )
+    .unwrap();
+
+    trigger.join().unwrap();
+    assert!(output.cancelled);
+    assert!(output.text.contains("cancelled by user"));
+    remove_test_root(&root);
+}
+
+#[test]
 fn shell_preserves_utf8_from_workspace_files() {
     let root = test_root();
     fs::write(

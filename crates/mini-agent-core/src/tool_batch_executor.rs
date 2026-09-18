@@ -4,6 +4,7 @@ use mini_agent_protocol::ToolCall;
 use mini_agent_protocol::ToolExecutionContext;
 use mini_agent_protocol::ToolExecutionRequest;
 
+use crate::RunControl;
 use crate::SessionState;
 use crate::ToolRouter;
 
@@ -14,6 +15,7 @@ pub(super) fn execute_tool_batch<O: Observer>(
     max_output_bytes: usize,
     session: &mut SessionState,
     observer: &mut O,
+    control: &RunControl,
     context: Option<&ToolExecutionContext>,
 ) -> Vec<(String, serde_json::Value, String)> {
     let mut executed = Vec::with_capacity(calls.len());
@@ -24,7 +26,8 @@ pub(super) fn execute_tool_batch<O: Observer>(
             request.with_context(context.clone())
         } else {
             request
-        };
+        }
+        .with_cancellation(control.cancellation_token());
         let outcome = tools.execute_outcome(&request);
         let is_error = outcome.status.is_error();
         let content = outcome.content.clone();

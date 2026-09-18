@@ -31,6 +31,18 @@ startup.
 mini-agent intentionally uses `pwsh`, not Windows PowerShell. Install
 PowerShell 7 and confirm `pwsh` is on `PATH` before using shell tools.
 
+## A long shell command makes steer or stop appear stuck
+
+The shell tool runs in the App Server's blocking tool boundary. Current
+Windows native runs attach the PowerShell process tree to a Job Object. A
+`turn/interrupt` request first publishes a host-local cancellation token, so a
+running shell is terminated before the normal worker command is consumed. The
+stop request should therefore settle before the shell's 120-second deadline;
+if it does not, inspect the runtime status and App Server stderr for a process
+termination failure. Steering an active Turn is admitted directly into the
+bounded control queue and may be acknowledged before the current shell
+checkpoint returns.
+
 ## A noninteractive tool call is denied
 
 `run` cannot stop a script to obtain approval when stdin is not a terminal.

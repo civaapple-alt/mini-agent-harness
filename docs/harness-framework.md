@@ -31,8 +31,9 @@ VS Code 的经验是设计假设和验证方法，不是 mini-agent-harness 的�
 ```
 
 ```text
-mini-agent-harness = model + bounded tool loop
-Codex native        = durable Session/Task/Turn/Item + tool/event runtime
+mini-agent runtime = thin Agent Loop + thick Control Plane
+Web Studio         = long-lived control and observation surface
+Codex native       = durable Session/Task/Turn/Item + tool/event runtime
 ```
 
 当前 mini-codex 的分层边界：
@@ -105,11 +106,14 @@ Turn 内继续下一次 sampling。两者不是正确性高低差异，而是边
 | 可验证性 | bounded 输入/输出、被动事件和本地 mock 场景便于隔离验证 | 更接近生产工作流，需要更大的跨平台、真实 provider 和长期运行证据 |
 | 主要风险 | 追求小而漏掉真实 provider、平台和安全策略证据 | 功能面扩大后增加隐式状态、异步竞态和上下文成本 |
 
-因此，mini 不复制原生 Codex 的全部对象或工具生态；当前主线是
-`mini-agent-core → Host → App Server → Python SDK → FastAPI Gateway → Web Studio`，
+因此，mini 不复制原生 Codex 的全部对象或工具生态。当前交付重点是把
+`mini-agent-core → Host → App Server → Python SDK → FastAPI Gateway → Web Studio`
+做成一条可观察、可控制、可恢复的运行链路：Core 保持薄，Control Plane 承担
+Session、审批、恢复和并发，Web Studio 提供长时间运行任务的控制与观察入口。
+时间上延展、结构上并发是这条路线的基础设施，而不是 Web Studio 之外的附加能力。
 用 bounded scenario 验证每次变更对 Turn、Tool、Context、State 和 Boundary 的影响。
-Rust REPL 与 Python TUI 只用于验证 App Server 边界，不承担 Web Studio 的控制平面。
-只有真实场景和证据成立，才扩大 provider、retry 或 Docker policy。
+Rust REPL 与 Python TUI 只用于验证 App Server 边界。只有真实场景和证据成立，才
+扩大 provider、retry 或 Docker policy。
 
 ## 维护规则
 

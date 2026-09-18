@@ -9,6 +9,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   bounded target paths already available in the protocol. `apply_patch` can
   therefore identify added, modified, and deleted files before approval while
   preserving `action` as the authorization identity.
+- Long-running shell tools now receive the App Server's host-local cancellation
+  token. Windows process trees are terminated through the sandbox Job Object,
+  and active steer/interrupt requests no longer wait for the blocking shell
+  worker to reach its next checkpoint.
 - Add an independent Child Session control seam. Child Sessions use exact
   persisted checkpoints and their own runtime, history, approvals, and replay;
   Core remains a single-Thread Turn loop.

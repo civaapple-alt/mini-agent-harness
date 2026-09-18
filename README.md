@@ -1,18 +1,38 @@
 # Mini Agent Harness
 
-Mini Agent Harness 是一个用于研究 coding-agent harness 行为的原生实现。它
-观察模型、工具、上下文、限制、失败、控制和持久化如何组成一次可验证的
-Agent 运行；命令行程序名为 `mini-agent`。
+Mini Agent Harness 是一个面向交付的 Agent 运行系统。它以“薄 Agent Loop、厚
+Control Plane”为核心：Core 负责模型和工具契约、有界执行循环、限制、停止分类
+和观察事件；Host、Capabilities、App Server 负责准入、审批、沙箱、副作用、
+Thread/Turn/Session、恢复、并发和持久化。
 
-它刻意保持小而明确，不是 Codex、Pi、fx 或 Qi 的功能复制品，也不承诺功能
-数量上的 parity。
+`mini-agent` 是命令行入口，Web Studio 是面向长时间运行任务的控制和观察工作台。
+两者通过同一条 App Server 运行链路访问同一套 Thread、Turn、Session 和运行状态。
+CLI 适合本地运行、脚本和底层边界验证；Web Studio 适合项目管理、审批、状态观察、
+停止与继续、Session 恢复、Child Session 和 Notebook。
+
+项目的目标是把一次 Agent 运行做成可启动、可观察、可控制、可暂停、可恢复、可审计
+和可验证的系统。它不以复制 Codex、Pi、fx 或 Qi 的全部功能为目标，也不以功能数量
+作为成熟度标准。
 
 ```text
-agent = model + harness
+agent runtime = thin Agent Loop + thick Control Plane
 ```
 
-模型提出回答或动作，harness 负责上下文、工具、执行循环、限制、失败分类和
-观察事件。
+模型提出回答或动作，Agent Loop 负责有界执行，Control Plane 负责把执行放进可
+审批、可观察、可恢复和可持久化的运行生命周期。
+
+## 当前推进方向
+
+项目沿两条相互依赖的路线推进：
+
+1. **薄 Agent Loop、厚 Control Plane**：保持 Core 的责任窄而稳定，把执行准入、
+   审批、沙箱、Session、恢复、并发和对外状态投影放在 Core 之外的控制平面。
+2. **时间上延展、结构上并发**：通过独立 Session、Child Session、operation、
+   notebook 和 replay，让任务能够跨越更长时间运行，并在明确边界内并发。
+
+第二条路线为第一条路线提供长时间运行所需的状态、恢复和并发结构。相关架构决策
+见[薄 Agent Loop、厚 Control Plane](.agents/notes/implemented/architecture/2026-09-08-thin-loop-thick-control-plane-system-engineering.zh.md)
+和[时间上延展、结构上并发](.agents/notes/implemented/architecture/2026-09-17-time-extended-child-session-and-notebook.zh.md)。
 
 ## 安装与第一次运行
 
@@ -73,8 +93,9 @@ Experimental edges: Rust REPL / Python TUI → App Server
 | CLI | 终端输入、输出、批准交互和实验性本地客户端入口 |
 
 主线是 `mini-agent-core → Host → App Server → Python SDK → FastAPI Gateway →
-Web Studio`。Web Studio 是用户主流程；Rust REPL 和 Python TUI 只是实验性边界，
-消费 App Server 的 Thread/Turn/Item 契约，不另建执行循环。
+Web Studio`。`mini-agent` CLI 和 Web Studio 都消费 App Server 的 Thread/Turn/Item
+契约，不另建执行循环。Web Studio 是长时间运行任务的默认控制和观察界面；Rust REPL
+和 Python TUI 仍是用于验证 App Server 边界的实验性客户端。
 
 默认 model-visible Builtin 工具只有 `read_file`、`apply_patch`、`shell` 和
 `read_image`；MCP 与 `web_fetch` 是显式扩展。文件修改统一由 `apply_patch`

@@ -1,5 +1,6 @@
 use crate::AppServerError;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use tokio::sync::oneshot;
@@ -141,7 +142,12 @@ impl ActionReceipt {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct ActionSequencer {
+    state: Arc<Mutex<ActionSequencerState>>,
+}
+
+struct ActionSequencerState {
     next_id: u64,
     next_sequence: u64,
 }
@@ -149,28 +155,43 @@ pub(super) struct ActionSequencer {
 impl ActionSequencer {
     pub(super) fn new() -> Self {
         Self {
-            next_id: 1,
-            next_sequence: 1,
+            state: Arc::new(Mutex::new(ActionSequencerState {
+                next_id: 1,
+                next_sequence: 1,
+            })),
         }
     }
 
     /// Assigns identity and server-admission order to the next queued command.
     pub(super) fn admit<T>(
-        &mut self,
+        &self,
         command: T,
         base_revision: RuntimeRevision,
         runtime_revision: Arc<AtomicU64>,
     ) -> ActionEnvelope<T> {
+        let mut state = self.state.lock().unwrap();
         let envelope = ActionEnvelope {
-            id: ActionId(self.next_id),
-            sequence: ActionSequence(self.next_sequence),
+            id: ActionId(state.next_id),
+            sequence: ActionSequence(state.next_sequence),
             base_revision,
             runtime_revision,
             command,
         };
-        self.next_id = self.next_id.saturating_add(1);
-        self.next_sequence = self.next_sequence.saturating_add(1);
+        state.next_id = state.next_id.saturating_add(1);
+        state.next_sequence = state.next_sequence.saturating_add(1);
         envelope
+    }
+
+    pub(super) fn receipt(&self, runtime_revision: Arc<AtomicU64>) -> ActionReceipt {
+        let mut state = self.state.lock().unwrap();
+        let receipt = ActionReceipt {
+            id: ActionId(state.next_id),
+            sequence: ActionSequence(state.next_sequence),
+            runtime_revision,
+        };
+        state.next_id = state.next_id.saturating_add(1);
+        state.next_sequence = state.next_sequence.saturating_add(1);
+        receipt
     }
 }
 
@@ -183,7 +204,7 @@ mod tests {
 
     #[test]
     fn assigns_independent_action_identity_and_admission_order() {
-        let mut sequencer = ActionSequencer::new();
+        let sequencer = ActionSequencer::new();
         let runtime_revision = Arc::new(AtomicU64::new(0));
         let first = sequencer.admit(
             "first",

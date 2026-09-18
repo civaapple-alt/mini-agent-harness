@@ -529,6 +529,7 @@ impl<M: Model> Harness<M> {
                 self.config.max_tool_output_bytes,
                 &mut self.session,
                 observer,
+                control,
                 tool_context.as_ref(),
             );
 
