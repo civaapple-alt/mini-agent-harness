@@ -3,9 +3,12 @@
 Status: current cross-repository integration guide
 
 Scope: `mini-agent-core` → Host → App Server → Python SDK → FastAPI Gateway →
-Web Studio. This document describes the boundary between the two repositories
-at the current protocol version 1; it does not replace the App Server wire
-contract or the Web repository's local implementation README files.
+Web Studio. This document describes the control and observation boundary between
+the two repositories at the current protocol version 1. Web Studio is the
+user-facing surface for project and long-lived Session work; it does not own a
+second Agent loop or a second runtime authority. This document does not replace
+the App Server wire contract or the Web repository's local implementation README
+files.
 
 ## Runtime topology and ownership
 

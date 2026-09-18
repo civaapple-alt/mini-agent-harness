@@ -1,7 +1,9 @@
 # CLI 使用指南
 
-本文件只描述 `mini-agent` 命令行的安装、运行参数和本地 Session 操作。协议
-与运行时语义见本目录的 App Server 文档。
+本文件只描述 `mini-agent` 命令行的安装、运行参数和本地 Session 操作。CLI
+是 Mini Agent 运行系统的本地、脚本和边界验证入口；长时间运行任务的项目、
+审批、恢复和 Web 控制通过 Web Studio 使用同一条 App Server 运行链路。协议与
+运行时语义见本目录的 App Server 文档。
 
 ## 安装
 

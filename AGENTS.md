@@ -2,8 +2,16 @@
 
 ## Purpose
 
-Mini Agent Harness studies agent harness behavior. It is not a smaller copy of
-every feature in Codex, Pi, fx, or Qi.
+Mini Agent Harness builds a deliverable Agent runtime. Its central architecture
+is a thin Agent Loop with a thick Control Plane: Core keeps the portable,
+bounded execution contract, while Host, Capabilities, and App Server own
+admission, side effects, control, recovery, concurrency, and persistence.
+
+The `mini-agent` CLI and Web Studio are clients of the same App Server runtime.
+Long-lived Session, Child Session, operation, notebook, and replay behavior
+must stay on the control-plane side of the boundary. The project is not a
+smaller copy of every feature in Codex, Pi, fx, or Qi; it is evaluated by
+observable, recoverable, and verifiable runtime behavior.
 
 ## Documentation topology
 

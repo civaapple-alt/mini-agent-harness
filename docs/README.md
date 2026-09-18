@@ -1,18 +1,20 @@
 # Documentation
 
-This directory contains the current project documentation. Use this file as
-the entry point; each document is a standalone topic document and is not an
-index of other Markdown files.
+This directory contains the current documentation for the deliverable Mini
+Agent runtime. It covers the thin Agent Loop, the thick Control Plane, and the
+long-lived Session and Web Studio runtime path. Use this file as the entry
+point; each document is a standalone topic document and is not an index of
+other Markdown files.
 
 ## Current architecture and contracts
 
 | Document | Covers |
 | --- | --- |
-| [Harness framework](harness-framework.md) | Harness responsibilities, Core/Host/Capabilities/App Server layers, and the mini/Codex comparison. |
+| [Harness framework](harness-framework.md) | Thin Agent Loop, thick Control Plane, Core/Host/Capabilities/App Server layers, and the mini/Codex comparison. |
 | [Harness boundaries](harness-boundaries.md) | Ownership boundaries, change admission, loop control, approval, sandbox, and deferred policy decisions. |
 | [Harness tool surface](harness-tool-surface.md) | The four default Builtin tools, paged `read_file`, `apply_patch`, and extension rules. |
 | [App Server](app-server.md) | JSON-RPC transport, Thread/Turn/ThreadItem operations, settings, Goal control, events, approval, and runtime ordering. |
-| [Studio integration](studio-integration.md) | The Core → App Server → SDK → FastAPI → Web Studio runtime path, Project/workspace binding, Session switching, and approval ownership. |
+| [Studio integration](studio-integration.md) | The Core → App Server → SDK → FastAPI → Web Studio control and observation path, Project/workspace binding, Session switching, and approval ownership. |
 | [World state](world-state.md) | Bounded environment snapshots, durable items, checkpoints, and resume authority. |
 | [Harness evidence](harness-evidence.md) | Bounded scenarios, failure/timeout/retry coverage, and evidence gates for harness changes. |
 
