@@ -67,6 +67,12 @@ pub const METHOD_MCP_STATUS: &str = "mcp/status";
 pub const METHOD_MCP_RETRY: &str = "mcp/retry";
 pub const METHOD_RUNTIME_STATUS: &str = "runtime/status";
 pub const METHOD_RUNTIME_STATUS_UPDATED: &str = "runtime/status/updated";
+pub const METHOD_BACKGROUND_TASK_LIST: &str = "background-task/list";
+pub const METHOD_BACKGROUND_TASK_READ: &str = "background-task/read";
+pub const METHOD_BACKGROUND_TASK_LOGS: &str = "background-task/logs";
+pub const METHOD_BACKGROUND_TASK_STOP: &str = "background-task/stop";
+pub const METHOD_BACKGROUND_TASK_RESTART: &str = "background-task/restart";
+pub const METHOD_BACKGROUND_TASK_UPDATED: &str = "background-task/updated";
 pub const METHOD_CHECKPOINT_COMMITTED: &str = "checkpoint/committed";
 pub const METHOD_GOAL_VERIFICATION_STARTED: &str = "goal/verification_started";
 pub const METHOD_GOAL_VERIFICATION_COMPLETED: &str = "goal/verification_completed";
@@ -239,6 +245,60 @@ pub struct RuntimeStatusParams {
     pub thread_id: ThreadId,
 }
 
+/// A bounded snapshot of one locally managed background Shell process.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTask {
+    pub task_id: String,
+    pub owner_thread_id: ThreadId,
+    pub state: String,
+    pub command_summary: String,
+    pub command_hash: String,
+    pub working_directory: String,
+    pub process_id: Option<u32>,
+    pub started_at: u64,
+    pub stopped_at: Option<u64>,
+    pub exit_code: Option<i32>,
+    pub log_bytes: usize,
+    pub log_truncated: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTaskLogs {
+    pub task_id: String,
+    pub text: String,
+    pub bytes: usize,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTaskListParams {
+    pub thread_id: ThreadId,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTaskParams {
+    pub thread_id: ThreadId,
+    pub task_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTaskListResult {
+    pub data: Vec<BackgroundTask>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTaskUpdatedNotification {
+    pub thread_id: ThreadId,
+    pub task: BackgroundTask,
+    pub state_revision: u64,
+}
+
 /// A bounded workflow lifecycle record. The method name identifies the
 /// transition; optional fields carry only the correlation data needed to
 /// reconcile a live client with the canonical runtime.
@@ -393,6 +453,8 @@ pub struct ServerCapabilities {
     pub event_replay: bool,
     #[serde(default)]
     pub workflow_lifecycle_notifications: bool,
+    #[serde(default)]
+    pub background_tasks: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

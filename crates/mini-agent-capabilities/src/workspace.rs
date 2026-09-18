@@ -3,6 +3,8 @@ mod files;
 mod patch;
 mod shell;
 
+pub(crate) use shell::shell_command;
+
 use crate::result_store::ResultStore;
 use crate::sandbox::{ProcessSandbox, SandboxKind};
 use crate::security::{SecurityDecision, SecurityPolicy, SecurityPreset};
@@ -51,6 +53,29 @@ pub fn workspace_tools_with_read_roots_and_results(
     images: crate::image::ImageStore,
     results: ResultStore,
 ) -> Result<Vec<Box<dyn Tool>>, ToolError> {
+    workspace_tools_with_read_roots_results_and_background_shells(
+        root,
+        approval,
+        extra_read_roots,
+        extra_write_roots,
+        sandbox,
+        images,
+        results,
+        crate::background_shell::BackgroundShellManager::new(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn workspace_tools_with_read_roots_results_and_background_shells(
+    root: PathBuf,
+    approval: ApprovalController,
+    extra_read_roots: Vec<PathBuf>,
+    extra_write_roots: Vec<PathBuf>,
+    sandbox: SandboxKind,
+    images: crate::image::ImageStore,
+    results: ResultStore,
+    background_shells: crate::background_shell::BackgroundShellManager,
+) -> Result<Vec<Box<dyn Tool>>, ToolError> {
     workspace_tools_with_config(
         WorkspaceToolConfig {
             root,
@@ -60,6 +85,7 @@ pub fn workspace_tools_with_read_roots_and_results(
             skill_read_roots: Vec::new(),
             extra_write_roots,
             sandbox,
+            background_shells,
         },
         images,
         results,
@@ -74,6 +100,7 @@ pub(crate) struct WorkspaceToolConfig {
     pub(crate) skill_read_roots: Vec<PathBuf>,
     pub(crate) extra_write_roots: Vec<PathBuf>,
     pub(crate) sandbox: SandboxKind,
+    pub(crate) background_shells: crate::background_shell::BackgroundShellManager,
 }
 
 pub(crate) fn workspace_tools_with_config(
@@ -93,7 +120,11 @@ pub(crate) fn workspace_tools_with_config(
     let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(files::ReadFile(Arc::clone(&workspace))),
         Box::new(patch::ApplyPatch(Arc::clone(&workspace))),
-        Box::new(shell::Shell(Arc::clone(&workspace), results.clone())),
+        Box::new(shell::Shell(
+            Arc::clone(&workspace),
+            results.clone(),
+            config.background_shells,
+        )),
     ];
     tools.extend(crate::web::web_tools(results.clone()));
     tools.push(Box::new(files::ReadImage {

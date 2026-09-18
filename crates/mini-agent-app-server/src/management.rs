@@ -10,6 +10,7 @@ use crate::status::RuntimeStatusHandle;
 use crate::thread_settings::ThreadSettingsService;
 use crate::worker::Command;
 use crate::{AppServer, AppServerError, McpRetryResult, RuntimeSessionInfo, RuntimeTurnResult};
+use mini_agent_capabilities::BackgroundShellManager;
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
 use mini_agent_capabilities::{
     ApprovalController, ApprovalPolicy, McpServerConfig, OpenedSession, SecurityPreset,
@@ -31,6 +32,7 @@ pub(crate) struct RuntimeActorState {
     pub(crate) settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
     pub(crate) notifications: broadcast::Sender<RuntimeNotification>,
     pub(crate) status: RuntimeStatusHandle,
+    pub(crate) background_shells: BackgroundShellManager,
     revision: crate::action::RuntimeRevision,
 }
 
@@ -57,6 +59,7 @@ pub(crate) struct RuntimeManagementState {
     local_checkpoint_seq: u64,
     pub(crate) base_harness_config: HarnessConfig,
     pub(crate) skill_discovery: Option<mini_agent_capabilities::Discovery>,
+    pub(crate) background_shells: BackgroundShellManager,
 }
 
 struct McpRuntimeState {
@@ -163,6 +166,33 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         base_harness_config: HarnessConfig,
         skill_discovery: Option<mini_agent_capabilities::Discovery>,
     ) -> Self {
+        Self::new_with_harness_config_and_skills_and_background_shells(
+            server,
+            session,
+            world,
+            enabled_mcp_servers,
+            mcp_tool_count,
+            retry_mcp_servers,
+            approval,
+            base_harness_config,
+            skill_discovery,
+            BackgroundShellManager::new(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_harness_config_and_skills_and_background_shells(
+        server: AppServer<M>,
+        session: Option<OpenedSession>,
+        world: WorldState,
+        enabled_mcp_servers: Vec<String>,
+        mcp_tool_count: usize,
+        retry_mcp_servers: Vec<McpServerConfig>,
+        approval: ApprovalController,
+        base_harness_config: HarnessConfig,
+        skill_discovery: Option<mini_agent_capabilities::Discovery>,
+        background_shells: BackgroundShellManager,
+    ) -> Self {
         let active_thread_id = server.thread_id().clone();
         let local_checkpoint_seq = 0;
         let (goal_notifications, _) = broadcast::channel(64);
@@ -186,6 +216,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 local_checkpoint_seq,
                 base_harness_config,
                 skill_discovery,
+                background_shells,
             }),
             approval,
             goal_notifications,
@@ -235,6 +266,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             Some(notifications.clone()),
         );
         let commands = server.command_sender();
+        let background_shells = management.background_shells.clone();
         server
             .install_runtime_state(RuntimeActorState {
                 management,
@@ -247,6 +279,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 settings_notifications: settings_notifications.clone(),
                 notifications: notifications.clone(),
                 status: status.clone(),
+                background_shells,
                 revision: crate::action::RuntimeRevision::default(),
             })
             .map_err(|error| error.to_string())?;
@@ -398,6 +431,52 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
+    pub(crate) async fn background_task_list_action(
+        &self,
+    ) -> Result<ActionResponse<Vec<mini_agent_app_server_protocol::BackgroundTask>>, ActionFailure>
+    {
+        self.client
+            .request_action(|reply| RuntimeCommand::BackgroundTaskList { reply })
+            .await
+    }
+
+    pub(crate) async fn background_task_read_action(
+        &self,
+        task_id: String,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::BackgroundTask>, ActionFailure> {
+        self.client
+            .request_action(|reply| RuntimeCommand::BackgroundTaskRead { task_id, reply })
+            .await
+    }
+
+    pub(crate) async fn background_task_logs_action(
+        &self,
+        task_id: String,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::BackgroundTaskLogs>, ActionFailure>
+    {
+        self.client
+            .request_action(|reply| RuntimeCommand::BackgroundTaskLogs { task_id, reply })
+            .await
+    }
+
+    pub(crate) async fn background_task_stop_action(
+        &self,
+        task_id: String,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::BackgroundTask>, ActionFailure> {
+        self.client
+            .request_action(|reply| RuntimeCommand::BackgroundTaskStop { task_id, reply })
+            .await
+    }
+
+    pub(crate) async fn background_task_restart_action(
+        &self,
+        task_id: String,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::BackgroundTask>, ActionFailure> {
+        self.client
+            .request_action(|reply| RuntimeCommand::BackgroundTaskRestart { task_id, reply })
+            .await
+    }
+
     pub(crate) async fn retry_mcp_action(
         &self,
     ) -> Result<ActionResponse<McpRetryResult>, ActionFailure> {
@@ -432,6 +511,36 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .map(ActionResponse::into_value)
             .map_err(ActionFailure::into_error)
             .map_err(|error| error.to_string())
+    }
+}
+
+pub(crate) fn project_background_task(
+    task: mini_agent_capabilities::BackgroundShellTask,
+) -> mini_agent_app_server_protocol::BackgroundTask {
+    mini_agent_app_server_protocol::BackgroundTask {
+        task_id: task.task_id,
+        owner_thread_id: ThreadId::new(task.owner_thread_id),
+        state: task.state,
+        command_summary: task.command_summary,
+        command_hash: task.command_hash,
+        working_directory: task.working_directory,
+        process_id: task.process_id,
+        started_at: task.started_at,
+        stopped_at: task.stopped_at,
+        exit_code: task.exit_code,
+        log_bytes: task.log_bytes,
+        log_truncated: task.log_truncated,
+    }
+}
+
+pub(crate) fn project_background_logs(
+    logs: mini_agent_capabilities::BackgroundShellLogs,
+) -> mini_agent_app_server_protocol::BackgroundTaskLogs {
+    mini_agent_app_server_protocol::BackgroundTaskLogs {
+        task_id: logs.task_id,
+        text: logs.text,
+        bytes: logs.bytes,
+        truncated: logs.truncated,
     }
 }
 

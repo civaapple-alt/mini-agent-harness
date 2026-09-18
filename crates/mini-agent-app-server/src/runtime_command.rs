@@ -74,6 +74,25 @@ pub(super) enum RuntimeCommand {
     McpStatus {
         reply: oneshot::Sender<ActionResult<crate::management::McpRuntimeSnapshot>>,
     },
+    BackgroundTaskList {
+        reply: oneshot::Sender<ActionResult<Vec<mini_agent_app_server_protocol::BackgroundTask>>>,
+    },
+    BackgroundTaskRead {
+        task_id: String,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::BackgroundTask>>,
+    },
+    BackgroundTaskLogs {
+        task_id: String,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::BackgroundTaskLogs>>,
+    },
+    BackgroundTaskStop {
+        task_id: String,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::BackgroundTask>>,
+    },
+    BackgroundTaskRestart {
+        task_id: String,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::BackgroundTask>>,
+    },
     RetryMcp {
         approval: ApprovalController,
         reply: oneshot::Sender<ActionResult<crate::McpRetryResult>>,
@@ -119,6 +138,8 @@ impl RuntimeCommand {
                 | Self::PrepareSessionFork { .. }
                 | Self::WriteNotebook { .. }
                 | Self::ForgetNotebook { .. }
+                | Self::BackgroundTaskStop { .. }
+                | Self::BackgroundTaskRestart { .. }
         )
     }
 }

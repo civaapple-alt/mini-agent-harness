@@ -5,9 +5,10 @@ use mini_agent_app_server_protocol::{
     SESSION_FORK_CONFLICT_CODE,
 };
 use mini_agent_capabilities::{
-    ApprovalController, ApprovalPolicy, ImageStore, ResultStore, SandboxKind, SecurityPolicy,
-    SecurityPreset, SessionRequest as SessionStoreRequest, SessionStore,
-    workspace_tools_with_read_roots_and_results,
+    ApprovalController, ApprovalPolicy, BackgroundShellManager, ImageStore, ResultStore,
+    SandboxKind, SecurityPolicy, SecurityPreset, SessionRequest as SessionStoreRequest,
+    SessionStore, workspace_tools_with_read_roots_and_results,
+    workspace_tools_with_read_roots_results_and_background_shells,
 };
 use mini_agent_core::{Harness, HarnessConfig, Thread, ToolRouter};
 use mini_agent_protocol::{
@@ -104,6 +105,150 @@ async fn approval_request_ids_remain_unique_across_brokers() {
     }
     first_task.await.unwrap().unwrap();
     second_task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn exposes_empty_background_shell_task_list_and_capability() {
+    let (mut connection, root) = managed_connection("background-shell-list");
+    let initialize = connection
+        .handle_request(initialize_request(1, "background-shell-test"))
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(initialize["capabilities"]["backgroundTasks"], true);
+    let result = rpc_call(
+        &mut connection,
+        2,
+        METHOD_BACKGROUND_TASK_LIST,
+        serde_json::json!({"threadId": "thread-1"}),
+    )
+    .await;
+    assert_eq!(result["value"]["data"], serde_json::json!([]));
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
+    let root = rpc_root("background-shell-lifecycle");
+    let background_shells = BackgroundShellManager::new();
+    let approval = ApprovalController::with_policy_and_callback(
+        ApprovalPolicy::Automatic,
+        SecurityPolicy::for_preset(SecurityPreset::Default),
+        |_| {
+            Ok(mini_agent_protocol::ToolApprovalResolution {
+                outcome: mini_agent_protocol::ApprovalOutcome::Approved,
+                grant_scope: mini_agent_protocol::ActionGrantScope::Once,
+                reason: None,
+            })
+        },
+    );
+    let tools = workspace_tools_with_read_roots_results_and_background_shells(
+        root.clone(),
+        approval.clone(),
+        Vec::new(),
+        Vec::new(),
+        SandboxKind::Native,
+        ImageStore::memory_only(),
+        ResultStore::default(),
+        background_shells.clone(),
+    )
+    .unwrap();
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(
+            ThreadId::new("initial"),
+            Harness::new(
+                ScenarioModel::BackgroundShell,
+                ToolRouter::with_executor(
+                    tools,
+                    Arc::new(mini_agent_host::ToolOrchestrator::new(approval.clone())),
+                ),
+                HarnessConfig::default(),
+            ),
+        ),
+    );
+    let management =
+        RuntimeManagementService::new_with_harness_config_and_skills_and_background_shells(
+            server.clone(),
+            None,
+            mini_agent_host::WorldState::detect_with_roots(
+                &root,
+                Vec::new(),
+                SecurityPreset::Default,
+                ApprovalPolicy::Automatic,
+                SandboxKind::Native,
+            ),
+            Vec::new(),
+            0,
+            Vec::new(),
+            approval,
+            HarnessConfig::default(),
+            None,
+            background_shells,
+        );
+    let mut connection = AppServerConnection::new(server).with_runtime_services(
+        RuntimeServices::new(
+            management,
+            ThreadSettingsService::new(),
+            ThreadGoalRequestProcessor::new(
+                root.clone(),
+                crate::goal_service::GoalLimits::default(),
+            ),
+        )
+        .unwrap(),
+    );
+    initialize_connection(&mut connection, "background-shell-lifecycle").await;
+    let started = start_turn(&mut connection, 2, "start a background shell").await;
+    assert_eq!(started["value"]["turn_id"], "turn-1");
+    wait_for_turn_finished(&mut connection).await;
+
+    let listed = rpc_call(
+        &mut connection,
+        3,
+        METHOD_BACKGROUND_TASK_LIST,
+        serde_json::json!({"threadId": "thread-1"}),
+    )
+    .await;
+    assert_eq!(listed["value"]["data"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["value"]["data"][0]["taskId"], "scenario-task");
+    assert!(matches!(
+        listed["value"]["data"][0]["state"].as_str(),
+        Some("starting" | "running")
+    ));
+
+    let restarted = rpc_call(
+        &mut connection,
+        4,
+        METHOD_BACKGROUND_TASK_RESTART,
+        serde_json::json!({"threadId": "thread-1", "taskId": "scenario-task"}),
+    )
+    .await;
+    assert!(matches!(
+        restarted["value"]["state"].as_str(),
+        Some("starting" | "running")
+    ));
+
+    let stopped = rpc_call(
+        &mut connection,
+        5,
+        METHOD_BACKGROUND_TASK_STOP,
+        serde_json::json!({"threadId": "thread-1", "taskId": "scenario-task"}),
+    )
+    .await;
+    assert_eq!(stopped["value"]["state"], "stopped");
+    let logs = rpc_call(
+        &mut connection,
+        6,
+        METHOD_BACKGROUND_TASK_LOGS,
+        serde_json::json!({"threadId": "thread-1", "taskId": "scenario-task"}),
+    )
+    .await;
+    assert!(logs["value"].get("text").is_some());
+
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 async fn initialize_connection<M: Model + Send + 'static>(
@@ -217,6 +362,7 @@ fn rpc_root(name: &str) -> std::path::PathBuf {
 
 enum ScenarioModel {
     ShellApproval,
+    BackgroundShell,
     StepLimit,
     Budget,
     Counting(Arc<AtomicUsize>),
@@ -232,6 +378,40 @@ impl Model for ScenarioModel {
         _events: &'a mut (dyn ModelEventSink + Send),
     ) -> Result<ModelResponse, Self::Error> {
         match self {
+            Self::BackgroundShell => {
+                if request.messages.iter().any(|message| {
+                    matches!(
+                        message,
+                        Message::Tool {
+                            name,
+                            outcome: Some(ToolExecutionStatus::Completed),
+                            ..
+                        } if name == "shell"
+                    )
+                }) {
+                    return Ok(ModelResponse {
+                        reasoning: String::new(),
+                        text: "background shell started".to_string(),
+                        tool_calls: Vec::new(),
+                        usage: None,
+                    });
+                }
+                Ok(ModelResponse {
+                    reasoning: String::new(),
+                    text: String::new(),
+                    tool_calls: vec![ToolCall {
+                        id: "background-shell-call".to_string(),
+                        name: "shell".to_string(),
+                        arguments: serde_json::json!({
+                            "mode": "background",
+                            "action": "start",
+                            "task_id": "scenario-task",
+                            "command": background_shell_command(),
+                        }),
+                    }],
+                    usage: None,
+                })
+            }
             Self::ShellApproval => {
                 if request.messages.iter().any(|message| {
                     matches!(
@@ -311,6 +491,17 @@ fn shell_approval_command() -> &'static str {
     #[cfg(not(windows))]
     {
         "printf shell-approved"
+    }
+}
+
+fn background_shell_command() -> &'static str {
+    #[cfg(windows)]
+    {
+        "Write-Output background-started; Start-Sleep -Seconds 30"
+    }
+    #[cfg(not(windows))]
+    {
+        "printf background-started; sleep 30"
     }
 }
 

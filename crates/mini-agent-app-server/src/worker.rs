@@ -498,12 +498,17 @@ pub(super) async fn worker_loop<M>(
 ) where
     M: Model + Send + 'static,
 {
-    let mut runtime = None;
+    let mut runtime: Option<RuntimeActorState> = None;
     let mut threads = ThreadManager::new(threads, thread_ids.clone(), factory.clone());
     let mut settled_turns = HashMap::new();
     let mut deferred_goal_verifications = VecDeque::new();
     while let Some(command) = commands.recv().await {
         if let Command::Shutdown { reply } = command {
+            if let Some(state) = runtime.as_ref()
+                && let Err(error) = state.background_shells.close_all()
+            {
+                eprintln!("warning: failed to stop background Shell tasks: {error}");
+            }
             let _ = reply.send(Ok(()));
             break;
         }
@@ -1382,7 +1387,8 @@ pub(super) async fn worker_loop<M>(
                 respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);
             }
             Command::CloseThread { thread_id, reply } => {
-                let result = threads
+                let active_thread_id = thread_id.clone();
+                let mut result = threads
                     .get_mut(thread_id.as_str())
                     .ok_or(AppServerError::ThreadNotFound(thread_id))
                     .and_then(|thread| {
@@ -1390,6 +1396,17 @@ pub(super) async fn worker_loop<M>(
                             .close()
                             .map_err(|error| AppServerError::Checkpoint(error.to_string()))
                     });
+                if result.is_ok()
+                    && runtime
+                        .as_ref()
+                        .is_some_and(|state| state.management.thread_id() == active_thread_id)
+                    && let Some(state) = runtime.as_ref()
+                    && let Err(error) = state.background_shells.close_all()
+                {
+                    result = Err(AppServerError::Checkpoint(format!(
+                        "failed to stop background Shell tasks: {error}"
+                    )));
+                }
                 respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);
             }
             Command::ReadTurn { turn_id, reply } => {

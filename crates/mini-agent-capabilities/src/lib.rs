@@ -4,6 +4,7 @@
 //! selects providers through bounded identifiers and remains responsible for
 //! runtime composition and orchestration.
 
+mod background_shell;
 mod blocking;
 mod child_tasks;
 mod image;
@@ -62,6 +63,7 @@ pub use session::resolve_session_file;
 
 // Host/App Server composition and embedding seams. These exports assemble
 // concrete providers without exposing their internal wire or process logic.
+pub use background_shell::{BackgroundShellLogs, BackgroundShellManager, BackgroundShellTask};
 pub use child_tasks::child_task_tools;
 pub use image::FileUploader;
 pub use image::ImageStore;
@@ -96,7 +98,10 @@ pub use skills::discover_with_builtin_root;
 pub use workspace::ApprovalController;
 pub use workspace::ApprovalFailure;
 pub use workspace::MAX_SKILL_READ_BYTES;
-pub use workspace::workspace_tools_with_read_roots_and_results;
+pub use workspace::{
+    workspace_tools_with_read_roots_and_results,
+    workspace_tools_with_read_roots_results_and_background_shells,
+};
 
 /// Stable identifier for the built-in OpenAI-compatible model provider.
 pub const OPENAI_MODEL_PROVIDER: &str = "openai";

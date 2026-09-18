@@ -1,3 +1,4 @@
+use crate::BackgroundShellManager;
 use crate::ImageStore;
 use crate::SandboxKind;
 use crate::result_store::ResultStore;
@@ -48,6 +49,7 @@ pub struct ToolBuildRequest {
     pub sandbox: SandboxKind,
     pub images: ImageStore,
     pub results: ResultStore,
+    pub background_shells: BackgroundShellManager,
 }
 
 /// A host-embedded tool provider.
@@ -104,6 +106,7 @@ impl ToolProvider for BuiltinToolProvider {
                 skill_read_roots: request.skill_read_roots,
                 extra_write_roots: request.extra_write_roots,
                 sandbox: request.sandbox,
+                background_shells: request.background_shells,
             },
             request.images,
             request.results,

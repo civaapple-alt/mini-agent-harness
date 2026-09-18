@@ -13,6 +13,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   token. Windows process trees are terminated through the sandbox Job Object,
   and active steer/interrupt requests no longer wait for the blocking shell
   worker to reach its next checkpoint.
+- Add explicit background Shell mode for local processes that must span Turns.
+  App Server owns bounded task snapshots and process-group cleanup; Gateway and
+  Web Studio expose read/log/stop/restart controls. Remote waits such as GitHub
+  Actions remain a separate future operation type.
 - Add an independent Child Session control seam. Child Sessions use exact
   persisted checkpoints and their own runtime, history, approvals, and replay;
   Core remains a single-Thread Turn loop.

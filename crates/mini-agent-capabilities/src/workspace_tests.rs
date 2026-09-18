@@ -1,4 +1,5 @@
 use super::*;
+use crate::BackgroundShellManager;
 use crate::test_support::{approval_controller, remove_test_root, test_root};
 use mini_agent_protocol::{
     ApprovalOutcome, ApprovalPolicy, ThreadId, ToolExecutionContext, ToolExecutionStatus, TurnId,
@@ -302,7 +303,11 @@ fn trusted_policy_directly_admits_non_destructive_patches_but_not_deletes() {
         other => panic!("expected delete approval, got {other:?}"),
     }
 
-    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+    let shell = Shell(
+        Arc::clone(&workspace),
+        ResultStore::default(),
+        BackgroundShellManager::new(),
+    );
     let high_risk = ToolExecutionRequest::new(
         "trusted-shell",
         "shell",
@@ -323,7 +328,11 @@ fn trusted_policy_auto_approves_ordinary_shell_commands() {
         panic!("ordinary trusted shell command should not request approval")
     });
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
-    let shell = Shell(workspace, ResultStore::default());
+    let shell = Shell(
+        workspace,
+        ResultStore::default(),
+        BackgroundShellManager::new(),
+    );
     let command = if cfg!(windows) {
         "Write-Output trusted-shell"
     } else {
@@ -454,7 +463,11 @@ fn shell_denial_is_explicit_before_sandbox_execution() {
         Vec::new(),
         SandboxKind::Docker,
     );
-    let shell = Shell(workspace, ResultStore::default());
+    let shell = Shell(
+        workspace,
+        ResultStore::default(),
+        BackgroundShellManager::new(),
+    );
 
     let outcome = shell.execute_outcome(&json!({"command": &command}));
 
@@ -776,7 +789,11 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
         .unwrap();
     assert!(fs::read_to_string(&plan).unwrap().contains("- add restore"));
 
-    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+    let shell = Shell(
+        Arc::clone(&workspace),
+        ResultStore::default(),
+        BackgroundShellManager::new(),
+    );
     let marker = root.join("should-not-run.txt");
     let marker_text = marker.to_string_lossy();
     let command = if cfg!(windows) {
@@ -801,7 +818,11 @@ fn plan_mode_routes_shell_commands_to_approval_admission() {
     let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
     approval.set_living_plan(Some(plan));
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
-    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+    let shell = Shell(
+        Arc::clone(&workspace),
+        ResultStore::default(),
+        BackgroundShellManager::new(),
+    );
 
     let request = ToolExecutionRequest::new(
         "plan-scratch",
@@ -839,7 +860,11 @@ fn plan_mode_allows_read_only_shell_inspection() {
     let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
     approval.set_living_plan(Some(plan));
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
-    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+    let shell = Shell(
+        Arc::clone(&workspace),
+        ResultStore::default(),
+        BackgroundShellManager::new(),
+    );
     let command = if cfg!(windows) {
         "Get-ChildItem -Force | Select-Object Name | Format-Table -AutoSize"
     } else {
@@ -874,7 +899,11 @@ fn plan_mode_routes_shell_mutations_through_approval_policy() {
     let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
     approval.set_living_plan(Some(plan));
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
-    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+    let shell = Shell(
+        Arc::clone(&workspace),
+        ResultStore::default(),
+        BackgroundShellManager::new(),
+    );
     let marker = root.join("approved-by-policy.txt");
     let marker_text = marker.to_string_lossy();
     let command = if cfg!(windows) {
@@ -903,7 +932,11 @@ fn automatic_shell_admission_requires_workspace_bounded_paths() {
         panic!("bounded read-only shell inspection should not request approval")
     });
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
-    let shell = Shell(Arc::clone(&workspace), ResultStore::default());
+    let shell = Shell(
+        Arc::clone(&workspace),
+        ResultStore::default(),
+        BackgroundShellManager::new(),
+    );
 
     let inside = if cfg!(windows) {
         format!(
@@ -1119,7 +1152,7 @@ fn large_shell_output_is_retained_as_bounded_artifact() {
     let root = test_root();
     let workspace = automatic_workspace(root.clone());
     let results = ResultStore::default();
-    let shell = Shell(workspace, results.clone());
+    let shell = Shell(workspace, results.clone(), BackgroundShellManager::new());
     let command = if cfg!(windows) {
         "Write-Output ('x' * 20000)"
     } else {

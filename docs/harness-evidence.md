@@ -70,6 +70,30 @@ uv run pytest -q tests/gateway/test_knowledge_work_import.py
 Harness 控制流，不证明真实 Provider 的回答质量、真实连接器权限或完整源仓库
 reference 选择质量。
 
+## Background Shell cross-turn scenario（2026-09-18）
+
+本场景使用本地 deterministic model、临时 workspace 和原生进程，不调用付费
+Provider，也不把远程等待任务伪装成本地 Shell。模型先通过真实 `shell` 工具
+启动一个有界的后台进程；首个 Turn 收到 `TurnFinished` 后，再通过 App Server
+后台任务 RPC 读取并停止它。
+
+| 场景 | 公共路径 | 可观察结果 |
+| :--- | :--- | :--- |
+| 本地后台 Shell 跨 Turn 生命周期 | `json_rpc::tests::background_shell_survives_turn_and_is_controlled_by_next_rpc` | Turn 结束后任务仍为 `starting/running`，下一次 RPC 能列出同一 `taskId`、显式重启、停止完整进程组并读取有界日志；后台进程不会占用下一次控制请求 |
+| Child 禁止创建后台 Shell | `background_shell::tests::disabled_runtime_cannot_create_background_tasks` | Child 使用禁用的 BackgroundShellManager 时创建请求 fail closed；读取权限由上层 owner 路由单独控制 |
+
+命令：
+
+```text
+cargo test -p mini-agent-app-server --lib json_rpc::tests::background_shell_survives_turn_and_is_controlled_by_next_rpc -- --exact
+cargo test -p mini-agent-capabilities --lib background_shell::tests::disabled_runtime_cannot_create_background_tasks -- --exact
+```
+
+该场景证明的是本地进程的跨 Turn 生命周期和 App Server 公共控制面；不证明
+Gateway 重启恢复、远程 GitHub Action 等待、跨平台 Job Object 等价性或 Web
+浏览器端的视觉质量。Web Gateway/Studio 的后台任务投影和 Child 只读路由仍由
+各自的 SDK、Gateway 和 UI 回归测试覆盖。
+
 ## Control Plane boundary evidence（2026-09-07）
 
 line gate 的后续计划要求 Permission、Sandbox、Recovery、Audit 不能只停留在

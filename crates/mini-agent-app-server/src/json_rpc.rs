@@ -15,10 +15,13 @@ use crate::management::SettingsRuntimeEvent;
 use crate::notification::{RuntimeNotification, WorkflowRuntimeEvent};
 use mini_agent_app_server_protocol::{
     ApprovalRequestNotification, ApprovalResolvedNotification, ApprovalRespondParams,
-    CapabilityManifest, CollaborationMode, CollaborationModeKind, DisabledCapability,
-    InitializeParams, InitializeResult, ItemCompletedNotification, ItemStartedNotification,
-    JsonRpcError, JsonRpcRequest, JsonRpcResponse, METHOD_APPROVAL_RESPOND,
-    METHOD_CHECKPOINT_COMMITTED, METHOD_GOAL_CONTINUATION_QUEUED, METHOD_GOAL_CONTINUATION_STARTED,
+    BackgroundTaskListParams, BackgroundTaskListResult, BackgroundTaskParams, CapabilityManifest,
+    CollaborationMode, CollaborationModeKind, DisabledCapability, InitializeParams,
+    InitializeResult, ItemCompletedNotification, ItemStartedNotification, JsonRpcError,
+    JsonRpcRequest, JsonRpcResponse, METHOD_APPROVAL_RESPOND, METHOD_BACKGROUND_TASK_LIST,
+    METHOD_BACKGROUND_TASK_LOGS, METHOD_BACKGROUND_TASK_READ, METHOD_BACKGROUND_TASK_RESTART,
+    METHOD_BACKGROUND_TASK_STOP, METHOD_BACKGROUND_TASK_UPDATED, METHOD_CHECKPOINT_COMMITTED,
+    METHOD_GOAL_CONTINUATION_QUEUED, METHOD_GOAL_CONTINUATION_STARTED,
     METHOD_GOAL_VERIFICATION_COMPLETED, METHOD_GOAL_VERIFICATION_FAILED,
     METHOD_GOAL_VERIFICATION_STARTED, METHOD_INITIALIZE, METHOD_INITIALIZED, METHOD_MCP_RETRY,
     METHOD_MCP_STATUS, METHOD_PLAN_CLEANUP_COMPLETED, METHOD_PLAN_CLEANUP_FAILED,
@@ -56,6 +59,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::broadcast;
 
+mod background;
 mod thread;
 mod transport;
 mod turn;
@@ -271,6 +275,11 @@ where
             METHOD_MCP_STATUS => self.handle_mcp_status(request).await,
             METHOD_MCP_RETRY => self.handle_mcp_retry(request).await,
             METHOD_RUNTIME_STATUS => self.handle_runtime_status(request).await,
+            METHOD_BACKGROUND_TASK_LIST => self.handle_background_task_list(request).await,
+            METHOD_BACKGROUND_TASK_READ => self.handle_background_task_read(request).await,
+            METHOD_BACKGROUND_TASK_LOGS => self.handle_background_task_logs(request).await,
+            METHOD_BACKGROUND_TASK_STOP => self.handle_background_task_stop(request).await,
+            METHOD_BACKGROUND_TASK_RESTART => self.handle_background_task_restart(request).await,
             _ => response_error(id, JsonRpcError::method_not_found(request.method)),
         }
     }
@@ -366,6 +375,7 @@ where
                 runtime_status: true,
                 event_replay: true,
                 workflow_lifecycle_notifications: self.runtime.is_some(),
+                background_tasks: self.runtime.is_some(),
             },
             capability_manifest: self.capability_manifest.clone(),
         };
@@ -593,6 +603,10 @@ pub(super) fn runtime_notification_request(event: RuntimeNotification) -> JsonRp
         RuntimeNotification::Status(status) => JsonRpcRequest::notification(
             METHOD_RUNTIME_STATUS_UPDATED,
             Some(serde_json::to_value(status).expect("runtime status is serializable")),
+        ),
+        RuntimeNotification::BackgroundTaskUpdated(event) => JsonRpcRequest::notification(
+            METHOD_BACKGROUND_TASK_UPDATED,
+            Some(serde_json::to_value(event).expect("background task update is serializable")),
         ),
         RuntimeNotification::Workflow(event) => workflow_notification_request(event),
     }

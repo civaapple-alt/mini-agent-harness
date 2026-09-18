@@ -12,6 +12,16 @@ list/read/items/list/close, fork and resume, turn result reads, cooperative stee
 interruption, and approval request/response routing. External adapters should
 use the same App Server boundary.
 
+Local processes that must outlive one Turn use the Shell tool's explicit background
+mode. `background-task/list`, `background-task/read`, `background-task/logs`,
+`background-task/stop`, and `background-task/restart` expose the same bounded
+control surface to clients. The App Server runtime owns the authoritative
+`BackgroundShellTask` records and cleans their process groups when the owning
+Thread runtime closes. `runtime/status` remains scoped to the current Turn.
+Child Sessions can read their parent's task projection but cannot control it.
+Remote waits such as GitHub Actions are not background Shell tasks; they require a
+separate external-wait operation.
+
 Ordered `turn/event` notifications preserve `thread_id`, `turn_id`, sequence,
 and bounded ThreadItem identity. Each model response also carries an optional
 `item_id` shared by its `model_started`, reasoning/text delta, and
@@ -225,6 +235,17 @@ Thread returned by `thread/start`.
 | `session/notebook/read` | `threadId`, optional `scope` (`self` or `parent`) | Reads the current Session notebook or a Host-validated parent snapshot. Parent scope is read-only and cannot select an arbitrary Session or path. |
 | `session/notebook/write` | `threadId`, `key`, `content`, optional `append`, `importance` (`critical`, `high`, `normal`, `temporary`), `keywords`, and bounded `evidence` | Upserts the current Session's bounded Notebook entry and returns the new snapshot. Evidence is bounded caller-supplied provenance metadata; subject normalization and truncation are applied, but Git/file-system verification is not claimed. |
 | `session/notebook/forget` | `threadId`, `key` | Removes one current-Session entry and advances the Notebook revision without rewriting checkpoint history. |
+
+#### Background Shell tasks
+
+| Method | Parameters | Result / effect |
+| --- | --- | --- |
+| `background-task/list` | `threadId` | Returns an action result containing bounded local Shell task snapshots. |
+| `background-task/read` | `threadId`, `taskId` | Returns one task snapshot. |
+| `background-task/logs` | `threadId`, `taskId` | Returns the bounded log tail; logs are not inserted into the default information stream. |
+| `background-task/stop` | `threadId`, `taskId` | Stops the complete local process group. Child Sessions receive a read-only error. |
+| `background-task/restart` | `threadId`, `taskId` | Recreates the same task from its pinned command and working directory. |
+| `background-task/updated` | notification | Carries one bounded task snapshot after an explicit control action. |
 
 Successful `session/notebook/write` and `session/notebook/forget` operations also
 emit `session/notebook/updated` with `threadId`, `revision`, and bounded

@@ -1,6 +1,19 @@
 use super::*;
 
-pub(super) struct Shell(pub(super) Arc<Workspace>, pub(super) ResultStore);
+pub(super) struct Shell(
+    pub(super) Arc<Workspace>,
+    pub(super) ResultStore,
+    pub(super) crate::background_shell::BackgroundShellManager,
+);
+
+enum ShellInvocation<'a> {
+    Foreground(&'a str),
+    Background {
+        action: &'a str,
+        task_id: &'a str,
+        command: Option<&'a str>,
+    },
+}
 
 impl ToolHandler for Shell {
     fn spec(&self) -> ToolSpec {
@@ -9,27 +22,57 @@ impl ToolHandler for Shell {
             description: shell_description(self.0.approval.approval_policy()),
             parameters: json!({
                 "type": "object",
-                "properties": { "command": {"type": "string"} },
-                "required": ["command"],
+                "properties": {
+                    "command": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["foreground", "background"]},
+                    "action": {"type": "string", "enum": ["start", "status", "logs", "stop", "restart"]},
+                    "task_id": {"type": "string"}
+                },
+                "required": [],
                 "additionalProperties": false
             }),
         }
     }
 
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
-        let command = self.validated_command(&request.arguments)?;
+        let invocation = self.validated_invocation(&request.arguments)?;
+        let background_read = matches!(
+            &invocation,
+            ShellInvocation::Background {
+                action,
+                ..
+            } if matches!(*action, "status" | "logs")
+        );
         if matches!(
             self.0.approval.approval_policy(),
             mini_agent_protocol::ApprovalPolicy::Automatic
                 | mini_agent_protocol::ApprovalPolicy::Trusted
-        ) && self.0.is_bounded_read_only_shell_command(command)
+        ) && (matches!(&invocation, ShellInvocation::Foreground(command) if self
+            .0
+            .is_bounded_read_only_shell_command(command))
+            || background_read)
         {
-            let action = format!("shell command `{command}`");
+            let action = match &invocation {
+                ShellInvocation::Foreground(command) => format!("shell command `{command}`"),
+                ShellInvocation::Background {
+                    action, task_id, ..
+                } => {
+                    format!("background shell {action} task `{task_id}`")
+                }
+            };
             self.0.approval.ensure_not_denied(&action)?;
             return Ok(ToolAdmission::Allowed);
         }
+        let action = match &invocation {
+            ShellInvocation::Foreground(command) => format!("shell command `{command}`"),
+            ShellInvocation::Background {
+                action, task_id, ..
+            } => {
+                format!("background shell {action} task `{task_id}`")
+            }
+        };
         Ok(ToolAdmission::ApprovalRequired {
-            action: format!("shell command `{command}`"),
+            action,
             target_paths: Vec::new(),
             action_summary: None,
         })
@@ -38,7 +81,10 @@ impl ToolHandler for Shell {
 
 impl ToolRuntime for Shell {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let command = self.validated_command(arguments)?;
+        let invocation = self.validated_invocation(arguments)?;
+        let ShellInvocation::Foreground(command) = invocation else {
+            return self.execute_background(invocation, "default");
+        };
         self.0.approval.approve_request(&ToolApprovalRequest {
             action: format!("shell command `{command}`"),
             tool_name: Some("shell".to_string()),
@@ -48,9 +94,23 @@ impl ToolRuntime for Shell {
     }
 
     fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
-        let command = match self.validated_command(&request.arguments) {
-            Ok(command) => command,
+        let invocation = match self.validated_invocation(&request.arguments) {
+            Ok(invocation) => invocation,
             Err(error) => return ToolExecutionOutcome::failed(error.to_string()),
+        };
+        if !matches!(&invocation, ShellInvocation::Foreground(_)) {
+            let owner = request
+                .context
+                .as_ref()
+                .map(|context| context.thread_id.as_str())
+                .unwrap_or("default");
+            return self.execute_background(invocation, owner).map_or_else(
+                |error| ToolExecutionOutcome::failed(error.to_string()),
+                ToolExecutionOutcome::completed,
+            );
+        }
+        let ShellInvocation::Foreground(command) = invocation else {
+            unreachable!("background shell handled above");
         };
         let output = match run_shell_with_cancel(
             command,
@@ -74,6 +134,63 @@ impl ToolRuntime for Shell {
 }
 
 impl Shell {
+    fn validated_invocation<'a>(
+        &self,
+        arguments: &'a Value,
+    ) -> Result<ShellInvocation<'a>, ToolError> {
+        let mode = arguments
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("foreground");
+        match mode {
+            "foreground" => {
+                if arguments.get("action").is_some() || arguments.get("task_id").is_some() {
+                    return Err(ToolError(
+                        "action and task_id require mode=background".to_string(),
+                    ));
+                }
+                Ok(ShellInvocation::Foreground(
+                    self.validated_command(arguments)?,
+                ))
+            }
+            "background" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError("background shell action is required".to_string()))?;
+                if !matches!(action, "start" | "status" | "logs" | "stop" | "restart") {
+                    return Err(ToolError("unknown background shell action".to_string()));
+                }
+                let task_id = arguments
+                    .get("task_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError("background shell task_id is required".to_string()))?;
+                if action == "start" {
+                    Ok(ShellInvocation::Background {
+                        action,
+                        task_id,
+                        command: Some(self.validated_command(arguments)?),
+                    })
+                } else {
+                    if arguments.get("command").is_some() {
+                        return Err(ToolError(
+                            "command is only accepted when starting a background shell task"
+                                .to_string(),
+                        ));
+                    }
+                    Ok(ShellInvocation::Background {
+                        action,
+                        task_id,
+                        command: None,
+                    })
+                }
+            }
+            _ => Err(ToolError(
+                "shell mode must be foreground or background".to_string(),
+            )),
+        }
+    }
+
     fn validated_command<'a>(&self, arguments: &'a Value) -> Result<&'a str, ToolError> {
         let command = string_arg(arguments, "command")?;
         if command.is_empty() || command.len() > MAX_COMMAND_BYTES {
@@ -82,6 +199,45 @@ impl Shell {
             )));
         }
         Ok(command)
+    }
+
+    fn execute_background(
+        &self,
+        invocation: ShellInvocation<'_>,
+        owner_thread_id: &str,
+    ) -> Result<String, ToolError> {
+        let ShellInvocation::Background {
+            action,
+            task_id,
+            command,
+        } = invocation
+        else {
+            return Err(ToolError(
+                "foreground shell was sent to background executor".to_string(),
+            ));
+        };
+        let snapshot = match action {
+            "start" => {
+                let command = command
+                    .ok_or_else(|| ToolError("background start command is required".to_string()))?;
+                let root = self.0.shell_root(command);
+                self.2
+                    .start(owner_thread_id, task_id, command, &root, self.0.sandbox)
+            }
+            "status" => self.2.read(owner_thread_id, task_id),
+            "logs" => {
+                return self
+                    .2
+                    .logs(owner_thread_id, task_id)
+                    .map(|logs| logs.text)
+                    .map_err(ToolError);
+            }
+            "stop" => self.2.stop(owner_thread_id, task_id),
+            "restart" => self.2.restart(owner_thread_id, task_id, self.0.sandbox),
+            _ => unreachable!("background action was validated"),
+        }
+        .map_err(ToolError)?;
+        serde_json::to_string(&snapshot).map_err(|error| ToolError(error.to_string()))
     }
 
     fn run_command(&self, command: &str) -> Result<String, ToolError> {

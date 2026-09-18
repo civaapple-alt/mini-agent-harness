@@ -3,7 +3,9 @@ use crate::management::SettingsRuntimeEvent;
 use mini_agent_app_server_protocol::ItemCompletedNotification;
 use mini_agent_app_server_protocol::ItemStartedNotification;
 use mini_agent_app_server_protocol::NotebookUpdatedNotification;
-use mini_agent_app_server_protocol::{RuntimeStatus, WorkflowLifecycleNotification};
+use mini_agent_app_server_protocol::{
+    BackgroundTaskUpdatedNotification, RuntimeStatus, WorkflowLifecycleNotification,
+};
 use mini_agent_protocol::EventEnvelope;
 
 #[derive(Clone, Debug)]
@@ -34,5 +36,6 @@ pub(crate) enum RuntimeNotification {
     Goal(GoalRuntimeEvent),
     Settings(SettingsRuntimeEvent),
     Status(RuntimeStatus),
+    BackgroundTaskUpdated(BackgroundTaskUpdatedNotification),
     Workflow(WorkflowRuntimeEvent),
 }

@@ -551,6 +551,81 @@ pub(super) fn handle<M>(
                 .map(|state| state.management.mcp_status())
                 .ok_or(AppServerError::RuntimeUnavailable),
         ),
+        RuntimeCommand::BackgroundTaskList { reply } => respond(
+            reply,
+            receipt,
+            runtime
+                .as_ref()
+                .ok_or(AppServerError::RuntimeUnavailable)
+                .and_then(|state| {
+                    state
+                        .background_shells
+                        .list(state.management.thread_id().as_str())
+                        .map(|tasks| {
+                            tasks
+                                .into_iter()
+                                .map(crate::management::project_background_task)
+                                .collect()
+                        })
+                        .map_err(background_task_error)
+                }),
+        ),
+        RuntimeCommand::BackgroundTaskRead { task_id, reply } => respond(
+            reply,
+            receipt,
+            runtime
+                .as_ref()
+                .ok_or(AppServerError::RuntimeUnavailable)
+                .and_then(|state| {
+                    state
+                        .background_shells
+                        .read(state.management.thread_id().as_str(), &task_id)
+                        .map(crate::management::project_background_task)
+                        .map_err(background_task_error)
+                }),
+        ),
+        RuntimeCommand::BackgroundTaskLogs { task_id, reply } => respond(
+            reply,
+            receipt,
+            runtime
+                .as_ref()
+                .ok_or(AppServerError::RuntimeUnavailable)
+                .and_then(|state| {
+                    state
+                        .background_shells
+                        .logs(state.management.thread_id().as_str(), &task_id)
+                        .map(crate::management::project_background_logs)
+                        .map_err(background_task_error)
+                }),
+        ),
+        RuntimeCommand::BackgroundTaskStop { task_id, reply } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .background_shells
+                    .stop(state.management.thread_id().as_str(), &task_id)
+                    .map(crate::management::project_background_task)
+                    .map(|task| (task, true))
+                    .map_err(background_task_error)
+            });
+            notify_background_task(runtime, &result);
+            respond(reply, receipt, result);
+        }
+        RuntimeCommand::BackgroundTaskRestart { task_id, reply } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .background_shells
+                    .restart(
+                        state.management.thread_id().as_str(),
+                        &task_id,
+                        state.management.world().sandbox(),
+                    )
+                    .map(crate::management::project_background_task)
+                    .map(|task| (task, true))
+                    .map_err(background_task_error)
+            });
+            notify_background_task(runtime, &result);
+            respond(reply, receipt, result);
+        }
         RuntimeCommand::RetryMcp { approval, reply } => {
             let result = mutate(runtime, runtime_revision, |state| {
                 retry_mcp(threads, state, approval)
@@ -700,6 +775,11 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::SetExecution { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::UpdateThread { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::McpStatus { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::BackgroundTaskList { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::BackgroundTaskRead { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::BackgroundTaskLogs { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::BackgroundTaskStop { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::BackgroundTaskRestart { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::RetryMcp { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ReadCheckpoint { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::StartNewThread { reply } => respond(reply, receipt, Err(error)),
@@ -850,7 +930,9 @@ fn prepare_active_session_fork(
 fn is_safe_goal_mutation_while_running(command: &RuntimeCommand) -> bool {
     matches!(
         command,
-        RuntimeCommand::ThreadGoalClear { .. }
+        RuntimeCommand::BackgroundTaskStop { .. }
+            | RuntimeCommand::BackgroundTaskRestart { .. }
+            | RuntimeCommand::ThreadGoalClear { .. }
             | RuntimeCommand::ThreadGoalSet {
                 objective: None,
                 status: Some(mini_agent_app_server_protocol::ThreadGoalStatus::Paused),
@@ -1582,15 +1664,44 @@ where
             "session persistence is disabled".to_string(),
         ));
     };
+    state
+        .background_shells
+        .close_all()
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
     if let Err(error) = session.store.start_thread() {
         return Err(AppServerError::Checkpoint(error));
     }
     let new_thread_id = ThreadId::new(session.store.thread_id().to_string());
-    threads.rename(&old_thread_id, new_thread_id, 1)
+    threads.rename(&old_thread_id, new_thread_id.clone(), 1)?;
+    state.background_shells.bind_owner(new_thread_id.as_str());
+    Ok(())
 }
 
 fn workflow_error(error: std::io::Error) -> AppServerError {
     AppServerError::Checkpoint(error.to_string())
+}
+
+fn background_task_error(error: String) -> AppServerError {
+    AppServerError::Checkpoint(format!("background shell task failed: {error}"))
+}
+
+fn notify_background_task(
+    runtime: &Option<RuntimeActorState>,
+    result: &Result<mini_agent_app_server_protocol::BackgroundTask, AppServerError>,
+) {
+    if let Ok(task) = result
+        && let Some(state) = runtime.as_ref()
+    {
+        let _ = state
+            .notifications
+            .send(crate::RuntimeNotification::BackgroundTaskUpdated(
+                mini_agent_app_server_protocol::BackgroundTaskUpdatedNotification {
+                    thread_id: state.management.thread_id(),
+                    task: task.clone(),
+                    state_revision: state.revision().value(),
+                },
+            ));
+    }
 }
 
 fn mutate<T, F>(

@@ -172,6 +172,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             retry_mcp_servers,
             capability_manifest,
             skill_discovery,
+            background_shells,
         } = prepare_harness_with_model_factory(
             &runtime_config,
             approval.clone(),
@@ -239,6 +240,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             .as_ref()
             .map(|opened| ThreadId::new(opened.store.thread_id().to_string()))
             .unwrap_or_else(|| ThreadId::new("default"));
+        background_shells.bind_owner(thread_id.as_str());
         let mut thread = Thread::new(thread_id.clone(), harness);
         if let Some(opened) = &session {
             thread.set_next_turn_number(opened.store.thread_turn_count() as u64 + 1);
@@ -258,17 +260,19 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             goal_limits,
         )
         .with_verifier_config(runtime_config.clone());
-        let management = RuntimeManagementService::new_with_harness_config_and_skills(
-            server.clone(),
-            session,
-            world,
-            enabled_mcp_servers,
-            mcp_tool_count,
-            retry_mcp_servers,
-            approval.clone(),
-            base_harness_config,
-            skill_discovery,
-        );
+        let management =
+            RuntimeManagementService::new_with_harness_config_and_skills_and_background_shells(
+                server.clone(),
+                session,
+                world,
+                enabled_mcp_servers,
+                mcp_tool_count,
+                retry_mcp_servers,
+                approval.clone(),
+                base_harness_config,
+                skill_discovery,
+                background_shells,
+            );
         let services = RuntimeServices::new(management, thread_settings, goals)
             .map_err(|error| format!("cannot bind runtime services: {error}"))?;
         let connection = AppServerConnection::with_capability_manifest(
