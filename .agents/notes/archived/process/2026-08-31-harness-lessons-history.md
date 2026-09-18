@@ -1,5 +1,10 @@
 # Harness 经验、框架对比与下一迭代历史记录
 
+状态：archived
+归档日期：2026-09-19
+
+本文件是 2026-08-31 的冻结过程记录，不描述当前产品行为。当前规格见 `docs/`。
+
 Status: historical, frozen
 
 This file is retained only as a historical record of the 2026-08-31 review. It is

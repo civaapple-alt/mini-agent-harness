@@ -109,7 +109,7 @@ Web Studio`。`mini-agent` CLI 和 Web Studio 都消费 App Server 的 Thread/Tu
 | Provider、Session、Skill、Plugin、MCP | [`docs/configuration.md`](docs/configuration.md) |
 | App Server JSON-RPC、Thread、Turn、Goal、Item | [`docs/app-server.md`](docs/app-server.md) |
 | Web Studio 集成、Project、Session 和批准 | [`docs/studio-integration.md`](docs/studio-integration.md) |
-| Harness 分层与 Codex 对照 | [`docs/harness-framework.md`](docs/harness-framework.md) |
+| 运行时架构与所有权 | [`docs/harness-framework.md`](docs/harness-framework.md) |
 | 责任边界与变更准入 | [`docs/harness-boundaries.md`](docs/harness-boundaries.md) |
 | Builtin 工具契约 | [`docs/harness-tool-surface.md`](docs/harness-tool-surface.md) |
 | 限制、超时与上下文预算 | [`docs/limits.md`](docs/limits.md) |
@@ -130,6 +130,7 @@ cargo fmt --all
 cargo clippy -p <affected-package> --all-targets -- -D warnings
 cargo test -p <affected-package>
 python3 scripts/line_budget.py
+python3 scripts/check_docs_links.py README.md docs
 ```
 
 跨包发布验证和完整 workspace 测试见 [`docs/releasing.md`](docs/releasing.md)。

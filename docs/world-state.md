@@ -1,110 +1,74 @@
-# World state and durable conversation direction
+# World state and durable session state
 
-Skills, plugins, and MCP preserve experience that people publish
-and share. World state answers a different question: what is true in this
-specific execution environment right now?
+World state describes the current execution environment. Session state records
+what a Thread has already done. They have different owners and different
+lifetimes.
 
-## Current experiment
+## World state
 
-At startup the CLI builds one bounded `WorldState` snapshot without executing
-discovered commands. It inspects only the current workspace and `PATH` and
-records:
+Host builds a bounded `WorldState` from the configured workspace roots and the
+local host. It records the platform, workspace markers, host shell, selected
+access scope, approval policy, sandbox kind, and a fixed command catalog. It
+does not include environment values, command output, provider credentials, or
+an unbounded directory scan.
 
-- operating system, architecture, workspace, and the actual host shell;
-- current access (`project` or `full_machine`), execution policy
-  (`interactive`, `automatic`, or `trusted`), and the selected native or Docker process
-  sandbox;
-- root project markers for Rust, Maven/Gradle Java, Go, Python, Node, and .NET;
-- availability of a fixed catalog of common navigation, VCS, build, runtime,
-  and package-manager commands;
-- workspace Maven and Gradle wrappers.
+The App Server exposes the current projection through `world/state`. A client
+can request `world/refresh` after the workspace or available commands change.
+`world/set_execution` updates the access scope and approval policy through the
+runtime control plane. It does not bypass the admission order: deny rules,
+Plan-mode source mutation locks, tool availability, sandbox checks, and
+high-risk approval still apply.
 
-The catalog is fixed, the workspace path is capped, and the complete rendered
-item has an 8 KiB hard limit. No environment values, command output, versions,
-or credentials are included.
+The Host contributes world state to bounded model context as a replaceable
+context slot. A root-set change replaces that slot after runtime rebinding.
+Ordinary Turns do not append another copy. Gateway-managed Session attachments
+are a separate, read-only root. The model receives logical Session capabilities
+instead of the raw Session directory or its sidecar files.
 
-The snapshot is sent as a typed `Message::Context` item, mapped to a Responses
-API `developer` message. It is not concatenated into `instructions`. The first
-request therefore keeps project instructions and extension metadata in a
-stable prefix while placing local facts immediately before conversation input.
-App Server clients can inspect it with `world/state` and refresh it with
-`world/refresh`; the core REPL does not duplicate this management dashboard.
+## Durable session state
 
-Execution changes are also append-only. `world/set_execution` updates access and
-policy and appends an authoritative full world snapshot. Grant lifetime is
-selected per approval response and is owned by Host/Capabilities, not World
-state. `/plan` and `/goal`
-are Thread-owned App Server workflows; they do not create a second world-state
-loop. The current CLI has no `/new` command: a new CLI Thread receives a fresh
-snapshot, while a resumed Session restores the snapshot from its settled
-checkpoint.
-Compaction retains the newest context item next to its summary.
-
-Full snapshots are deliberate at this scale. They avoid requiring old deltas
-to reconstruct current authority, and remain far below the item limit. If the
-state grows, the next experiment should introduce typed section snapshots and
-diff rendering like Codex rather than mutable system-prompt rewriting.
-
-## Durable item boundary
-
-World state makes the need for durable ordered items visible. The JSONL store
-lives in the CLI host rather than `mini-agent-core`; it is used by persisted
-sessions and preserves
-these identities and relationships:
+App Server and the Session store own durable conversation state. A Session
+contains an append-only `session.jsonl` log, complete settled checkpoints, and
+bounded sidecars such as Thread settings, Goal state, approval evidence,
+attachments, and Notebook data. The canonical relationship is:
 
 ```text
-session
-  thread
-    turn
-      ordered item
+Session
+  └─ Thread
+       └─ Turn
+            └─ ordered item
 ```
 
-A session identifies one append-only project log. A thread identifies one
-conversation lineage. A turn owns one user-initiated run and its settled
-status. Message items preserve user input, context snapshots, reasoning,
-assistant output, tool proposals, and tool settlements. Goal verifier verdicts
-are kept in the Goal workspace and are not replayable conversation messages.
+An interrupted Turn is not replayed. A checkpoint only authorizes resume from
+the last settled state. This prevents a tool call that began before a process
+failure from being treated as a completed or replay-safe effect.
 
-Records have a strictly increasing sequence and bounded payload. Message items
-have stable item IDs, thread identity, kind, and timestamp; turn-owned messages
-carry a turn ID. A full bounded checkpoint is appended only
-after a turn settles and is the sole resume authority. Torn final writes fall
-back to the previous checkpoint.
+The Session store also persists control-plane state that is not conversation
+history:
 
-This is conversation persistence, not operation recovery. A process crash can
-still occur between tool intent and effect settlement; the interrupted turn is
-not replayed. A future Pi-style operation register must make that uncertain
-state explicit before safe/unsafe replay policies are introduced. Compaction
-lineage, branch indexes, and live operation recovery are not
-implemented.
+- Child operation records retain their queue, running, approval, completion,
+  failure, cancellation, retry attempt, and scheduling metadata.
+- `notebook.json` stores bounded Session facts. Resume injects only a bounded
+  summary. Full entries are available through explicit Notebook reads.
+- Background Shell tasks and scheduled wake-up markers are bounded,
+  runtime-scoped managers. They are not conversation history and do not create
+  a second Core loop. Closing that runtime cleans up its local task state.
 
-Context-compaction lifecycle items are an exception to that generic lineage
-limitation: their start and finish events use one bounded item identity and
-remain visible in ordered projections. Full operation recovery is still not
-implemented.
+An exact `session/fork` creates an independent child Session from the newest
+complete checkpoint. The child receives its own runtime, event stream, and
+approval flow. Gateway recovery reconciles persisted operation records with
+live runtimes. It rebinds known work instead of fabricating child history or
+starting a duplicate operation.
 
-## Goal verifier boundary
+## Goal verifier
 
-A Goal verifier is a separately configured model runtime, not a hidden second
-voice inside the primary turn. It reads the latest settled checkpoint. The
-Runtime Actor associates its result with the Goal, source Thread, verifier
-turn, and authoritative checkpoint sequence before applying it. The
-`goal/verifier_verdict.md` artifact is created with a bounded `running` marker
-as soon as verification starts, then stores the source checkpoint sequence and
-bounded verifier output (or a bounded failure reason). The App Server emits a
-`thread/goal/updated` notification for these lifecycle changes, so clients can
-show verification progress without waiting for the next Goal turn.
+Goal verification is a separate, tool-free model run against the latest
+settled checkpoint. The verifier cannot modify primary conversation history,
+approve effects, or call tools. Its bounded verdict is stored in the Goal area
+and associated with the source Thread, Turn, and checkpoint sequence. App
+Server emits Goal lifecycle notifications so clients can show progress without
+inventing their own verifier state.
 
-The verifier uses a separate harness with an empty tool catalog, a zero
-tool-call limit, and one model step. It cannot edit the primary transcript,
-approve effects, or make tool calls. Verification evaluates arrival criteria
-against immutable evidence. This keeps verifier output reproducible and makes
-disagreement inspectable rather than allowing an auxiliary model to mutate
-live state invisibly.
-
-The verdict is not appended to the primary conversation history. A retry Goal
-turn may explicitly read the bounded `goal/verifier_verdict.md` artifact to
-address rejected findings, while an ordinary session resume does not inject
-the verdict automatically. World state is already part of the settled
-checkpoint; the checkpoint sequence remains the authoritative source
-reference.
+For Session methods, operation fields, and replay rules, see [App
+Server](app-server.md). For local retention and removal guidance, see [Data and
+privacy](privacy.md).

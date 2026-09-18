@@ -24,13 +24,13 @@ source 的 operating limit 为 `39,000`，red band 为 `39,500`；非 red 区间
 默认最多增长 `300` 行，进入 red band 后禁止继续正增长。Core + Protocol 和
 Control Plane 当前先执行绝对硬上限，不额外增加过细的增量门禁。
 
-默认报告只回答是否可交付：
+在当前 revision，默认报告为：
 
 ```text
 line-budget: PASS
-core+protocol   4518/6000    75.3% remain  1482 PASS
-control-plane  23603/28000  84.3% remain  4397 PASS
-release        34809/40000  87.0% remain  5191 PASS
+core+protocol    4663/6000   77.7% remain  1337 PASS
+control-plane   25957/28000  92.7% remain  2043 PASS
+release         38359/40000  95.9% remain  1641 PASS
 ```
 
 使用 `--base <merge-base> --check-delta` 时追加三项增量；使用 `--verbose` 查看 crate
@@ -113,9 +113,9 @@ tools therefore makes long Goal runs worse, not better.
 The host currently uses context items for full world-state snapshots. The
 latest snapshot is retained across compaction. A newly started Thread receives
 the current snapshot; a resumed Session restores the snapshot from its settled
-checkpoint.
-Changing execution mode appends a new context item while leaving the system
-prompt byte-stable.
+checkpoint. When the execution setting changes, App Server replaces the named
+`world_state` context slot and persists the replacement. The stable system
+prompt does not change.
 
 Host tools add their own effect-side bounds before results reach core:
 

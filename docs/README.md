@@ -10,7 +10,7 @@ other Markdown files.
 
 | Document | Covers |
 | --- | --- |
-| [Harness framework](harness-framework.md) | Thin Agent Loop, thick Control Plane, Core/Host/Capabilities/App Server layers, and the mini/Codex comparison. |
+| [Runtime architecture](harness-framework.md) | Thin Agent Loop, thick Control Plane, ownership boundaries, and the long-running runtime path. |
 | [Harness boundaries](harness-boundaries.md) | Ownership boundaries, change admission, loop control, approval, sandbox, and deferred policy decisions. |
 | [Harness tool surface](harness-tool-surface.md) | The four default Builtin tools, paged `read_file`, `apply_patch`, and extension rules. |
 | [App Server](app-server.md) | JSON-RPC transport, Thread/Turn/ThreadItem operations, settings, Goal control, events, approval, and runtime ordering. |
@@ -29,12 +29,6 @@ other Markdown files.
 | [Privacy](privacy.md) | Provider requests, local session data, credentials, MCP, and Goal verification data. |
 | [Release process](releasing.md) | Versioning, validation, archives, checksums, and publishing a release. |
 
-## Historical record
-
-| Document | Status |
-| --- | --- |
-| [Harness lessons history — 2026-08-31](harness-lessons-history-2026-08-31.md) | Frozen historical record; it is not a current specification. |
-
 Current behavior belongs in the topic documents above. Dated architecture
-decisions and implementation records are maintained separately under the
+decisions, implementation records, and frozen history are maintained under the
 repository's agent notes; they should not be copied into this index.

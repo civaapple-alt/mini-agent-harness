@@ -1,121 +1,78 @@
-# Harness 框架比较与分层结论
+# Runtime architecture
 
-Status: current architecture guide
-Source: [The Coding Harness Behind GitHub Copilot in VS Code](https://code.visualstudio.com/blogs/2026/05/15/agent-harnesses-github-copilot-vscode)
+Mini Agent Harness is a deliverable Agent runtime. Its architecture keeps the
+Agent Loop small and puts long-lived execution concerns in the Control Plane.
+The split is an ownership boundary. It is not a license for either side to
+accumulate unrelated responsibilities.
 
-## 结论
+## Ownership
 
-模型只是引擎，harness 才是把上下文、工具、执行循环和结果反馈组织成产品
-体验的系统。harness 至少负责：
+| Layer | Owns | Does not own |
+| --- | --- | --- |
+| Protocol | model, tool, message, event, stop, and limit contracts | provider connections or side effects |
+| Core | bounded turn loop, context control, stop classification, observation events, and conversation writeback | files, processes, approval UI, persistence, or terminal output |
+| Capabilities | providers, workspace tools, process execution, sandboxing, MCP, Skills, and concrete side effects | the Core turn loop or a second Session history |
+| Host | prompt and rule composition, tool admission, approval ordering, and runtime assembly | public Thread lifecycle or a browser-facing state store |
+| App Server | Thread, Turn, Goal, Session, Actor/CAS control, runtime status, recovery, and JSON-RPC projection | a second model/tool loop |
+| SDK, Gateway, and Web Studio | process connection, protocol mapping, Project metadata, control requests, and bounded UI projections | execution authority, approval grants, or canonical Session history |
 
-1. 组装模型可见上下文；
-2. 声明当前允许的工具能力；
-3. 校验并执行工具调用；
-4. 决定继续、停止、取消或进入下一轮。
+`mini-agent` and Web Studio are clients of the same App Server runtime. The
+CLI is useful for local runs, scripts, and lower-level boundary checks. Web
+Studio is the main control and observation interface for long-running work.
+The Rust REPL and Python TUI are experimental clients. They do not define a
+separate runtime model.
 
-一次用户可见的 `turn` 可以包含多个内部 `round`/`step`。每一轮都重新组装
-有界上下文，执行工具并判断是否继续。工具数量、取消、stop hook、上下文
-压缩和持久化结果共同构成 loop-control，而不是交给模型自行决定。
-
-VS Code 的经验是设计假设和验证方法，不是 mini-agent-harness 的功能对齐
-目标。下一迭代应投资可观察、可评估、可取消的边界，而不是用 provider、工具
-或配置数量代替成熟度。
-
-## 定位与分层
-
-两者共享的最小闭环是：
-
-```text
-用户输入 → 构造上下文 → 模型生成 → 判断工具调用
-         → 执行工具并写回结果 → 再次请求模型 → 最终回复或停止
-```
+## Runtime path
 
 ```text
-mini-agent runtime = thin Agent Loop + thick Control Plane
-Web Studio         = long-lived control and observation surface
-Codex native       = durable Session/Task/Turn/Item + tool/event runtime
-```
-
-当前 mini-codex 的分层边界：
-
-```text
-主线执行所有权：
-mini-agent-core + Protocol
-    ↓
-Host（runtime/workflow 组合）
-    ↓
-App Server（Actor、CAS/revision、事件与控制面）
-    ↓
+model request or tool call
+        ↓
+Core executes one bounded turn
+        ↓
+Host admits the action and composes runtime state
+        ↓
+Capabilities perform the approved side effect
+        ↓
+App Server persists and projects Thread, Turn, Session, and events
+        ↓
 Python SDK → FastAPI Gateway → Web Studio
-
-Host 内部能力：Capabilities（provider、workspace、process、sandbox、MCP、approval）
-实验性边界：Rust REPL / Python TUI → App Server
 ```
 
-| 概念 | mini-agent-harness | Codex 原生框架 |
-| :--- | :--- | :--- |
-| 会话 | `Thread`、`SessionState` 与 settled checkpoint | 持久化 `CodexThread`、`Session` 与 rollout |
-| 工作单元 | `Thread::run_turn`；Turn 内多个 Core Step | `RegularTask` 驱动的持久化 Turn |
-| 模型步骤 | `Model::respond` 后执行有界工具 batch | Responses stream、多个 output Item 与异步工具任务 |
-| 工具路由 | Capabilities 执行，Host/App Server 组合 policy、MCP、approval | `ToolRouter`、沙箱、审批、MCP 与 `StepContext` 协同 |
-| 上下文 | bounded `Message`、压缩和 UTF-8 截断 | Turn/Step context、response item、rollout 与模型相关压缩 |
-| 事件 | 稳定的 `Event`/`EventEnvelope` | Turn/Item lifecycle、delta、diff、MCP 和 raw response 事件 |
-| 持久化 | settled checkpoint、Session JSONL、Result Store handle | thread store、rollout、response item 与恢复/分叉 |
-| 控制 | safe checkpoint 上的 cancel、steer、follow-up | cancellation token、interrupt、mailbox 和 task 生命周期 |
+Core runs one Thread at a time. It validates a model response, executes a
+bounded tool batch, appends the result to the conversation, and either requests
+another model step or settles the Turn. Cancellation and steering are observed
+at safe boundaries between model steps and complete tool batches. A settled
+checkpoint is written before a later Turn resumes that Session.
 
-## Turn/Step 与控制边界
+Child work does not add a scheduler to Core. Host and App Server create an
+independent child Session from an exact settled checkpoint, then run its own
+runtime. The Session store records the operation lifecycle and App Server
+projects it to clients. A child has its own history, approval flow, runtime
+status, and event stream.
 
-mini 的一轮流程是：
+## Long-running control plane
 
-```text
-turn/start
-  ↓
-App Server Actor 分配 identity/revision
-  ↓
-Thread.begin_turn → Harness.run_with_control_mode
-  ↓
-追加 User Message，检查/压缩 context
-  ↓
-Model.respond
-  ├─ 无工具调用 → 最终回复并结束
-  └─ 有工具调用 → 校验数量 → 完整执行 bounded batch
-                         ↓
-                    追加 Tool Message / result handle
-                         ↓
-                    下一次 Model.respond
-  ↓
-TurnFinished → settled checkpoint / Session 持久化
-```
+The Control Plane makes a running task observable and recoverable without
+expanding the model loop:
 
-响应和工具调用先验证，失败时不执行副作用；工具结果进入模型上下文前截断；
-cancel 和 steer 只在模型步骤之间或完整工具 batch 后观察。App Server 的默认
-外部语义是安全停止当前工作单元、持久化 checkpoint，再启动 queued steer 或
-follow-up；一次 `turn/start` 仍可能连续 settle 多个 Core Turn。
+- App Server owns the canonical Thread, Turn, Goal, Session, checkpoint, and
+  operation state.
+- Host and Capabilities own tool admission, path policy, sandboxing, approval,
+  and side effects.
+- The Session store keeps settled conversation checkpoints, operation records,
+  and the bounded Notebook. It does not make an interrupted external effect
+  safe to replay.
+- Gateway and Web Studio project runtime state, replay bounded events after a
+  reconnect, and reconcile from canonical Thread and item data when the event
+  cursor has a gap.
 
-Codex 原生通常把 `turn/steer` 放入 Session input queue/mailbox，在同一个外部
-Turn 内继续下一次 sampling。两者不是正确性高低差异，而是边界选择：mini
-优先显式 checkpoint 和确定性测试，原生框架优先长任务的连续工作语义。
+For exact public methods and fields, see [App Server](app-server.md). For the
+change-admission rules and non-negotiable boundaries, see [Harness
+boundaries](harness-boundaries.md).
 
-## 成熟度判断
+## Maintenance
 
-| 维度 | mini-agent-harness 当前优势 | Codex 原生框架的优势与代价 |
-| :--- | :--- | :--- |
-| 执行内核 | Loop、Step、limits、stop 分类和安全检查点显式，容易做确定性 fixture | 生命周期覆盖完整，但 Task、Item、stream 和异步工具协调更复杂 |
-| 状态与恢复 | App Server Actor/CAS、Session settled checkpoint 和单一路径边界清楚 | 持久化粒度、恢复/分叉和长任务能力更丰富，状态面更大 |
-| 能力面 | Provider、workspace、sandbox、MCP、approval 在 Core 外组合 | 工具、hooks、skills、MCP、沙箱和环境集成更成熟，兼容矩阵更宽 |
-| 可验证性 | bounded 输入/输出、被动事件和本地 mock 场景便于隔离验证 | 更接近生产工作流，需要更大的跨平台、真实 provider 和长期运行证据 |
-| 主要风险 | 追求小而漏掉真实 provider、平台和安全策略证据 | 功能面扩大后增加隐式状态、异步竞态和上下文成本 |
-
-因此，mini 不复制原生 Codex 的全部对象或工具生态。当前交付重点是把
-`mini-agent-core → Host → App Server → Python SDK → FastAPI Gateway → Web Studio`
-做成一条可观察、可控制、可恢复的运行链路：Core 保持薄，Control Plane 承担
-Session、审批、恢复和并发，Web Studio 提供长时间运行任务的控制与观察入口。
-时间上延展、结构上并发是这条路线的基础设施，而不是 Web Studio 之外的附加能力。
-用 bounded scenario 验证每次变更对 Turn、Tool、Context、State 和 Boundary 的影响。
-Rust REPL 与 Python TUI 只用于验证 App Server 边界。只有真实场景和证据成立，才
-扩大 provider、retry 或 Docker policy。
-
-## 维护规则
-
-本文件只描述当前的 Harness 分层、Turn/Step 和成熟度边界。实现批次写入
-`.agents/notes/` 的日期变更记录；当当前行为变化时，直接更新本文件的相关段落。
+Update this document when an ownership boundary or the runtime path changes.
+Record the implementation decision, alternatives, and verification evidence in
+`.agents/notes/`. Do not turn this page into a batch log or a comparison of
+other agent products.

@@ -1,43 +1,47 @@
-# Builtin Tool Surface Upgrade
+# Builtin tool contract
 
-Status: current tool surface
-
-## Decision
-
-将默认 Builtin model-visible tool surface 收敛为四个稳定能力：
+The default model-visible Builtin tool set is deliberately small:
 
 ```text
 read_file | apply_patch | shell | read_image
 ```
 
-文件修改统一由 `apply_patch` 承担；`write_file`、`edit_file` 不再保留实现、
-catalog entry 或兼容路径。`web_fetch` 是独立的显式扩展，不属于默认工具集。
-这样默认 harness 更接近 Pi 的极简内核：少量稳定内置工具，扩展能力由
-Host/extension 显式加入。
+`web_fetch`, MCP tools, child-task tools, Notebook tools, background Shell
+tasks, and scheduled wake-up tools are explicit Host-composed capabilities.
+They are not compatibility names for the default set. `write_file` and
+`edit_file` are not supported fallback tools. Use `apply_patch` for workspace
+changes.
 
-## Boundary
+## Ownership and admission
 
-- Core 继续拥有 turn loop、observation events、limits 和 history writeback；
-- Protocol 的 `ToolHandler` 负责参数解析和 admission 描述；
-- Host 的 `ToolOrchestrator` 负责 admission、approval 和 execution ordering；
-- `ToolRuntime` 继续拥有具体副作用与 sandbox；
-- App Server 只选择 allowlisted tool/runtime 组合，并通过 Thread settings 返回当前
-  selection；不再维护 workflow 聚合状态快照；
-- Web Gateway、SDK 和 SidePanel 保持相同的 tool selection 语义，显式空选择不
-  被默认值覆盖。
+Core resolves a registered tool by name and owns the bounded execution loop.
+The protocol handler validates parameters and describes the requested action.
+Host `ToolOrchestrator` applies admission, approval, and execution ordering.
+The concrete `ToolRuntime` owns the side effect and its workspace and sandbox
+configuration. App Server selects an allowlisted runtime composition and
+projects structured outcomes. SDK, Gateway, and Web Studio only consume that
+projection.
 
-## Read / patch contract
+Tool admission follows this order:
 
-`read_file` 改为有界分页读取：支持 `offset` 和 `limit`，默认 200 行、最大 2000
-行，单页输出不超过约 15 KiB，结果带行号并返回 `next_offset`。文件 source
-读取上限为 8 MiB；长文件必须继续分页，不能依赖截断输出。
+```text
+deny → Plan lock → workspace and sandbox → approval → execution → event and receipt
+```
 
-新增 `apply_patch` 使用 Codex 风格的 `*** Begin Patch` 文本协议，支持 Add、
-Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk 行；先对
-所有路径和 hunk 做完整校验，再执行副作用。沿用 Workspace path policy、approval
-和 Plan Mode；后续写入失败时尽力回滚已完成的文件写入。
+An approval grant does not override an earlier denial. The App Server preserves
+the distinct tool lifecycle status and execution outcome so clients do not have
+to infer `needs_approval`, `deferred`, or `retryable` from error text.
 
-最小调用形状如下；长文件读取必须使用返回的 `next_offset` 继续请求：
+## Read files
+
+`read_file` uses bounded pagination. It accepts a workspace-relative `path`
+and optional `offset` and `limit`. The default page is 200 lines, the maximum
+is 2,000 lines, and a result includes a `next_offset` when more content is
+available. One page is bounded to about 15 KiB and the source-file read limit
+is 8 MiB.
+
+Use the returned offset to continue a long read. Do not depend on a truncated
+result as a complete file.
 
 ```json
 {
@@ -45,6 +49,14 @@ Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk �
   "arguments": {"path": "src/main.rs", "offset": 0, "limit": 200}
 }
 ```
+
+## Apply patches
+
+`apply_patch` accepts the Codex `*** Begin Patch` text format with Add, Update,
+Move, and Delete operations. A patch is limited to 512 KiB, 16 file
+operations, and 32,000 hunk lines. The runtime validates paths and hunks before
+performing a side effect. If a later write fails, it attempts to roll back
+completed writes.
 
 ```json
 {
@@ -55,41 +67,12 @@ Update、Move、Delete。一次 patch 最多 512 KiB、16 个操作、32K hunk �
 }
 ```
 
-`apply_patch` 的路径必须是相对于当前 Workspace 的路径；客户端不应把
-`write_file` 或 `edit_file` 当作回退接口。执行结果、批准请求和 Plan 锁定
-仍由 Host/App Server 返回的结构化事件决定。
-
-## Six-question admission record
-
-```text
-1. Layer: Capabilities/Host/App Server + Web mirrors; Core contract unchanged.
-2. Duplicate responsibility: reuse existing Workspace policy, ToolRouter,
-   ToolOrchestrator and Thread settings; no second file-edit loop or workflow
-   aggregate.
-3. Replace vs add: replace the old file mutation pair with one bounded patch
-   protocol; keep the four-tool default and do not retain compatibility entries.
-4. Net line delta: Core + Protocol, Control Plane, and release-source budgets are
-   measured after implementation by scripts/line_budget.py; removed file tools do
-   not have a second or compatibility path.
-5. Visible surface: default tool manifest, read_file pagination and apply_patch
-   schema changed; all payloads remain bounded; Thread settings expose the
-   allowlisted selection, not arbitrary prompt replacement.
-6. Boundary evidence: affected Rust package tests, CLI public scenarios, Web
-   gateway/SDK tests, frontend tests/build, fmt, Clippy, line budget and diff check.
-```
-
-## Verification evidence
-
-- Affected Rust package tests pass; strict affected-package Clippy passes with the
-  repository's existing `session.rs::initialize_new` argument-count allowance.
-- `cargo fmt --all --check` and `python scripts/line_budget.py` pass.
-- Web Gateway/SDK pytest passes, Ruff checks pass, frontend tests and production build
-  pass using the freshly built local App Server binary.
-- No paid provider call was used.
+Paths are relative to an admitted workspace root. The same path policy,
+approval policy, and Plan-mode lock apply to the whole patch.
 
 ## Maintenance
 
-New tools should first prove that one of the four defaults cannot express the
-required workflow, then add bounded extension capability rather than
-growing the default catalog. Implementation changes are recorded in dated notes,
-while this file is updated when the current tool contract changes.
+Add a default tool only when the four existing tools cannot express a required
+workflow. Define its bounded schema, admission behavior, event projection, and
+scenario evidence before exposing it. Keep implementation decisions and
+one-time migration evidence in `.agents/notes/`.

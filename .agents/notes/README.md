@@ -157,5 +157,9 @@ graph LR
 - [Proposal Quality and Evidence Guide](proposal-quality-and-evidence-guide.md)：提案
   起草、批次实施、跨仓同步、证据验证和状态晋级的可执行工作手册。
 
+### Proposed
+
+- [当前文档与运行时对齐](proposed/process/2026-09-19-current-documentation-alignment.zh.md)
+
 其他记录可直接在生命周期目录中查找；不把所有历史记录复制到 README，避免它
 退化成重复维护的 changelog。
