@@ -1457,6 +1457,10 @@ impl SessionStore {
             .max()
             .unwrap_or(0)
             .saturating_add(1);
+        self.bytes = self
+            .file
+            .seek(SeekFrom::End(0))
+            .map_err(|error| format!("cannot seek session append position: {error}"))?;
         Ok(())
     }
 }
