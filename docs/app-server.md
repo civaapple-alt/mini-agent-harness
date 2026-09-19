@@ -1,9 +1,13 @@
 # App Server
 
-`mini-agent-app-server` exposes the host backed `Thread` service to a
-subprocess client. The current transport is newline delimited JSON over
-stdin/stdout. Each input line is one JSON-RPC request; turn progress is emitted
-on the same output stream as `turn/event` notifications.
+`mini-agent-app-server` exposes the Host-backed `Thread` service to a
+subprocess client. It is the public control-plane boundary around Core's thin,
+bounded Agent Loop: Core owns model/tool contracts, the loop, limits, stop
+classification, and execution events; Host and Capabilities own admission,
+approval, and sandboxed side effects; App Server owns the durable Session
+boundary. The current transport is newline-delimited JSON over stdin/stdout.
+Each input line is one JSON-RPC request; turn progress is emitted on the same
+output stream as `turn/event` notifications.
 
 The default binary owns one configured thread per process. Embedded callers can
 construct a service with several preconfigured thread identities and address
@@ -380,12 +384,10 @@ reads the child’s canonical Session projection and returns only bounded status
 attempt, result, and error fields. Neither tool adds a scheduler or a second
 history authority to Core. WebStudio defaults to two active children per parent,
 with a Host setting bounded to `1..=8`; overflow is durable `queued` state.
-The setting controls only the active-child capacity. The Main Thread chooses the
-per-operation `execution_mode` (`parallel` or `sequential`) and may include a
-`group_id` and `sequence` when it delegates work; the Host validates and persists
-that intent without changing Core's loop. Older requests without the field use
-`execution_mode` is required for Child delegation; requests that omit it are
-rejected instead of receiving an implicit scheduling policy.
+The setting controls only the active-child capacity. Every `delegate_task` call
+must provide `execution_mode` as `parallel` or `sequential`. Sequential work
+also requires `group_id` and may provide `sequence`. The Host validates and
+persists that scheduling intent without changing Core's loop.
 
 The Session store appends operation lifecycle records (`queued`, `running`,
 `awaiting_approval`, `completed`, `failed`, or `cancelled`) to the existing
