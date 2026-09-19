@@ -7,7 +7,7 @@ read_file | apply_patch | shell | read_image
 ```
 
 `web_fetch`, MCP tools, child-task tools, Notebook tools, background Shell
-tasks, and scheduled wake-up tools are explicit Host-composed capabilities.
+tasks, and scheduled delay markers are explicit Host-composed capabilities.
 They are not compatibility names for the default set. `write_file` and
 `edit_file` are not supported fallback tools. Use `apply_patch` for workspace
 changes.
@@ -31,6 +31,26 @@ deny → Plan lock → workspace and sandbox → approval → execution → even
 An approval grant does not override an earlier denial. The App Server preserves
 the distinct tool lifecycle status and execution outcome so clients do not have
 to infer `needs_approval`, `deferred`, or `retryable` from error text.
+
+## Background Shell and delayed markers
+
+Use foreground Shell for commands expected to finish within 120 seconds. Use
+`mode=background` for a local service or process that must outlive the current
+Turn, then keep its `task_id` for status and log reads:
+
+```json
+{"mode":"background","action":"start","task_id":"tauri-dev","command":"pnpm tauri dev"}
+{"mode":"background","action":"status","task_id":"tauri-dev"}
+```
+
+Starting again with the same ID returns the existing task; `restart` replaces its
+current process and log tail. Check task state before reading logs; use a separate
+process or endpoint probe only for an app-health question. The Runtime panel can
+control the same task, and a changed PID does not identify who initiated the change.
+Do not create a `scheduled_task` to poll a local Shell task. A scheduled task is only
+a bounded delay marker: it does not wait, end the current Turn, or wake/resume a later
+Turn. Use it for remote checks only when a future Turn will be started explicitly by
+the user or Host.
 
 ## Read files
 

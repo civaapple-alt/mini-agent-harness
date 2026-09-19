@@ -23,10 +23,11 @@ control surface to clients. The App Server runtime owns the authoritative
 `BackgroundShellTask` records and cleans their process groups when the owning
 Thread runtime closes. `runtime/status` remains scoped to the current Turn.
 Child Sessions can read their parent's task projection but cannot control it.
-Remote waits such as GitHub Actions are not background Shell tasks. The model can use
-the bounded `scheduled_task` capability to end the current Turn and continue the
-remote status query in a later Turn; the App Server does not run Shell or resume the
-model automatically.
+Remote waits such as GitHub Actions are not background Shell tasks. `scheduled_task`
+creates a bounded delay marker only: it does not hold or end the current Turn, wake or
+resume a Thread, or query the remote task. Use it only when a later Turn will be started
+explicitly by the user or Host and needs a record of when to check. For a local process,
+use the Shell task's `status` and `logs` actions instead.
 
 Ordered `turn/event` notifications preserve `thread_id`, `turn_id`, sequence,
 and bounded ThreadItem identity. Each model response also carries an optional
@@ -253,7 +254,7 @@ Thread returned by `thread/start`.
 | `background-task/restart` | `threadId`, `taskId` | Recreates the same task from its pinned command and working directory. |
 | `background-task/updated` | notification | Carries one bounded task snapshot after an explicit control action. |
 
-#### Scheduled wake-up tasks
+#### Scheduled delay markers
 
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
@@ -263,9 +264,10 @@ Thread returned by `thread/start`.
 | `scheduled-task/updated` | notification | Carries one marker after cancellation. |
 
 The model-facing `scheduled_task` tool supports only `create`, `list`, `read`, and
-`cancel`; delay is bounded to 1 second through 24 hours. A scheduled marker does not
-execute a command, start a model Turn, or provide a remote-provider adapter. A future
-turn must explicitly call the relevant remote status tool.
+`cancel`; delay is bounded to 1 second through 24 hours. A marker becomes `ready` when
+the runtime next reads or updates it; there is no timer worker. It does not execute a
+command, end the current Turn, start a later Turn, or provide a remote-provider adapter.
+A future Turn must be started explicitly and call the relevant remote status tool.
 
 Successful `session/notebook/write` and `session/notebook/forget` operations also
 emit `session/notebook/updated` with `threadId`, `revision`, and bounded

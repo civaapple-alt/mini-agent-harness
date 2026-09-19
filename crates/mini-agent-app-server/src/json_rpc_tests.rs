@@ -6,8 +6,9 @@ use mini_agent_app_server_protocol::{
 };
 use mini_agent_capabilities::{
     ApprovalController, ApprovalPolicy, BackgroundShellManager, ImageStore, ResultStore,
-    SandboxKind, SecurityPolicy, SecurityPreset, SessionRequest as SessionStoreRequest,
-    SessionStore, workspace_tools_with_read_roots_and_results,
+    SandboxKind, ScheduledTaskManager, SecurityPolicy, SecurityPreset,
+    SessionRequest as SessionStoreRequest, SessionStore,
+    workspace_tools_with_read_roots_and_results,
     workspace_tools_with_read_roots_results_and_background_shells,
 };
 use mini_agent_core::{Harness, HarnessConfig, Thread, ToolRouter};
@@ -166,7 +167,9 @@ async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
             })
         },
     );
-    let tools = workspace_tools_with_read_roots_results_and_background_shells(
+    let scheduled_tasks = ScheduledTaskManager::new();
+    scheduled_tasks.bind_owner("thread-1");
+    let mut tools = workspace_tools_with_read_roots_results_and_background_shells(
         root.clone(),
         approval.clone(),
         Vec::new(),
@@ -177,6 +180,10 @@ async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
         background_shells.clone(),
     )
     .unwrap();
+    tools.retain(|tool| tool.spec().name != "scheduled_task");
+    tools.extend(mini_agent_capabilities::scheduled_task_tools(
+        scheduled_tasks.clone(),
+    ));
     let server = AppServer::new(
         ThreadStart::new(ThreadId::new("thread-1")),
         Thread::new(
@@ -191,25 +198,25 @@ async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
             ),
         ),
     );
-    let management =
-        RuntimeManagementService::new_with_harness_config_and_skills_and_background_shells(
-            server.clone(),
-            None,
-            mini_agent_host::WorldState::detect_with_roots(
-                &root,
-                Vec::new(),
-                SecurityPreset::Default,
-                ApprovalPolicy::Automatic,
-                SandboxKind::Native,
-            ),
+    let management = RuntimeManagementService::new_with_harness_config_and_skills_and_task_managers(
+        server.clone(),
+        None,
+        mini_agent_host::WorldState::detect_with_roots(
+            &root,
             Vec::new(),
-            0,
-            Vec::new(),
-            approval,
-            HarnessConfig::default(),
-            None,
-            background_shells,
-        );
+            SecurityPreset::Default,
+            ApprovalPolicy::Automatic,
+            SandboxKind::Native,
+        ),
+        Vec::new(),
+        0,
+        Vec::new(),
+        approval,
+        HarnessConfig::default(),
+        None,
+        background_shells,
+        scheduled_tasks,
+    );
     let mut connection = AppServerConnection::new(server).with_runtime_services(
         RuntimeServices::new(
             management,
@@ -222,7 +229,12 @@ async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
         .unwrap(),
     );
     initialize_connection(&mut connection, "background-shell-lifecycle").await;
-    let started = start_turn(&mut connection, 2, "start a background shell").await;
+    let started = start_turn(
+        &mut connection,
+        2,
+        "Start a local process that must outlive this Turn.",
+    )
+    .await;
     assert_eq!(started["value"]["turn_id"], "turn-1");
     wait_for_turn_finished(&mut connection).await;
 
@@ -240,9 +252,18 @@ async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
         Some("starting" | "running")
     ));
 
-    let restarted = rpc_call(
+    let delayed = rpc_call(
         &mut connection,
         4,
+        METHOD_SCHEDULED_TASK_LIST,
+        serde_json::json!({"threadId": "thread-1"}),
+    )
+    .await;
+    assert_eq!(delayed["value"]["data"], serde_json::json!([]));
+
+    let restarted = rpc_call(
+        &mut connection,
+        5,
         METHOD_BACKGROUND_TASK_RESTART,
         serde_json::json!({"threadId": "thread-1", "taskId": "scenario-task"}),
     )
@@ -254,7 +275,7 @@ async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
 
     let stopped = rpc_call(
         &mut connection,
-        5,
+        6,
         METHOD_BACKGROUND_TASK_STOP,
         serde_json::json!({"threadId": "thread-1", "taskId": "scenario-task"}),
     )
@@ -262,7 +283,7 @@ async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
     assert_eq!(stopped["value"]["state"], "stopped");
     let logs = rpc_call(
         &mut connection,
-        6,
+        7,
         METHOD_BACKGROUND_TASK_LOGS,
         serde_json::json!({"threadId": "thread-1", "taskId": "scenario-task"}),
     )
@@ -418,6 +439,31 @@ impl Model for ScenarioModel {
                         usage: None,
                     });
                 }
+                let shell = request
+                    .tools
+                    .iter()
+                    .find(|tool| tool.name == "shell")
+                    .expect("workspace composition should expose Shell");
+                let scheduled = request
+                    .tools
+                    .iter()
+                    .find(|tool| tool.name == "scheduled_task")
+                    .expect("workspace composition should expose delayed markers");
+                assert!(shell.description.contains("mode=background/action=start"));
+                assert!(shell.description.contains("Do not use scheduled_task"));
+                assert_eq!(
+                    shell.parameters["oneOf"][1]["required"],
+                    serde_json::json!(["mode", "action", "task_id", "command"])
+                );
+                assert_eq!(
+                    shell.parameters["oneOf"][2]["required"],
+                    serde_json::json!(["mode", "action", "task_id"])
+                );
+                assert!(scheduled.description.contains("wake or resume a Thread"));
+                assert_eq!(
+                    scheduled.parameters["oneOf"][0]["required"],
+                    serde_json::json!(["action", "task_id", "delay_seconds"])
+                );
                 Ok(ModelResponse {
                     reasoning: String::new(),
                     text: String::new(),

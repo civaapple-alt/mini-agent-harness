@@ -3,6 +3,10 @@
 状态：第一版已实现（有界 delay 标记、App Server 控制面、SDK/Gateway/Studio 投影）；
 供应商适配器、Webhook、runtime 重启恢复和自动模型续跑仍不属于第一版。
 
+> 当前实现校正（2026-09-19）：下文“当前 Turn 立即结束/下一轮模型读取”是原设计目标，
+> 实际工具只记录 delay marker，不结束当前 Turn，也不唤醒或启动后续 Turn。以
+> [App Server 当前契约](../../../../docs/app-server.md)为准。
+
 ## 决策
 
 模型有时需要等待远程状态变化，例如 GitHub Action、云端构建或部署任务。让模型

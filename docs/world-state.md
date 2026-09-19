@@ -54,7 +54,7 @@ history:
   workflow and skill-group/skill-load milestones. It is an App Server display
   observation, anchored to completed assistant segments; it neither changes
   Core conversation history nor replays an interrupted Turn.
-- Background Shell tasks and scheduled wake-up markers are bounded,
+- Background Shell tasks and scheduled delay markers are bounded,
   runtime-scoped managers. They are not conversation history and do not create
   a second Core loop. Closing that runtime cleans up its local task state.
 

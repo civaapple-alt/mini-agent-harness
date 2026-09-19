@@ -23,12 +23,27 @@ impl ToolHandler for Shell {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string"},
-                    "mode": {"type": "string", "enum": ["foreground", "background"]},
-                    "action": {"type": "string", "enum": ["start", "status", "logs", "stop", "restart"]},
-                    "task_id": {"type": "string"}
+                    "command": {"type": "string", "description": "Required for foreground execution or background action=start; omit for other background actions."},
+                    "mode": {"type": "string", "enum": ["foreground", "background"], "description": "Omit for a foreground command. Use background for a process that should outlive this Turn."},
+                    "action": {"type": "string", "enum": ["start", "status", "logs", "stop", "restart"], "description": "Required with mode=background. Use start once, status for state, logs for recent output, and stop or restart only to control an existing process."},
+                    "task_id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$", "description": "Required with mode=background. Use a stable ID for one process; start with an existing ID returns its current record, while restart replaces its process and log tail."}
                 },
-                "required": [],
+                "oneOf": [
+                    {
+                        "properties": {"mode": {"enum": ["foreground"]}},
+                        "required": ["command"],
+                        "not": {"anyOf": [{"required": ["action"]}, {"required": ["task_id"]}]}
+                    },
+                    {
+                        "properties": {"mode": {"enum": ["background"]}, "action": {"enum": ["start"]}},
+                        "required": ["mode", "action", "task_id", "command"]
+                    },
+                    {
+                        "properties": {"mode": {"enum": ["background"]}, "action": {"enum": ["status", "logs", "stop", "restart"]}},
+                        "required": ["mode", "action", "task_id"],
+                        "not": {"required": ["command"]}
+                    }
+                ],
                 "additionalProperties": false
             }),
         }
@@ -384,15 +399,14 @@ pub(super) fn shell_description(policy: mini_agent_protocol::ApprovalPolicy) -> 
             "automatically for ordinary commands; recognized destructive commands still require approval"
         }
     };
-    if cfg!(windows) {
-        format!(
-            "Run one PowerShell 7 command via pwsh in the Windows workspace {approval}, with a 120-second deadline. Plan Mode keeps source-file mutation tools read-only; Shell is governed by the selected approval policy."
-        )
+    let shell = if cfg!(windows) {
+        "PowerShell 7 command via pwsh in the Windows workspace"
     } else {
-        format!(
-            "Run one POSIX sh command in the workspace {approval}, with a 120-second deadline. Plan Mode keeps source-file mutation tools read-only; Shell is governed by the selected approval policy."
-        )
-    }
+        "POSIX sh command in the workspace"
+    };
+    format!(
+        "Run one {shell} {approval}. Foreground is the default and has a 120-second deadline. Start a local process that should outlive this Turn with mode=background/action=start and a stable task_id; it returns immediately and is cleaned up when its owner runtime closes. Check state with status first, then read logs if startup or failure details matter; probe a process or endpoint only when verifying app health. Same-ID start returns the existing run; restart replaces its PID and log tail. The Runtime panel and model share task state, but snapshots do not identify who changed it. Use stop or restart only to control an existing task. Do not use scheduled_task for local process polling: it records a delay but does not wait, wake, or resume a Turn. Plan Mode restrictions still apply."
+    )
 }
 
 fn apply_utf8_env(cmd: &mut Command) {

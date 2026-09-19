@@ -303,7 +303,7 @@ pub struct BackgroundTaskUpdatedNotification {
     pub state_revision: u64,
 }
 
-/// A bounded wake-up marker for a later model turn.
+/// A bounded delay marker that never starts a later model turn.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduledTask {

@@ -12,8 +12,8 @@ const MAX_TASK_ID_BYTES: usize = 128;
 const MAX_SUMMARY_BYTES: usize = 512;
 const MAX_DELAY_SECONDS: u64 = 24 * 60 * 60;
 
-/// A bounded, runtime-scoped marker that tells the model when it may perform
-/// the next check. It never executes Shell commands or model prompts.
+/// A bounded, runtime-scoped delay marker for a later explicit status check.
+/// It never wakes a Thread, starts a Turn, or executes Shell commands.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ScheduledTask {
     pub task_id: String,
@@ -172,8 +172,8 @@ impl Default for ScheduledTaskManager {
     }
 }
 
-/// Model-facing control for bounded wake-up markers. A later model turn can
-/// read a task and perform one remote status query without holding a Shell.
+/// Model-facing control for bounded delay markers. A later, explicitly started
+/// Turn can read a marker and perform one remote status query.
 pub fn scheduled_task_tools(manager: ScheduledTaskManager) -> Vec<Box<dyn Tool>> {
     vec![Box::new(ScheduledTaskTool { manager })]
 }
@@ -186,16 +186,31 @@ impl ToolHandler for ScheduledTaskTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "scheduled_task".to_string(),
-            description: "Schedule a bounded wake-up marker without running Shell or a model prompt. Use it instead of sleeping in a foreground Shell while waiting to check a remote task; on a later turn read the task and perform one status check.".to_string(),
+            description: "Create or inspect a bounded delay marker only. This tool does not sleep, run Shell, end the current Turn, wake or resume a Thread, or poll remote work. Use shell mode=background for local long-running processes. Use scheduled_task only when a later Turn will be explicitly started by the user or Host and you need to record when to check external work; read the marker in that later Turn. Reusing a task_id returns the existing marker unchanged.".to_string(),
             parameters: json!({
                 "type": "object",
-                "required": ["action"],
                 "properties": {
-                    "action": {"type": "string", "enum": ["create", "read", "list", "cancel"]},
-                    "task_id": {"type": "string"},
-                    "delay_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_DELAY_SECONDS},
-                    "summary": {"type": "string"}
+                    "action": {"type": "string", "enum": ["create", "read", "list", "cancel"], "description": "Choose create, read, list, or cancel."},
+                    "task_id": {"type": "string", "minLength": 1, "maxLength": MAX_TASK_ID_BYTES, "pattern": "^[A-Za-z0-9._-]+$", "description": "Required for create, read, and cancel. Reusing an ID on create returns its existing marker without changing the delay."},
+                    "delay_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_DELAY_SECONDS, "description": "Required for create; delay from 1 second to 24 hours."},
+                    "summary": {"type": "string", "description": "Optional short reason for the later check."}
                 },
+                "oneOf": [
+                    {
+                        "properties": {"action": {"enum": ["create"]}},
+                        "required": ["action", "task_id", "delay_seconds"]
+                    },
+                    {
+                        "properties": {"action": {"enum": ["read", "cancel"]}},
+                        "required": ["action", "task_id"],
+                        "not": {"anyOf": [{"required": ["delay_seconds"]}, {"required": ["summary"]}]}
+                    },
+                    {
+                        "properties": {"action": {"enum": ["list"]}},
+                        "required": ["action"],
+                        "not": {"anyOf": [{"required": ["task_id"]}, {"required": ["delay_seconds"]}, {"required": ["summary"]}]}
+                    }
+                ],
                 "additionalProperties": false
             }),
         }
@@ -325,6 +340,41 @@ fn timestamp_ms() -> u64 {
 mod tests {
     use super::*;
     use std::thread;
+
+    #[test]
+    fn model_schema_requires_action_specific_arguments() {
+        let tool = ScheduledTaskTool {
+            manager: ScheduledTaskManager::new(),
+        };
+        let spec = tool.spec();
+        let variants = spec.parameters["oneOf"].as_array().unwrap();
+
+        assert_eq!(variants.len(), 3);
+        assert_eq!(
+            variants[0]["required"],
+            json!(["action", "task_id", "delay_seconds"])
+        );
+        assert_eq!(variants[1]["required"], json!(["action", "task_id"]));
+        assert_eq!(variants[2]["required"], json!(["action"]));
+        assert_eq!(
+            spec.parameters["properties"]["task_id"]["maxLength"],
+            json!(MAX_TASK_ID_BYTES)
+        );
+        assert!(spec.description.contains("does not sleep"));
+        assert!(spec.description.contains("wake or resume a Thread"));
+        assert_eq!(
+            tool.execute(&json!({"action": "create", "delay_seconds": 60}))
+                .unwrap_err()
+                .to_string(),
+            "scheduled_task create requires task_id"
+        );
+        assert_eq!(
+            tool.execute(&json!({"action": "create", "task_id": "check"}))
+                .unwrap_err()
+                .to_string(),
+            "scheduled_task create requires delay_seconds"
+        );
+    }
 
     #[test]
     fn delay_task_becomes_ready_without_blocking_a_turn() {
