@@ -59,9 +59,6 @@ impl ToolHandler for ApplyPatch {
     }
 
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
-        if let Some(reason) = self.0.approval.plan_mode_block_reason() {
-            return Ok(ToolAdmission::Deferred { reason });
-        }
         let plan = self.prepare(&request.arguments)?;
         let has_external_path = plan
             .effects
