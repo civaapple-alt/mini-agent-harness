@@ -195,9 +195,10 @@ fail-closed 行为，再增加政策和跨平台边界测试。
 
 ### Provider 与 retry
 
-单一 provider 的行为不能自动产生 provider-specific 分支。HTTP 429 保持 bounded
-fail-fast；只有第二个真实 provider 或明确的 bounded retry policy 出现后，才建立
-provider matrix 和 retry/backoff，且不调用付费 provider、不另起执行循环。
+单一 provider 的行为不能自动产生 provider-specific 分支。Responses adapter 对 HTTP
+请求阶段的连接建立错误执行最多两次短延迟重试；HTTP 429、其他 HTTP 状态和已开始的
+SSE 响应保持 fail-fast，避免重放已被 provider 接收或已向用户输出部分内容的请求。错误
+信息保留有界的底层传输原因。此策略不另起执行循环，也不调用付费 provider。
 
 ### Cargo dependency direction
 

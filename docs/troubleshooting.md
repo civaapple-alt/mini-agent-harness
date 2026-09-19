@@ -98,6 +98,16 @@ If a connection was denied or startup failed transiently, call App Server
 `mcp/retry` from Studio or an SDK client. Existing conversation history is
 preserved.
 
+## A model request fails with a transport error
+
+The Responses adapter retries connection-establishment failures up to two times
+with short delays before ending the Turn. HTTP error responses and failures after
+the streaming response begins are not retried, because the provider may already
+have processed the request or emitted part of the answer. The error includes the
+bounded underlying connection cause when the transport exposes one. If retries
+are exhausted, the checkpoint is preserved; check the configured endpoint,
+network route, proxy, and TLS connectivity before continuing the Thread.
+
 ## File tools and workspace paths
 
 `read_file` and `read_image` accept paths located inside the active Project

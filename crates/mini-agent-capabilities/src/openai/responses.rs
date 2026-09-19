@@ -311,6 +311,7 @@ mod tests {
     use mini_agent_protocol::ToolSpec;
     use std::io::{Read as _, Write as _};
     use std::net::TcpListener;
+    use std::sync::mpsc;
     use std::thread;
 
     #[derive(Default)]
@@ -426,6 +427,77 @@ mod tests {
             &images,
         );
         assert_eq!(body_without_search["tools"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn retries_connection_failures_before_receiving_an_http_response() {
+        let reserved = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = reserved.local_addr().unwrap();
+        drop(reserved);
+
+        let (start_server, wait_for_server) = mpsc::channel();
+        let server = thread::spawn(move || {
+            if wait_for_server.recv().is_err() {
+                return;
+            }
+            let listener = TcpListener::bind(address).unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let _ = stream.read(&mut request).unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+            stream.flush().unwrap();
+        });
+
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let url = format!("http://{address}/responses");
+        let mut send_attempts = 0;
+        let response = super::super::send_with_connect_retries(|| {
+            send_attempts += 1;
+            let attempt = send_attempts;
+            let client = client.clone();
+            let url = url.clone();
+            let start_server = start_server.clone();
+            async move {
+                let response = client.post(url).body("{}").send().await;
+                if attempt == 1 {
+                    assert!(response.as_ref().is_err_and(reqwest::Error::is_connect));
+                    start_server.send(()).unwrap();
+                }
+                response
+            }
+        })
+        .await
+        .unwrap();
+        drop(start_server);
+        server.join().unwrap();
+
+        assert_eq!(send_attempts, 2);
+        assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn bounds_connection_retries_and_reports_the_final_attempt_count() {
+        let reserved = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = reserved.local_addr().unwrap();
+        drop(reserved);
+
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let endpoint = format!("http://{address}/responses");
+        let error = super::super::post_json(&client, &endpoint, "test-key", &json!({}))
+            .await
+            .unwrap_err();
+
+        match error {
+            super::super::OpenAiError::Transport(message) => {
+                assert!(message.contains(&endpoint));
+                assert!(message.contains("after 3 connection attempts"));
+            }
+            error => panic!("unexpected provider error: {error}"),
+        }
     }
 
     #[test]

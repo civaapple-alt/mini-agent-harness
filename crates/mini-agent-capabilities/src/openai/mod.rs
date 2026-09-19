@@ -15,11 +15,15 @@ use reqwest::Client;
 use serde_json::Value;
 use std::error::Error;
 use std::fmt;
+use std::future::Future;
 use std::time::Duration;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
+const CONNECT_RETRY_DELAYS: [Duration; 2] =
+    [Duration::from_millis(250), Duration::from_millis(500)];
+const MAX_TRANSPORT_ERROR_BYTES: usize = 1024;
 
 pub struct OpenAiModel {
     client: Client,
@@ -49,7 +53,7 @@ impl OpenAiModel {
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
             .build()
-            .map_err(|error| OpenAiError::Transport(error.to_string()))?;
+            .map_err(|error| OpenAiError::Transport(transport_error_message(&error)))?;
         Ok(Self {
             client,
             api_key,
@@ -111,13 +115,16 @@ async fn post_json(
     api_key: &str,
     body: &Value,
 ) -> Result<reqwest::Response, OpenAiError> {
-    let response = client
-        .post(url)
-        .bearer_auth(api_key)
-        .json(body)
-        .send()
-        .await
-        .map_err(|error| OpenAiError::Transport(error.to_string()))?;
+    let response =
+        send_with_connect_retries(|| client.post(url).bearer_auth(api_key).json(body).send())
+            .await
+            .map_err(|(error, attempts)| {
+                let mut message = transport_error_message(&error);
+                if attempts > 1 {
+                    message.push_str(&format!(" (after {attempts} connection attempts)"));
+                }
+                OpenAiError::Transport(message)
+            })?;
     if !response.status().is_success() {
         let status = response.status();
         let body = bounded_error_body(response).await;
@@ -129,6 +136,53 @@ async fn post_json(
     Ok(response)
 }
 
+async fn send_with_connect_retries<F, Fut>(
+    mut send: F,
+) -> Result<reqwest::Response, (reqwest::Error, usize)>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<reqwest::Response, reqwest::Error>>,
+{
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match send().await {
+            Ok(response) => return Ok(response),
+            Err(error) if error.is_connect() && attempts <= CONNECT_RETRY_DELAYS.len() => {
+                tokio::time::sleep(CONNECT_RETRY_DELAYS[attempts - 1]).await;
+            }
+            Err(error) => return Err((error, attempts)),
+        }
+    }
+}
+
+fn transport_error_message(error: &(dyn Error + 'static)) -> String {
+    let mut message = error.to_string();
+    let mut source = Error::source(error);
+    let mut depth = 0;
+    while let Some(cause) = source {
+        if depth == 3 {
+            break;
+        }
+        let detail = cause.to_string();
+        if !detail.is_empty() && !message.contains(&detail) {
+            message.push_str(": ");
+            message.push_str(&detail);
+        }
+        source = cause.source();
+        depth += 1;
+    }
+    if message.len() > MAX_TRANSPORT_ERROR_BYTES {
+        let mut end = MAX_TRANSPORT_ERROR_BYTES;
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        message.truncate(end);
+        message.push('…');
+    }
+    message
+}
+
 async fn drain_sse(
     response: reqwest::Response,
     max_event_bytes: usize,
@@ -138,7 +192,8 @@ async fn drain_sse(
     let mut stream = response.bytes_stream().eventsource();
     let mut completed_on_done = false;
     while let Some(event) = stream.next().await {
-        let event = event.map_err(|error| OpenAiError::Transport(error.to_string()))?;
+        let event =
+            event.map_err(|error| OpenAiError::Transport(transport_error_message(&error)))?;
         if event.data == "[DONE]" {
             completed_on_done = complete_on_done;
             break;
