@@ -301,7 +301,7 @@ impl Workspace {
                     .to_string(),
             ));
         }
-        if let Some(living) = self.approval.living_plan()
+        if let Some(living) = self.approval.session_plan_path()
             && crate::path_policy::is_plan_md_alias(path)
         {
             return Ok(living);
@@ -374,9 +374,9 @@ impl Workspace {
         None
     }
 
-    fn is_living_plan(&self, path: &Path) -> bool {
+    fn is_session_plan(&self, path: &Path) -> bool {
         self.approval
-            .living_plan()
+            .session_plan_path()
             .is_some_and(|living| crate::path_policy::same_path(path, &living))
     }
 
@@ -387,7 +387,7 @@ impl Workspace {
     }
 
     fn is_session_artifact(&self, path: &Path) -> bool {
-        self.is_living_plan(path) || self.is_plan_scratch(path) || self.is_goal_artifact(path)
+        self.is_session_plan(path) || self.is_plan_scratch(path) || self.is_goal_artifact(path)
     }
 
     fn is_plan_scratch(&self, path: &Path) -> bool {

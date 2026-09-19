@@ -48,6 +48,40 @@ impl ApprovalBinding {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct PlanAccessState {
+    session_plan: Option<PathBuf>,
+    mode_active: bool,
+}
+
+impl PlanAccessState {
+    fn session_plan(&self) -> Option<&PathBuf> {
+        self.session_plan.as_ref()
+    }
+
+    fn scratch_dir(&self) -> Option<PathBuf> {
+        if !self.mode_active {
+            return None;
+        }
+        self.session_plan
+            .as_ref()?
+            .parent()
+            .map(|parent| parent.join("scratch"))
+    }
+
+    fn set_session_plan(&mut self, session_plan: Option<PathBuf>) {
+        self.session_plan = session_plan;
+    }
+
+    fn set_active(&mut self, active: bool) {
+        self.mode_active = active;
+    }
+
+    fn is_active(&self) -> bool {
+        self.mode_active
+    }
+}
+
 #[derive(Clone)]
 pub struct ApprovalController {
     approval_policy: Arc<RwLock<ApprovalPolicy>>,
@@ -55,8 +89,7 @@ pub struct ApprovalController {
     policy: Arc<RwLock<SecurityPolicy>>,
     store: ApprovalStore,
     callback: Arc<ApprovalCallback>,
-    living_plan: Arc<Mutex<Option<PathBuf>>>,
-    plan_scratch: Arc<Mutex<Option<PathBuf>>>,
+    plan_access: Arc<Mutex<PlanAccessState>>,
     read_only_agent: Arc<AtomicBool>,
     goal_dir: Arc<Mutex<Option<PathBuf>>>,
     session_dir: Arc<Mutex<Option<PathBuf>>>,
@@ -116,8 +149,7 @@ impl ApprovalController {
             policy: Arc::new(RwLock::new(policy)),
             store: ApprovalStore::new(),
             callback,
-            living_plan: Arc::new(Mutex::new(None)),
-            plan_scratch: Arc::new(Mutex::new(None)),
+            plan_access: Arc::new(Mutex::new(PlanAccessState::default())),
             read_only_agent: Arc::new(AtomicBool::new(false)),
             goal_dir: Arc::new(Mutex::new(None)),
             session_dir: Arc::new(Mutex::new(None)),
@@ -175,22 +207,23 @@ impl ApprovalController {
         Self { store, ..self }
     }
 
-    pub fn set_living_plan(&self, path: Option<PathBuf>) {
+    pub fn set_plan_context(&self, path: Option<PathBuf>, active: bool) {
         let normalized = path.map(|path| crate::path_policy::normalize_path(&path));
-        let scratch = normalized
-            .as_ref()
-            .and_then(|path| path.parent())
-            .map(|path| crate::path_policy::normalize_path(&path.join("scratch")));
-        *self.living_plan.lock().unwrap() = normalized;
-        *self.plan_scratch.lock().unwrap() = scratch;
+        let mut plan_access = self.plan_access.lock().unwrap();
+        plan_access.set_session_plan(normalized);
+        plan_access.set_active(active);
     }
 
-    pub fn living_plan(&self) -> Option<PathBuf> {
-        self.living_plan.lock().unwrap().clone()
+    pub fn set_plan_mode_active(&self, active: bool) {
+        self.plan_access.lock().unwrap().set_active(active);
+    }
+
+    pub fn session_plan_path(&self) -> Option<PathBuf> {
+        self.plan_access.lock().unwrap().session_plan().cloned()
     }
 
     pub fn plan_scratch(&self) -> Option<PathBuf> {
-        self.plan_scratch.lock().unwrap().clone()
+        self.plan_access.lock().unwrap().scratch_dir()
     }
 
     pub fn set_read_only_agent(&self, read_only: bool) {
@@ -228,12 +261,16 @@ impl ApprovalController {
         if self.read_only_agent() {
             return Some("workspace mutations disabled by the active agent profile".to_string());
         }
-        self.living_plan().map(|living| {
-            format!(
-                "workspace mutations locked in Plan Mode; living plan is {}",
-                living.display()
-            )
-        })
+        let plan_access = self.plan_access.lock().unwrap();
+        plan_access
+            .is_active()
+            .then(|| match plan_access.session_plan() {
+                Some(plan) => format!(
+                    "workspace mutations locked in Plan Mode; living plan is {}",
+                    plan.display()
+                ),
+                None => "workspace mutations locked in Plan Mode".to_string(),
+            })
     }
 
     pub fn approve(&self, action: &str) -> Result<(), ToolError> {

@@ -1057,7 +1057,7 @@ where
             .goal_runtime_handle
             .init_plan_mode(None)
             .map_err(workflow_error)?;
-        state.approval.set_living_plan(Some(plan_path));
+        state.approval.set_plan_context(Some(plan_path), true);
         let base_prompt = match state.stable_system_prompt.as_ref() {
             Some(prompt) => prompt.clone(),
             None => {
@@ -1084,7 +1084,7 @@ where
             }
         }
         cleanup_result.map_err(workflow_error)?;
-        state.approval.set_living_plan(None);
+        state.approval.set_plan_mode_active(false);
         if let Some(prompt) = state.stable_system_prompt.as_deref() {
             thread.harness_mut().set_system_prompt(prompt);
         }

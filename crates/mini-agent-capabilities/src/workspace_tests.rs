@@ -745,7 +745,7 @@ fn plan_mode_aliases_plan_md_and_locks_workspace_writes() {
     let plan = plan_dir.join("plan.md");
     fs::write(&plan, "# Implementation Plan\n").unwrap();
     let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
-    approval.set_living_plan(Some(plan.clone()));
+    approval.set_plan_context(Some(plan.clone()), true);
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let read = ReadFile(Arc::clone(&workspace));
     let patch = ApplyPatch(Arc::clone(&workspace));
@@ -816,7 +816,7 @@ fn plan_mode_routes_shell_commands_to_approval_admission() {
     fs::create_dir_all(plan.parent().unwrap().join("scratch")).unwrap();
     fs::write(&plan, "# Plan\n").unwrap();
     let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
-    approval.set_living_plan(Some(plan));
+    approval.set_plan_context(Some(plan), true);
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let shell = Shell(
         Arc::clone(&workspace),
@@ -858,7 +858,7 @@ fn plan_mode_allows_read_only_shell_inspection() {
     let plan = plan_dir.join("plan.md");
     fs::write(&plan, "# Plan\n").unwrap();
     let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
-    approval.set_living_plan(Some(plan));
+    approval.set_plan_context(Some(plan), true);
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let shell = Shell(
         Arc::clone(&workspace),
@@ -897,7 +897,7 @@ fn plan_mode_routes_shell_mutations_through_approval_policy() {
     fs::create_dir_all(plan.parent().unwrap()).unwrap();
     fs::write(&plan, "# Plan\n").unwrap();
     let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
-    approval.set_living_plan(Some(plan));
+    approval.set_plan_context(Some(plan), true);
     let workspace = workspace(root.clone(), approval, Vec::new(), SandboxKind::Native);
     let shell = Shell(
         Arc::clone(&workspace),

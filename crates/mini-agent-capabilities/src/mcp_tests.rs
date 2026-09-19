@@ -175,7 +175,7 @@ fn plan_mode_defers_mcp_tool_admission_before_remote_call() {
     let plan = root.join("plan.md");
     fs::write(&plan, "# Plan\n").unwrap();
     let approval = approval_controller(ApprovalPolicy::Automatic, ApprovalOutcome::Approved);
-    approval.set_living_plan(Some(plan));
+    approval.set_plan_context(Some(plan), true);
     let (commands, _receiver) = tokio_mpsc::unbounded_channel();
     let tool = McpTool {
         spec: ToolSpec {

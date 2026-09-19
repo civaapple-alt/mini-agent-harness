@@ -42,7 +42,7 @@ impl ToolHandler for ApplyPatch {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "apply_patch".to_string(),
-            description: "Apply a bounded Codex-style patch to workspace files. Use relative paths for registered roots; an absolute external path requires explicit approval. A patch may add, update, move, or delete files; validate the complete patch before relying on its result. Update hunks use context lines prefixed with a space, removed lines with -, and added lines with +. Session-owned Goal files such as goal/plan.md already exist; use *** Update File rather than *** Add File for them. All affected files are validated before any write.".to_string(),
+            description: "Apply a bounded Codex-style patch to workspace files. Use relative paths for registered roots; an absolute external path requires explicit approval. A patch may add, update, move, or delete files; validate the complete patch before relying on its result. Update hunks use context lines prefixed with a space, removed lines with -, and added lines with +. The Session-owned plan.md and Goal files such as goal/plan.md already exist; use *** Update File rather than *** Add File for them. All affected files are validated before any write.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -60,10 +60,9 @@ impl ToolHandler for ApplyPatch {
 
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let plan = self.prepare(&request.arguments)?;
-        let has_external_path = plan
-            .effects
-            .iter()
-            .any(|effect| !self.0.is_write_path(&effect.path));
+        let has_external_path = plan.effects.iter().any(|effect| {
+            !self.0.is_session_artifact(&effect.path) && !self.0.is_write_path(&effect.path)
+        });
         if !has_external_path
             && self.0.approval.approval_policy() == mini_agent_protocol::ApprovalPolicy::Trusted
             && plan.effects.iter().all(|effect| effect.after.is_some())
@@ -146,7 +145,7 @@ impl ApplyPatch {
                     if resolved.exists() {
                         if self.0.is_session_artifact(&resolved) {
                             return Err(ToolError(format!(
-                                "cannot add existing Session-owned Goal artifact {:?}; use *** Update File instead",
+                                "cannot add existing Session-owned Plan or Goal artifact {:?}; use *** Update File instead",
                                 path
                             )));
                         }

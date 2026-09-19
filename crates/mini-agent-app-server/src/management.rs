@@ -304,6 +304,10 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             verifier_config.clone(),
             Some(notifications.clone()),
         );
+        let plan_active = goal_service.plan_active();
+        let plan_path = goal_service.plan_file_path();
+        let session_plan = (plan_active || plan_path.is_file()).then_some(plan_path);
+        approval.set_plan_context(session_plan, plan_active);
         let commands = server.command_sender();
         let background_shells = management.background_shells.clone();
         let scheduled_tasks = management.scheduled_tasks.clone();

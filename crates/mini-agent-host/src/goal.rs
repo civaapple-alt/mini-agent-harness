@@ -149,6 +149,10 @@ impl HostWorkflowStore {
         self.session_dir.join("goal")
     }
 
+    pub fn plan_file_path(&self) -> PathBuf {
+        living_plan_path(&self.session_dir)
+    }
+
     pub fn init_plan_mode(&self, prompt: Option<&str>) -> io::Result<PathBuf> {
         init_plan_mode_with_prompt(&self.session_dir, prompt)
     }

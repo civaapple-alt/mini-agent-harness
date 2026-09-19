@@ -79,6 +79,10 @@ impl GoalRuntimeHandle {
         self.store.plan_active()
     }
 
+    pub(crate) fn plan_file_path(&self) -> std::path::PathBuf {
+        self.store.plan_file_path()
+    }
+
     pub(crate) fn set_plan_review_pending(&self, pending: bool) -> io::Result<()> {
         self.store.set_plan_review_pending(pending)
     }
