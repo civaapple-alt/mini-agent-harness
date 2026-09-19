@@ -60,6 +60,8 @@ pub use session::SessionRequest;
 pub use session::SessionStore;
 pub use session::THREAD_SETTINGS_FILE_NAME;
 pub use session::TurnCommit;
+pub use session::TurnPresentation;
+pub use session::TurnPresentationActivity;
 pub use session::TurnStatus;
 pub use session::resolve_session_file;
 

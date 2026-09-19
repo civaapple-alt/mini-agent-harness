@@ -5,6 +5,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+- Persist a bounded, Host-owned per-Turn presentation projection for workflow
+  selection and skill lifecycle milestones. App Server records each milestone
+  relative to the completed assistant segments, so a client can restore the
+  same display boundaries without replaying Core or retaining an unbounded
+  observer-event log.
 - Project approval notifications now carry the structured action summary and
   bounded target paths already available in the protocol. `apply_patch` can
   therefore identify added, modified, and deleted files before approval while

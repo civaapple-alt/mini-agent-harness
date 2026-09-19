@@ -24,6 +24,13 @@ use tokio::time::Instant;
 
 const EVENT_REPLAY_BUFFER: usize = 512;
 
+fn skill_display_name(skill: &mini_agent_protocol::SkillLoadRecord) -> String {
+    skill
+        .qualified_name
+        .clone()
+        .unwrap_or_else(|| skill.name.clone())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn operation_record(
     operation_id: &str,
@@ -144,6 +151,8 @@ struct ThreadListener {
     started_skill_reads: BTreeSet<String>,
     loaded_skill_reads: BTreeSet<String>,
     failed_skill_reads: BTreeSet<String>,
+    presentation: mini_agent_capabilities::TurnPresentation,
+    assistant_segments: u32,
     tokens_used: u64,
 }
 
@@ -154,6 +163,58 @@ impl ThreadListener {
 
     fn take_tool_arguments(&mut self) -> Vec<(String, Value)> {
         std::mem::take(&mut self.tool_arguments)
+    }
+
+    fn take_presentation(&mut self) -> mini_agent_capabilities::TurnPresentation {
+        std::mem::take(&mut self.presentation)
+    }
+
+    fn record_presentation_event(&mut self, event: &Event) {
+        use mini_agent_capabilities::TurnPresentationActivity;
+
+        match event {
+            Event::ModelResponded { .. } => {
+                self.assistant_segments = self.assistant_segments.saturating_add(1);
+            }
+            Event::SkillGroupActivated { group, source } => {
+                self.presentation
+                    .push(TurnPresentationActivity::skill_group_activated(
+                        self.assistant_segments,
+                        group,
+                        source,
+                    ));
+            }
+            Event::SkillsLoaded {
+                phase,
+                activation,
+                skills,
+            } => {
+                self.presentation
+                    .push(TurnPresentationActivity::skills_loaded(
+                        self.assistant_segments,
+                        match phase {
+                            SkillLoadPhase::Started => "started",
+                            SkillLoadPhase::Loaded => "loaded",
+                        },
+                        activation.as_deref(),
+                        skills.iter().map(skill_display_name),
+                    ));
+            }
+            Event::SkillsLoadFailed {
+                activation,
+                skills,
+                reason_code,
+            } => {
+                self.presentation
+                    .push(TurnPresentationActivity::skills_load_failed(
+                        self.assistant_segments,
+                        activation.as_deref(),
+                        skills.iter().cloned(),
+                        reason_code,
+                    ));
+            }
+            _ => {}
+        }
     }
 
     fn send_event(&self, event: EventEnvelope) {
@@ -311,7 +372,7 @@ struct RunningCommandContext<'a, M> {
 
 impl ThreadListener {
     fn emit_skill_event(
-        &self,
+        &mut self,
         thread_id: &ThreadId,
         turn_id: &TurnId,
         phase: SkillLoadPhase,
@@ -339,6 +400,7 @@ impl ThreadListener {
             event,
         );
         envelope.item_id = Some(format!("{}:skills", turn_id.as_str()));
+        self.record_presentation_event(&envelope.event);
         self.send_event(envelope);
         *next_sequence = (*next_sequence).saturating_add(1);
     }
@@ -347,6 +409,7 @@ impl ThreadListener {
 impl EventSink for ThreadListener {
     fn emit(&mut self, event: EventEnvelope) {
         self.update_status_for_event(&event);
+        self.record_presentation_event(&event.event);
         if matches!(&event.event, Event::ToolStarted { .. }) {
             for item in ThreadItem::from_event(&event) {
                 if let ThreadItem::ToolCall { id, arguments, .. } = item {
@@ -924,6 +987,10 @@ pub(super) async fn worker_loop<M>(
                         started_skill_reads: BTreeSet::new(),
                         loaded_skill_reads: BTreeSet::new(),
                         failed_skill_reads: BTreeSet::new(),
+                        presentation: mini_agent_capabilities::TurnPresentation::from_workflow(
+                            input.workflow.as_ref(),
+                        ),
+                        assistant_segments: 0,
                         tokens_used: 0,
                     };
                     let mut turn = Box::pin(thread.run_turn_with_events_and_preflight(
@@ -990,6 +1057,7 @@ pub(super) async fn worker_loop<M>(
                     };
                     drop(turn);
                     thread.harness_mut().replace_config(original_config);
+                    let presentation = sink.take_presentation();
                     let mut goal_turn_completed = false;
                     let mut goal_budget_exhausted = false;
                     let mut goal_step_limited = false;
@@ -1008,9 +1076,12 @@ pub(super) async fn worker_loop<M>(
                                 &thread,
                                 started_at_ms,
                                 &prompt,
-                                &projected,
-                                turn_messages,
-                                &tool_arguments,
+                                crate::management::TurnPersistence {
+                                    result: &projected,
+                                    messages: turn_messages,
+                                    tool_arguments: &tool_arguments,
+                                    presentation: Some(&presentation),
+                                },
                             )
                             .err()
                             .map(|error| error.to_string());
@@ -1100,9 +1171,12 @@ pub(super) async fn worker_loop<M>(
                                 &thread,
                                 started_at_ms,
                                 &prompt,
-                                &projected,
-                                &projected.messages,
-                                &[],
+                                crate::management::TurnPersistence {
+                                    result: &projected,
+                                    messages: &projected.messages,
+                                    tool_arguments: &[],
+                                    presentation: Some(&presentation),
+                                },
                             )
                             .err()
                             .map(|persist_error| {

@@ -1,5 +1,6 @@
+use crate::skills::MAX_SELECTED_SKILLS;
 use mini_agent_core::SessionState;
-use mini_agent_protocol::Message;
+use mini_agent_protocol::{Message, TurnWorkflow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -30,6 +31,11 @@ const MAX_OPERATION_KIND_BYTES: usize = 64;
 const MAX_OPERATION_ERROR_BYTES: usize = 4096;
 const MAX_OPERATION_RESULT_BYTES: usize = 16 * 1024;
 const MAX_OPERATION_PROMPT_BYTES: usize = 32 * 1024;
+/// A single Turn can activate a bounded number of explicit skills, and may
+/// additionally load a small number of skills on demand. Keep the replay
+/// projection bounded independently of the raw event stream.
+pub const MAX_TURN_PRESENTATION_ACTIVITIES: usize = 32;
+const MAX_TURN_PRESENTATION_VALUE_CHARS: usize = 256;
 const SESSION_FILE_NAME: &str = "session.jsonl";
 const SESSION_LOCK_NAME: &str = "session";
 pub const SUMMARY_FILE_NAME: &str = "summary.json";
@@ -178,7 +184,142 @@ pub struct TurnCommit<'a> {
     /// Bounded/redacted tool argument projections from the App Server event
     /// stream, keyed by tool call id. Raw model arguments are not persisted.
     pub tool_arguments: &'a [(String, Value)],
+    /// Host-owned, bounded display metadata. This is not Core conversation
+    /// state; it lets a client replay the same workflow/skill milestones after
+    /// the App Server process has restarted.
+    pub presentation: Option<&'a TurnPresentation>,
     pub checkpoint: &'a [Message],
+}
+
+/// Per-turn display metadata derived from the App Server event stream.
+///
+/// The SessionStore keeps this projection next to the Turn rather than
+/// retaining arbitrary observer events. `after_assistant_segments` preserves
+/// the visible placement of each skill milestone without making the durable
+/// session log a second event stream.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnPresentation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workflow: Option<TurnWorkflow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    activities: Vec<TurnPresentationActivity>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnPresentationActivityKind {
+    SkillGroupActivated,
+    SkillsLoaded,
+    SkillsLoadFailed,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnPresentationActivity {
+    after_assistant_segments: u32,
+    kind: TurnPresentationActivityKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    activation: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason_code: Option<String>,
+}
+
+impl TurnPresentation {
+    pub fn from_workflow(workflow: Option<&TurnWorkflow>) -> Self {
+        Self {
+            workflow: workflow.map(bounded_workflow),
+            activities: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, activity: TurnPresentationActivity) {
+        if self.activities.len() < MAX_TURN_PRESENTATION_ACTIVITIES {
+            self.activities.push(activity);
+        }
+    }
+}
+
+impl TurnPresentationActivity {
+    pub fn skill_group_activated(after_assistant_segments: u32, group: &str, source: &str) -> Self {
+        Self {
+            after_assistant_segments,
+            kind: TurnPresentationActivityKind::SkillGroupActivated,
+            group: Some(bounded_presentation_value(group)),
+            source: Some(bounded_presentation_value(source)),
+            phase: None,
+            activation: None,
+            skills: Vec::new(),
+            reason_code: None,
+        }
+    }
+
+    pub fn skills_loaded(
+        after_assistant_segments: u32,
+        phase: &str,
+        activation: Option<&str>,
+        skills: impl IntoIterator<Item = String>,
+    ) -> Self {
+        Self {
+            after_assistant_segments,
+            kind: TurnPresentationActivityKind::SkillsLoaded,
+            group: None,
+            source: None,
+            phase: Some(bounded_presentation_value(phase)),
+            activation: activation.map(bounded_presentation_value),
+            skills: bounded_skill_names(skills),
+            reason_code: None,
+        }
+    }
+
+    pub fn skills_load_failed(
+        after_assistant_segments: u32,
+        activation: Option<&str>,
+        skills: impl IntoIterator<Item = String>,
+        reason_code: &str,
+    ) -> Self {
+        Self {
+            after_assistant_segments,
+            kind: TurnPresentationActivityKind::SkillsLoadFailed,
+            group: None,
+            source: None,
+            phase: None,
+            activation: activation.map(bounded_presentation_value),
+            skills: bounded_skill_names(skills),
+            reason_code: Some(bounded_presentation_value(reason_code)),
+        }
+    }
+}
+
+fn bounded_workflow(workflow: &TurnWorkflow) -> TurnWorkflow {
+    TurnWorkflow {
+        kind: workflow.kind,
+        id: bounded_presentation_value(&workflow.id),
+        mode: workflow.mode,
+    }
+}
+
+fn bounded_skill_names(names: impl IntoIterator<Item = String>) -> Vec<String> {
+    names
+        .into_iter()
+        .take(MAX_SELECTED_SKILLS)
+        .map(|name| bounded_presentation_value(&name))
+        .collect()
+}
+
+fn bounded_presentation_value(value: &str) -> String {
+    value
+        .chars()
+        .take(MAX_TURN_PRESENTATION_VALUE_CHARS)
+        .collect()
 }
 
 /// A bounded Host-owned lifecycle record for work that outlives one Turn.
@@ -457,13 +598,19 @@ impl SessionStore {
         turn_id: &str,
         turn: TurnCommit<'_>,
     ) -> Result<(), String> {
-        let mut records = vec![json!({
+        let mut turn_started = json!({
             "kind": "turn_started",
             "thread_id": self.thread_id,
             "turn_id": turn_id,
             "timestamp_ms": turn.started_at_ms,
             "prompt": turn.prompt,
-        })];
+        });
+        if let Some(presentation) = turn.presentation
+            && let Some(record) = turn_started.as_object_mut()
+        {
+            record.insert("presentation".to_string(), json!(presentation));
+        }
+        let mut records = vec![turn_started];
         let items = turn
             .messages
             .iter()
@@ -1457,6 +1604,7 @@ mod tests {
                     error: None,
                     messages: &messages,
                     tool_arguments: &[],
+                    presentation: None,
                     checkpoint: &messages,
                 },
             )
@@ -1500,6 +1648,7 @@ mod tests {
                     error: None,
                     messages: std::slice::from_ref(&context),
                     tool_arguments: &[],
+                    presentation: None,
                     checkpoint: std::slice::from_ref(&context),
                 },
             )
@@ -1567,6 +1716,7 @@ mod tests {
                     error: None,
                     messages: &messages,
                     tool_arguments: &[],
+                    presentation: None,
                     checkpoint: &messages,
                 },
             )
@@ -1620,6 +1770,7 @@ mod tests {
                     error: None,
                     messages: &messages,
                     tool_arguments: &[],
+                    presentation: None,
                     checkpoint: &messages,
                 },
             )
@@ -1654,6 +1805,7 @@ mod tests {
                     error: None,
                     messages: &messages,
                     tool_arguments: &[],
+                    presentation: None,
                     checkpoint: &messages,
                 },
             )
@@ -1727,6 +1879,7 @@ mod tests {
                     error: None,
                     messages: &first_messages,
                     tool_arguments: &[],
+                    presentation: None,
                     checkpoint: &first_messages,
                 },
             )
@@ -1756,6 +1909,7 @@ mod tests {
                     error: None,
                     messages: &second_messages,
                     tool_arguments: &[],
+                    presentation: None,
                     checkpoint: &second_messages,
                 },
             )
@@ -1809,6 +1963,16 @@ mod tests {
             "call-1".to_string(),
             serde_json::json!({"command": "Get-ChildItem", "token": "[REDACTED]"}),
         )];
+        let mut presentation = TurnPresentation::from_workflow(Some(&TurnWorkflow {
+            kind: mini_agent_protocol::TurnWorkflowKind::SkillGroup,
+            id: "knowledge-work".to_string(),
+            mode: mini_agent_protocol::TurnWorkflowMode::Auto,
+        }));
+        presentation.push(TurnPresentationActivity::skill_group_activated(
+            0,
+            "knowledge-work",
+            "builtin",
+        ));
         opened
             .store
             .record_turn_with_id(
@@ -1821,6 +1985,7 @@ mod tests {
                     error: None,
                     messages: &messages,
                     tool_arguments: &arguments,
+                    presentation: Some(&presentation),
                     checkpoint: &messages,
                 },
             )
@@ -1831,6 +1996,7 @@ mod tests {
         );
         let session_text = fs::read_to_string(opened.store.path()).unwrap();
         assert!(session_text.contains("Get-ChildItem"));
+        assert!(session_text.contains("knowledge-work"));
         drop(opened);
 
         let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();

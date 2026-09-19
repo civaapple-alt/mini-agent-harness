@@ -1,6 +1,6 @@
 use crate::AppServerError;
 use crate::action::{ActionReceipt, RuntimeRevision, respond};
-use crate::management::{RuntimeActorState, SettingsRuntimeEvent};
+use crate::management::{RuntimeActorState, SettingsRuntimeEvent, TurnPersistence};
 use crate::notification::WorkflowRuntimeEvent;
 pub(super) use crate::runtime_command::{RuntimeCommand, RuntimeRequest};
 use crate::status;
@@ -1813,9 +1813,7 @@ pub(super) fn persist_turn(
     thread: &Thread<impl Model>,
     started_at_ms: u64,
     prompt: &str,
-    result: &crate::RuntimeTurnResult,
-    messages: &[Message],
-    tool_arguments: &[(String, serde_json::Value)],
+    turn: TurnPersistence<'_>,
 ) -> Result<(), AppServerError> {
     let checkpoint = thread
         .checkpoint()
@@ -1823,14 +1821,9 @@ pub(super) fn persist_turn(
     let Some(state) = runtime.as_mut() else {
         return Ok(());
     };
-    state.management.record_turn(
-        started_at_ms,
-        prompt,
-        result,
-        messages,
-        tool_arguments,
-        checkpoint.session.messages(),
-    )
+    state
+        .management
+        .record_turn(started_at_ms, prompt, turn, checkpoint.session.messages())
 }
 
 pub(super) fn record_operation(

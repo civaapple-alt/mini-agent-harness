@@ -50,6 +50,10 @@ history:
   failure, cancellation, retry attempt, and scheduling metadata.
 - `notebook.json` stores bounded Session facts. Resume injects only a bounded
   summary. Full entries are available through explicit Notebook reads.
+- Each settled Turn retains a bounded presentation projection of its requested
+  workflow and skill-group/skill-load milestones. It is an App Server display
+  observation, anchored to completed assistant segments; it neither changes
+  Core conversation history nor replays an interrupted Turn.
 - Background Shell tasks and scheduled wake-up markers are bounded,
   runtime-scoped managers. They are not conversation history and do not create
   a second Core loop. Closing that runtime cleans up its local task state.

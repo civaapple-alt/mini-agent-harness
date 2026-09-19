@@ -64,6 +64,13 @@ pub(crate) struct RuntimeManagementState {
     pub(crate) scheduled_tasks: ScheduledTaskManager,
 }
 
+pub(crate) struct TurnPersistence<'a> {
+    pub(crate) result: &'a RuntimeTurnResult,
+    pub(crate) messages: &'a [Message],
+    pub(crate) tool_arguments: &'a [(String, serde_json::Value)],
+    pub(crate) presentation: Option<&'a mini_agent_capabilities::TurnPresentation>,
+}
+
 struct McpRuntimeState {
     enabled_servers: Vec<String>,
     tool_count: usize,
@@ -844,16 +851,14 @@ impl RuntimeManagementState {
         &mut self,
         started_at_ms: u64,
         prompt: &str,
-        result: &RuntimeTurnResult,
-        messages: &[Message],
-        tool_arguments: &[(String, serde_json::Value)],
+        turn: TurnPersistence<'_>,
         checkpoint: &[Message],
     ) -> Result<(), AppServerError> {
         let Some(session) = self.session.as_mut() else {
             self.local_checkpoint_seq = self.local_checkpoint_seq.saturating_add(1);
             return Ok(());
         };
-        let status = match result.status {
+        let status = match turn.result.status {
             TurnStatus::Completed => SessionTurnStatus::Completed,
             TurnStatus::StepLimit => SessionTurnStatus::StepLimit,
             TurnStatus::Steered => SessionTurnStatus::Steered,
@@ -863,15 +868,16 @@ impl RuntimeManagementState {
         session
             .store
             .record_turn_with_id(
-                result.turn_id.as_str(),
+                turn.result.turn_id.as_str(),
                 TurnCommit {
                     started_at_ms,
                     prompt,
                     status,
-                    steps: result.steps,
-                    error: result.error.as_deref(),
-                    messages,
-                    tool_arguments,
+                    steps: turn.result.steps,
+                    error: turn.result.error.as_deref(),
+                    messages: turn.messages,
+                    tool_arguments: turn.tool_arguments,
+                    presentation: turn.presentation,
                     checkpoint,
                 },
             )
