@@ -96,6 +96,7 @@ graph LR
 
 ### Proposed
 
+- [WebStudio Session Doctor：工作区 Session 日志诊断与安全修复](proposed/feature/2026-09-19-web-studio-session-doctor.zh.md)
 - [跨 Turn 的后台 Shell 任务](proposed/architecture/2026-09-18-background-shell-task.zh.md)
 - [跨 Turn 的定时唤醒任务](proposed/architecture/2026-09-18-scheduled-task.zh.md)
 - [Session 状态、Notebook 与 Subagent 执行策略](proposed/architecture/2026-09-17-session-state-notebook-and-subagent-execution-policy.zh.md)
