@@ -1024,6 +1024,89 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
 }
 
 #[tokio::test]
+async fn child_task_report_rpc_checks_attempt_and_persists_idempotently() {
+    let root = rpc_root("child-task-report");
+    let parent = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let parent_thread_id = parent.store.thread_id().to_string();
+    let mut operation = mini_agent_capabilities::SessionOperation::new(
+        "child:child-rpc-thread",
+        "child_task",
+        "queued",
+    );
+    operation.parent_thread_id = Some(parent_thread_id.clone());
+    let child = SessionStore::fork_from_checkpoint_with_operation(
+        &root,
+        parent.store.session_id(),
+        parent.store.checkpoint_seq(),
+        "child-rpc-thread",
+        &[],
+        mini_agent_capabilities::SessionForkMetadata {
+            context_policy: "exact".to_string(),
+            context_before_bytes: 0,
+            context_after_bytes: 0,
+            compacted: false,
+            method: "exact".to_string(),
+        },
+        Some(operation),
+    )
+    .unwrap();
+    let child_session_id = child.session_id;
+    drop(parent);
+
+    let mut child =
+        SessionStore::open(&root, SessionStoreRequest::Resume(child_session_id.clone())).unwrap();
+    child
+        .store
+        .record_operation(mini_agent_capabilities::SessionOperation::new(
+            "child:child-rpc-thread",
+            "child_task",
+            "running",
+        ))
+        .unwrap();
+    let child_thread_id = child.store.thread_id().to_string();
+    let mut connection = managed_connection_with_session(DoneModel, root.clone(), child);
+    initialize_connection(&mut connection, "child-task-report-test").await;
+
+    let stale = connection
+        .handle_request(JsonRpcRequest::request(
+            2,
+            METHOD_CHILD_TASK,
+            serde_json::json!({
+                "threadId": child_thread_id,
+                "parentThreadId": parent_thread_id,
+                "operationId": "child:child-rpc-thread",
+                "attempt": 2,
+                "action": "report",
+                "reportId": "report-call",
+                "report": "Checking the report path."
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(stale.error.is_some());
+    let params = serde_json::json!({
+        "threadId": child_thread_id,
+        "parentThreadId": parent_thread_id,
+        "operationId": "child:child-rpc-thread",
+        "attempt": 1,
+        "action": "report",
+        "reportId": "report-call",
+        "report": "Checking the report path."
+    });
+    let first = rpc_call(&mut connection, 3, METHOD_CHILD_TASK, params.clone()).await;
+    let retry = rpc_call(&mut connection, 4, METHOD_CHILD_TASK, params).await;
+    assert_eq!(first["value"]["cursor"], retry["value"]["cursor"]);
+    assert_eq!(first["value"]["attempt"], 1);
+
+    connection.shutdown().await.unwrap();
+    let (_, child_path) =
+        mini_agent_capabilities::resolve_session_file(&root, &child_session_id).unwrap();
+    let child_log = std::fs::read_to_string(child_path).unwrap();
+    assert_eq!(child_log.matches("\"kind\":\"child_report\"").count(), 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn exact_session_fork_can_prepare_from_an_active_parent_turn() {
     let root = rpc_root("active-session-fork");
     let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();

@@ -96,6 +96,7 @@ graph LR
 
 ### Proposed
 
+- [子代理动态协作与进展跟踪](proposed/architecture/2026-09-20-dynamic-child-agent-coordination.zh.md)
 - [WebStudio Session Doctor：工作区 Session 日志诊断与安全修复](proposed/feature/2026-09-19-web-studio-session-doctor.zh.md)
 - [跨 Turn 的后台 Shell 任务](proposed/architecture/2026-09-18-background-shell-task.zh.md)
 - [跨 Turn 的定时唤醒任务](proposed/architecture/2026-09-18-scheduled-task.zh.md)
@@ -141,6 +142,7 @@ graph LR
 - [Cargo Boundary Audit](implemented/architecture/2026-09-07-cargo-boundary-audit.md)
 - [Multi-Directory Workspace Context Perception](implemented/feature/2026-09-07-multi-directory-workspace-context.md)
 - [Line Budget Ceiling Adjustment Rationale](implemented/process/2026-09-10-line-budget-ceiling-adjustment-rationale.zh.md)
+- [面向交付的 Agent 运行系统行数门禁](implemented/process/2026-09-20-deliverable-agent-system-line-budgets.zh.md)
 - [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md)
 - [Hard Limits System](implemented/architecture/2026-08-24-hard-limits-system.md)
 - [Session as Single Durable Store](implemented/architecture/2026-08-28-session-single-source-of-truth.md)

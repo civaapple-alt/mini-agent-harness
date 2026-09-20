@@ -23,6 +23,11 @@ errors, and complete settled checkpoints. They can contain source code or
 secrets exposed during a turn. Review those files before sharing them. Session
 files are neither encrypted nor uploaded by mini-agent.
 
+Delegated child progress reports are also stored in the child Session JSONL with
+the operation ID, attempt, timestamp, and report text. They have the same local
+retention and review requirements as other Session content; Web Studio projects
+only bounded reports into the parent view and does not copy the child transcript.
+
 Goal verification can send the complete latest settled checkpoint to the
 effective verifier endpoint, which may differ from `OPENAI_BASE_URL`. This can
 include all of the durable content described above. The verifier runs with one

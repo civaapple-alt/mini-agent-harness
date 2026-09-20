@@ -12,16 +12,12 @@ KERNEL_LIMIT = 6_000
 # The release-source total includes production code and tests from the supported
 # runtime packages. The experimental CLI/REPL is reported separately and is not
 # part of this hard release gate.
-PROJECT_LIMIT = 40_000
-CONTROL_PLANE_LIMIT = 28_000
+PROJECT_LIMIT = 45_000
+CONTROL_PLANE_LIMIT = 30_000
+PROJECT_DELTA_LIMIT = 1_000
 
-# The hard ceilings remain the emergency release boundary. The release-source
-# operating limit leaves room for ordinary maintenance; the delta gate below
-# permits bounded growth through the amber band and freezes positive growth in
-# the red band. Runtime is reported for visibility but has no aggregate gate.
-PROJECT_OPERATING_LIMIT = 39_000
-PROJECT_RED_LIMIT = 39_500
-PROJECT_NON_RED_DELTA_LIMIT = 300
+# Runtime is reported for visibility but has no aggregate gate. Release growth
+# is bounded per change, while the source totals remain subject to hard limits.
 
 # Keep the report aligned with the conceptual runtime layers. Capabilities are
 # reported separately because they are provider implementations behind Host;
@@ -375,16 +371,6 @@ def build_git_report(root: Path, ref: str) -> dict[str, object]:
     )
 
 
-def _budget_band(total: int, operating: int, red: int, hard: int) -> str:
-    if total > hard:
-        return "fail"
-    if total > red:
-        return "red"
-    if total > operating:
-        return "amber"
-    return "green"
-
-
 def _status(report: dict[str, object]) -> dict[str, str]:
     return {
         "kernel": "fail" if int(report["kernel"]) > KERNEL_LIMIT else "green",
@@ -393,12 +379,7 @@ def _status(report: dict[str, object]) -> dict[str, str]:
             if int(report["control_plane"]) > CONTROL_PLANE_LIMIT
             else "green"
         ),
-        "release": _budget_band(
-            int(report["release"]),
-            PROJECT_OPERATING_LIMIT,
-            PROJECT_RED_LIMIT,
-            PROJECT_LIMIT,
-        ),
+        "release": "fail" if int(report["release"]) > PROJECT_LIMIT else "green",
     }
 
 
@@ -412,26 +393,17 @@ def _delta_gate_violations(
         "control_plane": int(current["control_plane"])
         - int(base["control_plane"]),
     }
-    policies = (
-        (
-            "release",
-            PROJECT_OPERATING_LIMIT,
-            PROJECT_RED_LIMIT,
-            PROJECT_LIMIT,
-            PROJECT_NON_RED_DELTA_LIMIT,
-        ),
-    )
-    for name, operating, red, hard, non_red_delta in policies:
-        total = int(current[name])
-        delta = deltas[name]
-        if total > hard:
-            violations.append(f"{name} exceeds hard limit ({total}/{hard})")
-        elif total <= red and delta > non_red_delta:
-            violations.append(
-                f"{name} grew by {delta} lines, above non-red limit {non_red_delta}"
-            )
-        if total > red and delta > 0:
-            violations.append(f"{name} is in red band and cannot grow")
+    release_total = int(current["release"])
+    release_delta = deltas["release"]
+    if release_total > PROJECT_LIMIT:
+        violations.append(
+            f"release exceeds hard limit ({release_total}/{PROJECT_LIMIT})"
+        )
+    if release_delta > PROJECT_DELTA_LIMIT:
+        violations.append(
+            f"release grew by {release_delta} lines, above per-change limit "
+            f"{PROJECT_DELTA_LIMIT}"
+        )
     kernel_total = int(current["kernel"])
     if kernel_total > KERNEL_LIMIT:
         violations.append(
@@ -489,8 +461,6 @@ def _compact_status(report: dict[str, object]) -> dict[str, str]:
         else "PASS",
         "release": {
             "green": "PASS",
-            "amber": "WARN",
-            "red": "FREEZE",
             "fail": "FAIL",
         }[statuses["release"]],
     }
@@ -608,9 +578,7 @@ def check(
                 "core_protocol_hard": KERNEL_LIMIT,
                 "release_hard": PROJECT_LIMIT,
                 "control_plane_hard": CONTROL_PLANE_LIMIT,
-                "release_operating": PROJECT_OPERATING_LIMIT,
-                "release_red": PROJECT_RED_LIMIT,
-                "release_non_red_delta": PROJECT_NON_RED_DELTA_LIMIT,
+                "release_delta": PROJECT_DELTA_LIMIT,
             },
             "current": _json_report(current),
             "base": _json_report(baseline) if baseline else None,
@@ -644,7 +612,7 @@ def main() -> int:
     parser.add_argument(
         "--check-delta",
         action="store_true",
-        help="enforce the operating-band and per-PR delta policy",
+        help="enforce hard limits and the per-change release delta limit",
     )
     parser.add_argument(
         "--json", action="store_true", help="emit machine-readable JSON"

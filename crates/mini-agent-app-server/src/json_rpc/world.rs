@@ -4,6 +4,59 @@ impl<M> AppServerConnection<M>
 where
     M: Model + Send + 'static,
 {
+    pub(super) async fn handle_child_task(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<ChildTaskParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        if params.attempt == 0
+            || params.parent_thread_id.is_empty()
+            || params.parent_thread_id.len() > 128
+            || params.operation_id.is_empty()
+            || params.operation_id.len() > 128
+        {
+            return response_error(
+                request.id,
+                JsonRpcError::invalid_params(
+                    "parentThreadId and operationId must be bounded and non-empty",
+                ),
+            );
+        }
+        match params.action.as_str() {
+            "report" if params.report_id.is_some() && params.report.is_some() => {}
+            "update_queued" if params.prompt.is_some() => {}
+            "cancel_queued" => {}
+            "report" | "update_queued" => {
+                return response_error(
+                    request.id,
+                    JsonRpcError::invalid_params("action payload is incomplete"),
+                );
+            }
+            _ => {
+                return response_error(
+                    request.id,
+                    JsonRpcError::invalid_params("unsupported child task action"),
+                );
+            }
+        }
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        action_response(
+            request.id,
+            management.child_task_action(params),
+            Clone::clone,
+        )
+        .await
+    }
+
     pub(super) async fn handle_session_fork(
         &self,
         request: JsonRpcRequest,

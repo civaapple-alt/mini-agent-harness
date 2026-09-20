@@ -50,6 +50,10 @@ pub(super) enum RuntimeCommand {
         key: String,
         reply: oneshot::Sender<ActionResult<serde_json::Value>>,
     },
+    ChildTask {
+        params: mini_agent_app_server_protocol::ChildTaskParams,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::ChildTaskResult>>,
+    },
     CheckpointSeq {
         reply: oneshot::Sender<ActionResult<Option<u64>>>,
     },
@@ -149,6 +153,7 @@ impl RuntimeCommand {
                 | Self::PrepareSessionFork { .. }
                 | Self::WriteNotebook { .. }
                 | Self::ForgetNotebook { .. }
+                | Self::ChildTask { .. }
                 | Self::BackgroundTaskStop { .. }
                 | Self::BackgroundTaskRestart { .. }
                 | Self::ScheduledTaskCancel { .. }

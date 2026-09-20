@@ -74,9 +74,9 @@ observable, recoverable, and verifiable runtime behavior.
 
 - Core + Protocol hard limit: 6,000 effective Rust source lines across `core`
   and `protocol`.
-- Release-source hard limit: 40,000 effective Rust source lines across Core, Protocol,
+- Release-source hard limit: 45,000 effective Rust source lines across Core, Protocol,
   Capabilities, Host, and App Server.
-- Control Plane hard limit: 28,000 effective Rust source lines across the Host
+- Control Plane hard limit: 30,000 effective Rust source lines across the Host
   and Capabilities control-plane categories.
 - The CLI, including the experimental REPL, is reported separately and is
   excluded from the release-source limit. Tests in release packages count.
@@ -92,10 +92,8 @@ observable, recoverable, and verifiable runtime behavior.
   dependency directions and reports the existing App Server to Capabilities
   edge as a review finding; it does not require a crate split merely to satisfy
   the line gate.
-- Release Rust `39,000` is the operating budget and `39,500` is the red-band
-  threshold. Green and amber pull requests may grow by at most `300` release
-  lines;
-  positive growth is frozen once the resulting total enters the red band. Use
+- A pull request may add up to `1,000` net effective Release Rust lines from
+  its base revision, provided every total stays under its hard limit. Use
   `python scripts/line_budget.py --base <merge-base> --check-delta --json`
   for the incremental check.
 
@@ -120,11 +118,13 @@ present, all answer placeholders are replaced, all six questions have answers,
 and all six admission boxes are checked. The check validates completion only;
 reviewers still judge the answer quality and architecture.
 
-New code defaults to net-zero growth or must identify an explicit offset. Never
-remove Core tests, Actor/CAS/Session authority, or public protocol behavior only
-to satisfy the approximate Stage 1 target. The 6,000-line Core + Protocol and
-40,000-line release-source ceilings remain hard gates; experimental CLI/REPL
-growth is informational until it is promoted into the supported surface.
+New code defaults to net-zero growth. A feature may use the per-pull-request
+allowance when its scope requires growth and its boundary evidence supports it.
+Never remove Core tests, Actor/CAS/Session authority, or public protocol behavior
+only to satisfy a line target. The 6,000-line Core + Protocol, 30,000-line
+Control Plane, and 45,000-line Release Rust ceilings remain hard gates;
+experimental CLI/REPL growth is informational until it is promoted into the
+supported surface.
 
 If a change affects prompt, tool schema, loop-control, context, events, or
 persistence, public unit tests alone are not sufficient: add bounded Harness

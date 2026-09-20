@@ -124,6 +124,19 @@ Child 运行在独立 App Server runtime 中。`delegate_task` 的 `execution_mo
 是 `parallel` 或 `sequential`；顺序任务还需要 `group_id`。Gateway 只把 operation
 的有限状态投影给父 Thread，Child transcript 始终留在 Child Session。
 
+Child 可用 `task_report` 发送有界进展；Gateway 通过 App Server `child/task`
+写入 Child Session，再刷新 `/children` 和父 Turn 批次卡。父 Thread 活跃时，报告和
+终态在安全的续行边界排队处理；空闲时合并唤醒并自动续行一轮。父代理可以通过
+`task_control` 修改/取消排队项、引导或取消运行项、重试失败项、取消顺序组，或用
+`delegate_task` 追加新方向。顺序组缺号时等待，前序失败或取消时暂停后续项。
+运行面板展示相同的持久状态和最近报告；只有已创建 Session 的任务可打开。Gateway
+事件是刷新提示，Session operation/report 仍是状态权威。
+
+Gateway 也会把 `task_control` 的执行结果合并到父会话唤醒中。父 Thread 活跃时，
+Gateway 在安全续行边界发送结果；空闲时启动一轮续行。该结果说明 Gateway 控制调用
+是否应用、失败或部分完成，不代替 App Server 中的 operation 状态。待处理唤醒保存在
+Gateway 内存中，Gateway 重启后不会重放。
+
 Notebook 属于当前 Session。Gateway 通过 App Server 读写它，不缓存第二份内容。Child
 可以读取 Host 校验的父级快照，但只能修改自己的 Notebook。
 

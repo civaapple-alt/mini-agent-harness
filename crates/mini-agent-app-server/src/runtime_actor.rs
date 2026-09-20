@@ -476,6 +476,15 @@ pub(super) fn handle<M>(
             }
             respond(reply, receipt, result);
         }
+        RuntimeCommand::ChildTask { params, reply } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .management
+                    .child_task_action(&params)
+                    .map(|value| (value, true))
+            });
+            respond(reply, receipt, result);
+        }
         RuntimeCommand::CheckpointSeq { reply } => respond(
             reply,
             receipt,
@@ -813,6 +822,7 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::ReadNotebook { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::WriteNotebook { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ForgetNotebook { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::ChildTask { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::CheckpointSeq { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ThreadId { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::World { reply } => respond(reply, receipt, Err(error)),
@@ -979,6 +989,7 @@ fn is_safe_goal_mutation_while_running(command: &RuntimeCommand) -> bool {
     matches!(
         command,
         RuntimeCommand::BackgroundTaskStop { .. }
+            | RuntimeCommand::ChildTask { .. }
             | RuntimeCommand::BackgroundTaskRestart { .. }
             | RuntimeCommand::ScheduledTaskCancel { .. }
             | RuntimeCommand::ThreadGoalClear { .. }

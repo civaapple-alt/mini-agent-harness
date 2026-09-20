@@ -31,6 +31,7 @@ const MAX_OPERATION_KIND_BYTES: usize = 64;
 const MAX_OPERATION_ERROR_BYTES: usize = 4096;
 const MAX_OPERATION_RESULT_BYTES: usize = 16 * 1024;
 const MAX_OPERATION_PROMPT_BYTES: usize = 32 * 1024;
+const MAX_CHILD_REPORT_BYTES: usize = 4 * 1024;
 /// A single Turn can activate a bounded number of explicit skills, and may
 /// additionally load a small number of skills on demand. Keep the replay
 /// projection bounded independently of the raw event stream.
@@ -330,6 +331,7 @@ fn bounded_presentation_value(value: &str) -> String {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct SessionOperation {
     pub operation_id: String,
+    #[serde(rename = "operation_kind")]
     pub kind: String,
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -337,11 +339,19 @@ pub struct SessionOperation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
     pub attempt: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "operation_group_id",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub group_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "group_sequence",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub sequence: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
@@ -349,6 +359,21 @@ pub struct SessionOperation {
     pub result: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    pub timestamp_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChildTaskContext {
+    pub parent_thread_id: String,
+    pub operation_id: String,
+    pub attempt: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChildTaskMutationResult {
+    pub status: String,
+    pub cursor: u64,
+    pub attempt: u32,
     pub timestamp_ms: u64,
 }
 
@@ -574,6 +599,16 @@ impl SessionStore {
     /// recoverable state after a restart. They are ignored by Core's message
     /// reconstruction and therefore cannot change the model conversation.
     pub fn record_operation(&mut self, operation: SessionOperation) -> Result<(), String> {
+        let mut operation = operation;
+        if operation.kind == "child_task"
+            && let Some(previous) = latest_operation(&self.path, &operation.operation_id)?
+        {
+            operation.parent_thread_id = operation.parent_thread_id.or(previous.parent_thread_id);
+            operation.group_id = operation.group_id.or(previous.group_id);
+            operation.execution_mode = operation.execution_mode.or(previous.execution_mode);
+            operation.sequence = operation.sequence.or(previous.sequence);
+            operation.prompt = operation.prompt.or(previous.prompt);
+        }
         operation.validate()?;
         self.append_records(vec![json!({
             "kind": "operation",
@@ -591,6 +626,124 @@ impl SessionStore {
             "error": operation.error,
             "timestamp_ms": operation.timestamp_ms,
         })])
+    }
+
+    pub fn child_task_context(&self) -> Result<Option<ChildTaskContext>, String> {
+        let records = session_values(&self.path)?;
+        if !records.iter().any(|record| {
+            record.get("kind").and_then(Value::as_str) == Some("session_created")
+                && record.get("forked_from").is_some()
+        }) {
+            return Ok(None);
+        }
+        let operation = records.iter().rev().find(|record| {
+            record.get("kind").and_then(Value::as_str) == Some("operation")
+                && record.get("operation_kind").and_then(Value::as_str) == Some("child_task")
+        });
+        Ok(operation.and_then(|record| {
+            Some(ChildTaskContext {
+                parent_thread_id: record.get("parent_thread_id")?.as_str()?.to_string(),
+                operation_id: record.get("operation_id")?.as_str()?.to_string(),
+                attempt: record.get("attempt")?.as_u64()?.try_into().ok()?,
+            })
+        }))
+    }
+
+    pub fn record_child_report(
+        &mut self,
+        context: &ChildTaskContext,
+        report_id: &str,
+        report: &str,
+    ) -> Result<ChildTaskMutationResult, String> {
+        if report_id.is_empty() || report_id.len() > MAX_OPERATION_ID_BYTES {
+            return Err("report_id must be bounded and non-empty".to_string());
+        }
+        if report.trim().is_empty()
+            || report.len() > MAX_CHILD_REPORT_BYTES
+            || report
+                .chars()
+                .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
+        {
+            return Err("report must be non-empty and at most 4 KiB".to_string());
+        }
+        let operation = validate_child_operation(self, context, None)?;
+        for record in session_values(&self.path)? {
+            if record.get("kind").and_then(Value::as_str) == Some("child_report")
+                && record.get("operation_id").and_then(Value::as_str)
+                    == Some(context.operation_id.as_str())
+                && record.get("attempt").and_then(Value::as_u64)
+                    == Some(u64::from(operation.attempt))
+                && record.get("report_id").and_then(Value::as_str) == Some(report_id)
+            {
+                return Ok(ChildTaskMutationResult {
+                    status: "reported".to_string(),
+                    cursor: record
+                        .get("seq")
+                        .and_then(Value::as_u64)
+                        .unwrap_or_default(),
+                    attempt: operation.attempt,
+                    timestamp_ms: record
+                        .get("timestamp_ms")
+                        .and_then(Value::as_u64)
+                        .unwrap_or_default(),
+                });
+            }
+        }
+        let timestamp_ms = timestamp_ms();
+        self.append_records(vec![json!({
+            "kind": "child_report",
+            "operation_id": context.operation_id,
+            "parent_thread_id": context.parent_thread_id,
+            "report_id": report_id,
+            "attempt": operation.attempt,
+            "timestamp_ms": timestamp_ms,
+            "report": report,
+        })])?;
+        Ok(ChildTaskMutationResult {
+            status: "reported".to_string(),
+            cursor: self.next_seq.saturating_sub(1),
+            attempt: operation.attempt,
+            timestamp_ms,
+        })
+    }
+
+    pub fn update_queued_child_task(
+        &mut self,
+        context: &ChildTaskContext,
+        prompt: String,
+    ) -> Result<ChildTaskMutationResult, String> {
+        if prompt.trim().is_empty() || prompt.len() > MAX_OPERATION_PROMPT_BYTES {
+            return Err("prompt must be non-empty and bounded".to_string());
+        }
+        self.mutate_queued_child_task(context, Some(prompt))
+    }
+
+    pub fn cancel_queued_child_task(
+        &mut self,
+        context: &ChildTaskContext,
+    ) -> Result<ChildTaskMutationResult, String> {
+        self.mutate_queued_child_task(context, None)
+    }
+
+    fn mutate_queued_child_task(
+        &mut self,
+        context: &ChildTaskContext,
+        prompt: Option<String>,
+    ) -> Result<ChildTaskMutationResult, String> {
+        let mut operation = validate_child_operation(self, context, Some(&["queued"]))?;
+        if let Some(prompt) = prompt {
+            operation.prompt = Some(prompt);
+        } else {
+            operation.status = "cancelled".to_string();
+        }
+        operation.timestamp_ms = timestamp_ms();
+        self.record_operation(operation.clone())?;
+        Ok(ChildTaskMutationResult {
+            status: operation.status,
+            cursor: self.next_seq.saturating_sub(1),
+            attempt: operation.attempt,
+            timestamp_ms: operation.timestamp_ms,
+        })
     }
 
     pub fn record_turn_with_id(
@@ -1548,6 +1701,69 @@ fn validate_operation_text(value: &str, max_bytes: usize, label: &str) -> Result
     Ok(())
 }
 
+fn session_values(path: &Path) -> Result<Vec<Value>, String> {
+    let bytes = fs::read(path).map_err(|error| format!("cannot read Session: {error}"))?;
+    Ok(bytes
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
+        .collect())
+}
+
+fn latest_operation(path: &Path, operation_id: &str) -> Result<Option<SessionOperation>, String> {
+    Ok(session_values(path)?.iter().rev().find_map(|record| {
+        (record.get("kind").and_then(Value::as_str) == Some("operation")
+            && record.get("operation_kind").and_then(Value::as_str) == Some("child_task")
+            && record.get("operation_id").and_then(Value::as_str) == Some(operation_id))
+        .then(|| serde_json::from_value(record.clone()).ok())
+        .flatten()
+    }))
+}
+
+fn validate_child_operation(
+    store: &SessionStore,
+    context: &ChildTaskContext,
+    statuses: Option<&[&str]>,
+) -> Result<SessionOperation, String> {
+    let records = session_values(&store.path)?;
+    if !records.iter().any(|record| {
+        record.get("kind").and_then(Value::as_str) == Some("session_created")
+            && record.get("forked_from").is_some()
+    }) {
+        return Err("child task Session lineage was not found".to_string());
+    }
+    let operation = records
+        .iter()
+        .rev()
+        .find(|record| {
+            record.get("kind").and_then(Value::as_str) == Some("operation")
+                && record.get("operation_kind").and_then(Value::as_str) == Some("child_task")
+                && record.get("operation_id").and_then(Value::as_str)
+                    == Some(context.operation_id.as_str())
+                && (statuses.is_some()
+                    || record.get("attempt").and_then(Value::as_u64)
+                        == Some(u64::from(context.attempt)))
+        })
+        .cloned()
+        .map(serde_json::from_value::<SessionOperation>)
+        .transpose()
+        .map_err(|error| format!("cannot decode child task operation: {error}"))?
+        .ok_or_else(|| "child task operation was not found".to_string())?;
+    if operation.kind != "child_task"
+        || operation.parent_thread_id.as_deref() != Some(context.parent_thread_id.as_str())
+        || operation.attempt != context.attempt
+    {
+        return Err("child task parent or operation identity mismatch".to_string());
+    }
+    if statuses.is_some_and(|statuses| !statuses.contains(&operation.status.as_str())) {
+        return Err(format!(
+            "child task status is {}, expected {}",
+            operation.status,
+            statuses.unwrap_or_default().join(" or ")
+        ));
+    }
+    Ok(operation)
+}
+
 pub(crate) fn timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1690,6 +1906,71 @@ mod tests {
         assert!(text.contains("\"status\":\"completed\""));
         assert_eq!(resumed.state.messages().len(), 0);
         drop(resumed);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn child_reports_are_idempotent_and_lifecycle_snapshots_keep_parent_identity() {
+        let root = crate::test_support::test_root();
+        let parent = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let mut queued = SessionOperation::new("child:one", "child_task", "queued");
+        queued.parent_thread_id = Some(parent.store.thread_id().to_string());
+        queued.group_id = Some("batch".to_string());
+        queued.execution_mode = Some("parallel".to_string());
+        queued.sequence = Some(2);
+        queued.prompt = Some("inspect issue".to_string());
+        let child_info = SessionStore::fork_from_checkpoint_with_operation(
+            &root,
+            parent.store.session_id(),
+            0,
+            "child-thread",
+            &[],
+            exact_fork_metadata(),
+            Some(queued),
+        )
+        .unwrap();
+        let mut child =
+            SessionStore::open(&root, SessionRequest::Resume(child_info.session_id)).unwrap();
+        let mut running = SessionOperation::new("child:one", "child_task", "running");
+        running.attempt = 1;
+        child.store.record_operation(running).unwrap();
+        let context = child.store.child_task_context().unwrap().unwrap();
+        assert_eq!(context.parent_thread_id, parent.store.thread_id());
+        let first = child
+            .store
+            .record_child_report(&context, "call-1", "found the failing branch")
+            .unwrap();
+        let retry = child
+            .store
+            .record_child_report(&context, "call-1", "found the failing branch")
+            .unwrap();
+        assert_eq!(first, retry);
+        let mut next_attempt = SessionOperation::new("child:one", "child_task", "running");
+        next_attempt.attempt = 2;
+        child.store.record_operation(next_attempt).unwrap();
+        let late_report = child
+            .store
+            .record_child_report(&context, "call-late", "attempt one had completed")
+            .unwrap();
+        assert_eq!(late_report.attempt, 1);
+        let text = fs::read_to_string(child.store.path()).unwrap();
+        assert_eq!(text.matches("\"kind\":\"child_report\"").count(), 2);
+        assert!(text.contains("\"operation_group_id\":\"batch\""));
+        assert!(
+            child
+                .store
+                .record_child_report(
+                    &ChildTaskContext {
+                        parent_thread_id: "other".to_string(),
+                        ..context
+                    },
+                    "call-2",
+                    "bad lineage"
+                )
+                .is_err()
+        );
+        drop(child);
+        drop(parent);
         crate::test_support::remove_test_root(&root);
     }
 

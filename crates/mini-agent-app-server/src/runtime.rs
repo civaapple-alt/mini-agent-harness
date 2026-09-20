@@ -214,6 +214,9 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             harness.extend_tools(mini_agent_capabilities::notebook_tools(session_dir.clone()));
             harness.extend_tools(mini_agent_capabilities::child_task_tools(
                 session_dir.clone(),
+                session
+                    .as_ref()
+                    .and_then(|opened| opened.store.child_task_context().ok().flatten()),
             ));
             if let Ok(notebook) = mini_agent_capabilities::read_notebook(
                 &session_dir.join(mini_agent_capabilities::NOTEBOOK_FILE_NAME),

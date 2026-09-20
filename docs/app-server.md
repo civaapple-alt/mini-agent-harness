@@ -379,17 +379,43 @@ only `name`, `qualifiedName`, compatibility `aliases`, `description`, `source`,
 
 #### Child operations and Session notebook
 
-`delegate_task` and `task_read` are Host-owned capabilities. `delegate_task`
-returns a bounded queue request; the surrounding Host/App Server control seam
-creates an exact child Session and starts a separate child runtime. `task_read`
-reads the child’s canonical Session projection and returns only bounded status,
-attempt, result, and error fields. Neither tool adds a scheduler or a second
-history authority to Core. WebStudio defaults to two active children per parent,
-with a Host setting bounded to `1..=8`; overflow is durable `queued` state.
+`delegate_task`, `task_read`, `task_report`, and `task_control` are Host-owned
+capabilities. `delegate_task` returns a bounded queue request; the surrounding
+Host/App Server control seam creates an exact child Session and starts a separate
+child runtime. Child Sessions receive `task_report`, but not delegation tools, so
+delegation remains one level deep. `task_read` reads the child’s canonical
+Session projection and returns bounded status, attempt, result, error, and
+incremental reports (`after_cursor`, at most 32 reports / 10 KiB per page).
+Neither tool adds a scheduler or a second history authority to Core. WebStudio
+defaults to two active children per parent, with a Host setting bounded to
+`1..=8`; overflow is durable `queued` state.
 The setting controls only the active-child capacity. Every `delegate_task` call
 must provide `execution_mode` as `parallel` or `sequential`. Sequential work
-also requires `group_id` and may provide `sequence`. The Host validates and
-persists that scheduling intent without changing Core's loop.
+also requires `group_id` and a zero-based `sequence`. Missing sequence positions
+wait; a failed or cancelled predecessor pauses later work in the group. The Host
+validates and persists that scheduling intent without changing Core's loop.
+
+Children send progress with `task_report`. App Server appends each bounded
+report to the child Session with its operation ID, attempt, report ID, timestamp,
+and Session cursor. Repeated report IDs within an attempt are idempotent. A report
+is attributed to the attempt active when the tool ran, so a late report can still
+be stored after that attempt settles or a retry starts. The parent reads reports
+incrementally with `task_read`; full child tool activity and transcript stay in
+the child Session. The JSON-RPC `child/task` action is restricted to report
+persistence and queued-task updates/cancellation. Reports validate their captured
+attempt against child operation history; queued-task mutations validate the
+current attempt and queued state. WebStudio handles steer/cancel for running
+children, retries, and group cancellation through the existing Host runtime
+controls.
+
+Task control execution remains Gateway-mediated. The Gateway sends each control
+action through the child runtime, then coalesces its bounded outcome into a
+parent wake-up. An active parent receives it at a safe Turn boundary; an idle
+parent starts one continuation Turn. The outcome reports what the Gateway
+control call did. App Server operation state remains authoritative, so the
+parent rereads `task_read` or the child projection before deciding what to do
+next. Pending wake-ups live in Gateway memory and are not replayed after a
+Gateway restart.
 
 The Session store appends operation lifecycle records (`queued`, `running`,
 `awaiting_approval`, `completed`, `failed`, or `cancelled`) to the existing

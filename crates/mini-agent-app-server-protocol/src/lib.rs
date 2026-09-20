@@ -60,6 +60,7 @@ pub const METHOD_SESSION_NOTEBOOK_READ: &str = "session/notebook/read";
 pub const METHOD_SESSION_NOTEBOOK_WRITE: &str = "session/notebook/write";
 pub const METHOD_SESSION_NOTEBOOK_FORGET: &str = "session/notebook/forget";
 pub const METHOD_SESSION_NOTEBOOK_UPDATED: &str = "session/notebook/updated";
+pub const METHOD_CHILD_TASK: &str = "child/task";
 pub const METHOD_WORLD_STATE: &str = "world/state";
 pub const METHOD_WORLD_REFRESH: &str = "world/refresh";
 pub const METHOD_WORLD_SET_EXECUTION: &str = "world/set_execution";
@@ -780,6 +781,35 @@ pub struct SessionNotebookWriteParams {
 pub struct SessionNotebookForgetParams {
     pub thread_id: ThreadId,
     pub key: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildTaskParams {
+    pub thread_id: ThreadId,
+    pub parent_thread_id: String,
+    pub operation_id: String,
+    pub attempt: u32,
+    pub action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildTaskResult {
+    pub thread_id: ThreadId,
+    pub parent_thread_id: String,
+    pub operation_id: String,
+    pub action: String,
+    pub status: String,
+    pub cursor: u64,
+    pub attempt: u32,
+    pub timestamp_ms: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

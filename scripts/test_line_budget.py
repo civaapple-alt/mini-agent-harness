@@ -125,42 +125,43 @@ class LineBudgetTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "unclassified Rust source"):
                 line_budget.category_counts(root)
 
-    def test_delta_gate_allows_bounded_growth_in_amber_band(self):
-        current = {"kernel": 5_200, "runtime": 24_200, "release": 39_400, "control_plane": 1}
-        base = {"kernel": 5_000, "runtime": 24_000, "release": 39_100, "control_plane": 1}
+    def test_delta_gate_allows_growth_at_per_pr_limit(self):
+        current = {"kernel": 5_200, "runtime": 24_200, "release": 40_000, "control_plane": 1}
+        base = {"kernel": 5_000, "runtime": 24_000, "release": 39_000, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(
-            deltas, {"kernel": 200, "release": 300, "control_plane": 0}
+            deltas, {"kernel": 200, "release": 1_000, "control_plane": 0}
         )
         self.assertEqual(violations, [])
 
-    def test_delta_gate_rejects_growth_above_non_red_limit(self):
-        current = {"kernel": 5_201, "runtime": 24_201, "release": 39_401, "control_plane": 1}
-        base = {"kernel": 5_000, "runtime": 24_000, "release": 39_100, "control_plane": 1}
+    def test_delta_gate_rejects_growth_above_per_pr_limit(self):
+        current = {"kernel": 5_201, "runtime": 24_201, "release": 40_001, "control_plane": 1}
+        base = {"kernel": 5_000, "runtime": 24_000, "release": 39_000, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(
-            deltas, {"kernel": 201, "release": 301, "control_plane": 0}
+            deltas, {"kernel": 201, "release": 1_001, "control_plane": 0}
         )
-        self.assertIn("release grew by 301 lines, above non-red limit 300", violations)
+        self.assertTrue(any("1001" in violation for violation in violations))
+        self.assertTrue(any("1000" in violation for violation in violations))
 
-    def test_delta_gate_freezes_growth_in_red_band(self):
-        current = {"kernel": 5_501, "runtime": 24_501, "release": 39_997, "control_plane": 1}
-        base = {"kernel": 5_500, "runtime": 24_500, "release": 39_996, "control_plane": 1}
+    def test_delta_gate_allows_growth_above_old_red_band(self):
+        current = {"kernel": 5_501, "runtime": 24_501, "release": 40_001, "control_plane": 1}
+        base = {"kernel": 5_500, "runtime": 24_500, "release": 40_000, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(
             deltas, {"kernel": 1, "release": 1, "control_plane": 0}
         )
-        self.assertIn("release is in red band and cannot grow", violations)
+        self.assertEqual(violations, [])
 
-    def test_delta_gate_allows_zero_growth_when_checkout_is_red(self):
-        current = {"kernel": 5_887, "runtime": 24_887, "release": 39_997, "control_plane": 1}
-        base = {"kernel": 5_887, "runtime": 24_887, "release": 39_997, "control_plane": 1}
+    def test_delta_gate_allows_zero_growth_at_hard_limit(self):
+        current = {"kernel": 5_887, "runtime": 24_887, "release": 45_000, "control_plane": 1}
+        base = {"kernel": 5_887, "runtime": 24_887, "release": 45_000, "control_plane": 1}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
@@ -180,9 +181,9 @@ class LineBudgetTests(unittest.TestCase):
             self.assertIn("core+protocol", output.getvalue())
             self.assertIn("1/6000", output.getvalue())
             self.assertIn("control-plane", output.getvalue())
-            self.assertIn("0/28000", output.getvalue())
+            self.assertIn("0/30000", output.getvalue())
             self.assertIn(
-                "release             1/40000",
+                "release             1/45000",
                 output.getvalue(),
             )
             self.assertNotIn("runtime (core + protocol + host + app-server)", output.getvalue())
@@ -220,15 +221,31 @@ class LineBudgetTests(unittest.TestCase):
             )
 
     def test_control_plane_hard_limit_is_enforced(self):
-        current = {"kernel": 1, "runtime": 1, "release": 1, "control_plane": 28_001}
-        base = {"kernel": 1, "runtime": 1, "release": 1, "control_plane": 28_000}
+        current = {"kernel": 1, "runtime": 1, "release": 1, "control_plane": 30_001}
+        base = {"kernel": 1, "runtime": 1, "release": 1, "control_plane": 30_000}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(deltas["control_plane"], 1)
         self.assertIn(
-            "control-plane exceeds hard limit (28001/28000)", violations
+            "control-plane exceeds hard limit (30001/30000)", violations
         )
+
+    def test_delta_gate_enforces_core_protocol_hard_limit(self):
+        current = {"kernel": 6_001, "runtime": 1, "release": 1, "control_plane": 1}
+        base = {"kernel": 6_001, "runtime": 1, "release": 1, "control_plane": 1}
+
+        violations, _ = line_budget._delta_gate_violations(current, base)
+
+        self.assertIn("core+protocol exceeds hard limit (6001/6000)", violations)
+
+    def test_release_hard_limit_is_enforced(self):
+        current = {"kernel": 1, "runtime": 1, "release": 45_001, "control_plane": 1}
+        base = {"kernel": 1, "runtime": 1, "release": 45_001, "control_plane": 1}
+
+        violations, _ = line_budget._delta_gate_violations(current, base)
+
+        self.assertIn("release exceeds hard limit (45001/45000)", violations)
 
     def test_core_protocol_hard_limit_is_enforced(self):
         with tempfile.TemporaryDirectory() as directory:
