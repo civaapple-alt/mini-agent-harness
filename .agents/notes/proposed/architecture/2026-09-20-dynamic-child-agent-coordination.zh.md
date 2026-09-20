@@ -15,6 +15,10 @@
 - 报告和终态会合并父会话唤醒。父 Turn 活跃时等待安全边界；父代理空闲时启动续跑。Gateway 重启后不会重放尚未处理的自动唤醒，但报告仍留在 App Server，可由父代理后续用 `task_read` 读取。
 - WebStudio 消息流显示每个子任务的生命周期和报告。运行面板展示任务状态、报告及可用的子 Session 打开入口；项目侧栏过滤委派子 Session，并保留普通派生会话。
 
+本次会话暴露了并发队列的边界缺陷：默认上限为 2 时，前两个并行任务已启动，后 3 个本应持久化为 `queued`；但 queued fork 将多行 prompt 写入 operation，通用文本校验拒绝了换行符，导致无子 Session 的失败回执，随后 `task_read` 找不到会话。Capabilities 现在对 operation prompt 单独校验：允许 LF、CR 和 tab，仍拒绝其他控制字符并保留 32 KiB 上限；`task_read` 的工具描述也明确 queued 项会自动排空，应优先跟踪运行中的子任务。该失败与同一 Turn 的 DeepSeek 10053 传输中断无关。
+
+子会话查看器还会在加载旧页后自动滚回底部；抽屉内容与 transcript 存在嵌套滚动，命令预览浮层也可能越出抽屉。前端现在分页时保留可视位置，只让 transcript 滚动，并将浮层约束到抽屉范围。本次静态验证通过：`cargo fmt --all --check`、Capabilities Clippy、前端 ESLint/生产构建和 Release 行数增量门禁；Rust 增量为 11 行。没有运行测试套件，队列回放和抽屉分页仍需定向验收；本记录继续保持 `proposed`，不将未验证项标记为完成。
+
 已通过的定向验证：Rust App Server 与 Capabilities 共 188 项测试（分别 67、121），受影响 Rust 包的 Clippy 通过；Gateway 与 SDK 共 97 项测试通过；前端相关 Vitest 17 项、ESLint 和构建通过。构建仍报告现有 640.46 kB chunk 提示。新增的跨仓场景使用真实 App Server，验证报告持久化、重复报告去重、过期 attempt 拒绝、父代理空闲续行触发及 `/children` 回读；父代理 `start_turn` 使用 stub，不调用模型。该场景 `1 passed`，Ruff、Python 编译检查通过。
 
 跨仓场景尚未覆盖活跃父 Turn 的安全边界、并行报告交错、顺序组失败恢复、Gateway 重启后的待处理唤醒恢复及前端刷新一致性。Gateway 重启后自动重放待处理唤醒也尚未实现；持久报告可在后续回合读取。

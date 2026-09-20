@@ -388,7 +388,11 @@ Session projection and returns bounded status, attempt, result, error, and
 incremental reports (`after_cursor`, at most 32 reports / 10 KiB per page).
 Neither tool adds a scheduler or a second history authority to Core. WebStudio
 defaults to two active children per parent, with a Host setting bounded to
-`1..=8`; overflow is durable `queued` state.
+`1..=8`; overflow is durable `queued` state and starts automatically when a slot
+frees. Queued operation prompts retain ordinary line breaks and tabs, remain
+bounded to 32 KiB, and reject other control characters. `task_read` should be
+used to check a queued task once and to follow active children; queued tasks do
+not need repeated polling.
 The setting controls only the active-child capacity. Every `delegate_task` call
 must provide `execution_mode` as `parallel` or `sequential`. Sequential work
 also requires `group_id` and a zero-based `sequence`. Missing sequence positions

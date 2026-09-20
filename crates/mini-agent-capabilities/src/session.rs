@@ -428,11 +428,6 @@ impl SessionOperation {
             ),
             (self.turn_id.as_deref(), MAX_OPERATION_ID_BYTES, "turn id"),
             (
-                self.prompt.as_deref(),
-                MAX_OPERATION_PROMPT_BYTES,
-                "operation prompt",
-            ),
-            (
                 self.result.as_deref(),
                 MAX_OPERATION_RESULT_BYTES,
                 "operation result",
@@ -446,6 +441,9 @@ impl SessionOperation {
             if let Some(value) = value {
                 validate_operation_text(value, limit, label)?;
             }
+        }
+        if let Some(prompt) = self.prompt.as_deref() {
+            validate_operation_prompt(prompt)?;
         }
         Ok(())
     }
@@ -1697,6 +1695,20 @@ fn validate_operation_text(value: &str, max_bytes: usize, label: &str) -> Result
         return Err(format!(
             "{label} is empty, oversized, or contains control characters"
         ));
+    }
+    Ok(())
+}
+
+fn validate_operation_prompt(value: &str) -> Result<(), String> {
+    if value.trim().is_empty()
+        || value.len() > MAX_OPERATION_PROMPT_BYTES
+        || value
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err(
+            "operation prompt is empty, oversized, or contains control characters".to_string(),
+        );
     }
     Ok(())
 }

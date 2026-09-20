@@ -112,7 +112,7 @@ impl ToolHandler for TaskReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task_read".to_string(),
-            description: "Read the bounded status and result of a child Session task. Use the child_thread_id returned by delegate_task.".to_string(),
+            description: "Read bounded status, result, and reports for a child Session. Use the child_thread_id returned by delegate_task and read each task once after dispatch to distinguish running from queued. Poll running children for progress; queued tasks start automatically when a slot frees, so do not repeatedly read them. If a child Session is not materialized yet, skip it and report the missing child ID instead of retrying in a loop.".to_string(),
             parameters: json!({
                 "type": "object",
                 "required": ["child_thread_id"],
