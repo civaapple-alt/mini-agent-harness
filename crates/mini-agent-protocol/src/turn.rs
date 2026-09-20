@@ -36,6 +36,18 @@ pub enum TurnSource {
     ChildWakeup,
 }
 
+/// Identifies why a durable child operation is running this attempt.
+///
+/// App Server and host adapters persist this metadata for presentation and
+/// recovery. Core does not use it to change execution behavior.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildTaskAttemptKind {
+    Initial,
+    Retry,
+    FollowUp,
+}
+
 /// Identifies the kind of input submitted to a running conversation.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -102,6 +114,8 @@ pub struct TurnStart {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_attempt_kind: Option<ChildTaskAttemptKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_group_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<String>,
@@ -115,6 +129,7 @@ impl TurnStart {
             input,
             operation_id: None,
             operation_attempt: None,
+            operation_attempt_kind: None,
             operation_group_id: None,
             execution_mode: None,
             group_sequence: None,

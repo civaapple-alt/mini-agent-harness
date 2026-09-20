@@ -97,6 +97,7 @@ graph LR
 
 ### Proposed
 
+- [子代理多轮协作与消息流恢复](proposed/architecture/2026-09-20-child-agent-rounds-and-message-flow.zh.md)
 - [子代理动态协作与进展跟踪](proposed/architecture/2026-09-20-dynamic-child-agent-coordination.zh.md)
 - [WebStudio Session Doctor：工作区 Session 日志诊断与安全修复](proposed/feature/2026-09-19-web-studio-session-doctor.zh.md)
 - [Session 状态、Notebook 与 Subagent 执行策略](proposed/architecture/2026-09-17-session-state-notebook-and-subagent-execution-policy.zh.md)

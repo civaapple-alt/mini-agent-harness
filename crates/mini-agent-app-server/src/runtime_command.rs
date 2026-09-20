@@ -54,6 +54,15 @@ pub(super) enum RuntimeCommand {
         params: mini_agent_app_server_protocol::ChildTaskParams,
         reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::ChildTaskResult>>,
     },
+    ChildSteerRequest {
+        thread_id: ThreadId,
+        request_id: String,
+        turn_id: String,
+        step: mini_agent_capabilities::ChildSteerRequestStep,
+        accepted_status: Option<String>,
+        reply:
+            oneshot::Sender<ActionResult<Option<mini_agent_capabilities::ChildTaskMutationResult>>>,
+    },
     CheckpointSeq {
         reply: oneshot::Sender<ActionResult<Option<u64>>>,
     },
@@ -154,6 +163,7 @@ impl RuntimeCommand {
                 | Self::WriteNotebook { .. }
                 | Self::ForgetNotebook { .. }
                 | Self::ChildTask { .. }
+                | Self::ChildSteerRequest { .. }
                 | Self::BackgroundTaskStop { .. }
                 | Self::BackgroundTaskRestart { .. }
                 | Self::ScheduledTaskCancel { .. }

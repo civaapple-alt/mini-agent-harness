@@ -791,13 +791,53 @@ pub struct ChildTaskParams {
     pub parent_thread_id: String,
     pub operation_id: String,
     pub attempt: u32,
-    pub action: String,
+    pub action: ChildTaskAction,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildTaskAction {
+    Report,
+    UpdateQueued,
+    CancelQueued,
+    QueueFollowUp,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnSteerAction {
+    Steer,
+    QueueFollowUp,
+}
+
+/// Result for a turn/steer request. Request identity is Host-owned and kept
+/// out of the portable Core submission type.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnSteerResult {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<TurnId>,
+    #[serde(default)]
+    pub duplicate: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_action: Option<TurnSteerAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_kind: Option<mini_agent_protocol::ChildTaskAttemptKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -806,10 +846,18 @@ pub struct ChildTaskResult {
     pub thread_id: ThreadId,
     pub parent_thread_id: String,
     pub operation_id: String,
-    pub action: String,
+    pub action: ChildTaskAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_action: Option<TurnSteerAction>,
     pub status: String,
     pub cursor: u64,
     pub attempt: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_kind: Option<mini_agent_protocol::ChildTaskAttemptKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    #[serde(default)]
+    pub duplicate: bool,
     pub timestamp_ms: u64,
 }
 
@@ -1054,6 +1102,8 @@ pub struct TurnStartParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_attempt_kind: Option<mini_agent_protocol::ChildTaskAttemptKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_group_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<String>,
@@ -1164,6 +1214,8 @@ pub struct TurnSteerParams {
     pub thread_id: ThreadId,
     pub turn_id: TurnId,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

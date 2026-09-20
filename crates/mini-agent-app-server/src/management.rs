@@ -404,6 +404,29 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
+    pub(crate) async fn child_steer_request_action(
+        &self,
+        thread_id: ThreadId,
+        request_id: String,
+        turn_id: String,
+        step: mini_agent_capabilities::ChildSteerRequestStep,
+        accepted_status: Option<String>,
+    ) -> Result<
+        ActionResponse<Option<mini_agent_capabilities::ChildTaskMutationResult>>,
+        ActionFailure,
+    > {
+        self.client
+            .request_action(|reply| RuntimeCommand::ChildSteerRequest {
+                thread_id,
+                request_id,
+                turn_id,
+                step,
+                accepted_status,
+                reply,
+            })
+            .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn fork_session_action(
         &self,
@@ -823,6 +846,19 @@ impl RuntimeManagementState {
             .and_then(|opened| opened.store.turn_source(turn_id))
     }
 
+    pub(crate) fn session_operation(
+        &self,
+        operation_id: &str,
+    ) -> Result<Option<mini_agent_capabilities::SessionOperation>, AppServerError> {
+        match self.session.as_ref() {
+            Some(opened) => opened
+                .store
+                .operation(operation_id)
+                .map_err(AppServerError::Checkpoint),
+            None => Ok(None),
+        }
+    }
+
     pub(crate) fn session_is_forked(&self) -> bool {
         self.session
             .as_ref()
@@ -888,9 +924,9 @@ impl RuntimeManagementState {
             operation_id: params.operation_id.clone(),
             attempt: params.attempt,
         };
-        let result =
-            match params.action.as_str() {
-                "report" => opened.store.record_child_report(
+        let result = match params.action {
+            mini_agent_app_server_protocol::ChildTaskAction::Report => {
+                opened.store.record_child_report(
                     &context,
                     params.report_id.as_deref().ok_or_else(|| {
                         AppServerError::Checkpoint("reportId is required".to_string())
@@ -898,31 +934,80 @@ impl RuntimeManagementState {
                     params.report.as_deref().ok_or_else(|| {
                         AppServerError::Checkpoint("report is required".to_string())
                     })?,
-                ),
-                "update_queued" => opened.store.update_queued_child_task(
+                )
+            }
+            mini_agent_app_server_protocol::ChildTaskAction::UpdateQueued => {
+                opened.store.update_queued_child_task(
                     &context,
                     params.prompt.clone().ok_or_else(|| {
                         AppServerError::Checkpoint("prompt is required".to_string())
                     })?,
-                ),
-                "cancel_queued" => opened.store.cancel_queued_child_task(&context),
-                _ => {
-                    return Err(AppServerError::Checkpoint(
-                        "unsupported child task action".to_string(),
-                    ));
-                }
+                )
             }
-            .map_err(AppServerError::Checkpoint)?;
+            mini_agent_app_server_protocol::ChildTaskAction::CancelQueued => {
+                opened.store.cancel_queued_child_task(&context)
+            }
+            mini_agent_app_server_protocol::ChildTaskAction::QueueFollowUp => {
+                opened.store.queue_child_follow_up(
+                    &context,
+                    params.request_id.as_deref().ok_or_else(|| {
+                        AppServerError::Checkpoint("requestId is required".to_string())
+                    })?,
+                    params.prompt.clone().ok_or_else(|| {
+                        AppServerError::Checkpoint("prompt is required".to_string())
+                    })?,
+                )
+            }
+        }
+        .map_err(AppServerError::Checkpoint)?;
         Ok(mini_agent_app_server_protocol::ChildTaskResult {
             thread_id: params.thread_id.clone(),
             parent_thread_id: params.parent_thread_id.clone(),
             operation_id: params.operation_id.clone(),
-            action: params.action.clone(),
+            action: params.action,
+            request_action: result.request_action.map(|action| match action {
+                mini_agent_capabilities::ChildControlRequestAction::Steer => {
+                    mini_agent_app_server_protocol::TurnSteerAction::Steer
+                }
+                mini_agent_capabilities::ChildControlRequestAction::QueueFollowUp => {
+                    mini_agent_app_server_protocol::TurnSteerAction::QueueFollowUp
+                }
+            }),
             status: result.status,
             cursor: result.cursor,
             attempt: result.attempt,
+            attempt_kind: result.attempt_kind,
+            turn_id: result.turn_id,
+            duplicate: result.duplicate,
             timestamp_ms: result.timestamp_ms,
         })
+    }
+
+    pub(crate) fn child_steer_request(
+        &mut self,
+        thread_id: &ThreadId,
+        request_id: &str,
+        turn_id: &str,
+        step: mini_agent_capabilities::ChildSteerRequestStep,
+        accepted_status: Option<&str>,
+    ) -> Result<Option<mini_agent_capabilities::ChildTaskMutationResult>, AppServerError> {
+        let opened = self.session.as_mut().ok_or_else(|| {
+            AppServerError::Checkpoint("session persistence is disabled".to_string())
+        })?;
+        if opened.store.thread_id() != thread_id.as_str() {
+            return Err(AppServerError::ThreadNotFound(thread_id.clone()));
+        }
+        let Some(context) = opened
+            .store
+            .child_task_context()
+            .map_err(AppServerError::Checkpoint)?
+        else {
+            return Ok(None);
+        };
+        opened
+            .store
+            .transition_child_steer_request(&context, request_id, turn_id, step, accepted_status)
+            .map_err(AppServerError::Checkpoint)
     }
 
     pub(crate) fn record_turn(

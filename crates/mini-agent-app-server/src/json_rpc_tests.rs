@@ -51,6 +51,7 @@ fn turn_start_request(id: u64, prompt: &str) -> JsonRpcRequest {
             input: TurnInput::new(TurnInputMode::Start, prompt),
             operation_id: None,
             operation_attempt: None,
+            operation_attempt_kind: None,
             operation_group_id: None,
             execution_mode: None,
             group_sequence: None,
@@ -653,6 +654,36 @@ fn managed_connection_with_session<M: Model + Send + 'static>(
         .with_runtime_services(RuntimeServices::new(management, thread_settings, goals).unwrap())
 }
 
+fn forked_child_session(
+    root: &std::path::Path,
+    thread_id: &str,
+    mut operation: mini_agent_capabilities::SessionOperation,
+) -> (String, String, mini_agent_capabilities::OpenedSession) {
+    let parent = SessionStore::open(root, SessionStoreRequest::New).unwrap();
+    let parent_thread_id = parent.store.thread_id().to_string();
+    operation.parent_thread_id = Some(parent_thread_id.clone());
+    let child = SessionStore::fork_from_checkpoint_with_operation(
+        root,
+        parent.store.session_id(),
+        parent.store.checkpoint_seq(),
+        thread_id,
+        &[],
+        mini_agent_capabilities::SessionForkMetadata {
+            context_policy: "exact".to_string(),
+            context_before_bytes: 0,
+            context_after_bytes: 0,
+            compacted: false,
+            method: "exact".to_string(),
+        },
+        Some(operation),
+    )
+    .unwrap();
+    let session_id = child.session_id;
+    drop(parent);
+    let child = SessionStore::open(root, SessionStoreRequest::Resume(session_id.clone())).unwrap();
+    (parent_thread_id, session_id, child)
+}
+
 async fn wait_for_goal_status<M: Model + Send + 'static>(
     connection: &mut AppServerConnection<M>,
     status: &str,
@@ -964,6 +995,7 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
                 input: TurnInput::new(TurnInputMode::Start, "seed fork checkpoint"),
                 operation_id: None,
                 operation_attempt: None,
+                operation_attempt_kind: None,
                 operation_group_id: None,
                 execution_mode: None,
                 group_sequence: None,
@@ -1101,35 +1133,13 @@ async fn fork_child_thread_items_do_not_project_inherited_checkpoint_messages() 
 #[tokio::test]
 async fn child_task_report_rpc_checks_attempt_and_persists_idempotently() {
     let root = rpc_root("child-task-report");
-    let parent = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
-    let parent_thread_id = parent.store.thread_id().to_string();
-    let mut operation = mini_agent_capabilities::SessionOperation::new(
+    let operation = mini_agent_capabilities::SessionOperation::new(
         "child:child-rpc-thread",
         "child_task",
         "queued",
     );
-    operation.parent_thread_id = Some(parent_thread_id.clone());
-    let child = SessionStore::fork_from_checkpoint_with_operation(
-        &root,
-        parent.store.session_id(),
-        parent.store.checkpoint_seq(),
-        "child-rpc-thread",
-        &[],
-        mini_agent_capabilities::SessionForkMetadata {
-            context_policy: "exact".to_string(),
-            context_before_bytes: 0,
-            context_after_bytes: 0,
-            compacted: false,
-            method: "exact".to_string(),
-        },
-        Some(operation),
-    )
-    .unwrap();
-    let child_session_id = child.session_id;
-    drop(parent);
-
-    let mut child =
-        SessionStore::open(&root, SessionStoreRequest::Resume(child_session_id.clone())).unwrap();
+    let (parent_thread_id, child_session_id, mut child) =
+        forked_child_session(&root, "child-rpc-thread", operation);
     child
         .store
         .record_operation(mini_agent_capabilities::SessionOperation::new(
@@ -1182,6 +1192,122 @@ async fn child_task_report_rpc_checks_attempt_and_persists_idempotently() {
 }
 
 #[tokio::test]
+async fn completed_child_follow_up_starts_a_new_turn_on_the_same_session() {
+    let root = rpc_root("child-follow-up-round");
+    let mut operation = mini_agent_capabilities::SessionOperation::new(
+        "child:follow-up-rpc",
+        "child_task",
+        "completed",
+    );
+    operation.prompt = Some("Initial bounded task".to_string());
+    operation.attempt_kind = Some(mini_agent_protocol::ChildTaskAttemptKind::Initial);
+    operation.turn_id = Some("turn-initial".to_string());
+    let (parent_thread_id, child_session_id, child) =
+        forked_child_session(&root, "child-follow-up-rpc-thread", operation);
+    let mut connection = managed_connection_with_session(DoneModel, root.clone(), child);
+    initialize_connection(&mut connection, "child-follow-up-round-test").await;
+
+    let stale_steer = rpc_call(
+        &mut connection,
+        2,
+        METHOD_TURN_STEER,
+        serde_json::json!({
+            "threadId": "child-follow-up-rpc-thread",
+            "turnId": "turn-initial",
+            "requestId": "parent-control-event-2",
+            "text": "Review the initial result and fix the requested issue."
+        }),
+    )
+    .await;
+    assert_eq!(stale_steer["value"]["status"], "not_submitted");
+
+    let follow_up = rpc_call(
+        &mut connection,
+        3,
+        METHOD_CHILD_TASK,
+        serde_json::json!({
+            "threadId": "child-follow-up-rpc-thread",
+            "parentThreadId": parent_thread_id,
+            "operationId": "child:follow-up-rpc",
+            "attempt": 1,
+            "action": "queue_follow_up",
+            "requestId": "parent-control-event-2",
+            "prompt": "Review the initial result and fix the requested issue."
+        }),
+    )
+    .await;
+    assert_eq!(follow_up["value"]["action"], "queue_follow_up");
+    assert_eq!(follow_up["value"]["requestAction"], "queue_follow_up");
+    assert_eq!(follow_up["value"]["status"], "queued");
+    assert_eq!(follow_up["value"]["attempt"], 2);
+    assert_eq!(follow_up["value"]["attemptKind"], "follow_up");
+    assert!(follow_up["value"]["turnId"].is_null());
+
+    let changed_prompt = rpc_call(
+        &mut connection,
+        3,
+        METHOD_TURN_START,
+        serde_json::json!({
+            "threadId": "child-follow-up-rpc-thread",
+            "input": {"mode": "start", "text": "Overwrite the queued review prompt."},
+            "operationId": "child:follow-up-rpc",
+            "operationAttempt": 2,
+            "operationAttemptKind": "follow_up"
+        }),
+    )
+    .await;
+    assert_eq!(changed_prompt["value"]["status"], "not_submitted");
+
+    let second = rpc_call(
+        &mut connection,
+        4,
+        METHOD_TURN_START,
+        serde_json::json!({
+            "threadId": "child-follow-up-rpc-thread",
+            "input": {"mode": "start", "text": "Review the initial result and fix the requested issue."},
+            "operationId": "child:follow-up-rpc",
+            "operationAttempt": 2,
+            "operationAttemptKind": "follow_up"
+        }),
+    )
+    .await;
+    assert_eq!(second["value"]["status"], "started");
+    wait_for_turn_finished(&mut connection).await;
+    let unknown_operation = rpc_call(
+        &mut connection,
+        5,
+        METHOD_TURN_START,
+        serde_json::json!({
+            "threadId": "child-follow-up-rpc-thread",
+            "input": {"mode": "start", "text": "Unowned task"},
+            "operationId": "child:unknown",
+            "operationAttempt": 1,
+            "operationAttemptKind": "initial"
+        }),
+    )
+    .await;
+    assert_eq!(unknown_operation["value"]["status"], "not_submitted");
+    connection.shutdown().await.unwrap();
+
+    let resumed = SessionStore::open(&root, SessionStoreRequest::Resume(child_session_id)).unwrap();
+    let operation = resumed
+        .store
+        .operation("child:follow-up-rpc")
+        .unwrap()
+        .unwrap();
+    assert_eq!(operation.attempt, 2);
+    assert_eq!(operation.status, "completed");
+    assert_eq!(
+        operation.attempt_kind,
+        Some(mini_agent_protocol::ChildTaskAttemptKind::FollowUp)
+    );
+    assert_eq!(operation.turn_id.as_deref(), Some("turn-1"));
+    assert_eq!(resumed.store.thread_id(), "child-follow-up-rpc-thread");
+    drop(resumed);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn exact_session_fork_can_prepare_from_an_active_parent_turn() {
     let root = rpc_root("active-session-fork");
     let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
@@ -1205,6 +1331,7 @@ async fn exact_session_fork_can_prepare_from_an_active_parent_turn() {
                 input: TurnInput::new(TurnInputMode::Start, "active parent"),
                 operation_id: None,
                 operation_attempt: None,
+                operation_attempt_kind: None,
                 operation_group_id: None,
                 execution_mode: None,
                 group_sequence: None,
@@ -1436,6 +1563,7 @@ async fn child_wakeup_source_is_live_replayable_and_persisted_on_thread_items() 
                 input: TurnInput::new(TurnInputMode::Start, "child update batch"),
                 operation_id: None,
                 operation_attempt: None,
+                operation_attempt_kind: None,
                 operation_group_id: None,
                 execution_mode: None,
                 group_sequence: None,
@@ -2169,6 +2297,7 @@ async fn serves_approval_response_while_turn_steer_is_pending() {
             thread_id: ThreadId::new("thread-1"),
             turn_id: mini_agent_protocol::TurnId::new("turn-1"),
             text: "continue after approval".to_string(),
+            request_id: None,
         })
         .unwrap(),
     );

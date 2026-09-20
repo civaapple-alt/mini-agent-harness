@@ -152,6 +152,16 @@ Gateway 每个父 Session 最多缓存 64 个不同子任务的最新状态；�
 状态和最近报告；只有已创建 Session 的任务可打开。Gateway 事件是刷新提示，Session operation/report
 仍是状态权威。手动 steer 只在客户端收到 `steer_ack` 后提示一次。
 
+`task_control.assign` 根据 App Server 持久投影中的实时状态自动路由：运行中（包括已报告进展但仍继续执行）
+或等待审批的 child 使用带稳定 `requestId` 的 `turn/steer`；已完成 child 使用 `child/task` 的
+`queue_follow_up`，在同一 Thread 上启动一个新 Turn。Follow-up 使用相同 `operationId`、递增 attempt，
+并记录 `attemptKind: "follow_up"`。提示最多 32 KiB；并发容量或顺序组暂不可用时保持 queued，由持久队列
+在可运行后启动。重复请求 ID 返回同一后续 attempt。失败、取消或步数受限仍调用现有 retry，沿用原提示词。
+App Server 在提交 child steer 前先持久化 request ID reservation。若恢复时只有未结算 reservation，`turn/steer`
+返回 `pending`；Gateway 不自动重发该 ID，并会在父会话唤醒中注明结果未确定。父代理先读取权威子 Turn 和 operation 状态，再决定后续动作。该指令可能已提交，也可能未提交。若子任务在 reservation 前已完成，App Server 返回 `not_submitted`，Gateway 可读取新状态并用相同 request ID 建立 follow-up。
+每个父会话只显示一张 child 卡，轮次分别标记初次执行、重试和 follow-up；子详情显示该 Session 自身的
+本地 Turns，不显示父 checkpoint 的历史活动。
+
 `thread/items/list` 是子查看器的活动来源。Fork 的父 checkpoint 继续提供模型上下文，但子 Session 的
 item 投影不回退显示该 checkpoint 的消息。旧 child 没有本地活动项时，客户端显示空态。父 checkpoint
 来源信息单独展示，不混入 child 活动时间线。

@@ -37,6 +37,7 @@ fn operation_record(
     status: &str,
     turn_id: Option<&str>,
     attempt: u32,
+    attempt_kind: Option<mini_agent_protocol::ChildTaskAttemptKind>,
     result: Option<&str>,
     error: Option<&str>,
     group_id: Option<&str>,
@@ -51,6 +52,7 @@ fn operation_record(
     );
     operation.turn_id = turn_id.map(str::to_string);
     operation.attempt = attempt;
+    operation.attempt_kind = attempt_kind;
     operation.result = result.map(str::to_string);
     operation.error = error.map(str::to_string);
     operation.group_id = group_id.map(str::to_string);
@@ -726,9 +728,82 @@ pub(super) async fn worker_loop<M>(
                     continue;
                 }
 
+                let operation_attempt = request.operation_attempt.unwrap_or(1);
+                let operation_attempt_kind =
+                    request
+                        .operation_attempt_kind
+                        .or(Some(if operation_attempt > 1 {
+                            mini_agent_protocol::ChildTaskAttemptKind::Retry
+                        } else {
+                            mini_agent_protocol::ChildTaskAttemptKind::Initial
+                        }));
+                if let Some(operation_id) = request.operation_id.as_deref() {
+                    match runtime_actor::session_operation(&runtime, operation_id) {
+                        Ok(Some(operation)) => {
+                            let is_queued_attempt = operation.attempt == operation_attempt
+                                && operation.status == "queued"
+                                && operation.turn_id.is_none()
+                                && operation.prompt.as_deref() == Some(request.input.text.as_str())
+                                && operation
+                                    .attempt_kind
+                                    .is_none_or(|kind| Some(kind) == operation_attempt_kind);
+                            let is_retry_attempt = operation
+                                .attempt
+                                .checked_add(1)
+                                .is_some_and(|next| next == operation_attempt)
+                                && matches!(operation.status.as_str(), "failed" | "cancelled")
+                                && operation_attempt_kind
+                                    == Some(mini_agent_protocol::ChildTaskAttemptKind::Retry)
+                                && operation.prompt.as_deref() == Some(request.input.text.as_str());
+                            let already_started = operation.attempt == operation_attempt
+                                && operation.turn_id.is_some()
+                                && operation.status != "queued";
+                            if already_started {
+                                respond(
+                                    reply,
+                                    receipt,
+                                    Ok(TurnSubmission::NotSubmitted {
+                                        reason: "child task attempt already has a durable turn; read its current state before resubmitting".to_string(),
+                                    }),
+                                );
+                                threads.insert(thread);
+                                continue;
+                            }
+                            if !is_queued_attempt && !is_retry_attempt {
+                                respond(
+                                    reply,
+                                    receipt,
+                                    Ok(TurnSubmission::NotSubmitted {
+                                        reason: "child task attempt does not match its persisted operation; refresh task state before starting".to_string(),
+                                    }),
+                                );
+                                threads.insert(thread);
+                                continue;
+                            }
+                        }
+                        Ok(None) if runtime_actor::session_is_forked(&runtime) => {
+                            respond(
+                                reply,
+                                receipt,
+                                Ok(TurnSubmission::NotSubmitted {
+                                    reason: "child task operation is not persisted in this Session"
+                                        .to_string(),
+                                }),
+                            );
+                            threads.insert(thread);
+                            continue;
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            respond(reply, receipt, Err(error));
+                            threads.insert(thread);
+                            continue;
+                        }
+                    }
+                }
+
                 let mut next_input = Some(request.input);
                 let mut operation_id = request.operation_id.clone();
-                let operation_attempt = request.operation_attempt.unwrap_or(1);
                 let operation_group_id = request.operation_group_id.clone();
                 let execution_mode = request.execution_mode.clone();
                 let group_sequence = request.group_sequence;
@@ -948,6 +1023,7 @@ pub(super) async fn worker_loop<M>(
                                 "running",
                                 Some(turn_id.as_str()),
                                 operation_attempt,
+                                operation_attempt_kind,
                                 None,
                                 None,
                                 operation_group_id.as_deref(),
@@ -1115,6 +1191,7 @@ pub(super) async fn worker_loop<M>(
                                         operation_status,
                                         Some(result.id.as_str()),
                                         operation_attempt,
+                                        operation_attempt_kind,
                                         operation_result,
                                         persistence_error.as_deref(),
                                         operation_group_id.as_deref(),
@@ -1198,6 +1275,7 @@ pub(super) async fn worker_loop<M>(
                                         "failed",
                                         Some(turn_id.as_str()),
                                         operation_attempt,
+                                        operation_attempt_kind,
                                         None,
                                         persistence_error.as_deref(),
                                         operation_group_id.as_deref(),

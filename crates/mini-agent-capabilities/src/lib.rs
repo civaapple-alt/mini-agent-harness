@@ -85,7 +85,9 @@ pub use notebook::{
 pub use openai::OpenAiError;
 pub use openai::OpenAiModel;
 pub use path_policy::normalize_path;
-pub use session::{ChildTaskContext, ChildTaskMutationResult};
+pub use session::{
+    ChildControlRequestAction, ChildSteerRequestStep, ChildTaskContext, ChildTaskMutationResult,
+};
 pub use skills::Discovery;
 pub use skills::LoadedSkill;
 pub use skills::MAX_ACTIVATED_SKILL_BYTES;

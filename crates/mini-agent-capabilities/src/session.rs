@@ -1,6 +1,6 @@
 use crate::skills::MAX_SELECTED_SKILLS;
 use mini_agent_core::SessionState;
-use mini_agent_protocol::{Message, TurnSource, TurnWorkflow};
+use mini_agent_protocol::{ChildTaskAttemptKind, Message, TurnSource, TurnWorkflow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -349,6 +349,10 @@ pub struct SessionOperation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
     pub attempt: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_kind: Option<ChildTaskAttemptKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_request_id: Option<String>,
     #[serde(
         rename = "operation_group_id",
         default,
@@ -384,7 +388,24 @@ pub struct ChildTaskMutationResult {
     pub status: String,
     pub cursor: u64,
     pub attempt: u32,
+    pub attempt_kind: Option<ChildTaskAttemptKind>,
+    pub turn_id: Option<String>,
+    pub duplicate: bool,
+    pub request_action: Option<ChildControlRequestAction>,
     pub timestamp_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChildControlRequestAction {
+    Steer,
+    QueueFollowUp,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChildSteerRequestStep {
+    Reserve,
+    Accept,
+    NotAccepted,
 }
 
 impl SessionOperation {
@@ -400,6 +421,8 @@ impl SessionOperation {
             parent_thread_id: None,
             turn_id: None,
             attempt: 1,
+            attempt_kind: None,
+            control_request_id: None,
             group_id: None,
             execution_mode: None,
             sequence: None,
@@ -421,6 +444,9 @@ impl SessionOperation {
         }
         if self.attempt == 0 {
             return Err("operation attempt must be positive".to_string());
+        }
+        if let Some(request_id) = self.control_request_id.as_deref() {
+            validate_operation_text(request_id, 192, "control request id")?;
         }
         if let Some(group_id) = self.group_id.as_deref() {
             validate_operation_text(group_id, MAX_OPERATION_ID_BYTES, "operation group id")?;
@@ -624,6 +650,9 @@ impl SessionStore {
             operation.execution_mode = operation.execution_mode.or(previous.execution_mode);
             operation.sequence = operation.sequence.or(previous.sequence);
             operation.prompt = operation.prompt.or(previous.prompt);
+            operation.attempt_kind = operation.attempt_kind.or(previous.attempt_kind);
+            operation.control_request_id =
+                operation.control_request_id.or(previous.control_request_id);
         }
         operation.validate()?;
         self.append_records(vec![json!({
@@ -634,6 +663,8 @@ impl SessionStore {
             "parent_thread_id": operation.parent_thread_id,
             "turn_id": operation.turn_id,
             "attempt": operation.attempt,
+            "attempt_kind": operation.attempt_kind,
+            "control_request_id": operation.control_request_id,
             "operation_group_id": operation.group_id,
             "execution_mode": operation.execution_mode,
             "group_sequence": operation.sequence,
@@ -642,6 +673,10 @@ impl SessionStore {
             "error": operation.error,
             "timestamp_ms": operation.timestamp_ms,
         })])
+    }
+
+    pub fn operation(&self, operation_id: &str) -> Result<Option<SessionOperation>, String> {
+        latest_operation(&self.path, operation_id)
     }
 
     pub fn child_task_context(&self) -> Result<Option<ChildTaskContext>, String> {
@@ -698,6 +733,10 @@ impl SessionStore {
                         .and_then(Value::as_u64)
                         .unwrap_or_default(),
                     attempt: operation.attempt,
+                    attempt_kind: operation.attempt_kind,
+                    turn_id: operation.turn_id.clone(),
+                    duplicate: true,
+                    request_action: None,
                     timestamp_ms: record
                         .get("timestamp_ms")
                         .and_then(Value::as_u64)
@@ -719,6 +758,282 @@ impl SessionStore {
             status: "reported".to_string(),
             cursor: self.next_seq.saturating_sub(1),
             attempt: operation.attempt,
+            attempt_kind: operation.attempt_kind,
+            turn_id: operation.turn_id.clone(),
+            duplicate: false,
+            request_action: None,
+            timestamp_ms,
+        })
+    }
+
+    pub fn queue_child_follow_up(
+        &mut self,
+        context: &ChildTaskContext,
+        request_id: &str,
+        prompt: String,
+    ) -> Result<ChildTaskMutationResult, String> {
+        validate_operation_text(request_id, 192, "control request id")?;
+        if prompt.trim().is_empty() {
+            return Err("prompt must be non-empty and bounded".to_string());
+        }
+        validate_operation_prompt(&prompt)?;
+        if let Some(existing) = self.child_steer_request(context, request_id)? {
+            return Ok(existing);
+        }
+
+        let mut operation = validate_child_operation(self, context, Some(&["completed"]))?;
+        operation.attempt = operation
+            .attempt
+            .checked_add(1)
+            .ok_or_else(|| "child task attempt limit reached".to_string())?;
+        operation.status = "queued".to_string();
+        operation.turn_id = None;
+        operation.prompt = Some(prompt);
+        operation.result = None;
+        operation.error = None;
+        operation.attempt_kind = Some(ChildTaskAttemptKind::FollowUp);
+        operation.control_request_id = Some(request_id.to_string());
+        operation.timestamp_ms = timestamp_ms();
+        self.record_operation(operation.clone())?;
+        Ok(ChildTaskMutationResult {
+            status: operation.status,
+            cursor: self.next_seq.saturating_sub(1),
+            attempt: operation.attempt,
+            attempt_kind: operation.attempt_kind,
+            turn_id: operation.turn_id,
+            duplicate: false,
+            request_action: Some(ChildControlRequestAction::QueueFollowUp),
+            timestamp_ms: operation.timestamp_ms,
+        })
+    }
+
+    pub fn child_steer_request(
+        &self,
+        context: &ChildTaskContext,
+        request_id: &str,
+    ) -> Result<Option<ChildTaskMutationResult>, String> {
+        validate_operation_text(request_id, 192, "control request id")?;
+        self.validate_child_control_owner(context)?;
+        let records = session_values(&self.path)?;
+        let record = records.iter().rev().find(|record| {
+            record.get("operation_id").and_then(Value::as_str)
+                == Some(context.operation_id.as_str())
+                && record.get("parent_thread_id").and_then(Value::as_str)
+                    == Some(context.parent_thread_id.as_str())
+                && ((record.get("kind").and_then(Value::as_str) == Some("child_control_request")
+                    && record.get("action").and_then(Value::as_str) == Some("steer")
+                    && record.get("request_id").and_then(Value::as_str) == Some(request_id))
+                    || (record.get("kind").and_then(Value::as_str) == Some("operation")
+                        && record.get("operation_kind").and_then(Value::as_str)
+                            == Some("child_task")
+                        && record.get("control_request_id").and_then(Value::as_str)
+                            == Some(request_id)))
+        });
+        let Some(record) = record else {
+            return Ok(None);
+        };
+        if record.get("kind").and_then(Value::as_str) == Some("child_control_request") {
+            let request_status = record
+                .get("request_status")
+                .and_then(Value::as_str)
+                .unwrap_or("accepted");
+            if request_status == "not_accepted" {
+                return Ok(None);
+            }
+            return Ok(Some(ChildTaskMutationResult {
+                status: record
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("steered")
+                    .to_string(),
+                cursor: record
+                    .get("seq")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default(),
+                attempt: record
+                    .get("attempt")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| value.try_into().ok())
+                    .unwrap_or(context.attempt),
+                attempt_kind: record
+                    .get("attempt_kind")
+                    .and_then(Value::as_str)
+                    .and_then(|value| serde_json::from_value(json!(value)).ok()),
+                turn_id: record
+                    .get("turn_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                duplicate: true,
+                request_action: Some(ChildControlRequestAction::Steer),
+                timestamp_ms: record
+                    .get("timestamp_ms")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default(),
+            }));
+        }
+        let operation: SessionOperation = serde_json::from_value(record.clone())
+            .map_err(|error| format!("cannot decode child operation: {error}"))?;
+        Ok(Some(ChildTaskMutationResult {
+            status: operation.status,
+            cursor: record
+                .get("seq")
+                .and_then(Value::as_u64)
+                .unwrap_or_default(),
+            attempt: operation.attempt,
+            attempt_kind: operation.attempt_kind,
+            turn_id: operation.turn_id,
+            duplicate: true,
+            request_action: Some(ChildControlRequestAction::QueueFollowUp),
+            timestamp_ms: operation.timestamp_ms,
+        }))
+    }
+
+    pub fn transition_child_steer_request(
+        &mut self,
+        context: &ChildTaskContext,
+        request_id: &str,
+        turn_id: &str,
+        step: ChildSteerRequestStep,
+        accepted_status: Option<&str>,
+    ) -> Result<Option<ChildTaskMutationResult>, String> {
+        validate_operation_text(request_id, 192, "control request id")?;
+        validate_operation_text(turn_id, MAX_OPERATION_ID_BYTES, "turn id")?;
+        self.validate_child_control_owner(context)?;
+        if step == ChildSteerRequestStep::Reserve {
+            if let Some(existing) = self.child_steer_request(context, request_id)? {
+                return Ok(Some(existing));
+            }
+            let operation = latest_operation(&self.path, &context.operation_id)?
+                .ok_or_else(|| "child operation not found".to_string())?;
+            if !matches!(
+                operation.status.as_str(),
+                "running" | "in_progress" | "awaiting_approval"
+            ) {
+                return Ok(Some(ChildTaskMutationResult {
+                    status: "not_submitted".to_string(),
+                    cursor: self.next_seq.saturating_sub(1),
+                    attempt: operation.attempt,
+                    attempt_kind: operation.attempt_kind,
+                    turn_id: operation.turn_id,
+                    duplicate: false,
+                    request_action: Some(ChildControlRequestAction::Steer),
+                    timestamp_ms: timestamp_ms(),
+                }));
+            }
+            if operation.attempt != context.attempt {
+                return Err("child task attempt identity mismatch".to_string());
+            }
+            if operation.turn_id.as_deref() != Some(turn_id) {
+                return Err("child task turn identity mismatch".to_string());
+            }
+            return self
+                .append_child_steer_request(
+                    context,
+                    request_id,
+                    operation.attempt,
+                    operation.attempt_kind,
+                    turn_id,
+                    "pending",
+                    "pending",
+                )
+                .map(Some);
+        }
+
+        let current = session_values(&self.path)?
+            .into_iter()
+            .rev()
+            .find(|record| {
+                record.get("kind").and_then(Value::as_str) == Some("child_control_request")
+                    && record.get("action").and_then(Value::as_str) == Some("steer")
+                    && record.get("request_id").and_then(Value::as_str) == Some(request_id)
+                    && record.get("operation_id").and_then(Value::as_str)
+                        == Some(context.operation_id.as_str())
+                    && record.get("parent_thread_id").and_then(Value::as_str)
+                        == Some(context.parent_thread_id.as_str())
+                    && record.get("request_status").and_then(Value::as_str) == Some("pending")
+            })
+            .ok_or_else(|| "child steer request reservation is not pending".to_string())?;
+        if current.get("turn_id").and_then(Value::as_str) != Some(turn_id) {
+            return Err("child task turn identity mismatch".to_string());
+        }
+        let attempt = current
+            .get("attempt")
+            .and_then(Value::as_u64)
+            .and_then(|value| value.try_into().ok())
+            .unwrap_or(context.attempt);
+        let attempt_kind = current
+            .get("attempt_kind")
+            .and_then(Value::as_str)
+            .and_then(|value| serde_json::from_value(json!(value)).ok());
+        let (request_status, status) = match step {
+            ChildSteerRequestStep::Accept => ("accepted", accepted_status.unwrap_or("steered")),
+            ChildSteerRequestStep::NotAccepted => ("not_accepted", "not_submitted"),
+            ChildSteerRequestStep::Reserve => unreachable!(),
+        };
+        self.append_child_steer_request(
+            context,
+            request_id,
+            attempt,
+            attempt_kind,
+            turn_id,
+            request_status,
+            status,
+        )
+        .map(Some)
+    }
+
+    fn validate_child_control_owner(&self, context: &ChildTaskContext) -> Result<(), String> {
+        let owner = self
+            .child_task_context()?
+            .ok_or_else(|| "session is not owned by a child task".to_string())?;
+        if owner.operation_id != context.operation_id
+            || owner.parent_thread_id != context.parent_thread_id
+        {
+            return Err("child task ownership mismatch".to_string());
+        }
+        let operation = latest_operation(&self.path, &context.operation_id)?
+            .ok_or_else(|| "child operation not found".to_string())?;
+        if operation.kind != "child_task"
+            || operation.parent_thread_id.as_deref() != Some(context.parent_thread_id.as_str())
+        {
+            return Err("child task ownership mismatch".to_string());
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn append_child_steer_request(
+        &mut self,
+        context: &ChildTaskContext,
+        request_id: &str,
+        attempt: u32,
+        attempt_kind: Option<ChildTaskAttemptKind>,
+        turn_id: &str,
+        request_status: &str,
+        status: &str,
+    ) -> Result<ChildTaskMutationResult, String> {
+        let timestamp_ms = timestamp_ms();
+        self.append_records(vec![json!({
+            "kind": "child_control_request",
+            "action": "steer",
+            "request_id": request_id,
+            "request_status": request_status,
+            "status": status,
+            "parent_thread_id": context.parent_thread_id,
+            "operation_id": context.operation_id,
+            "attempt": attempt,
+            "attempt_kind": attempt_kind,
+            "turn_id": turn_id,
+            "timestamp_ms": timestamp_ms,
+        })])?;
+        Ok(ChildTaskMutationResult {
+            status: status.to_string(),
+            cursor: self.next_seq.saturating_sub(1),
+            attempt,
+            attempt_kind,
+            turn_id: Some(turn_id.to_string()),
+            duplicate: false,
+            request_action: Some(ChildControlRequestAction::Steer),
             timestamp_ms,
         })
     }
@@ -758,6 +1073,10 @@ impl SessionStore {
             status: operation.status,
             cursor: self.next_seq.saturating_sub(1),
             attempt: operation.attempt,
+            attempt_kind: operation.attempt_kind,
+            turn_id: operation.turn_id,
+            duplicate: false,
+            request_action: None,
             timestamp_ms: operation.timestamp_ms,
         })
     }
@@ -1970,10 +2289,12 @@ mod tests {
             Some(queued),
         )
         .unwrap();
+        let child_session_id = child_info.session_id;
         let mut child =
-            SessionStore::open(&root, SessionRequest::Resume(child_info.session_id)).unwrap();
+            SessionStore::open(&root, SessionRequest::Resume(child_session_id.clone())).unwrap();
         let mut running = SessionOperation::new("child:one", "child_task", "running");
         running.attempt = 1;
+        running.turn_id = Some("turn-active".to_string());
         child.store.record_operation(running).unwrap();
         let context = child.store.child_task_context().unwrap().unwrap();
         assert_eq!(context.parent_thread_id, parent.store.thread_id());
@@ -1985,7 +2306,49 @@ mod tests {
             .store
             .record_child_report(&context, "call-1", "found the failing branch")
             .unwrap();
-        assert_eq!(first, retry);
+        assert_eq!(first.status, retry.status);
+        assert_eq!(first.cursor, retry.cursor);
+        assert!(retry.duplicate);
+        let reservation = child
+            .store
+            .transition_child_steer_request(
+                &context,
+                "control-1",
+                "turn-active",
+                ChildSteerRequestStep::Reserve,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(reservation.status, "pending");
+        drop(child);
+        let mut child =
+            SessionStore::open(&root, SessionRequest::Resume(child_session_id)).unwrap();
+        let replay = child
+            .store
+            .transition_child_steer_request(
+                &context,
+                "control-1",
+                "turn-active",
+                ChildSteerRequestStep::Reserve,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(replay.duplicate);
+        assert_eq!(replay.status, "pending");
+        let accepted = child
+            .store
+            .transition_child_steer_request(
+                &context,
+                "control-1",
+                "turn-active",
+                ChildSteerRequestStep::Accept,
+                Some("steered"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(accepted.status, "steered");
         let mut next_attempt = SessionOperation::new("child:one", "child_task", "running");
         next_attempt.attempt = 2;
         child.store.record_operation(next_attempt).unwrap();

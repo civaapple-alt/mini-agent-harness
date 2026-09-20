@@ -151,6 +151,7 @@ where
             mini_agent_capabilities::SessionOperation::new(operation_id, "child_task", "queued");
         operation.parent_thread_id = Some(source_thread_id.as_str().to_string());
         operation.attempt = operation_attempt.unwrap_or(1);
+        operation.attempt_kind = Some(mini_agent_protocol::ChildTaskAttemptKind::Initial);
         operation.prompt = operation_prompt;
         operation.group_id = operation_group_id;
         operation.execution_mode = execution_mode;
@@ -481,6 +482,28 @@ pub(super) fn handle<M>(
                 state
                     .management
                     .child_task_action(&params)
+                    .map(|value| (value, true))
+            });
+            respond(reply, receipt, result);
+        }
+        RuntimeCommand::ChildSteerRequest {
+            thread_id,
+            request_id,
+            turn_id,
+            step,
+            accepted_status,
+            reply,
+        } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                state
+                    .management
+                    .child_steer_request(
+                        &thread_id,
+                        &request_id,
+                        &turn_id,
+                        step,
+                        accepted_status.as_deref(),
+                    )
                     .map(|value| (value, true))
             });
             respond(reply, receipt, result);
@@ -823,6 +846,7 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::WriteNotebook { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ForgetNotebook { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ChildTask { reply, .. } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::ChildSteerRequest { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::CheckpointSeq { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ThreadId { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::World { reply } => respond(reply, receipt, Err(error)),
@@ -966,6 +990,7 @@ fn prepare_active_session_fork(
             mini_agent_capabilities::SessionOperation::new(operation_id, "child_task", "queued");
         operation.parent_thread_id = Some(source_thread_id.as_str().to_string());
         operation.attempt = operation_attempt.unwrap_or(1);
+        operation.attempt_kind = Some(mini_agent_protocol::ChildTaskAttemptKind::Initial);
         operation.prompt = operation_prompt;
         operation.group_id = operation_group_id;
         operation.execution_mode = execution_mode;
@@ -990,6 +1015,7 @@ fn is_safe_goal_mutation_while_running(command: &RuntimeCommand) -> bool {
         command,
         RuntimeCommand::BackgroundTaskStop { .. }
             | RuntimeCommand::ChildTask { .. }
+            | RuntimeCommand::ChildSteerRequest { .. }
             | RuntimeCommand::BackgroundTaskRestart { .. }
             | RuntimeCommand::ScheduledTaskCancel { .. }
             | RuntimeCommand::ThreadGoalClear { .. }
@@ -1846,4 +1872,20 @@ pub(super) fn record_operation(
         return Ok(());
     };
     state.management.record_operation(operation)
+}
+
+pub(super) fn session_operation(
+    runtime: &Option<RuntimeActorState>,
+    operation_id: &str,
+) -> Result<Option<mini_agent_capabilities::SessionOperation>, AppServerError> {
+    match runtime.as_ref() {
+        Some(state) => state.management.session_operation(operation_id),
+        None => Ok(None),
+    }
+}
+
+pub(super) fn session_is_forked(runtime: &Option<RuntimeActorState>) -> bool {
+    runtime
+        .as_ref()
+        .is_some_and(|state| state.management.session_is_forked())
 }

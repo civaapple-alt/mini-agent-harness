@@ -35,6 +35,7 @@ pub use tool::ToolExecutionStatus;
 pub use tool::ToolHandler;
 pub use tool::ToolRuntime;
 pub use tool::ToolSpec;
+pub use turn::ChildTaskAttemptKind;
 pub use turn::ThreadId;
 pub use turn::ThreadStart;
 pub use turn::ThreadStatus;

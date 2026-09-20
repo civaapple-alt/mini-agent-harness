@@ -28,27 +28,38 @@ where
                 ),
             );
         }
-        match params.action.as_str() {
-            "report" if params.report_id.is_some() && params.report.is_some() => {}
-            "update_queued" if params.prompt.is_some() => {}
-            "cancel_queued" => {}
-            "report" | "update_queued" => {
-                return response_error(
-                    request.id,
-                    JsonRpcError::invalid_params("action payload is incomplete"),
-                );
+        let payload_valid = match params.action {
+            mini_agent_app_server_protocol::ChildTaskAction::Report => {
+                params.report_id.is_some() && params.report.is_some()
             }
-            _ => {
-                return response_error(
-                    request.id,
-                    JsonRpcError::invalid_params("unsupported child task action"),
-                );
+            mini_agent_app_server_protocol::ChildTaskAction::UpdateQueued => {
+                params.prompt.is_some()
             }
+            mini_agent_app_server_protocol::ChildTaskAction::CancelQueued => true,
+            mini_agent_app_server_protocol::ChildTaskAction::QueueFollowUp => {
+                params.prompt.is_some()
+                    && params
+                        .request_id
+                        .as_deref()
+                        .is_some_and(|id| !id.is_empty() && id.len() <= 192)
+            }
+        };
+        if !payload_valid {
+            return response_error(
+                request.id,
+                JsonRpcError::invalid_params("action payload is incomplete"),
+            );
         }
         let management = match self.management_service() {
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
+        let _request_guard =
+            if params.action == mini_agent_app_server_protocol::ChildTaskAction::QueueFollowUp {
+                Some(self.server.lock_child_steer_request().await)
+            } else {
+                None
+            };
         action_response(
             request.id,
             management.child_task_action(params),

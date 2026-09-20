@@ -235,6 +235,7 @@ where
                 input,
                 operation_id: None,
                 operation_attempt: None,
+                operation_attempt_kind: None,
                 operation_group_id: None,
                 execution_mode: None,
                 group_sequence: None,
@@ -256,6 +257,26 @@ where
                 thread_id,
                 turn_id,
                 text: text.into(),
+                request_id: None,
+            },
+        )
+        .await
+    }
+
+    pub async fn steer_with_request_id(
+        &mut self,
+        thread_id: ThreadId,
+        turn_id: TurnId,
+        text: impl Into<String>,
+        request_id: impl Into<String>,
+    ) -> Result<mini_agent_app_server_protocol::TurnSteerResult, JsonRpcError> {
+        self.call(
+            METHOD_TURN_STEER,
+            TurnSteerParams {
+                thread_id,
+                turn_id,
+                text: text.into(),
+                request_id: Some(request_id.into()),
             },
         )
         .await

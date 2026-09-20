@@ -246,6 +246,7 @@ Thread returned by `thread/start`.
 | `thread/items/list` | `threadId`; optional `turnId`, `cursor`, `limit`, `sortDirection` | Returns cursor-bounded `data` entries, `nextCursor`, and `backwardsCursor`. |
 | `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
 | `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`), `operationId`, `operationAttempt`, `operationPrompt`, `operationGroupId`, `executionMode`, `groupSequence` | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. Fork metadata is a bounded operation projection only; it does not make Core a scheduler. |
+| `child/task` | `threadId`, `parentThreadId`, `operationId`, `attempt`, `action`; action-specific bounded report, prompt, report/request identity | Persists a validated child report or queued-task mutation. `queue_follow_up` uses the expected completed attempt and stable `requestId` to allocate the next attempt on the same child operation; repeats return the same allocation. |
 | `session/notebook/read` | `threadId`, optional `scope` (`self` or `parent`) | Reads the current Session notebook or a Host-validated parent snapshot. Parent scope is read-only and cannot select an arbitrary Session or path. |
 | `session/notebook/write` | `threadId`, `key`, `content`, optional `append`, `importance` (`critical`, `high`, `normal`, `temporary`), `keywords`, and bounded `evidence` | Upserts the current Session's bounded Notebook entry and returns the new snapshot. Evidence is bounded caller-supplied provenance metadata; subject normalization and truncation are applied, but Git/file-system verification is not claimed. |
 | `session/notebook/forget` | `threadId`, `key` | Removes one current-Session entry and advances the Notebook revision without rewriting checkpoint history. |
@@ -326,10 +327,10 @@ attachment references and explicit external paths remain dynamic input.
 
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
-| `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?}`, optional `operationId`, `operationAttempt`, `turnSource` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. `turnSource` is bounded metadata; the currently defined value `child_wakeup` marks an automatic parent continuation and does not change the input text. Operation metadata is opaque lifecycle correlation for a Host-owned child task; Core carries it with the Turn but does not schedule, authorize, or interpret it. |
+| `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?}`, optional `operationId`, `operationAttempt`, `operationAttemptKind`, `turnSource` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. `turnSource` is bounded metadata; the currently defined value `child_wakeup` marks an automatic parent continuation and does not change the input text. `operationAttemptKind` is child lifecycle metadata (`initial`, `retry`, `follow_up`); it does not change Core execution. |
 | `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, and optional error. |
 | `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of ordered `turn/event` notifications with `nextCursor`, `oldestSequence`, and `hasGap`. |
-| `turn/steer` | `threadId`, `turnId`, `text` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. |
+| `turn/steer` | `threadId`, `turnId`, `text`, optional bounded `requestId` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. Child control supplies a stable request ID so a replayed accepted steer is idempotent. |
 | `turn/interrupt` | `threadId`, `turnId` | Requests cooperative cancellation and returns `{accepted: true}` when admitted; settlement remains pending until `turn_finished`. |
 
 `turn/start` is asynchronous. Clients should render `turn/event` and Item
@@ -412,12 +413,25 @@ and Session cursor. Repeated report IDs within an attempt are idempotent. A repo
 is attributed to the attempt active when the tool ran, so a late report can still
 be stored after that attempt settles or a retry starts. The parent reads reports
 incrementally with `task_read`; full child tool activity and transcript stay in
-the child Session. The JSON-RPC `child/task` action is restricted to report
-persistence and queued-task updates/cancellation. Reports validate their captured
-attempt against child operation history; queued-task mutations validate the
-current attempt and queued state. WebStudio handles steer/cancel for running
-children, retries, and group cancellation through the existing Host runtime
-controls.
+the child Session. The JSON-RPC `child/task` action supports report persistence,
+queued-task updates/cancellation, and `queue_follow_up`. Follow-up requests validate
+the parent lineage, stable operation ID, expected completed attempt, bounded
+32 KiB prompt, and request ID before allocating the next attempt. Repeating a
+request ID returns that allocation rather than creating another Turn. WebStudio
+routes `task_control.assign` to a steer for a live child or to a same-Session
+follow-up after completion. Failed, cancelled, and step-limited attempts retain
+the existing retry action and prompt. Before a child steer is submitted, the App
+Server persists its request ID as a reservation; acceptance or definitive
+non-acceptance is then appended to the same Session log. Replays retain the
+original route and do not inject a second instruction. If a restart leaves only
+an unresolved reservation, `turn/steer` returns `pending`; the Gateway must not
+resend that ID automatically. The Gateway reports the unresolved outcome in the
+parent wake-up, and the parent rereads the authoritative child Turn and operation
+state before deciding what to do. A reservation may have been written immediately
+before or after delivery, so pending is an at-most-once outcome, not a delivery
+guarantee. If the child settles between Gateway inspection and reservation, the
+App Server returns `not_submitted`; the Gateway rereads the child and may queue
+the completed follow-up with the same request ID.
 
 Task control execution remains Gateway-mediated. The Gateway sends each control
 action through the child runtime, then coalesces its bounded outcome into a
@@ -435,8 +449,9 @@ automatic wake-up admission with user Turn starts.
 The Session store appends operation lifecycle records (`queued`, `running`,
 `awaiting_approval`, `completed`, `failed`, or `cancelled`) to the existing
 bounded JSONL persistence. A child operation keeps the same `operationId` across
-its retry attempts and increments `operationAttempt`; a retry is a new child
-Turn, not a replay of the old Core loop. The App Server `runtime/status` and
+attempts and increments `operationAttempt`; `attemptKind` distinguishes `initial`,
+`retry`, and `follow_up`. A retry or follow-up is a new child Turn, not a replay of
+the old Core loop. The App Server `runtime/status` and
 WebStudio child projection may expose the latest operation identity without
 copying child history into the parent.
 

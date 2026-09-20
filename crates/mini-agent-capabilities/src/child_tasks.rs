@@ -242,7 +242,7 @@ impl ToolHandler for TaskControlTool {
             parameters: json!({
                 "type":"object", "required":["action"],
                 "properties":{
-                    "action":{"type":"string","enum":["update_queued","steer","cancel","retry","cancel_group"]},
+                    "action":{"type":"string","enum":["update_queued","steer","assign","cancel","retry","cancel_group"]},
                     "child_thread_id":{"type":"string"}, "operation_id":{"type":"string"},
                     "group_id":{"type":"string"}, "prompt":{"type":"string","maxLength":32768},
                     "text":{"type":"string","maxLength":4096}
@@ -260,9 +260,38 @@ impl ToolRuntime for TaskControlTool {
             .ok_or_else(|| ToolError("task_control requires action".to_string()))?;
         if !matches!(
             action,
-            "update_queued" | "steer" | "cancel" | "retry" | "cancel_group"
+            "update_queued" | "steer" | "assign" | "cancel" | "retry" | "cancel_group"
         ) {
             return Err(ToolError("task_control action is invalid".to_string()));
+        }
+        if action == "assign" {
+            let child_thread_id = arguments
+                .get("child_thread_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    ToolError("task_control assign requires child_thread_id".to_string())
+                })?;
+            validate_child_id(child_thread_id).map_err(ToolError)?;
+            let operation_id = arguments
+                .get("operation_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    ToolError("task_control assign requires operation_id".to_string())
+                })?;
+            if operation_id.trim().is_empty() || operation_id.len() > 128 {
+                return Err(ToolError(
+                    "task_control assign operation_id must be non-empty and bounded".to_string(),
+                ));
+            }
+            let prompt = arguments
+                .get("prompt")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ToolError("task_control assign requires prompt".to_string()))?;
+            if prompt.trim().is_empty() || prompt.len() > MAX_CHILD_PROMPT_BYTES {
+                return Err(ToolError(
+                    "task_control assign prompt must be non-empty and at most 32 KiB".to_string(),
+                ));
+            }
         }
         let mut intent = json!({"status":"requested","action":action});
         for key in [

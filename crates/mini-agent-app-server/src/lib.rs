@@ -15,7 +15,7 @@ use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use tokio::sync::{Notify, broadcast, mpsc, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, Notify, OwnedMutexGuard, broadcast, mpsc, oneshot};
 
 const EVENT_BUFFER: usize = 256;
 const EVENT_REPLAY_BUFFER: usize = 512;
@@ -472,6 +472,7 @@ pub struct AppServer<M> {
     runtime_status: Arc<Mutex<mini_agent_app_server_protocol::RuntimeStatus>>,
     control: Arc<RunControl>,
     action_sequencer: ActionSequencer,
+    child_steer_request_lock: Arc<AsyncMutex<()>>,
     thread_id: ThreadId,
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
     runtime_revision: Arc<AtomicU64>,
@@ -489,6 +490,7 @@ impl<M> Clone for AppServer<M> {
             runtime_status: self.runtime_status.clone(),
             control: self.control.clone(),
             action_sequencer: self.action_sequencer.clone(),
+            child_steer_request_lock: self.child_steer_request_lock.clone(),
             thread_id: self.thread_id.clone(),
             thread_ids: self.thread_ids.clone(),
             runtime_revision: self.runtime_revision.clone(),
@@ -593,6 +595,7 @@ where
         let worker_factory = factory.clone();
         let worker_control = control.clone();
         let action_sequencer = ActionSequencer::new();
+        let child_steer_request_lock = Arc::new(AsyncMutex::new(()));
         let worker_action_sequencer = action_sequencer.clone();
         thread::Builder::new()
             .name("mini-agent-app-server".to_string())
@@ -624,6 +627,7 @@ where
             runtime_status,
             control,
             action_sequencer,
+            child_steer_request_lock,
             thread_id: start.thread_id,
             thread_ids,
             runtime_revision,
@@ -660,6 +664,10 @@ where
 
     pub(crate) fn runtime_revision_handle(&self) -> Arc<AtomicU64> {
         self.runtime_revision.clone()
+    }
+
+    pub(crate) async fn lock_child_steer_request(&self) -> OwnedMutexGuard<()> {
+        self.child_steer_request_lock.clone().lock_owned().await
     }
 
     pub(crate) fn install_runtime_state(
