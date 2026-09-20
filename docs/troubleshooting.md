@@ -108,6 +108,15 @@ bounded underlying connection cause when the transport exposes one. If retries
 are exhausted, the checkpoint is preserved; check the configured endpoint,
 network route, proxy, and TLS connectivity before continuing the Thread.
 
+On Windows, `os error 10053` with `error writing a body to connection` means the
+local host aborted a socket while the request was being sent. That message alone
+does not identify whether a proxy, VPN, security product, network path, or remote
+peer closed it, and it does not prove the request body was too large. The provider
+may have received some or all of the request, so the adapter does not replay this
+ambiguous send failure automatically. Continue in the same Thread to use its
+preserved checkpoint; if it repeats, compare the configured endpoint and network
+route and inspect local proxy/VPN/security logs around the failure time.
+
 ## File tools and workspace paths
 
 `read_file` and `read_image` accept paths located inside the active Project
