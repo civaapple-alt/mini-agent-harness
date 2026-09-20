@@ -50,7 +50,12 @@ control the same task, and a changed PID does not identify who initiated the cha
 Do not create a `scheduled_task` to poll a local Shell task. A scheduled task is only
 a bounded delay marker: it does not wait, end the current Turn, or wake/resume a later
 Turn. Use it for remote checks only when a future Turn will be started explicitly by
-the user or Host.
+the user or Host. Supply a stable `task_id` on every `create` call, then let that
+explicitly started Turn read the marker before querying the remote service:
+
+```json
+{"action":"create","task_id":"check-action","delay_seconds":300,"summary":"Later check GitHub Actions"}
+```
 
 ## Read files
 

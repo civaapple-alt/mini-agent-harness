@@ -24,6 +24,10 @@ Child Session 的并发容量和单次任务的调度意图是两个不同维度
 
 ## 预算门禁
 
+> 预算数值记录 2026-09-18 的当时决策。2026-09-20 起的当前门禁见
+> [面向交付的 Agent 运行系统行数门禁](2026-09-20-deliverable-agent-system-line-budgets.zh.md)。
+
+
 为支持该架构持续演进，同时保留硬约束，预算调整为：
 
 | 指标 | 硬上限 | operating | red band |

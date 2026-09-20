@@ -128,11 +128,11 @@ Gateway 投影；新增场景需记录可观察 trace、失败反例和结果。
 - [ ] 确认 Session/Actor/App Server 的单一状态与控制权威。
 - [ ] 完成新增工具、事件、持久化和协议兼容审查。
 - [x] 添加并通过一项跨层 Harness Scenario；完整状态机与恢复 Scenario/Eval 仍待补齐。
-- [ ] 更新两仓当前规范与变更记录；完成验证后再晋级本 note。
+- [x] 更新两仓当前规范与变更记录；本提案仍待补齐完整生命周期与恢复验收后再晋级。
 
 ## 文档生命周期
 
 本文件保持 `proposed`，直到完整生命周期与恢复场景通过并完成实现审查。Gateway 重启后不重放
 待处理唤醒的限制已记录。稳定协议与集成说明已更新到 `mini-codex/docs/app-server.md`、
-`docs/studio-integration.md`、`docs/privacy.md` 和 `mini-agent-web/docs/troubleshooting.md`、
-`CHANGELOG.md`。本提案仍记录未完成的验证，不替代当前产品规范。
+`docs/studio-integration.md`、`docs/privacy.md` 和
+`mini-agent-web/docs/child-tasks.md`、`docs/troubleshooting.md`、`CHANGELOG.md`。本提案仍记录未完成的验证，不替代当前产品规范。

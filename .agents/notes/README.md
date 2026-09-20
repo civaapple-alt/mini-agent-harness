@@ -98,8 +98,6 @@ graph LR
 
 - [子代理动态协作与进展跟踪](proposed/architecture/2026-09-20-dynamic-child-agent-coordination.zh.md)
 - [WebStudio Session Doctor：工作区 Session 日志诊断与安全修复](proposed/feature/2026-09-19-web-studio-session-doctor.zh.md)
-- [跨 Turn 的后台 Shell 任务](proposed/architecture/2026-09-18-background-shell-task.zh.md)
-- [跨 Turn 的定时唤醒任务](proposed/architecture/2026-09-18-scheduled-task.zh.md)
 - [Session 状态、Notebook 与 Subagent 执行策略](proposed/architecture/2026-09-17-session-state-notebook-and-subagent-execution-policy.zh.md)
 - [时间上延展、结构上并发：Agent Harness Charter](proposed/architecture/2026-09-17-time-extended-structural-concurrency.zh.md)
 - [Result-Oriented Long-Term Bot Agents](proposed/architecture/2026-09-04-result-oriented-long-term-bot-agents.zh.md)
@@ -110,6 +108,8 @@ graph LR
 
 ### Implemented
 
+- [跨 Turn 的本地后台 Shell 任务](implemented/architecture/2026-09-18-background-shell-task.zh.md)
+- [跨 Turn 延时标记](implemented/architecture/2026-09-18-scheduled-task.zh.md)
 - [Child Session、operation 与 Session notebook](implemented/architecture/2026-09-17-time-extended-child-session-and-notebook.zh.md)
 - [Session Notebook 与 Subagent 执行策略落地记录](implemented/architecture/2026-09-18-session-notebook-and-subagent-policy.zh.md)
 - [Session Notebook 证据、检索与简化配置](implemented/architecture/2026-09-18-session-notebook-evidence-search-and-config.zh.md)
@@ -142,6 +142,7 @@ graph LR
 - [Cargo Boundary Audit](implemented/architecture/2026-09-07-cargo-boundary-audit.md)
 - [Multi-Directory Workspace Context Perception](implemented/feature/2026-09-07-multi-directory-workspace-context.md)
 - [Line Budget Ceiling Adjustment Rationale](implemented/process/2026-09-10-line-budget-ceiling-adjustment-rationale.zh.md)
+- [WebStudio 会话体验文档回填](implemented/process/2026-09-20-webstudio-session-experience-docs.zh.md)
 - [面向交付的 Agent 运行系统行数门禁](implemented/process/2026-09-20-deliverable-agent-system-line-budgets.zh.md)
 - [Core Harness Boundary](implemented/architecture/2026-08-24-core-harness-boundary.md)
 - [Hard Limits System](implemented/architecture/2026-08-24-hard-limits-system.md)

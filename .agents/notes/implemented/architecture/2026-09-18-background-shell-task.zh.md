@@ -1,11 +1,11 @@
 # 跨 Turn 的后台 Shell 任务
 
-状态：第一版实现完成（本地进程生命周期、App Server 控制面、Gateway/Studio 投影和
-跨 Turn 公共场景已接入；runtime 重启恢复与远程等待仍明确留在后续范围）
+- status: implemented
+- date: 2026-09-18
 
 ## 结论
 
-本提案只解决本地进程型长任务的跨 Turn 生命周期，不把所有长时间操作抽象成
+本实现记录只解决本地进程型长任务的跨 Turn 生命周期，不把所有长时间操作抽象成
 服务。Web、Backend、Dev Server 等本地进程统一视为 Shell 的后台执行模式：
 
 ```text
@@ -18,7 +18,7 @@ shell
 `ManagedService`、健康检查、端口声明、通用 Scheduler、Service Registry 或隐式
 自动重启策略。
 
-GitHub Action 状态查询、云端构建和部署状态等待等远程长任务不属于本提案。第一版
+GitHub Action 状态查询、云端构建和部署状态等待等远程长任务不属于本实现记录。第一版
 使用独立的 `ScheduledTask` 有界延时标记，让下一轮模型继续查询；它不保存供应商
 取消协议，也不取消远程操作。详见
 `2026-09-18-scheduled-task.zh.md`，不要把远程等待伪装成后台 Shell。
@@ -88,7 +88,7 @@ ID、状态、PID、工作目录、命令摘要和 hash、运行时长、退出�
 
 保留
 `.agents/notes/implemented/architecture/2026-09-17-time-extended-child-session-and-notebook.zh.md`。
-该提案描述 Child Session、operation 和时间延展；本提案只补充本地 Shell 进程的
+该提案描述 Child Session、operation 和时间延展；本实现记录只补充本地 Shell 进程的
 跨 Turn 生命周期，不把它扩展成通用服务管理框架。远程等待任务使用独立的
 `ScheduledTask` 提案，不复用 `BackgroundShellTask`。
 
@@ -101,7 +101,7 @@ ID、状态、PID、工作目录、命令摘要和 hash、运行时长、退出�
 3. 删除旧概念：取消 ManagedService、Service Registry、通用 Scheduler 和隐式自动
    重启；远程等待不伪装成本地 Shell。
 4. 预算：实现后运行 `python scripts/line_budget.py`；当前 release source 仍需
-   保持在 40,000 行硬上限内，并记录实际 delta。
+   保持在 45,000 行 Release Rust 硬上限内；单次 PR 净增量不超过 1,000 行。
 5. 可见面：新增有限 Shell 参数、App Server 方法、SDK/REST DTO 和一条有界更新通知；
    不新增 Core 事件、Session 持久化字段或 Gateway 进程缓存。
 6. 证据：Capabilities/App Server 单元测试、App Server 跨 Turn 公共场景、SDK/Gateway
@@ -122,3 +122,11 @@ ID、状态、PID、工作目录、命令摘要和 hash、运行时长、退出�
 - 跨 Turn、Child 创建拒绝和运行时关闭场景有 bounded Scenario/Eval 或边界测试证据；
 - “启动 Web 服务 → 下一 Turn 显式重启 → Child 读取”作为后续组合场景，不提前宣称
   已覆盖。
+
+## 落地记录
+
+后台 Shell 跨 Turn 生命周期由 Harness 提交 `1fe02fa` 建立；WebStudio 运行面板由
+`a497f56` 接入。远程延时标记的独立边界由 `91ab580` 建立，并由 `8e77e7b` 校正工具
+契约和使用说明。WebStudio 的运行面板与文档术语由 `e8f5fb8` 对齐。当前规范见
+`docs/app-server.md`、`docs/harness-tool-surface.md`，以及 WebStudio 的
+`docs/background-tasks.md` 与 `docs/scheduled-tasks.md`。

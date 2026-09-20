@@ -70,10 +70,23 @@ Gateway 提供的跨层读取路径如下：
 | `/api/threads/{thread_id}/runtime/status` | 非阻塞运行时状态 |
 | `/api/threads/{thread_id}/attach` | 恢复可写 Session，或报告外部锁 |
 | `/api/threads/{thread_id}/children` | Child Session 的控制与观察投影 |
+| `/api/workflows/files` | 列出当前 Project 文件与 Session 计划产物 |
+| `/api/workflows/file/content` | 读取受控 Project 文件或 Session 计划产物 |
 | `/api/threads/{thread_id}/notebook` | Session-owned Notebook 投影 |
 
 读取历史不会 attach 或修改 Session。若另一个 App Server 持有 Session lock，Gateway
 只返回只读历史或锁定信息，绝不启动第二个 writer。
+
+## Plan Mode 与计划查看
+
+Host 的逻辑文件别名 `plan.md` 指向当前 Session 的 Plan artifact。Web Studio 的
+`/api/workflows/files` 将该 Session-owned 文件列为 `plan/plan.md`，并让计划查看器优先
+显示它。项目根目录的 `plan.md` 是独立工作区文件，不与 Session 计划合并。计划查看器
+通过 Gateway 的受控文件接口读取，不扫描物理 Session 目录。
+
+Turn 结算后，SidePanel 使用新的 Turn 结果重新加载计划文件清单和所选文件内容。若 UI
+仍显示旧内容，先确认当前 Project/Thread，再刷新计划页；不要用绝对 Session 路径替代
+逻辑别名或公开接口。
 
 ## Turn、事件与重连
 

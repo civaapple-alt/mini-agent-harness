@@ -26,9 +26,13 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   App Server owns bounded task snapshots and process-group cleanup; Gateway and
   Web Studio expose read/log/stop/restart controls. Remote waits such as GitHub
   Actions use the separate bounded scheduled-task marker below.
-- Add a bounded `scheduled_task` wake-up marker for remote status polling. It ends
-  the current Turn without running Shell or automatically resuming the model;
-  a later Turn explicitly reads the marker and performs the remote query.
+- Add a bounded `scheduled_task` delay marker for remote status checks. It neither
+  ends the current Turn nor wakes a later Turn; a user- or Host-started Turn reads
+  the marker before querying remote status.
+- Add bounded child-agent reports, cursor-based reads, and parent controls for
+  queued/running work, retries, sequential groups, and additional delegation.
+  App Server operation/report records remain authoritative; Gateway coalesces
+  wakeups and does not interrupt an active parent model request.
 - Add an independent Child Session control seam. Child Sessions use exact
   persisted checkpoints and their own runtime, history, approvals, and replay;
   Core remains a single-Thread Turn loop.

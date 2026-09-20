@@ -216,8 +216,10 @@ the core REPL remains focused on turn execution and run control:
 - **Plan Mode (`thread/settings/update`)**: Set `collaborationMode.mode` to
   `"plan"` to make exploration read-mostly. Bounded scratch scripts and outputs
   may be created in the Session-owned plan area, and `plan.md` is retained;
-  formal Project mutations remain locked. Shell remains available according to
-  the selected approval policy; Plan mode does not add a separate Shell
+  the logical `plan.md` alias resolves to the current Session's plan artifact
+  (exposed to Web Studio as `plan/plan.md`), separately from any Project-root
+  `plan.md`. Formal Project mutations remain locked. Shell remains available
+  according to the selected approval policy; Plan mode does not add a separate Shell
   read-only restriction. The setting is applied by the App
   Server Runtime Actor to the settled Thread, approval controller, and bounded
   Host-composed prompt; arbitrary raw system-prompt replacement is not accepted.
