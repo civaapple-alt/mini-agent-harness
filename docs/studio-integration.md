@@ -123,8 +123,9 @@ Project 广播给浏览器，浏览器通过 REST 或 WebSocket 提交 `approval
 变化，以及显式撤销，都会使旧 grant 失效。
 
 `project` 与 `full_machine` 是路径范围；`interactive`、`automatic` 与 `trusted`
-是审批策略。`full_machine` 不等于 allow-all。Deny、工具可用性、Plan 模式的源文件
-修改锁和高风险确认仍由 App Server/Host 执行。
+是审批策略。Trusted 自动准入通过 URL 校验的公网 `web_fetch`；Interactive 仍要求
+确认。`full_machine` 不等于 allow-all。Deny、工具可用性、Plan 模式的源文件修改锁和
+其他高风险确认仍由 App Server/Host 执行。
 
 ## Fork、Child Session 与 Notebook
 

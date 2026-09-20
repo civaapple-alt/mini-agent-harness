@@ -141,8 +141,8 @@ public `http`/`https` URLs and loopback (`localhost`, `127.0.0.1`, `[::1]`). It 
 credentials, LAN/private IPs, cloud metadata (`169.254.169.254`), and `file:` paths, and it
 does not run JavaScript. A public page cannot redirect onto loopback. Client-only SPAs may
 come back as a thin shell with a warning; SSR HTML is returned as markdown. A public `web_fetch`
-request crosses the Host approval boundary in interactive/trusted policy; loopback is an explicit
-allowed target, and automatic policy can admit public reads without a round trip. Network
+request requires Host approval in Interactive policy. Automatic and Trusted policies admit it
+after URL validation; loopback remains an explicit allowed target. Network
 timeouts and transient transport failures are reported as retryable tool outcomes. `read_file`
 returns bounded, line-numbered pages; workspace and configured extension-root paths are allowed,
 while an existing file outside those roots requires Host admission. Pass its `next_offset` back as

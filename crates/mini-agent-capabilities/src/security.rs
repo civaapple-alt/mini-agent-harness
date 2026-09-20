@@ -46,10 +46,9 @@ pub(crate) fn is_high_risk(request: &ToolApprovalRequest) -> bool {
     })
 }
 
-/// Trusted execution keeps the normal approval path for actions whose tool
-/// semantics are destructive or external. Ordinary shell commands are
-/// admitted automatically, but known destructive command forms remain
-/// explicit approval boundaries.
+/// Trusted execution admits ordinary Shell and bounded `web_fetch` requests
+/// after tool admission. Destructive Shell commands and sensitive tools still
+/// require approval.
 pub(crate) fn is_trusted_high_risk(request: &ToolApprovalRequest) -> bool {
     let tool_name = request
         .tool_name
@@ -59,7 +58,7 @@ pub(crate) fn is_trusted_high_risk(request: &ToolApprovalRequest) -> bool {
         .to_ascii_lowercase();
     match tool_name.as_str() {
         "shell" | "bash" | "exec" => return is_destructive_shell_command(&request.action),
-        "read_image" | "apply_patch" | "mcp" | "mcp_tool" | "web_fetch" => return true,
+        "read_image" | "apply_patch" | "mcp" | "mcp_tool" => return true,
         _ => {}
     }
     is_high_risk(request) || is_destructive_shell_command(&request.action)

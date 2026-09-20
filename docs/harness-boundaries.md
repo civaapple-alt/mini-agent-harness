@@ -182,9 +182,10 @@ state. A future general-purpose scheduler still requires a separate ownership
 and evidence decision.
 
 `web_fetch` 在 DNS 解析后固定 origin endpoint，并要求所有解析地址与已准入的
-public/loopback class 一致；redirect 只能留在同一 host 和同一 class。公共 URL
-进入 Host approval，loopback 是显式本地允许目标；resolver 不能把公共域名转成
-loopback、私网或 cloud metadata 地址。
+public/loopback class 一致；redirect 只能留在同一 host 和同一 class。Interactive
+策略会为公共 URL 请求 Host approval；Automatic 和 Trusted 在 URL 校验通过后自动准入。
+Loopback 是显式本地允许目标；resolver 不能把公共域名转成 loopback、私网或 cloud
+metadata 地址。
 
 ### Docker
 

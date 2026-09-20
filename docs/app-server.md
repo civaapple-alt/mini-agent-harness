@@ -505,7 +505,7 @@ or starts a competing writer. Consumers should keep the active identity until
 | --- | --- | --- |
 | `world/state` | No parameters | Returns the current workspace, structured status, status lines, and bounded model context. |
 | `world/refresh` | No parameters | Refreshes the world and returns `{changed, state}`. |
-| `world/set_execution` | `access`, `policy` | Sets execution scope and returns `{changed, state}`. `access` is `project` or `full_machine`; `policy` is `interactive`, `automatic`, or `trusted`. `trusted` bypasses ordinary validated workspace and Shell approval while retaining explicit approval for destructive, system-level, MCP, and workspace-external actions such as `read_image`. |
+| `world/set_execution` | `access`, `policy` | Sets execution scope and returns `{changed, state}`. `access` is `project` or `full_machine`; `policy` is `interactive`, `automatic`, or `trusted`. `trusted` bypasses approval for ordinary validated workspace and Shell actions and public `web_fetch` requests after URL validation. Destructive, system-level, MCP, and workspace-external actions such as `read_image` still require approval. |
 | `mcp/status` | No parameters | Returns enabled/inactive servers, tool count, and whether retry is available. |
 | `mcp/retry` | No parameters | Retries MCP setup and returns enabled/inactive servers, diagnostics, and tool count. |
 

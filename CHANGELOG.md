@@ -5,6 +5,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+- Trusted execution now admits public `web_fetch` requests after bounded URL
+  validation, without an extra approval prompt. Interactive policy still asks;
+  URL, DNS, redirect, and Security Deny checks remain in force.
 - Keep the SessionStore writer cursor aligned with the persisted end of the
   session log after ResultStore appends, preventing overwritten records and
   sequence gaps.
