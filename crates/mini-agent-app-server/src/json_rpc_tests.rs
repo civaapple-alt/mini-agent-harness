@@ -2,7 +2,7 @@ use super::*;
 use crate::tests::{DoneModel, harness};
 use mini_agent_app_server_protocol::{
     ActionGrantScope, ApprovalDecision, CapabilityProviderSelection, ClientCapabilities,
-    SESSION_FORK_CONFLICT_CODE,
+    SESSION_FORK_CONFLICT_CODE, TurnSource,
 };
 use mini_agent_capabilities::{
     ApprovalController, ApprovalPolicy, BackgroundShellManager, ImageStore, ResultStore,
@@ -54,6 +54,7 @@ fn turn_start_request(id: u64, prompt: &str) -> JsonRpcRequest {
             operation_group_id: None,
             execution_mode: None,
             group_sequence: None,
+            turn_source: None,
         }),
     )
 }
@@ -966,6 +967,7 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
                 operation_group_id: None,
                 execution_mode: None,
                 group_sequence: None,
+                turn_source: None,
             }),
         ),
     )
@@ -1019,6 +1021,79 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
     assert_eq!(data["existingContextPolicy"], "exact");
     assert_eq!(data["actionId"], 4);
     assert_eq!(data["actionSequence"], 4);
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn fork_child_thread_items_do_not_project_inherited_checkpoint_messages() {
+    let root = rpc_root("fork-child-items");
+    let mut parent = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let parent_session_id = parent.store.session_id().to_string();
+    let parent_messages = vec![
+        Message::User {
+            text: "parent-only prompt".to_string(),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: "parent-only answer".to_string(),
+            tool_calls: Vec::new(),
+        },
+    ];
+    parent
+        .store
+        .record_turn_with_id(
+            "parent-turn",
+            mini_agent_capabilities::TurnCommit {
+                started_at_ms: 1,
+                prompt: "parent-only prompt",
+                status: mini_agent_capabilities::TurnStatus::Completed,
+                steps: 1,
+                error: None,
+                messages: &parent_messages,
+                tool_arguments: &[],
+                presentation: None,
+                checkpoint: &parent_messages,
+            },
+        )
+        .unwrap();
+    let fork = SessionStore::fork_from_checkpoint(
+        &root,
+        &parent_session_id,
+        parent.store.checkpoint_seq(),
+        "fork-child-thread",
+        &parent_messages,
+        mini_agent_capabilities::SessionForkMetadata {
+            context_policy: "exact".to_string(),
+            context_before_bytes: 0,
+            context_after_bytes: 0,
+            compacted: false,
+            method: "exact".to_string(),
+        },
+    )
+    .unwrap();
+    let child_session_id = fork.session_id;
+    drop(parent);
+
+    let child = SessionStore::open(&root, SessionStoreRequest::Resume(child_session_id)).unwrap();
+    assert!(child.store.is_forked());
+    assert!(child.store.items().is_empty());
+    assert!(
+        child.state.messages().iter().any(
+            |message| matches!(message, Message::User { text } if text == "parent-only prompt")
+        )
+    );
+    let mut connection = managed_connection_with_session(DoneModel, root.clone(), child);
+    initialize_connection(&mut connection, "fork-child-items-test").await;
+    let items = rpc_call(
+        &mut connection,
+        2,
+        METHOD_THREAD_ITEMS_LIST,
+        serde_json::json!({"threadId": "fork-child-thread"}),
+    )
+    .await;
+    assert!(items["value"]["data"].as_array().unwrap().is_empty());
+
     connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -1133,6 +1208,7 @@ async fn exact_session_fork_can_prepare_from_an_active_parent_turn() {
                 operation_group_id: None,
                 execution_mode: None,
                 group_sequence: None,
+                turn_source: None,
             }),
         ),
     )
@@ -1338,6 +1414,96 @@ async fn lists_bounded_thread_items_with_cursor_projection() {
         first["value"]["data"][0]["turnId"],
         second["value"]["data"][0]["turnId"]
     );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn child_wakeup_source_is_live_replayable_and_persisted_on_thread_items() {
+    let root = rpc_root("child-wakeup-source");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let session_id = opened.store.session_id().to_string();
+    let thread_id = opened.store.thread_id().to_string();
+    let mut connection = managed_connection_with_session(DoneModel, root.clone(), opened);
+    initialize_connection(&mut connection, "child-wakeup-source-test").await;
+
+    let start = rpc_result(
+        &mut connection,
+        JsonRpcRequest::request(
+            2,
+            METHOD_TURN_START,
+            serde_json::json!(TurnStartParams {
+                thread_id: ThreadId::new(thread_id.clone()),
+                input: TurnInput::new(TurnInputMode::Start, "child update batch"),
+                operation_id: None,
+                operation_attempt: None,
+                operation_group_id: None,
+                execution_mode: None,
+                group_sequence: None,
+                turn_source: Some(TurnSource::ChildWakeup),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(start["value"]["status"], "started");
+
+    let started = loop {
+        let event = next_turn_event(&mut connection).await;
+        if matches!(event.event, mini_agent_protocol::Event::TurnStarted { .. }) {
+            break event;
+        }
+    };
+    assert_eq!(started.turn_source, Some(TurnSource::ChildWakeup));
+    wait_for_turn_finished(&mut connection).await;
+
+    let items = rpc_call(
+        &mut connection,
+        3,
+        METHOD_THREAD_ITEMS_LIST,
+        serde_json::json!({"threadId": thread_id, "limit": 16}),
+    )
+    .await;
+    let data = items["value"]["data"].as_array().unwrap();
+    assert!(!data.is_empty());
+    assert!(
+        data.iter()
+            .all(|entry| entry["turnSource"] == "child_wakeup")
+    );
+    assert!(
+        data.iter()
+            .any(|entry| entry["item"]["text"] == "child update batch")
+    );
+
+    let replay = rpc_call(
+        &mut connection,
+        4,
+        METHOD_TURN_EVENTS,
+        serde_json::json!({"threadId": thread_id, "afterSequence": 0, "limit": 64}),
+    )
+    .await;
+    let replay_events = replay["data"].as_array().unwrap();
+    assert!(replay_events.iter().any(|event| {
+        event["event"]["type"] == "turn_started" && event["turnSource"] == "child_wakeup"
+    }));
+
+    connection.shutdown().await.unwrap();
+    let resumed = SessionStore::open(&root, SessionStoreRequest::Resume(session_id)).unwrap();
+    let mut restarted = managed_connection_with_session(DoneModel, root.clone(), resumed);
+    initialize_connection(&mut restarted, "child-wakeup-source-restart-test").await;
+    let items = rpc_call(
+        &mut restarted,
+        2,
+        METHOD_THREAD_ITEMS_LIST,
+        serde_json::json!({"threadId": thread_id, "limit": 16}),
+    )
+    .await;
+    assert!(
+        items["value"]["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["turnSource"] == "child_wakeup")
+    );
+    restarted.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 

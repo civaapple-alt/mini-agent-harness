@@ -79,8 +79,12 @@ where
         turn.group_sequence = params.group_sequence;
         action_response(
             request.id,
-            self.server
-                .submit_start_action(params.thread_id, turn, None),
+            self.server.submit_start_action_with_source(
+                params.thread_id,
+                turn,
+                None,
+                params.turn_source,
+            ),
             Clone::clone,
         )
         .await

@@ -18,7 +18,7 @@ use mini_agent_capabilities::{
 use mini_agent_capabilities::{BackgroundShellManager, ScheduledTaskManager};
 use mini_agent_core::{HarnessConfig, ThreadCheckpoint};
 use mini_agent_host::WorldState;
-use mini_agent_protocol::{Message, Model, ThreadId, TurnStatus};
+use mini_agent_protocol::{Message, Model, ThreadId, TurnSource, TurnStatus};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 pub(crate) struct RuntimeActorState {
@@ -815,6 +815,18 @@ impl RuntimeManagementState {
 
     pub(crate) fn session_items(&self) -> Option<&[SessionItem]> {
         self.session.as_ref().map(|opened| opened.store.items())
+    }
+
+    pub(crate) fn session_turn_source(&self, turn_id: &str) -> Option<TurnSource> {
+        self.session
+            .as_ref()
+            .and_then(|opened| opened.store.turn_source(turn_id))
+    }
+
+    pub(crate) fn session_is_forked(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|opened| opened.store.is_forked())
     }
 
     pub(crate) fn record_context(

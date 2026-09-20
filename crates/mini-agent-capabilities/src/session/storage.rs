@@ -40,6 +40,8 @@ pub(super) struct LoadedRecords {
     pub(super) thread_id: String,
     pub(super) messages: Vec<Message>,
     pub(super) items: Vec<SessionItem>,
+    pub(super) turn_sources: HashMap<String, TurnSource>,
+    pub(super) is_forked: bool,
     pub(super) next_seq: u64,
     pub(super) checkpoint_seq: u64,
     pub(super) turn_count: usize,
@@ -55,6 +57,8 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
     let mut header_seen = false;
     let mut latest_checkpoint = None;
     let mut items = Vec::new();
+    let mut turn_sources = HashMap::new();
+    let mut is_forked = false;
     let mut turn_count = 0usize;
     let mut thread_turn_counts: HashMap<String, usize> = HashMap::new();
     let mut created_at_ms = 0u64;
@@ -97,6 +101,7 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                     .get("timestamp_ms")
                     .and_then(Value::as_u64)
                     .unwrap_or(0);
+                is_forked = record.get("forked_from").is_some();
                 header_seen = true;
             }
             Some("turn_started") if header_seen => {
@@ -105,6 +110,16 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                     .get("thread_id")
                     .and_then(Value::as_str)
                     .ok_or_else(|| "turn_started is missing thread_id".to_string())?;
+                if let (Some(turn_id), Some(source)) = (
+                    record.get("turn_id").and_then(Value::as_str),
+                    record
+                        .get("presentation")
+                        .and_then(|presentation| presentation.get("turnSource"))
+                        .cloned()
+                        .and_then(|source| serde_json::from_value::<TurnSource>(source).ok()),
+                ) {
+                    turn_sources.insert(turn_id.to_string(), source);
+                }
                 let count = thread_turn_counts.entry(thread_id.to_string()).or_insert(0);
                 *count = (*count).saturating_add(1);
             }
@@ -177,6 +192,8 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
         thread_id,
         messages,
         items,
+        turn_sources,
+        is_forked,
         next_seq: expected_seq,
         checkpoint_seq,
         turn_count,

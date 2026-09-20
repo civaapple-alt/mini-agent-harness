@@ -238,6 +238,7 @@ where
                 operation_group_id: None,
                 execution_mode: None,
                 group_sequence: None,
+                turn_source: None,
             },
         )
         .await
@@ -571,9 +572,11 @@ where
                 _ => None,
             })
         });
+        let turn_source = event.turn_source;
         let mut envelope =
             EventEnvelope::new(event.thread_id, event.turn_id, event.sequence, event.event);
         envelope.item_id = item_id;
+        envelope.turn_source = turn_source;
         Ok(envelope)
     }
 

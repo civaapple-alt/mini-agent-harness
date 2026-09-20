@@ -1,6 +1,6 @@
 use crate::skills::MAX_SELECTED_SKILLS;
 use mini_agent_core::SessionState;
-use mini_agent_protocol::{Message, TurnWorkflow};
+use mini_agent_protocol::{Message, TurnSource, TurnWorkflow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -160,6 +160,8 @@ pub struct SessionStore {
     turn_count: usize,
     thread_turn_count: usize,
     items: Vec<SessionItem>,
+    turn_sources: HashMap<String, TurnSource>,
+    is_forked: bool,
     created_at_ms: u64,
     continuation_mode: Option<String>,
     pub(crate) append_lock: Arc<Mutex<()>>,
@@ -202,6 +204,8 @@ pub struct TurnCommit<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct TurnPresentation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    turn_source: Option<TurnSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     workflow: Option<TurnWorkflow>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     activities: Vec<TurnPresentationActivity>,
@@ -237,9 +241,15 @@ pub struct TurnPresentationActivity {
 impl TurnPresentation {
     pub fn from_workflow(workflow: Option<&TurnWorkflow>) -> Self {
         Self {
+            turn_source: None,
             workflow: workflow.map(bounded_workflow),
             activities: Vec::new(),
         }
+    }
+
+    pub fn with_turn_source(mut self, source: Option<TurnSource>) -> Self {
+        self.turn_source = source;
+        self
     }
 
     pub fn push(&mut self, activity: TurnPresentationActivity) {
@@ -495,6 +505,14 @@ impl SessionStore {
 
     pub fn items(&self) -> &[SessionItem] {
         &self.items
+    }
+
+    pub fn turn_source(&self, turn_id: &str) -> Option<TurnSource> {
+        self.turn_sources.get(turn_id).copied()
+    }
+
+    pub fn is_forked(&self) -> bool {
+        self.is_forked
     }
 
     pub fn checkpoint_seq(&self) -> u64 {
@@ -802,6 +820,12 @@ impl SessionStore {
         }));
         records.push(self.checkpoint_record(turn.checkpoint));
         self.append_records(records)?;
+        if let Some(source) = turn
+            .presentation
+            .and_then(|presentation| presentation.turn_source)
+        {
+            self.turn_sources.insert(turn_id.to_string(), source);
+        }
         self.items.extend(items);
         self.checkpoint_seq = self.next_seq.saturating_sub(1);
         self.turn_count = self.turn_count.saturating_add(1);
@@ -991,6 +1015,8 @@ impl SessionStore {
             turn_count: loaded.turn_count,
             thread_turn_count: loaded.thread_turn_count,
             items: loaded.items,
+            turn_sources: loaded.turn_sources,
+            is_forked: loaded.is_forked,
             created_at_ms: loaded.created_at_ms,
             continuation_mode,
             append_lock: Arc::new(Mutex::new(())),
@@ -1410,6 +1436,7 @@ impl SessionStore {
         fork_metadata: Option<&SessionForkMetadata>,
     ) -> Result<Self, String> {
         let now = timestamp_ms();
+        let is_forked = forked_from.is_some();
         let mut store = Self {
             session_id: session_id.to_string(),
             thread_id: thread_id.to_string(),
@@ -1422,6 +1449,8 @@ impl SessionStore {
             turn_count: 0,
             thread_turn_count: 0,
             items: Vec::new(),
+            turn_sources: HashMap::new(),
+            is_forked,
             created_at_ms: now,
             continuation_mode: None,
             append_lock: Arc::new(Mutex::new(())),
@@ -2032,6 +2061,11 @@ mod tests {
         assert_ne!(info.session_id, parent_id);
         assert_eq!(info.thread_id, "child-thread");
         assert_eq!(info.parent_session_id, parent_id);
+        let child = SessionStore::open(&root, SessionRequest::Resume(info.session_id.clone()))
+            .expect("forked Session should resume");
+        assert!(child.store.is_forked());
+        assert!(child.store.items().is_empty());
+        drop(child);
         assert_eq!(info.metadata, Some(exact_fork_metadata()));
         assert!(
             fs::read_to_string(&info.path)
@@ -2302,6 +2336,48 @@ mod tests {
             Some(arguments[0].1.clone())
         );
         drop(resumed);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn turn_source_is_persisted_and_restored_with_the_turn_presentation() {
+        let root = crate::test_support::test_root();
+        let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let messages = vec![Message::User {
+            text: "child update prompt".to_string(),
+        }];
+        let presentation =
+            TurnPresentation::default().with_turn_source(Some(TurnSource::ChildWakeup));
+        opened
+            .store
+            .record_turn_with_id(
+                "turn-wakeup",
+                TurnCommit {
+                    started_at_ms: timestamp_ms(),
+                    prompt: "child update prompt",
+                    status: TurnStatus::Completed,
+                    steps: 1,
+                    error: None,
+                    messages: &messages,
+                    tool_arguments: &[],
+                    presentation: Some(&presentation),
+                    checkpoint: &messages,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            opened.store.turn_source("turn-wakeup"),
+            Some(TurnSource::ChildWakeup)
+        );
+        drop(opened);
+
+        let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        assert!(!resumed.store.is_forked());
+        assert_eq!(
+            resumed.store.turn_source("turn-wakeup"),
+            Some(TurnSource::ChildWakeup)
+        );
         crate::test_support::remove_test_root(&root);
     }
 

@@ -79,6 +79,7 @@ pub(super) enum Command {
         request: TurnStart,
         expected_turn_id: Option<TurnId>,
         origin: TurnOrigin,
+        turn_source: Option<mini_agent_protocol::TurnSource>,
         reply: oneshot::Sender<ActionResult<TurnSubmission>>,
     },
     GoalVerificationCompleted {
@@ -152,6 +153,7 @@ struct ThreadListener {
     loaded_skill_reads: BTreeSet<String>,
     failed_skill_reads: BTreeSet<String>,
     presentation: mini_agent_capabilities::TurnPresentation,
+    turn_source: Option<mini_agent_protocol::TurnSource>,
     assistant_segments: u32,
     tokens_used: u64,
 }
@@ -217,7 +219,8 @@ impl ThreadListener {
         }
     }
 
-    fn send_event(&self, event: EventEnvelope) {
+    fn send_event(&self, mut event: EventEnvelope) {
+        event.turn_source = self.turn_source;
         {
             let mut replay = self.event_replay.lock().unwrap();
             if replay.len() == EVENT_REPLAY_BUFFER {
@@ -684,6 +687,7 @@ pub(super) async fn worker_loop<M>(
                 request,
                 expected_turn_id,
                 origin,
+                turn_source,
                 reply,
             } => {
                 if expected_turn_id.is_some() {
@@ -730,11 +734,13 @@ pub(super) async fn worker_loop<M>(
                 let group_sequence = request.group_sequence;
                 let mut initial_reply = Some(reply);
                 let mut origin = origin;
+                let mut turn_source = turn_source;
                 let goal_turn = matches!(&origin, TurnOrigin::Goal { .. });
                 loop {
                     let input = next_input
                         .take()
                         .expect("app-server turn input must exist before execution");
+                    let current_turn_source = turn_source.take();
                     let turn_id = thread.next_turn_id();
                     if let Some(state) = runtime.as_ref()
                         && state.goal_runtime_handle.plan_active()
@@ -989,7 +995,9 @@ pub(super) async fn worker_loop<M>(
                         failed_skill_reads: BTreeSet::new(),
                         presentation: mini_agent_capabilities::TurnPresentation::from_workflow(
                             input.workflow.as_ref(),
-                        ),
+                        )
+                        .with_turn_source(current_turn_source),
+                        turn_source: current_turn_source,
                         assistant_segments: 0,
                         tokens_used: 0,
                     };
@@ -1693,6 +1701,7 @@ fn handle_running_command<M>(
             request,
             expected_turn_id,
             origin: _,
+            turn_source: _,
             reply,
         } => {
             if thread_id != *active_thread_id {
@@ -1836,6 +1845,8 @@ where
                 })
                 .filter_map(|record| {
                     let turn_id = record.turn_id.as_ref()?.clone();
+                    let turn_source =
+                        runtime.and_then(|state| state.management.session_turn_source(&turn_id));
                     let turn_id = TurnId::new(turn_id);
                     Some(
                         ThreadItem::from_message_with_id_and_arguments(
@@ -1846,6 +1857,7 @@ where
                         .into_iter()
                         .map(move |item| ThreadItemEntry {
                             turn_id: turn_id.clone(),
+                            turn_source,
                             item,
                         }),
                     )
@@ -1859,6 +1871,7 @@ where
         && runtime
             .and_then(|state| state.management.session_items())
             .is_none()
+        && !runtime.is_some_and(|state| state.management.session_is_forked())
     {
         let thread = threads
             .get(params.thread_id.as_str())
@@ -1871,6 +1884,7 @@ where
                 .into_iter()
                 .map(|item| ThreadItemEntry {
                     turn_id: turn_id.clone(),
+                    turn_source: None,
                     item,
                 })
                 .collect();

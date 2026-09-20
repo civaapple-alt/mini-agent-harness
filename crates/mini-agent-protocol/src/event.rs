@@ -6,6 +6,7 @@ use crate::ToolCall;
 use crate::ToolExecutionStatus;
 use crate::TurnId;
 use crate::TurnInputMode;
+use crate::TurnSource;
 use crate::TurnStatus;
 use serde::Deserialize;
 use serde::Serialize;
@@ -134,6 +135,9 @@ pub struct EventEnvelope {
     pub sequence: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,
+    /// Optional Host-owned origin tag for the Turn that emitted this event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_source: Option<TurnSource>,
     pub event: Event,
 }
 
@@ -144,6 +148,7 @@ impl EventEnvelope {
             turn_id,
             sequence,
             item_id: None,
+            turn_source: None,
             event,
         }
     }

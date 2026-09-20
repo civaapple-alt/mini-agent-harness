@@ -1186,6 +1186,7 @@ fn schedule_goal_turn(
             origin: crate::worker::TurnOrigin::Goal {
                 goal_id: goal.goal_id.clone(),
             },
+            turn_source: None,
             reply,
         })
         .is_err()

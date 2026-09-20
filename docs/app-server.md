@@ -176,6 +176,13 @@ same argument projection and add bounded output. The verifier keeps only the
 newest bounded settled-message window. `thread/items/list` returns cursor-bounded
 `ThreadItemEntry` values, optionally filtered by `turnId`, from the Session JSONL
 projection (or the current in-memory checkpoint when Session is disabled).
+Each entry may include the structured `turnSource` associated with its Turn.
+`child_wakeup` identifies an automatic parent continuation triggered by child
+reports or terminal updates; clients can label it without rendering its
+synthetic continuation input as a user message. The source is stored in the
+existing `turn_started.presentation.turnSource` Session record and restored
+when the App Server rebuilds the item projection. It does not change the model
+input or create a synthetic user message.
 Specialized Item variants and generic Artifact APIs remain deferred.
 
 The Rust `LocalAppServerClient` uses the same DTOs and dispatch without stdio,
@@ -319,7 +326,7 @@ attachment references and explicit external paths remain dynamic input.
 
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
-| `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?}`, optional `operationId`, `operationAttempt` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. Operation metadata is opaque lifecycle correlation for a Host-owned child task; Core carries it with the Turn but does not schedule, authorize, or interpret it. |
+| `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?}`, optional `operationId`, `operationAttempt`, `turnSource` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. `turnSource` is bounded metadata; the currently defined value `child_wakeup` marks an automatic parent continuation and does not change the input text. Operation metadata is opaque lifecycle correlation for a Host-owned child task; Core carries it with the Turn but does not schedule, authorize, or interpret it. |
 | `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, and optional error. |
 | `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of ordered `turn/event` notifications with `nextCursor`, `oldestSequence`, and `hasGap`. |
 | `turn/steer` | `threadId`, `turnId`, `text` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. |
@@ -414,12 +421,16 @@ controls.
 
 Task control execution remains Gateway-mediated. The Gateway sends each control
 action through the child runtime, then coalesces its bounded outcome into a
-parent wake-up. An active parent receives it at a safe Turn boundary; an idle
-parent starts one continuation Turn. The outcome reports what the Gateway
+parent wake-up. An active parent is not interrupted; the Gateway starts one
+continuation Turn after it settles. An idle parent starts one continuation Turn
+when the update arrives. The outcome reports what the Gateway
 control call did. App Server operation state remains authoritative, so the
 parent rereads `task_read` or the child projection before deciding what to do
 next. Pending wake-ups live in Gateway memory and are not replayed after a
-Gateway restart.
+Gateway restart. WebStudio retains at most 64 distinct pending child states per parent
+and submits at most 16 child updates per continuation; overflow is summarized
+with a count and up to eight sample IDs. A per-Session start lock serializes
+automatic wake-up admission with user Turn starts.
 
 The Session store appends operation lifecycle records (`queued`, `running`,
 `awaiting_approval`, `completed`, `failed`, or `cancelled`) to the existing
@@ -540,7 +551,7 @@ emitted on one ordered runtime stream.
 
 | Notification | Payload highlights | Use |
 | --- | --- | --- |
-| `turn/event` | `threadId`, optional `turnId`, Core `sequence`, bounded `items`, `event` | Ordered Core execution events, including turn settlement. |
+| `turn/event` | `threadId`, optional `turnId`, optional `turnSource`, Core `sequence`, bounded `items`, `event` | Ordered Core execution events, including turn settlement. `turnSource` is repeated on replay notifications for the source Turn. |
 | `turn/event` with `skills_loaded` | `phase`, `activation`, `skills: [{name, qualifiedName?, source, group?}]` | Reports a Skill body read starting or completing for the current turn. Missing `phase` means `loaded`. |
 | `turn/event` with `skills_load_failed` | `skills: [name]`, `reason_code` | Reports a bounded activation failure before model execution. |
 | `turn/event` with `skill_group_activated` | `group`, `source` | Reports a turn-local Skill Group workflow activation. |
@@ -563,6 +574,13 @@ response is the App Server admission order; they are different counters and
 must not be merged by clients. The stable ToolCall item identity is the model
 `callId`, which lets a client merge model, start, completion, and replay
 projections.
+
+For an exact `session/fork`, the checkpoint supplies the child model's initial
+context. `thread/items/list` still returns items owned by the child Session.
+When a fork child has no local item records, the App Server returns an empty
+page instead of projecting the inherited parent checkpoint as child activity.
+Ordinary non-fork Threads retain the checkpoint fallback when Session item
+storage is unavailable.
 
 ### Common response and error rules
 

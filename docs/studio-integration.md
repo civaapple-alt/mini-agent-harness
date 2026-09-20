@@ -140,16 +140,27 @@ Child 运行在独立 App Server runtime 中。`delegate_task` 的 `execution_mo
 
 Child 可用 `task_report` 发送有界进展；Gateway 通过 App Server `child/task`
 写入 Child Session，再刷新 `/children` 和父 Turn 批次卡。父 Thread 活跃时，报告和
-终态在安全的续行边界排队处理；空闲时合并唤醒并自动续行一轮。父代理可以通过
-`task_control` 修改/取消排队项、引导或取消运行项、重试失败项、取消顺序组，或用
-`delegate_task` 追加新方向。顺序组缺号时等待，前序失败或取消时暂停后续项。
-运行面板展示相同的持久状态和最近报告；只有已创建 Session 的任务可打开。Gateway
-事件是刷新提示，Session operation/report 仍是状态权威。
+终态只更新持久状态与批次卡，不调用 `turn/steer`。父 Turn 结束后，Gateway 合并待处理更新，
+启动一轮带 `turnSource: "child_wakeup"` 的续行。父 Turn 空闲时到达的更新也启动一轮续行；续行期间的新更新留到下一轮空闲边界。
+该来源随 Turn 事件和 Session item 投影提供给客户端，因此 UI 可在 Turn 轨道标记“子代理更新”，
+并隐藏续行输入，不把它显示为用户消息。
+Gateway 每个父 Session 最多缓存 64 个不同子任务的最新状态；每轮最多提交 16 个更新。超限更新
+合并为数量和最多 8 个示例 ID。Gateway 使用每个 Session 共用的启动锁串行化用户 Turn 和自动续行。
 
-Gateway 也会把 `task_control` 的执行结果合并到父会话唤醒中。父 Thread 活跃时，
-Gateway 在安全续行边界发送结果；空闲时启动一轮续行。该结果说明 Gateway 控制调用
+父代理可以通过 `task_control` 修改/取消排队项、引导或取消运行项、重试失败项、取消顺序组，或用
+`delegate_task` 追加新方向。顺序组缺号时等待，前序失败或取消时暂停后续项。运行面板展示相同的持久
+状态和最近报告；只有已创建 Session 的任务可打开。Gateway 事件是刷新提示，Session operation/report
+仍是状态权威。手动 steer 只在客户端收到 `steer_ack` 后提示一次。
+
+`thread/items/list` 是子查看器的活动来源。Fork 的父 checkpoint 继续提供模型上下文，但子 Session 的
+item 投影不回退显示该 checkpoint 的消息。旧 child 没有本地活动项时，客户端显示空态。父 checkpoint
+来源信息单独展示，不混入 child 活动时间线。
+
+Gateway 也会把 `task_control` 的执行结果合并到父会话唤醒中。活动父 Turn 不会被打断；
+Gateway 等 Turn 结束后再启动续行。父 Turn 空闲时到达的更新会启动一轮续行。该结果说明 Gateway 控制调用
 是否应用、失败或部分完成，不代替 App Server 中的 operation 状态。待处理唤醒保存在
-Gateway 内存中，Gateway 重启后不会重放。
+Gateway 内存中，Gateway 重启后不会重放；持久报告和任务状态仍可从 App Server 读取。队列溢出摘要
+不替代 operation/report 投影，后续处理仍以 App Server 状态为准。
 
 Notebook 属于当前 Session。Gateway 通过 App Server 读写它，不缓存第二份内容。Child
 可以读取 Host 校验的父级快照，但只能修改自己的 Notebook。

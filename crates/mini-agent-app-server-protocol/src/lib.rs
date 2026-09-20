@@ -14,6 +14,7 @@ use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnStatus;
 pub use mini_agent_protocol::{
     ActionGrantKey, ActionGrantScope, ApprovalOutcome, ApprovalPolicy, ToolApprovalResolution,
+    TurnSource,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -1058,6 +1059,8 @@ pub struct TurnStartParams {
     pub execution_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_sequence: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_source: Option<TurnSource>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -1142,6 +1145,8 @@ pub struct ThreadItemsListParams {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadItemEntry {
     pub turn_id: TurnId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_source: Option<TurnSource>,
     pub item: ThreadItem,
 }
 
@@ -1257,6 +1262,8 @@ pub struct TurnEventNotification {
     pub sequence: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_source: Option<TurnSource>,
     pub items: Vec<ThreadItem>,
     pub event: mini_agent_protocol::Event,
 }
@@ -1269,6 +1276,7 @@ impl From<EventEnvelope> for TurnEventNotification {
             turn_id: event.turn_id,
             sequence: event.sequence,
             item_id: event.item_id,
+            turn_source: event.turn_source,
             items,
             event: event.event,
         }

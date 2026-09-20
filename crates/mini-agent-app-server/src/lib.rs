@@ -959,6 +959,17 @@ where
         request: TurnStart,
         expected_turn_id: Option<TurnId>,
     ) -> Result<ActionResponse<TurnSubmission>, ActionFailure> {
+        self.submit_start_action_with_source(thread_id, request, expected_turn_id, None)
+            .await
+    }
+
+    pub(crate) async fn submit_start_action_with_source(
+        &self,
+        thread_id: ThreadId,
+        request: TurnStart,
+        expected_turn_id: Option<TurnId>,
+        turn_source: Option<mini_agent_protocol::TurnSource>,
+    ) -> Result<ActionResponse<TurnSubmission>, ActionFailure> {
         if request.input.mode == TurnInputMode::Steer
             && let Some(expected_turn_id) = expected_turn_id.as_ref()
             && self.active_turn_matches(&thread_id, expected_turn_id)
@@ -980,6 +991,7 @@ where
             request,
             expected_turn_id,
             origin: crate::worker::TurnOrigin::Client,
+            turn_source,
             reply,
         })
         .await

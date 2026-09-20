@@ -27,6 +27,15 @@ impl TurnId {
     }
 }
 
+/// Host-owned reason that a Turn was submitted. Core does not interpret this
+/// value; it travels with observer metadata so clients can label automatic
+/// control-plane continuations without encoding that origin in the prompt.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnSource {
+    ChildWakeup,
+}
+
 /// Identifies the kind of input submitted to a running conversation.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
