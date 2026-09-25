@@ -93,6 +93,11 @@ pub struct TurnInput {
     /// configuration stay outside the portable protocol.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_selection: Option<crate::ModelSelection>,
+    /// Explicit reasoning mode selected for this Turn or inherited from its
+    /// Thread. `None` lets the Host resolve defaults or legacy preferences.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_selection: Option<crate::ReasoningSelection>,
+    /// Legacy provider reasoning effort retained for older clients.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
 }
@@ -163,6 +168,7 @@ impl TurnInput {
             selected_skills: Vec::new(),
             workflow: None,
             model_selection: None,
+            reasoning_selection: None,
             reasoning_effort: None,
         }
     }

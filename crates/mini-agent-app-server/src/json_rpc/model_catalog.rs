@@ -78,7 +78,11 @@ where
                         ),
                     );
                 };
-                store.set_defaults(default_model, verifier_default_model)
+                store.set_defaults_with_reasoning(
+                    default_model,
+                    params.default_reasoning_selection.unwrap_or_default(),
+                    verifier_default_model,
+                )
             }
             ModelCatalogOperation::SetProjectDefault => {
                 let (Some(project_id), Some(project_default)) =

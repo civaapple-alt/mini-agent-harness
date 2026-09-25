@@ -14,6 +14,7 @@ use mini_agent_protocol::ModelEventSink;
 use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::ModelUsage;
+use mini_agent_protocol::ReasoningSelection;
 use mini_agent_protocol::ToolCall;
 use serde_json::Value;
 use serde_json::json;
@@ -29,7 +30,6 @@ pub async fn complete(
         model.web_search,
         &model.images,
         model.max_output_tokens,
-        request.reasoning_effort,
         &model.reasoning_parameter_map,
     );
     let response = post_json(&model.client, &model.endpoint, &model.api_key, &body).await?;
@@ -62,7 +62,6 @@ fn request_body(
         web_search,
         images,
         None,
-        request.reasoning_effort,
         &std::collections::BTreeMap::new(),
     )
 }
@@ -73,7 +72,6 @@ fn request_body_with_limit(
     web_search: bool,
     images: &ImageStore,
     max_output_tokens: Option<usize>,
-    reasoning_effort: Option<&str>,
     reasoning_parameter_map: &std::collections::BTreeMap<String, Value>,
 ) -> Value {
     let (projected, has_live_image) = project_for_request(request, images);
@@ -129,7 +127,12 @@ fn request_body_with_limit(
     if let Some(max_output_tokens) = max_output_tokens {
         body["max_output_tokens"] = json!(max_output_tokens);
     }
-    if let Some(effort) = reasoning_effort {
+    let effort = match request.reasoning_selection {
+        Some(ReasoningSelection::ApiDefault) => None,
+        Some(ReasoningSelection::Level(level)) => Some(level.as_str()),
+        None => request.reasoning_effort,
+    };
+    if let Some(effort) = effort {
         if let Some(parameters) = reasoning_parameter_map.get(effort) {
             if let Some(parameters) = parameters.as_object() {
                 for (key, value) in parameters {
@@ -397,6 +400,7 @@ mod tests {
             tools,
             max_response_bytes: config.max_model_response_bytes,
             model_selection: None,
+            reasoning_selection: None,
             reasoning_effort: None,
         }
     }
@@ -452,6 +456,42 @@ mod tests {
             &images,
         );
         assert_eq!(body_without_search["tools"], json!([]));
+    }
+
+    #[test]
+    fn applies_disabled_model_level_mapping_and_omits_api_default() {
+        let (messages, tools) = lookup_messages();
+        let config = HarnessConfig::default();
+        let images = ImageStore::memory_only();
+        let api_default = ReasoningSelection::ApiDefault;
+        let request = ModelRequest {
+            reasoning_selection: Some(&api_default),
+            reasoning_effort: Some("high"),
+            ..request(&config, &messages, &tools)
+        };
+        let api_body = request_body_with_limit(
+            "test-model",
+            &request,
+            false,
+            &images,
+            None,
+            &std::collections::BTreeMap::new(),
+        );
+        assert!(api_body.get("reasoning").is_none());
+
+        let disabled = ReasoningSelection::Level("disabled".to_string());
+        let mapping = std::collections::BTreeMap::from([(
+            "disabled".to_string(),
+            json!({"reasoning": {"effort": "none"}}),
+        )]);
+        let request = ModelRequest {
+            reasoning_selection: Some(&disabled),
+            reasoning_effort: None,
+            ..request
+        };
+        let disabled_body =
+            request_body_with_limit("test-model", &request, false, &images, None, &mapping);
+        assert_eq!(disabled_body["reasoning"]["effort"], "none");
     }
 
     #[tokio::test]
@@ -535,7 +575,6 @@ mod tests {
             false,
             &images,
             Some(64),
-            None,
             &std::collections::BTreeMap::new(),
         );
         assert_eq!(body["max_output_tokens"], 64);

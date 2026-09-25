@@ -4,13 +4,13 @@ use crate::action::{ActionFailure, ActionResponse};
 use crate::runtime_command::{RuntimeCommand, RuntimeCommandClient};
 use mini_agent_app_server_protocol::ContinuationMode;
 use mini_agent_host::BuiltinToolSelection;
-use mini_agent_protocol::ModelSelection;
+use mini_agent_protocol::{ModelSelection, ReasoningSelection};
 use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ThreadModelSettings {
     pub(crate) selection: Option<ModelSelection>,
-    pub(crate) reasoning_effort: Option<String>,
+    pub(crate) reasoning_selection: Option<ReasoningSelection>,
 }
 
 /// App Server settings boundary for one Thread runtime.
@@ -70,7 +70,7 @@ impl ThreadSettingsService {
         builtin_tools: Option<BuiltinToolSelection>,
         continuation_mode: Option<ContinuationMode>,
         model_selection: Option<Option<ModelSelection>>,
-        reasoning_effort: Option<Option<String>>,
+        reasoning_selection: Option<Option<ReasoningSelection>>,
     ) -> Result<ActionResponse<crate::management::ThreadSettingsRuntimeSnapshot>, ActionFailure>
     {
         let client = self.client.as_ref().ok_or_else(|| {
@@ -82,13 +82,13 @@ impl ThreadSettingsService {
                 builtin_tools,
                 continuation_mode,
                 model_selection,
-                reasoning_effort,
+                reasoning_selection,
                 reply,
             })
             .await?;
         *self.model_settings.write().unwrap() = ThreadModelSettings {
             selection: response.value.model_selection.clone(),
-            reasoning_effort: response.value.reasoning_effort.clone(),
+            reasoning_selection: response.value.reasoning_selection.clone(),
         };
         Ok(response)
     }

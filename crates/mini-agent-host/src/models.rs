@@ -2,7 +2,9 @@
 
 use fs2::FileExt;
 use mini_agent_capabilities::{ImageStore, ModelProviderSettings, OpenAiError, OpenAiModel};
-use mini_agent_protocol::{Model, ModelEventSink, ModelRequest, ModelResponse, ModelSelection};
+use mini_agent_protocol::{
+    Model, ModelEventSink, ModelRequest, ModelResponse, ModelSelection, ReasoningSelection,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -13,6 +15,8 @@ const STORE_FILE: &str = "model_catalog.json";
 const KEYRING_SERVICE: &str = "mini-agent-model-provider";
 const MAX_ID_BYTES: usize = 128;
 const MAX_BASE_URL_BYTES: usize = 2048;
+const REASONING_RESERVED_FIELDS: &str =
+    "model instructions input tools tool_choice parallel_tool_calls store stream max_output_tokens";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +76,8 @@ pub struct ModelCatalog {
     #[serde(default)]
     pub default_model: Option<ModelSelection>,
     #[serde(default)]
+    pub default_reasoning_selection: ReasoningSelection,
+    #[serde(default)]
     pub verifier_default_model: Option<ModelSelection>,
     #[serde(default)]
     pub project_defaults: BTreeMap<String, ModelSelection>,
@@ -90,6 +96,7 @@ pub struct ProviderView {
 pub struct ModelCatalogView {
     pub providers: Vec<ProviderView>,
     pub default_model: Option<ModelSelection>,
+    pub default_reasoning_selection: ReasoningSelection,
     pub verifier_default_model: Option<ModelSelection>,
     pub project_defaults: BTreeMap<String, ModelSelection>,
 }
@@ -202,6 +209,7 @@ impl ModelCatalogStore {
         Ok(ModelCatalogView {
             providers,
             default_model: catalog.default_model,
+            default_reasoning_selection: catalog.default_reasoning_selection,
             verifier_default_model: catalog.verifier_default_model,
             project_defaults: catalog.project_defaults,
         })
@@ -286,6 +294,7 @@ impl ModelCatalogStore {
         if let Some(previous_model_id) = renamed_from {
             rename_model_references(&mut catalog, provider_id, &previous_model_id, &model_id);
         }
+        validate_default_reasoning(&catalog)?;
         self.write_unlocked(&catalog)?;
         drop(_lock);
         self.view()
@@ -322,6 +331,7 @@ impl ModelCatalogStore {
             .is_some_and(|model| model.provider_id == provider_id)
         {
             catalog.default_model = None;
+            catalog.default_reasoning_selection = ReasoningSelection::ApiDefault;
         }
         if catalog
             .verifier_default_model
@@ -344,6 +354,19 @@ impl ModelCatalogStore {
         default_model: Option<ModelSelection>,
         verifier_default_model: Option<ModelSelection>,
     ) -> Result<ModelCatalogView, String> {
+        self.set_defaults_with_reasoning(
+            default_model,
+            ReasoningSelection::ApiDefault,
+            verifier_default_model,
+        )
+    }
+
+    pub fn set_defaults_with_reasoning(
+        &self,
+        default_model: Option<ModelSelection>,
+        default_reasoning_selection: ReasoningSelection,
+        verifier_default_model: Option<ModelSelection>,
+    ) -> Result<ModelCatalogView, String> {
         let _lock = self.lock()?;
         let mut catalog = self.read_unlocked()?;
         if let Some(selection) = &default_model {
@@ -355,7 +378,13 @@ impl ModelCatalogStore {
         if default_model.is_some() && default_model == verifier_default_model {
             return Err("primary and Goal Verifier defaults must be different models".to_string());
         }
+        if let Some(selection) = &default_model {
+            validate_reasoning_selection(&catalog, selection, &default_reasoning_selection)?;
+        } else if matches!(default_reasoning_selection, ReasoningSelection::Level(_)) {
+            return Err("a default reasoning level requires a global default model".to_string());
+        }
         catalog.default_model = default_model;
+        catalog.default_reasoning_selection = default_reasoning_selection;
         catalog.verifier_default_model = verifier_default_model;
         self.write_unlocked(&catalog)?;
         drop(_lock);
@@ -388,6 +417,7 @@ impl ModelCatalogStore {
     ) -> Result<(OpenAiModel, ModelProfile), String> {
         let catalog = self.read()?;
         let (provider, model) = find_model(&catalog, selection)?;
+        validate_model(model)?;
         if !provider.enabled || !model.enabled {
             return Err(format!(
                 "model {}/{} is disabled",
@@ -501,6 +531,10 @@ impl ModelCatalogStore {
         Ok(catalog.default_model)
     }
 
+    pub fn global_default_reasoning_selection(&self) -> Result<ReasoningSelection, String> {
+        Ok(self.read()?.default_reasoning_selection)
+    }
+
     pub fn verifier_default(&self) -> Result<Option<ModelSelection>, String> {
         let catalog = self.read()?;
         if let Some(selection) = &catalog.verifier_default_model {
@@ -604,41 +638,61 @@ impl Model for HostResponsesModel {
         request: ModelRequest<'a>,
         events: &'a mut (dyn ModelEventSink + Send),
     ) -> Result<ModelResponse, Self::Error> {
-        let selection = match request.model_selection {
-            Some(selection) => Some(selection.clone()),
+        let thread_reasoning = request.reasoning_selection.cloned();
+        let (selection, reasoning_selection) = match request.model_selection {
+            Some(selection) => (
+                Some(selection.clone()),
+                Some(
+                    thread_reasoning
+                        .or_else(|| request.reasoning_effort.map(ReasoningSelection::level))
+                        .unwrap_or(ReasoningSelection::ApiDefault),
+                ),
+            ),
             None => match self
                 .catalog
                 .project_default(&self.project_id)
                 .map_err(OpenAiError::Protocol)?
             {
-                Some(selection) => Some(selection),
-                None if self.legacy_environment_model => None,
-                None => self
-                    .catalog
-                    .global_default()
-                    .map_err(OpenAiError::Protocol)?,
+                Some(selection) => (
+                    Some(selection),
+                    Some(thread_reasoning.unwrap_or(ReasoningSelection::ApiDefault)),
+                ),
+                None if self.legacy_environment_model => (None, thread_reasoning),
+                None => (
+                    self.catalog
+                        .global_default()
+                        .map_err(OpenAiError::Protocol)?,
+                    Some(
+                        thread_reasoning.unwrap_or(
+                            self.catalog
+                                .global_default_reasoning_selection()
+                                .map_err(OpenAiError::Protocol)?,
+                        ),
+                    ),
+                ),
             },
         };
         if let Some(selection) = selection {
+            let reasoning_selection = reasoning_selection.unwrap_or(ReasoningSelection::ApiDefault);
             let (mut model, profile) = self
                 .catalog
                 .resolve(&selection, self.web_search)
                 .map_err(OpenAiError::Protocol)?;
-            if !profile.reasoning_levels.is_empty()
-                && request.reasoning_effort.is_some_and(|effort| {
-                    !profile.reasoning_levels.iter().any(|level| level == effort)
-                })
-            {
-                return Err(OpenAiError::Protocol(format!(
-                    "reasoning effort {} is not supported by model {}",
-                    request.reasoning_effort.unwrap_or_default(),
-                    profile.id
-                )));
-            }
+            validate_reasoning_for_profile(&profile, &reasoning_selection)
+                .map_err(OpenAiError::Protocol)?;
             model.set_images(self.images.clone());
-            model.respond(request, events).await
+            let resolved_request = ModelRequest {
+                reasoning_selection: Some(&reasoning_selection),
+                reasoning_effort: None,
+                ..request
+            };
+            model.respond(resolved_request, events).await
         } else if self.fallback_available {
-            self.fallback.respond(request, events).await
+            let resolved_request = ModelRequest {
+                reasoning_selection: reasoning_selection.as_ref(),
+                ..request
+            };
+            self.fallback.respond(resolved_request, events).await
         } else {
             Err(OpenAiError::Protocol(
                 "no enabled default Responses model is configured".to_string(),
@@ -718,12 +772,89 @@ fn validate_model(model: &ModelProfile) -> Result<(), String> {
     {
         return Err("input modalities may contain text, image, video, or pdf".to_string());
     }
+    if model.reasoning_levels.iter().any(|value| {
+        value.is_empty()
+            || value.len() > 64
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+    }) {
+        return Err("reasoning levels must be bounded identifiers".to_string());
+    }
     if model
         .reasoning_levels
         .iter()
-        .any(|value| !matches!(value.as_str(), "low" | "medium" | "high" | "xhigh" | "max"))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        != model.reasoning_levels.len()
     {
-        return Err("reasoning levels may contain low, medium, high, xhigh, or max".to_string());
+        return Err("reasoning levels must be unique".to_string());
+    }
+    for level in &model.reasoning_levels {
+        let parameters = model.reasoning_parameter_map.get(level);
+        if !matches!(level.as_str(), "low" | "medium" | "high" | "xhigh" | "max")
+            && parameters
+                .and_then(serde_json::Value::as_object)
+                .is_none_or(serde_json::Map::is_empty)
+        {
+            return Err("non-standard reasoning levels require a parameter mapping".to_string());
+        }
+        if let Some(parameters) = parameters {
+            let Some(parameters) = parameters.as_object() else {
+                return Err("reasoning mappings must be objects".to_string());
+            };
+            if parameters.is_empty()
+                || parameters.keys().any(|key| {
+                    REASONING_RESERVED_FIELDS
+                        .split_ascii_whitespace()
+                        .any(|field| field == key.as_str())
+                })
+            {
+                return Err(
+                    "reasoning mappings cannot override Responses request fields".to_string(),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_default_reasoning(catalog: &ModelCatalog) -> Result<(), String> {
+    let Some(selection) = &catalog.default_model else {
+        if matches!(
+            catalog.default_reasoning_selection,
+            ReasoningSelection::Level(_)
+        ) {
+            return Err("a default reasoning level requires a global default model".to_string());
+        }
+        return Ok(());
+    };
+    validate_reasoning_selection(catalog, selection, &catalog.default_reasoning_selection)
+}
+
+fn validate_reasoning_selection(
+    catalog: &ModelCatalog,
+    selection: &ModelSelection,
+    reasoning: &ReasoningSelection,
+) -> Result<(), String> {
+    let (_, model) = find_model(catalog, selection)?;
+    validate_reasoning_for_profile(model, reasoning)
+}
+
+fn validate_reasoning_for_profile(
+    model: &ModelProfile,
+    reasoning: &ReasoningSelection,
+) -> Result<(), String> {
+    if let ReasoningSelection::Level(level) = reasoning
+        && !model
+            .reasoning_levels
+            .iter()
+            .any(|supported| supported == level)
+    {
+        return Err(format!(
+            "reasoning level {level} is not supported by model {}",
+            model.id
+        ));
     }
     Ok(())
 }
@@ -746,6 +877,7 @@ fn clear_defaults(catalog: &mut ModelCatalog, provider_id: &str, model_id: &str)
     };
     if catalog.default_model.as_ref().is_some_and(matches) {
         catalog.default_model = None;
+        catalog.default_reasoning_selection = ReasoningSelection::ApiDefault;
     }
     if catalog.verifier_default_model.as_ref().is_some_and(matches) {
         catalog.verifier_default_model = None;
@@ -883,8 +1015,11 @@ mod tests {
                     max_output_tokens: Some(4_000),
                     input_modalities: vec!["text".to_string()],
                     capabilities: Vec::new(),
-                    reasoning_levels: vec!["high".to_string()],
-                    reasoning_parameter_map: BTreeMap::new(),
+                    reasoning_levels: vec!["high".to_string(), "disabled".to_string()],
+                    reasoning_parameter_map: BTreeMap::from([(
+                        "disabled".to_string(),
+                        serde_json::json!({"reasoning": {"effort": "none"}}),
+                    )]),
                     smart_managed: false,
                 },
                 None,
@@ -929,6 +1064,46 @@ mod tests {
 
         assert!(view.default_model.is_none());
         assert!(view.project_defaults.is_empty());
+    }
+
+    #[test]
+    fn global_default_stores_a_model_supported_reasoning_level() {
+        let store = test_store("https://example.test/v1".to_string());
+        let primary = ModelSelection {
+            provider_id: "deepseek".to_string(),
+            model_id: "deepseek-test".to_string(),
+        };
+
+        let view = store
+            .set_defaults_with_reasoning(
+                Some(primary.clone()),
+                ReasoningSelection::Level("disabled".to_string()),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            view.default_reasoning_selection,
+            ReasoningSelection::Level("disabled".to_string())
+        );
+        let mut unsafe_profile = store.read().unwrap().providers[0].models[0].clone();
+        unsafe_profile.reasoning_parameter_map.insert(
+            "disabled".to_string(),
+            serde_json::json!({"model": "untrusted-override"}),
+        );
+        assert!(
+            store
+                .upsert_model("deepseek", unsafe_profile, None)
+                .is_err()
+        );
+        assert!(
+            store
+                .set_defaults_with_reasoning(
+                    Some(primary),
+                    ReasoningSelection::Level("unsupported".to_string()),
+                    None,
+                )
+                .is_err()
+        );
     }
 
     #[test]
@@ -1070,6 +1245,7 @@ mod tests {
                     tools: &tools,
                     max_response_bytes: 64 * 1024,
                     model_selection: Some(&selection),
+                    reasoning_selection: None,
                     reasoning_effort: Some("high"),
                 },
                 &mut events,

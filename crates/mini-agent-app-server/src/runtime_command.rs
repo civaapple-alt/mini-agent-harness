@@ -132,7 +132,7 @@ pub(super) enum RuntimeCommand {
         builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
         continuation_mode: Option<mini_agent_app_server_protocol::ContinuationMode>,
         model_selection: Option<Option<mini_agent_protocol::ModelSelection>>,
-        reasoning_effort: Option<Option<String>>,
+        reasoning_selection: Option<Option<mini_agent_protocol::ReasoningSelection>>,
         reply: oneshot::Sender<ActionResult<crate::management::ThreadSettingsRuntimeSnapshot>>,
     },
     ThreadGoalSet {

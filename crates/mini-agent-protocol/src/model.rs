@@ -20,6 +20,31 @@ impl ModelSelection {
         }
     }
 }
+
+/// How a Turn chooses a model's reasoning behavior. `ApiDefault` means the
+/// provider request omits the model-specific reasoning parameter. `Level`
+/// carries one value declared by the selected model profile, including values
+/// such as `disabled` when the model exposes them.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum ReasoningSelection {
+    #[default]
+    ApiDefault,
+    Level(String),
+}
+
+impl ReasoningSelection {
+    pub fn level(value: impl Into<String>) -> Self {
+        Self::Level(value.into())
+    }
+
+    pub fn level_value(&self) -> Option<&str> {
+        match self {
+            Self::ApiDefault => None,
+            Self::Level(value) => Some(value),
+        }
+    }
+}
 use serde_json::Value;
 use std::error::Error;
 use std::future::Future;
@@ -82,12 +107,15 @@ pub trait ModelEventSink {
     fn emit(&mut self, event: ModelEvent);
 }
 
+#[derive(Clone, Copy)]
 pub struct ModelRequest<'a> {
     pub system_prompt: &'a str,
     pub messages: &'a [Message],
     pub tools: &'a [ToolSpec],
     pub max_response_bytes: usize,
     pub model_selection: Option<&'a ModelSelection>,
+    pub reasoning_selection: Option<&'a ReasoningSelection>,
+    /// Legacy reasoning parameter retained for older callers.
     pub reasoning_effort: Option<&'a str>,
 }
 

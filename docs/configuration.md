@@ -51,8 +51,13 @@ URL, and its model list. The Base URL has no default. Enter the URL root that
 the Host can extend with `/responses`.
 
 Each model stores its provider model ID, display name, enabled state, context
-window, output limit, input modalities, capabilities, reasoning levels, and
-reasoning parameter mappings. The local smart-match list suggests model IDs and
+window, output limit, input modalities, capabilities, its supported reasoning
+level values, and parameter mappings for provider-specific levels. The values
+are the choices shown for a Thread; they do not indicate a default setting.
+`disabled` is a regular supported level and must map to the provider's
+parameters for disabling reasoning. The global default pairs a model with
+either one of its supported levels or `api_default`, which omits reasoning
+parameters from the request. The local smart-match list suggests model IDs and
 metadata. The suggestion does not verify a remote endpoint.
 
 The Host resolves the primary model in this order: explicit Thread selection,
@@ -67,11 +72,16 @@ Verifier default affects new Goals only. `VERIFIER_OPENAI_MODEL`,
 legacy verifier configuration. The Verifier does not fall back to the primary
 model when no verifier is configured.
 
-Thread model selections and reasoning levels are stored in the Session's
-`thread_settings.json` file. Forked Threads inherit those settings. A settings
-change applies to the next Turn and does not alter a running Turn. Every
-configured provider uses the Responses API. An endpoint that rejects
-`/responses` returns an error; the Host does not retry with Chat Completions.
+Thread model selections and reasoning selections are stored in the Session's
+`thread_settings.json` file. A Thread can choose `api_default` or one of its
+selected model's supported levels. Clearing the Thread override returns to the
+project/global defaults. A project default specifies only a model; unless the
+Thread has an explicit reasoning choice, it uses that model's API default. A
+global default uses its paired model and reasoning selection. Forked Threads
+inherit those settings. A settings change applies to the next Turn and does not
+alter a running Turn. Every configured provider uses the Responses API. An
+endpoint that rejects `/responses` returns an error; the Host does not retry
+with Chat Completions.
 
 ## Runtime composition and prompt/rule sources
 

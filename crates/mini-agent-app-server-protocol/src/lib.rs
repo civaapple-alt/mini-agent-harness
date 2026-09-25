@@ -572,6 +572,15 @@ pub struct ThreadSettingsUpdateParams {
         skip_serializing_if = "Option::is_none"
     )]
     pub model_selection: Option<Option<mini_agent_protocol::ModelSelection>>,
+    /// Missing preserves the current Thread choice; null inherits catalog
+    /// defaults; a value selects API default or one model-supported level.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_nullable_patch",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reasoning_selection: Option<Option<mini_agent_protocol::ReasoningSelection>>,
+    /// Legacy string-based effort accepted for older clients.
     #[serde(
         default,
         deserialize_with = "deserialize_nullable_patch",
@@ -597,6 +606,9 @@ pub struct ThreadSettingsUpdateResult {
     #[serde(default)]
     pub model_selection: Option<mini_agent_protocol::ModelSelection>,
     #[serde(default)]
+    pub reasoning_selection: Option<mini_agent_protocol::ReasoningSelection>,
+    /// Legacy string-based value retained for older clients.
+    #[serde(default)]
     pub reasoning_effort: Option<String>,
 }
 
@@ -609,6 +621,9 @@ pub struct ThreadSettingsUpdatedNotification {
     pub continuation_mode: ContinuationMode,
     #[serde(default)]
     pub model_selection: Option<mini_agent_protocol::ModelSelection>,
+    #[serde(default)]
+    pub reasoning_selection: Option<mini_agent_protocol::ReasoningSelection>,
+    /// Legacy string-based value retained for older clients.
     #[serde(default)]
     pub reasoning_effort: Option<String>,
     pub state_revision: u64,
@@ -624,6 +639,8 @@ pub struct ThreadModelSettingsGetParams {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadModelSettingsGetResult {
     pub model_selection: Option<mini_agent_protocol::ModelSelection>,
+    pub reasoning_selection: Option<mini_agent_protocol::ReasoningSelection>,
+    #[serde(default)]
     pub reasoning_effort: Option<String>,
 }
 
@@ -688,6 +705,8 @@ pub struct ModelProviderView {
 pub struct ModelCatalogView {
     pub providers: Vec<ModelProviderView>,
     pub default_model: Option<mini_agent_protocol::ModelSelection>,
+    #[serde(default)]
+    pub default_reasoning_selection: mini_agent_protocol::ReasoningSelection,
     pub verifier_default_model: Option<mini_agent_protocol::ModelSelection>,
     pub project_defaults: std::collections::BTreeMap<String, mini_agent_protocol::ModelSelection>,
 }
@@ -723,6 +742,8 @@ pub struct ModelCatalogManageParams {
     pub model_id: Option<String>,
     #[serde(default, deserialize_with = "deserialize_nullable_patch")]
     pub default_model: Option<Option<mini_agent_protocol::ModelSelection>>,
+    #[serde(default)]
+    pub default_reasoning_selection: Option<mini_agent_protocol::ReasoningSelection>,
     #[serde(default, deserialize_with = "deserialize_nullable_patch")]
     pub verifier_default_model: Option<Option<mini_agent_protocol::ModelSelection>>,
     #[serde(default)]

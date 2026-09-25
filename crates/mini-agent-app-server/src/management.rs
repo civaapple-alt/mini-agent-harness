@@ -18,7 +18,7 @@ use mini_agent_capabilities::{
 use mini_agent_capabilities::{BackgroundShellManager, ScheduledTaskManager};
 use mini_agent_core::{HarnessConfig, ThreadCheckpoint};
 use mini_agent_host::WorldState;
-use mini_agent_protocol::{Message, Model, ThreadId, TurnSource, TurnStatus};
+use mini_agent_protocol::{Message, Model, ReasoningSelection, ThreadId, TurnSource, TurnStatus};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 pub(crate) struct RuntimeActorState {
@@ -29,7 +29,7 @@ pub(crate) struct RuntimeActorState {
     pub(crate) builtin_tools: mini_agent_host::BuiltinToolSelection,
     pub(crate) continuation_mode: mini_agent_app_server_protocol::ContinuationMode,
     pub(crate) model_selection: Option<mini_agent_protocol::ModelSelection>,
-    pub(crate) reasoning_effort: Option<String>,
+    pub(crate) reasoning_selection: Option<ReasoningSelection>,
     pub(crate) stable_system_prompt: Option<String>,
     pub(crate) settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
     pub(crate) notifications: broadcast::Sender<RuntimeNotification>,
@@ -46,7 +46,7 @@ pub(crate) struct SettingsRuntimeEvent {
     pub(crate) builtin_tools: Vec<String>,
     pub(crate) continuation_mode: mini_agent_app_server_protocol::ContinuationMode,
     pub(crate) model_selection: Option<mini_agent_protocol::ModelSelection>,
-    pub(crate) reasoning_effort: Option<String>,
+    pub(crate) reasoning_selection: Option<ReasoningSelection>,
     pub(crate) state_revision: u64,
 }
 
@@ -56,7 +56,7 @@ pub(crate) struct ThreadSettingsRuntimeSnapshot {
     pub(crate) builtin_tools: Vec<String>,
     pub(crate) continuation_mode: mini_agent_app_server_protocol::ContinuationMode,
     pub(crate) model_selection: Option<mini_agent_protocol::ModelSelection>,
-    pub(crate) reasoning_effort: Option<String>,
+    pub(crate) reasoning_selection: Option<ReasoningSelection>,
 }
 
 pub(crate) struct RuntimeManagementState {
@@ -294,7 +294,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .as_ref()
             .map(|opened| ThreadModelSettings {
                 selection: opened.store.model_selection().cloned(),
-                reasoning_effort: opened.store.reasoning_effort().map(str::to_string),
+                reasoning_selection: opened.store.reasoning_selection().cloned(),
             })
             .unwrap_or_default();
         settings.set_initial_model_settings(persisted_model_settings.clone());
@@ -337,7 +337,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
                 continuation_mode,
                 model_selection: persisted_model_settings.selection,
-                reasoning_effort: persisted_model_settings.reasoning_effort,
+                reasoning_selection: persisted_model_settings.reasoning_selection,
                 stable_system_prompt: stable_system_prompt.clone(),
                 settings_notifications: settings_notifications.clone(),
                 notifications: notifications.clone(),
@@ -859,14 +859,14 @@ impl RuntimeManagementState {
     pub(crate) fn persist_model_settings(
         &mut self,
         selection: Option<mini_agent_protocol::ModelSelection>,
-        reasoning_effort: Option<String>,
+        reasoning_selection: Option<ReasoningSelection>,
     ) -> Result<(), AppServerError> {
         let Some(session) = self.session.as_mut() else {
             return Ok(());
         };
         session
             .store
-            .set_model_settings(selection, reasoning_effort)
+            .set_model_settings(selection, reasoning_selection)
             .map_err(AppServerError::Checkpoint)
     }
 

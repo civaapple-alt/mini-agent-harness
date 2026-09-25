@@ -1,7 +1,7 @@
 use crate::skills::MAX_SELECTED_SKILLS;
 use mini_agent_core::SessionState;
 use mini_agent_protocol::{
-    ChildTaskAttemptKind, Message, ModelSelection, TurnSource, TurnWorkflow,
+    ChildTaskAttemptKind, Message, ModelSelection, ReasoningSelection, TurnSource, TurnWorkflow,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -167,7 +167,7 @@ pub struct SessionStore {
     created_at_ms: u64,
     continuation_mode: Option<String>,
     model_selection: Option<ModelSelection>,
-    reasoning_effort: Option<String>,
+    reasoning_selection: Option<ReasoningSelection>,
     pub(crate) append_lock: Arc<Mutex<()>>,
     _lock: SessionLock,
 }
@@ -603,17 +603,17 @@ impl SessionStore {
         self.model_selection.as_ref()
     }
 
-    pub fn reasoning_effort(&self) -> Option<&str> {
-        self.reasoning_effort.as_deref()
+    pub fn reasoning_selection(&self) -> Option<&ReasoningSelection> {
+        self.reasoning_selection.as_ref()
     }
 
     pub fn set_model_settings(
         &mut self,
         selection: Option<ModelSelection>,
-        reasoning_effort: Option<String>,
+        reasoning_selection: Option<ReasoningSelection>,
     ) -> Result<(), String> {
         self.model_selection = selection;
-        self.reasoning_effort = reasoning_effort;
+        self.reasoning_selection = reasoning_selection;
         self.persist_thread_settings()
     }
 
@@ -623,7 +623,7 @@ impl SessionStore {
             "thread_id": self.thread_id.as_str(),
             "continuation_mode": self.continuation_mode,
             "model_selection": self.model_selection,
-            "reasoning_effort": self.reasoning_effort,
+            "reasoning_selection": self.reasoning_selection,
         });
         write_json_atomic(&self.session_dir.join(THREAD_SETTINGS_FILE_NAME), &settings)
     }
@@ -647,7 +647,7 @@ impl SessionStore {
         self.thread_turn_count = 0;
         self.continuation_mode = None;
         self.model_selection = None;
-        self.reasoning_effort = None;
+        self.reasoning_selection = None;
         let _ = self.update_thread_index(Some(&previous_thread_id));
         Ok(())
     }
@@ -1340,7 +1340,7 @@ impl SessionStore {
         let lock = acquire_lock(&session_dir, SESSION_LOCK_NAME)?;
         let bytes = fs::read(&path).map_err(|error| format!("cannot read session: {error}"))?;
         let loaded = load_records(session_id, &bytes)?;
-        let (continuation_mode, model_selection, reasoning_effort) =
+        let (continuation_mode, model_selection, reasoning_selection) =
             load_thread_settings(&session_dir, &loaded.thread_id);
         let mut file = OpenOptions::new()
             .read(true)
@@ -1370,7 +1370,7 @@ impl SessionStore {
             created_at_ms: loaded.created_at_ms,
             continuation_mode,
             model_selection,
-            reasoning_effort,
+            reasoning_selection,
             append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
         };
@@ -1655,7 +1655,7 @@ impl SessionStore {
         })?;
         let parent_loaded =
             load_records(parent_session_id, &parent_bytes).map_err(SessionForkError::Storage)?;
-        let (_, parent_model_selection, parent_reasoning_effort) =
+        let (_, parent_model_selection, parent_reasoning_selection) =
             load_thread_settings(&parent_dir, &parent_loaded.thread_id);
 
         let project_dir = session_directory(workspace).map_err(SessionForkError::Storage)?;
@@ -1717,10 +1717,10 @@ impl SessionStore {
             );
             let store = match initialized {
                 Ok(mut store) => {
-                    if (parent_model_selection.is_some() || parent_reasoning_effort.is_some())
+                    if (parent_model_selection.is_some() || parent_reasoning_selection.is_some())
                         && let Err(error) = store.set_model_settings(
                             parent_model_selection.clone(),
-                            parent_reasoning_effort.clone(),
+                            parent_reasoning_selection.clone(),
                         )
                     {
                         drop(store);
@@ -1823,7 +1823,7 @@ impl SessionStore {
             created_at_ms: now,
             continuation_mode: None,
             model_selection: None,
-            reasoning_effort: None,
+            reasoning_selection: None,
             append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
         };
@@ -2019,7 +2019,11 @@ impl SessionStore {
 fn load_thread_settings(
     session_dir: &Path,
     thread_id: &str,
-) -> (Option<String>, Option<ModelSelection>, Option<String>) {
+) -> (
+    Option<String>,
+    Option<ModelSelection>,
+    Option<ReasoningSelection>,
+) {
     let Some(value) = fs::read_to_string(session_dir.join(THREAD_SETTINGS_FILE_NAME))
         .ok()
         .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
@@ -2046,12 +2050,32 @@ fn load_thread_settings(
             valid_model_identifier(&selection.provider_id)
                 && valid_model_identifier(&selection.model_id)
         });
-    let reasoning_effort = value
-        .get("reasoning_effort")
-        .and_then(Value::as_str)
-        .filter(|effort| matches!(*effort, "low" | "medium" | "high" | "xhigh" | "max"))
-        .map(str::to_string);
-    (continuation_mode, model_selection, reasoning_effort)
+    let reasoning_selection = value
+        .get("reasoning_selection")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<ReasoningSelection>(value).ok())
+        .filter(valid_reasoning_selection)
+        .or_else(|| {
+            value
+                .get("reasoning_effort")
+                .and_then(Value::as_str)
+                .filter(|effort| matches!(*effort, "low" | "medium" | "high" | "xhigh" | "max"))
+                .map(|effort| ReasoningSelection::Level(effort.to_string()))
+        });
+    (continuation_mode, model_selection, reasoning_selection)
+}
+
+fn valid_reasoning_selection(selection: &ReasoningSelection) -> bool {
+    match selection {
+        ReasoningSelection::ApiDefault => true,
+        ReasoningSelection::Level(value) => {
+            !value.is_empty()
+                && value.len() <= 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+        }
+    }
 }
 
 fn valid_model_identifier(value: &str) -> bool {
@@ -2479,7 +2503,10 @@ mod tests {
         };
         parent
             .store
-            .set_model_settings(Some(selection.clone()), Some("high".to_string()))
+            .set_model_settings(
+                Some(selection.clone()),
+                Some(ReasoningSelection::Level("high".to_string())),
+            )
             .unwrap();
         parent
             .store
@@ -2517,7 +2544,10 @@ mod tests {
         assert!(child.store.is_forked());
         assert!(child.store.items().is_empty());
         assert_eq!(child.store.model_selection(), Some(&selection));
-        assert_eq!(child.store.reasoning_effort(), Some("high"));
+        assert_eq!(
+            child.store.reasoning_selection(),
+            Some(&ReasoningSelection::Level("high".to_string()))
+        );
         drop(child);
         assert_eq!(info.metadata, Some(exact_fork_metadata()));
         assert!(
@@ -2848,7 +2878,10 @@ mod tests {
         opened.store.set_continuation_mode("continuous").unwrap();
         opened
             .store
-            .set_model_settings(Some(selection.clone()), Some("medium".to_string()))
+            .set_model_settings(
+                Some(selection.clone()),
+                Some(ReasoningSelection::ApiDefault),
+            )
             .unwrap();
         assert_eq!(opened.store.continuation_mode(), Some("continuous"));
         drop(opened);
@@ -2856,7 +2889,10 @@ mod tests {
         let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
         assert_eq!(resumed.store.continuation_mode(), Some("continuous"));
         assert_eq!(resumed.store.model_selection(), Some(&selection));
-        assert_eq!(resumed.store.reasoning_effort(), Some("medium"));
+        assert_eq!(
+            resumed.store.reasoning_selection(),
+            Some(&ReasoningSelection::ApiDefault)
+        );
         drop(resumed);
         crate::test_support::remove_test_root(&root);
     }

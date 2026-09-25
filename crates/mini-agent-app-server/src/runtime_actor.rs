@@ -737,7 +737,7 @@ pub(super) fn handle<M>(
             builtin_tools,
             continuation_mode,
             model_selection,
-            reasoning_effort,
+            reasoning_selection,
             reply,
         } => {
             let result = mutate::<(crate::management::ThreadSettingsRuntimeSnapshot, bool), _>(
@@ -748,7 +748,7 @@ pub(super) fn handle<M>(
                     let previous_tools = state.builtin_tools.names().to_vec();
                     let previous_continuation = state.continuation_mode;
                     let previous_model_selection = state.model_selection.clone();
-                    let previous_reasoning_effort = state.reasoning_effort.clone();
+                    let previous_reasoning_selection = state.reasoning_selection.clone();
                     set_thread_settings(
                         threads,
                         state,
@@ -756,14 +756,14 @@ pub(super) fn handle<M>(
                         builtin_tools,
                         continuation_mode,
                         model_selection,
-                        reasoning_effort,
+                        reasoning_selection,
                     )
                     .map(|settings| {
                         let changed = active.is_some_and(|active| previous_active != active)
                             || previous_tools != settings.builtin_tools
                             || previous_continuation != settings.continuation_mode
                             || previous_model_selection != settings.model_selection
-                            || previous_reasoning_effort != settings.reasoning_effort;
+                            || previous_reasoning_selection != settings.reasoning_selection;
                         ((settings, changed), changed)
                     })
                 },
@@ -776,7 +776,7 @@ pub(super) fn handle<M>(
                     builtin_tools: state.builtin_tools.names().to_vec(),
                     continuation_mode: state.continuation_mode,
                     model_selection: state.model_selection.clone(),
-                    reasoning_effort: state.reasoning_effort.clone(),
+                    reasoning_selection: state.reasoning_selection.clone(),
                     state_revision: state.revision().value(),
                 };
                 let _ = state.settings_notifications.send(event.clone());
@@ -1076,7 +1076,7 @@ pub(super) fn set_thread_settings<M>(
     builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
     continuation_mode: Option<ContinuationMode>,
     model_selection: Option<Option<mini_agent_protocol::ModelSelection>>,
-    reasoning_effort: Option<Option<String>>,
+    reasoning_selection: Option<Option<mini_agent_protocol::ReasoningSelection>>,
 ) -> Result<crate::management::ThreadSettingsRuntimeSnapshot, AppServerError>
 where
     M: Model + 'static,
@@ -1095,23 +1095,24 @@ where
     let thread = threads
         .get_mut(thread_id.as_str())
         .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
-    let model_settings_changed = model_selection.is_some() || reasoning_effort.is_some();
+    let model_settings_changed = model_selection.is_some() || reasoning_selection.is_some();
     let next_selection = model_selection.unwrap_or_else(|| state.model_selection.clone());
-    let next_effort = reasoning_effort.unwrap_or_else(|| state.reasoning_effort.clone());
-    if next_effort
-        .as_deref()
-        .is_some_and(|effort| !matches!(effort, "low" | "medium" | "high" | "xhigh" | "max"))
+    let next_reasoning_selection =
+        reasoning_selection.unwrap_or_else(|| state.reasoning_selection.clone());
+    if next_reasoning_selection
+        .as_ref()
+        .is_some_and(|value| !valid_reasoning_selection(value))
     {
         return Err(AppServerError::InvalidThreadSetting(
-            "reasoningEffort must be low, medium, high, xhigh, or max".to_string(),
+            "reasoning selection must be api_default or a bounded model level".to_string(),
         ));
     }
     if model_settings_changed {
         state
             .management
-            .persist_model_settings(next_selection.clone(), next_effort.clone())?;
+            .persist_model_settings(next_selection.clone(), next_reasoning_selection.clone())?;
         state.model_selection = next_selection;
-        state.reasoning_effort = next_effort;
+        state.reasoning_selection = next_reasoning_selection;
     }
     let was_plan_active = state.goal_runtime_handle.plan_active();
     if let Some(mode) = continuation_mode {
@@ -1175,8 +1176,21 @@ where
         builtin_tools: state.builtin_tools.names().to_vec(),
         continuation_mode: state.continuation_mode,
         model_selection: state.model_selection.clone(),
-        reasoning_effort: state.reasoning_effort.clone(),
+        reasoning_selection: state.reasoning_selection.clone(),
     })
+}
+
+fn valid_reasoning_selection(selection: &mini_agent_protocol::ReasoningSelection) -> bool {
+    match selection {
+        mini_agent_protocol::ReasoningSelection::ApiDefault => true,
+        mini_agent_protocol::ReasoningSelection::Level(value) => {
+            !value.is_empty()
+                && value.len() <= 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+        }
+    }
 }
 
 pub(super) fn restore_thread_continuation<M>(

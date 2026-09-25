@@ -129,6 +129,11 @@ where
                 ),
             );
         }
+        let reasoning_selection = params.reasoning_selection.or_else(|| {
+            params
+                .reasoning_effort
+                .map(|legacy| legacy.map(mini_agent_protocol::ReasoningSelection::Level))
+        });
         action_response(
             request.id,
             settings.update_action(
@@ -136,7 +141,7 @@ where
                 builtin_tools,
                 params.continuation_mode,
                 params.model_selection,
-                params.reasoning_effort,
+                reasoning_selection,
             ),
             |settings| ThreadSettingsUpdateResult {
                 collaboration_mode: CollaborationMode {
@@ -149,7 +154,12 @@ where
                 builtin_tools: settings.builtin_tools.clone(),
                 continuation_mode: settings.continuation_mode,
                 model_selection: settings.model_selection.clone(),
-                reasoning_effort: settings.reasoning_effort.clone(),
+                reasoning_selection: settings.reasoning_selection.clone(),
+                reasoning_effort: settings
+                    .reasoning_selection
+                    .as_ref()
+                    .and_then(mini_agent_protocol::ReasoningSelection::level_value)
+                    .map(str::to_string),
             },
         )
         .await
@@ -175,7 +185,12 @@ where
             request.id,
             ThreadModelSettingsGetResult {
                 model_selection: model_settings.selection,
-                reasoning_effort: model_settings.reasoning_effort,
+                reasoning_selection: model_settings.reasoning_selection.clone(),
+                reasoning_effort: model_settings
+                    .reasoning_selection
+                    .as_ref()
+                    .and_then(mini_agent_protocol::ReasoningSelection::level_value)
+                    .map(str::to_string),
             },
         )
     }

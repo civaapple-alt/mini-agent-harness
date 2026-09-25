@@ -574,7 +574,12 @@ pub(super) fn settings_notification_request(event: SettingsRuntimeEvent) -> Json
                 builtin_tools: event.builtin_tools,
                 continuation_mode: event.continuation_mode,
                 model_selection: event.model_selection,
-                reasoning_effort: event.reasoning_effort,
+                reasoning_selection: event.reasoning_selection.clone(),
+                reasoning_effort: event
+                    .reasoning_selection
+                    .as_ref()
+                    .and_then(mini_agent_protocol::ReasoningSelection::level_value)
+                    .map(str::to_string),
                 state_revision: event.state_revision,
             })
             .expect("settings update notification is serializable"),

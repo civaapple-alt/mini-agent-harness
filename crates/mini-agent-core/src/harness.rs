@@ -135,6 +135,7 @@ pub struct Harness<M> {
     config: HarnessConfig,
     session: SessionState,
     model_selection: Option<mini_agent_protocol::ModelSelection>,
+    reasoning_selection: Option<mini_agent_protocol::ReasoningSelection>,
     reasoning_effort: Option<String>,
 }
 
@@ -152,6 +153,7 @@ impl<M: Model> Harness<M> {
             config,
             session: SessionState::new(),
             model_selection: None,
+            reasoning_selection: None,
             reasoning_effort: None,
         }
     }
@@ -172,7 +174,20 @@ impl<M: Model> Harness<M> {
         reasoning_effort: Option<String>,
     ) {
         self.model_selection = selection;
+        self.reasoning_selection = None;
         self.reasoning_effort = reasoning_effort;
+    }
+
+    /// Sets model and reasoning choices for the next complete Turn.
+    pub fn set_model_preferences(
+        &mut self,
+        selection: Option<mini_agent_protocol::ModelSelection>,
+        reasoning_selection: Option<mini_agent_protocol::ReasoningSelection>,
+        legacy_reasoning_effort: Option<String>,
+    ) {
+        self.model_selection = selection;
+        self.reasoning_selection = reasoning_selection;
+        self.reasoning_effort = legacy_reasoning_effort;
     }
 
     /// Replaces the model-visible system prompt at a settled control-plane
@@ -469,6 +484,7 @@ impl<M: Model> Harness<M> {
                         tools: &tool_specs,
                         max_response_bytes: self.config.max_model_response_bytes,
                         model_selection: self.model_selection.as_ref(),
+                        reasoning_selection: self.reasoning_selection.as_ref(),
                         reasoning_effort: self.reasoning_effort.as_deref(),
                     },
                     &mut model_events,
@@ -704,6 +720,7 @@ impl<M: Model> Harness<M> {
                     tools: &[],
                     max_response_bytes: self.config.max_model_response_bytes,
                     model_selection: self.model_selection.as_ref(),
+                    reasoning_selection: self.reasoning_selection.as_ref(),
                     reasoning_effort: self.reasoning_effort.as_deref(),
                 },
                 &mut SilentModelEvents,

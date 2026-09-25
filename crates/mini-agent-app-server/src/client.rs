@@ -483,6 +483,7 @@ where
                 builtin_tools,
                 continuation_mode,
                 model_selection: None,
+                reasoning_selection: None,
                 reasoning_effort: None,
             },
         )

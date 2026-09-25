@@ -208,8 +208,9 @@ impl<M: Model> Thread<M> {
         steering_mode: SteeringMode,
     ) -> Result<TurnResult, ThreadError<M::Error>> {
         let id = self.begin_turn(&input)?;
-        self.harness.set_model_selection(
+        self.harness.set_model_preferences(
             input.model_selection.clone(),
+            input.reasoning_selection.clone(),
             input.reasoning_effort.clone(),
         );
         observer.observe(&Event::TurnStarted {

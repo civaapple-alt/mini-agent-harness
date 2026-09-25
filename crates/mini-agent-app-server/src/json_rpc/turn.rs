@@ -74,7 +74,7 @@ where
         if let Ok(settings) = self.thread_settings_service() {
             let model_settings = settings.model_settings();
             params.input.model_selection = model_settings.selection;
-            params.input.reasoning_effort = model_settings.reasoning_effort;
+            params.input.reasoning_selection = model_settings.reasoning_selection;
         }
         let mut turn = TurnStart::new(params.input);
         turn.operation_id = params.operation_id;

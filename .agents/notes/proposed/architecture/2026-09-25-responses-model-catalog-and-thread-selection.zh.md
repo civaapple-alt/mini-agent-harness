@@ -11,10 +11,16 @@
 返回是否已配置。主模型统一走现有 Responses 路径；不兼容的端点明确失败，不降级
 到 Chat Completions。
 
-全局主模型、项目默认模型、Thread 显式选择和 Goal Verifier 默认模型是分开的配置
-维度。Thread 的显式选择优先；没有项目 UI 默认值时保留旧项目 `OPENAI_MODEL`，再
-使用全局默认模型。Goal 创建时记录专用 Verifier 模型，修改默认值不改变已有 Goal；
-缺少 Verifier 配置时明确失败，不借用主模型。
+全局默认由模型引用和推理选择组成；推理选择可以是省略推理参数的
+`api_default`，也可以是该模型声明的任意等级。`disabled` 是模型等级枚举中的普通
+值，靠模型参数映射表达对应供应商的关闭请求，不是额外的全局开关。用户还可以在
+输入框中频繁切换 Thread 当前等级。
+
+项目默认模型、Thread 显式选择和 Goal Verifier 默认模型是分开的配置维度。Thread 的
+显式选择优先；没有项目 UI 默认值时保留旧项目 `OPENAI_MODEL`，再使用全局默认模型与
+等级。项目默认只指定模型；Thread 没有等级覆盖时采用该模型的 API 默认。Goal 创建时
+记录专用 Verifier 模型，修改默认值不改变已有 Goal；缺少 Verifier 配置时明确失败，
+不借用主模型。
 
 供应商和模型管理由 Host 持有。App Server 提供本地管理与 Thread 设置协议，SDK 和
 Gateway 负责传递，Web Studio 提供设置页和输入框选择器。智能匹配只生成本地建议；
@@ -26,7 +32,7 @@ Gateway 负责传递，Web Studio 提供设置页和输入框选择器。智能�
 | --- | --- | --- | --- |
 | 供应商目录、模型资料、全局与项目默认值 | Host `ModelCatalogStore` | App Server 暴露受限管理接口 | Gateway、SDK、Web 保存第二份配置或凭据 |
 | API Key | Host 系统凭据库 | Web 只提交新值并读取 `apiKeyConfigured` | 将 Key 放进目录、查询响应、事件或日志 |
-| Thread 模型覆盖与推理等级 | Session 的 Thread 设置 | SDK/Gateway/Web 发起设置更新 | 正在运行的 Turn 中途换模型 |
+| Thread 模型覆盖与推理选择 | Session 的 Thread 设置 | SDK/Gateway/Web 发起设置更新 | 正在运行的 Turn 中途换模型 |
 | 当前 Turn 的模型引用 | Turn 输入快照，由 Host 解析并构建 Provider | Core 保留可移植模型引用 | Core 管理供应商、凭据或配置存储 |
 | Goal Verifier 选择 | Goal 创建时保存的模型引用 | Host 独立构建无工具 Verifier | 回退到主模型或读取主会话历史 |
 
@@ -42,8 +48,8 @@ Gateway 负责传递，Web Studio 提供设置页和输入框选择器。智能�
 
 ### 批次二：机器级目录和设置
 
-- Host 机器级目录保存供应商、模型资料、全局主模型、独立 Verifier 默认值和项目
-  默认值；凭据写入操作系统凭据库。
+- Host 机器级目录保存供应商、模型资料、全局主模型及其推理选择、独立 Verifier
+  默认值和项目默认值；凭据写入操作系统凭据库。
 - 管理 API 不回传 Key。模型改名在一次目录写入中同步更新主模型、Verifier 和项目
   引用；删除则清除相应默认引用。
 - 设置页可新增、编辑、启停、删除供应商和模型。智能匹配不是远程探测，也不能
@@ -54,7 +60,8 @@ Gateway 负责传递，Web Studio 提供设置页和输入框选择器。智能�
 
 - 新 Thread 解析顺序为显式 Thread 选择、项目 UI 默认、兼容旧项目 `OPENAI_MODEL`、
   全局默认。
-- Thread 模型引用和推理等级持久化；Fork 与子会话继承；选择变更从下一 Turn 生效。
+- Thread 模型引用和 typed 推理选择持久化；选择可以是 `api_default` 或该模型支持的
+  任意等级（包括 `disabled`）；Fork 与子会话继承；选择变更从下一 Turn 生效。
 - 输入框按供应商分组选择模型和推理等级。被停用、缺少 URL 或缺少凭据时给出原因并
   阻止发送。
 - Goal 创建时快照独立的 Verifier 默认值。后续修改只影响新 Goal。
@@ -64,7 +71,7 @@ Gateway 负责传递，Web Studio 提供设置页和输入框选择器。智能�
 
 | 边界 | 新增契约 | 责任 |
 | --- | --- | --- |
-| Core ↔ Host | `ModelSelection`、推理等级进入 Turn 模型请求 | Core 保持通用；Host 解析到具体 Responses 模型 |
+| Core ↔ Host | `ModelSelection`、`ReasoningSelection` 进入 Turn 模型请求 | Core 保持通用；Host 解析到具体 Responses 模型和推理参数 |
 | Host ↔ App Server | 目录管理、全局/项目默认值、Goal 创建快照 | App Server 转发和保存运行状态，不持有 Key |
 | App Server ↔ SDK | `model/catalog/*` 管理请求及 Thread 模型设置 | SDK 负责类型与 RPC 调用 |
 | SDK/Gateway ↔ Web | 供应商/模型目录和 Thread 设置 API | Gateway 不解析或持久化凭据 |
@@ -85,13 +92,14 @@ Gateway 负责传递，Web Studio 提供设置页和输入框选择器。智能�
 
 - 本地模拟 Responses 服务验证所选模型的请求路由、流式输出、工具调用、推理参数和
   请求中不包含 API Key。
-- Rust 定向包测试串行通过，覆盖目录凭据脱敏、默认值校验、改名引用同步、Thread
-  选择持久化、继承以及 Goal Verifier 快照。
-- Web 前端模型选择和管理组件测试通过；Gateway/SDK 测试通过；lint 与生产构建通过。
-- Workspace Clippy、Cargo 边界检查和 `git diff --check` 通过。当前 Rust 硬预算为
-  Core + Protocol 4,727/6,000、Control Plane 29,741/30,000、Release 42,701/45,000。
-- 单次增量检查为 Release +1,809，有效行数超过每个 PR 的 +1,000 增量额度。后续
-  集成应按可独立审查的批次拆分，或先减少净增量。
+- Rust 定向包测试和 Clippy 通过，覆盖目录凭据脱敏、默认模型等级校验、`disabled`
+  映射到 Responses 请求、`api_default` 省略推理字段、改名引用同步和 Thread 持久化。
+- Web 模型选择/管理组件测试通过；Gateway/SDK 定向测试通过；前端 lint、生产构建、
+  Python Ruff 和 `git diff --check` 通过。
+- 当前 Rust 硬预算为 Core + Protocol 4,767/6,000、Control Plane 29,999/30,000、
+  Release 43,036/45,000。Control Plane 仅剩 1 行预算；后续实现应先删减或替换现有代码。
+- 相对 `origin/main` 的增量检查为 Release +2,144，有效行数超过每个 PR 的 +1,000
+  增量额度。集成应按可独立审查的批次拆分，或先减少净增量。
 - Windows Host 完整交叉编译尚未验证：当前 Mac 缺少 Windows SDK `windows.h`，使
   `aws-lc-sys` 跨目标构建停止。新增 `MoveFileExW` 用法已在独立 Windows 目标探针中
   编译通过；仍需 Windows 原生环境验证凭据库及运行时文件替换。
