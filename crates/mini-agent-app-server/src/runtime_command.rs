@@ -128,9 +128,11 @@ pub(super) enum RuntimeCommand {
         reply: oneshot::Sender<ActionResult<()>>,
     },
     ThreadSettingsUpdate {
-        active: bool,
+        active: Option<bool>,
         builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
         continuation_mode: Option<mini_agent_app_server_protocol::ContinuationMode>,
+        model_selection: Option<Option<mini_agent_protocol::ModelSelection>>,
+        reasoning_effort: Option<Option<String>>,
         reply: oneshot::Sender<ActionResult<crate::management::ThreadSettingsRuntimeSnapshot>>,
     },
     ThreadGoalSet {

@@ -134,6 +134,8 @@ pub struct Harness<M> {
     tools: ToolRouter,
     config: HarnessConfig,
     session: SessionState,
+    model_selection: Option<mini_agent_protocol::ModelSelection>,
+    reasoning_effort: Option<String>,
 }
 
 enum ControlAction {
@@ -149,6 +151,8 @@ impl<M: Model> Harness<M> {
             tools,
             config,
             session: SessionState::new(),
+            model_selection: None,
+            reasoning_effort: None,
         }
     }
 
@@ -158,6 +162,17 @@ impl<M: Model> Harness<M> {
 
     pub fn config(&self) -> &HarnessConfig {
         &self.config
+    }
+
+    /// Sets model metadata for the next complete turn. The concrete provider
+    /// still resolves IDs and credentials outside Core.
+    pub fn set_model_selection(
+        &mut self,
+        selection: Option<mini_agent_protocol::ModelSelection>,
+        reasoning_effort: Option<String>,
+    ) {
+        self.model_selection = selection;
+        self.reasoning_effort = reasoning_effort;
     }
 
     /// Replaces the model-visible system prompt at a settled control-plane
@@ -453,6 +468,8 @@ impl<M: Model> Harness<M> {
                         messages: self.session.messages(),
                         tools: &tool_specs,
                         max_response_bytes: self.config.max_model_response_bytes,
+                        model_selection: self.model_selection.as_ref(),
+                        reasoning_effort: self.reasoning_effort.as_deref(),
                     },
                     &mut model_events,
                 )
@@ -686,6 +703,8 @@ impl<M: Model> Harness<M> {
                     messages: &compaction_messages,
                     tools: &[],
                     max_response_bytes: self.config.max_model_response_bytes,
+                    model_selection: self.model_selection.as_ref(),
+                    reasoning_effort: self.reasoning_effort.as_deref(),
                 },
                 &mut SilentModelEvents,
             )

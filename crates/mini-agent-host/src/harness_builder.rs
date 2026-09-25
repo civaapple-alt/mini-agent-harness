@@ -1,6 +1,6 @@
 use mini_agent_capabilities::{
     ApprovalController, CapabilityRegistry, ImageStore, McpLoadResult, McpServerConfig,
-    ModelProviderSettings, OpenAiModel, ResultStore,
+    ModelProviderSettings, ResultStore,
 };
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
@@ -34,7 +34,7 @@ pub struct HarnessBuild<M: Model> {
 /// The fully assembled application-host runtime handed to a frontend or
 /// service boundary. It owns the concrete provider-backed Harness together
 /// with host state needed by persistence, extensions, and workflow adapters.
-pub type HostRuntime = HarnessBuild<OpenAiModel>;
+pub type HostRuntime = HarnessBuild<crate::models::HostResponsesModel>;
 
 const PROVIDER_WEB_SEARCH_PROMPT: &str = "## Provider web search\nThe model provider has enabled its server-side `web_search` tool for current web research. Use `web_search` for current or broad web research. It is separate from the Host `web_fetch` tool, which is only for reading an exact URL. Do not claim that `web_search` is unavailable merely because it is not listed with Host function tools; only report it unavailable after the provider returns a tool error.";
 

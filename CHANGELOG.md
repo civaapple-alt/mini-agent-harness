@@ -5,6 +5,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+- Add machine-wide Responses provider and model settings, separate primary and
+  Goal Verifier defaults, and persisted per-Thread model selection. Provider
+  API keys stay in the operating system credential store.
 - Trusted execution now admits public `web_fetch` requests after bounded URL
   validation, without an extra approval prompt. Interactive policy still asks;
   URL, DNS, redirect, and Security Deny checks remain in force.

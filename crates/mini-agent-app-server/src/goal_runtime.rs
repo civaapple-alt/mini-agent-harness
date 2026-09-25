@@ -5,6 +5,7 @@ use crate::notification::RuntimeNotification;
 use mini_agent_app_server_protocol::ThreadGoal;
 use mini_agent_app_server_protocol::ThreadGoalStatus;
 use mini_agent_host::HostWorkflowStore;
+use mini_agent_host::ModelCatalogStore;
 use mini_agent_host::RuntimeConfig;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::ThreadId;
@@ -34,6 +35,7 @@ pub(crate) struct GoalVerificationRequest {
     pub(crate) messages: Vec<Message>,
     pub(crate) criteria: String,
     pub(crate) runtime_config: RuntimeConfig,
+    pub(crate) verifier_model_selection: Option<mini_agent_protocol::ModelSelection>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,7 +196,18 @@ impl GoalRuntimeHandle {
                 )
             })?;
         self.scheduled_goal = None;
-        self.store.set_goal(objective, token_budget.flatten())
+        self.store.set_goal(objective, token_budget.flatten())?;
+        let verifier_selection = match self.verifier_config.as_ref() {
+            Some(config) if !config.has_legacy_verifier_model() => {
+                ModelCatalogStore::machine_default()
+                    .and_then(|catalog| catalog.verifier_default())
+                    .map_err(io::Error::other)?
+            }
+            _ => None,
+        };
+        self.store
+            .set_goal_verifier_selection(verifier_selection)?
+            .ok_or_else(|| io::Error::other("Goal state disappeared while selecting verifier"))
     }
 
     pub(crate) fn clear_goal(&mut self) -> io::Result<bool> {
@@ -281,6 +294,7 @@ impl GoalRuntimeHandle {
             messages,
             criteria,
             runtime_config,
+            verifier_model_selection: state.verifier_model_selection.clone(),
         }))
     }
 
@@ -424,6 +438,7 @@ pub(crate) fn project_goal(thread_id: ThreadId, state: GoalState) -> ThreadGoal 
         current_milestone: state.current_milestone,
         total_milestones: state.total_milestones,
         loop_count: state.loop_count,
+        verifier_model_selection: state.verifier_model_selection,
         last_verifier_score: state.last_verifier_score,
         last_error: state.last_error,
         verification_status: match state.verification_status {

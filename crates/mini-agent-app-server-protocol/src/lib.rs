@@ -17,6 +17,7 @@ pub use mini_agent_protocol::{
     TurnSource,
 };
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -37,7 +38,9 @@ pub const METHOD_THREAD_RESUME: &str = "thread/resume";
 pub const METHOD_THREAD_READ: &str = "thread/read";
 pub const METHOD_THREAD_CLOSE: &str = "thread/close";
 pub const METHOD_THREAD_SETTINGS_UPDATE: &str = "thread/settings/update";
+pub const METHOD_THREAD_MODEL_SETTINGS_GET: &str = "thread/model-settings/get";
 pub const METHOD_THREAD_SETTINGS_UPDATED: &str = "thread/settings/updated";
+pub const METHOD_MODEL_CATALOG_MANAGE: &str = "model/catalog/manage";
 pub const METHOD_TURN_START: &str = "turn/start";
 pub const METHOD_TURN_READ: &str = "turn/read";
 pub const METHOD_TURN_STEER: &str = "turn/steer";
@@ -553,13 +556,36 @@ pub enum ContinuationMode {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSettingsUpdateParams {
     pub thread_id: ThreadId,
-    pub collaboration_mode: CollaborationMode,
+    #[serde(default)]
+    pub collaboration_mode: Option<CollaborationMode>,
     /// Optional replacement for the model-visible Builtin tool selection.
     /// Omission keeps the current Thread selection unchanged.
     pub builtin_tools: Option<Vec<String>>,
     /// Optional Thread loop setting. Omission preserves the current value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continuation_mode: Option<ContinuationMode>,
+    /// Missing preserves the current selection; explicit null returns to the
+    /// project/global default for later Turns.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_nullable_patch",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub model_selection: Option<Option<mini_agent_protocol::ModelSelection>>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_nullable_patch",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reasoning_effort: Option<Option<String>>,
+}
+
+fn deserialize_nullable_patch<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -568,6 +594,10 @@ pub struct ThreadSettingsUpdateResult {
     pub collaboration_mode: CollaborationMode,
     pub builtin_tools: Vec<String>,
     pub continuation_mode: ContinuationMode,
+    #[serde(default)]
+    pub model_selection: Option<mini_agent_protocol::ModelSelection>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -577,7 +607,138 @@ pub struct ThreadSettingsUpdatedNotification {
     pub collaboration_mode: CollaborationMode,
     pub builtin_tools: Vec<String>,
     pub continuation_mode: ContinuationMode,
+    #[serde(default)]
+    pub model_selection: Option<mini_agent_protocol::ModelSelection>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub state_revision: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadModelSettingsGetParams {
+    pub thread_id: ThreadId,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadModelSettingsGetResult {
+    pub model_selection: Option<mini_agent_protocol::ModelSelection>,
+    pub reasoning_effort: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderKind {
+    #[serde(rename = "deepseek")]
+    DeepSeek,
+    Kimi,
+    Glm,
+    Volcengine,
+    Custom,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProfileConfig {
+    pub id: String,
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub context_window: Option<u32>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
+    #[serde(default)]
+    pub input_modalities: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub reasoning_levels: Vec<String>,
+    #[serde(default)]
+    pub reasoning_parameter_map: std::collections::BTreeMap<String, Value>,
+    #[serde(default)]
+    pub smart_managed: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderConfig {
+    pub id: String,
+    pub name: String,
+    pub kind: ModelProviderKind,
+    /// Must be entered by the user. No endpoint is inferred from provider kind.
+    pub base_url: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub models: Vec<ModelProfileConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderView {
+    #[serde(flatten)]
+    pub profile: ModelProviderConfig,
+    pub api_key_configured: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCatalogView {
+    pub providers: Vec<ModelProviderView>,
+    pub default_model: Option<mini_agent_protocol::ModelSelection>,
+    pub verifier_default_model: Option<mini_agent_protocol::ModelSelection>,
+    pub project_defaults: std::collections::BTreeMap<String, mini_agent_protocol::ModelSelection>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCatalogOperation {
+    Get,
+    UpsertProvider,
+    DeleteProvider,
+    UpsertModel,
+    DeleteModel,
+    SetDefaults,
+    SetProjectDefault,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCatalogManageParams {
+    pub operation: ModelCatalogOperation,
+    #[serde(default)]
+    pub provider: Option<ModelProviderConfig>,
+    /// Sent only with provider upsert; never returned by the query operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub model: Option<ModelProfileConfig>,
+    #[serde(default)]
+    pub previous_model_id: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_nullable_patch")]
+    pub default_model: Option<Option<mini_agent_protocol::ModelSelection>>,
+    #[serde(default, deserialize_with = "deserialize_nullable_patch")]
+    pub verifier_default_model: Option<Option<mini_agent_protocol::ModelSelection>>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_nullable_patch")]
+    pub project_default: Option<Option<mini_agent_protocol::ModelSelection>>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCatalogManageResult {
+    pub catalog: ModelCatalogView,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 /// The public lifecycle state of one Thread-owned Goal.
@@ -610,6 +771,8 @@ pub struct ThreadGoal {
     pub total_milestones: usize,
     #[serde(default)]
     pub loop_count: usize,
+    #[serde(default)]
+    pub verifier_model_selection: Option<mini_agent_protocol::ModelSelection>,
     #[serde(default)]
     pub last_verifier_score: Option<u32>,
     #[serde(default)]

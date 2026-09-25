@@ -1,6 +1,8 @@
 use crate::skills::MAX_SELECTED_SKILLS;
 use mini_agent_core::SessionState;
-use mini_agent_protocol::{ChildTaskAttemptKind, Message, TurnSource, TurnWorkflow};
+use mini_agent_protocol::{
+    ChildTaskAttemptKind, Message, ModelSelection, TurnSource, TurnWorkflow,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -164,6 +166,8 @@ pub struct SessionStore {
     is_forked: bool,
     created_at_ms: u64,
     continuation_mode: Option<String>,
+    model_selection: Option<ModelSelection>,
+    reasoning_effort: Option<String>,
     pub(crate) append_lock: Arc<Mutex<()>>,
     _lock: SessionLock,
 }
@@ -590,14 +594,38 @@ impl SessionStore {
         if !matches!(mode, "manual" | "continuous") {
             return Err("invalid continuation mode".to_string());
         }
+        self.continuation_mode = Some(mode.to_string());
+        self.persist_thread_settings()?;
+        Ok(())
+    }
+
+    pub fn model_selection(&self) -> Option<&ModelSelection> {
+        self.model_selection.as_ref()
+    }
+
+    pub fn reasoning_effort(&self) -> Option<&str> {
+        self.reasoning_effort.as_deref()
+    }
+
+    pub fn set_model_settings(
+        &mut self,
+        selection: Option<ModelSelection>,
+        reasoning_effort: Option<String>,
+    ) -> Result<(), String> {
+        self.model_selection = selection;
+        self.reasoning_effort = reasoning_effort;
+        self.persist_thread_settings()
+    }
+
+    fn persist_thread_settings(&self) -> Result<(), String> {
         let settings = json!({
             "version": 1,
             "thread_id": self.thread_id.as_str(),
-            "continuation_mode": mode,
+            "continuation_mode": self.continuation_mode,
+            "model_selection": self.model_selection,
+            "reasoning_effort": self.reasoning_effort,
         });
-        write_json_atomic(&self.session_dir.join(THREAD_SETTINGS_FILE_NAME), &settings)?;
-        self.continuation_mode = Some(mode.to_string());
-        Ok(())
+        write_json_atomic(&self.session_dir.join(THREAD_SETTINGS_FILE_NAME), &settings)
     }
 
     pub fn result_store(&self) -> crate::result_store::ResultStore {
@@ -618,6 +646,8 @@ impl SessionStore {
         self.thread_id = thread_id;
         self.thread_turn_count = 0;
         self.continuation_mode = None;
+        self.model_selection = None;
+        self.reasoning_effort = None;
         let _ = self.update_thread_index(Some(&previous_thread_id));
         Ok(())
     }
@@ -1310,7 +1340,8 @@ impl SessionStore {
         let lock = acquire_lock(&session_dir, SESSION_LOCK_NAME)?;
         let bytes = fs::read(&path).map_err(|error| format!("cannot read session: {error}"))?;
         let loaded = load_records(session_id, &bytes)?;
-        let continuation_mode = load_continuation_mode(&session_dir, &loaded.thread_id);
+        let (continuation_mode, model_selection, reasoning_effort) =
+            load_thread_settings(&session_dir, &loaded.thread_id);
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -1338,6 +1369,8 @@ impl SessionStore {
             is_forked: loaded.is_forked,
             created_at_ms: loaded.created_at_ms,
             continuation_mode,
+            model_selection,
+            reasoning_effort,
             append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
         };
@@ -1617,6 +1650,13 @@ impl SessionStore {
                 "parent session exceeds {MAX_SESSION_BYTES} byte limit"
             )));
         }
+        let parent_bytes = fs::read(&parent_path).map_err(|error| {
+            SessionForkError::Storage(format!("cannot read parent session: {error}"))
+        })?;
+        let parent_loaded =
+            load_records(parent_session_id, &parent_bytes).map_err(SessionForkError::Storage)?;
+        let (_, parent_model_selection, parent_reasoning_effort) =
+            load_thread_settings(&parent_dir, &parent_loaded.thread_id);
 
         let project_dir = session_directory(workspace).map_err(SessionForkError::Storage)?;
         // A retry can arrive after the child file is committed but before the
@@ -1677,6 +1717,16 @@ impl SessionStore {
             );
             let store = match initialized {
                 Ok(mut store) => {
+                    if (parent_model_selection.is_some() || parent_reasoning_effort.is_some())
+                        && let Err(error) = store.set_model_settings(
+                            parent_model_selection.clone(),
+                            parent_reasoning_effort.clone(),
+                        )
+                    {
+                        drop(store);
+                        let _ = fs::remove_dir_all(&session_dir);
+                        return Err(SessionForkError::Storage(error));
+                    }
                     if let Some(operation) = operation.clone()
                         && let Err(error) = store.record_operation(operation)
                     {
@@ -1772,6 +1822,8 @@ impl SessionStore {
             is_forked,
             created_at_ms: now,
             continuation_mode: None,
+            model_selection: None,
+            reasoning_effort: None,
             append_lock: Arc::new(Mutex::new(())),
             _lock: lock,
         };
@@ -1964,22 +2016,50 @@ impl SessionStore {
     }
 }
 
-fn load_continuation_mode(session_dir: &Path, thread_id: &str) -> Option<String> {
-    let value = fs::read_to_string(session_dir.join(THREAD_SETTINGS_FILE_NAME))
+fn load_thread_settings(
+    session_dir: &Path,
+    thread_id: &str,
+) -> (Option<String>, Option<ModelSelection>, Option<String>) {
+    let Some(value) = fs::read_to_string(session_dir.join(THREAD_SETTINGS_FILE_NAME))
         .ok()
-        .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())?;
+        .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
+    else {
+        return (None, None, None);
+    };
     if value.get("version").and_then(Value::as_u64) != Some(1)
         || value.get("thread_id").and_then(Value::as_str) != Some(thread_id)
     {
-        return None;
+        return (None, None, None);
     }
-    match value.get("continuation_mode").and_then(Value::as_str) {
+    let continuation_mode = match value.get("continuation_mode").and_then(Value::as_str) {
         Some("manual") | Some("continuous") => value
             .get("continuation_mode")
             .and_then(Value::as_str)
             .map(str::to_string),
         _ => None,
-    }
+    };
+    let model_selection = value
+        .get("model_selection")
+        .cloned()
+        .and_then(|selection| serde_json::from_value::<ModelSelection>(selection).ok())
+        .filter(|selection| {
+            valid_model_identifier(&selection.provider_id)
+                && valid_model_identifier(&selection.model_id)
+        });
+    let reasoning_effort = value
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .filter(|effort| matches!(*effort, "low" | "medium" | "high" | "xhigh" | "max"))
+        .map(str::to_string);
+    (continuation_mode, model_selection, reasoning_effort)
+}
+
+fn valid_model_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 impl TurnStatus {
@@ -2393,6 +2473,14 @@ mod tests {
                 tool_calls: Vec::new(),
             },
         ];
+        let selection = ModelSelection {
+            provider_id: "kimi".to_string(),
+            model_id: "kimi-k2".to_string(),
+        };
+        parent
+            .store
+            .set_model_settings(Some(selection.clone()), Some("high".to_string()))
+            .unwrap();
         parent
             .store
             .record_turn_with_id(
@@ -2428,6 +2516,8 @@ mod tests {
             .expect("forked Session should resume");
         assert!(child.store.is_forked());
         assert!(child.store.items().is_empty());
+        assert_eq!(child.store.model_selection(), Some(&selection));
+        assert_eq!(child.store.reasoning_effort(), Some("high"));
         drop(child);
         assert_eq!(info.metadata, Some(exact_fork_metadata()));
         assert!(
@@ -2751,12 +2841,22 @@ mod tests {
         let session_id = opened.store.session_id().to_string();
 
         assert_eq!(opened.store.continuation_mode(), None);
+        let selection = ModelSelection {
+            provider_id: "deepseek".to_string(),
+            model_id: "deepseek-r1".to_string(),
+        };
         opened.store.set_continuation_mode("continuous").unwrap();
+        opened
+            .store
+            .set_model_settings(Some(selection.clone()), Some("medium".to_string()))
+            .unwrap();
         assert_eq!(opened.store.continuation_mode(), Some("continuous"));
         drop(opened);
 
         let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
         assert_eq!(resumed.store.continuation_mode(), Some("continuous"));
+        assert_eq!(resumed.store.model_selection(), Some(&selection));
+        assert_eq!(resumed.store.reasoning_effort(), Some("medium"));
         drop(resumed);
         crate::test_support::remove_test_root(&root);
     }

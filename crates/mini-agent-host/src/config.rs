@@ -2,6 +2,8 @@ use crate::env_file::Environment;
 use crate::env_file::ResolvedValue;
 use crate::env_file::ValueSource;
 use crate::goal::GoalLimits;
+use mini_agent_capabilities::{ImageStore, OpenAiModel};
+use mini_agent_protocol::ModelSelection;
 use reqwest::Url;
 use std::env;
 use std::hash::Hash;
@@ -114,29 +116,49 @@ impl RuntimeConfig {
     }
 
     pub fn provider_settings(&self) -> Result<ProviderSettings, String> {
-        let api_key = self
-            .api_key
-            .as_ref()
-            .ok_or_else(|| {
-                "OPENAI_API_KEY is required (process, .env, or ~/.mini-agent/.env)".to_string()
-            })?
-            .value
-            .clone();
-        let model = self
-            .model
-            .as_ref()
-            .ok_or_else(|| {
-                "OPENAI_MODEL is required (process, .env, or ~/.mini-agent/.env)".to_string()
-            })?
-            .value
-            .clone();
-        validate_base_url(&self.base_url)?;
-        Ok(ProviderSettings {
-            api_key,
-            model,
-            base_url: self.base_url.clone(),
-            web_search: self.web_search,
-        })
+        match (&self.api_key, &self.model) {
+            (Some(api_key), Some(model)) => {
+                validate_base_url(&self.base_url)?;
+                Ok(ProviderSettings {
+                    api_key: api_key.value.clone(),
+                    model: model.value.clone(),
+                    base_url: self.base_url.clone(),
+                    web_search: self.web_search,
+                })
+            }
+            (Some(_), None) => {
+                Err("OPENAI_MODEL is required when OPENAI_API_KEY is configured".to_string())
+            }
+            (None, Some(_)) => {
+                Err("OPENAI_API_KEY is required when OPENAI_MODEL is configured".to_string())
+            }
+            (None, None) => {
+                let catalog = crate::models::ModelCatalogStore::machine_default()?;
+                let selected = catalog
+                    .primary_default(&self.project_id())?
+                    .and_then(|selection| {
+                        catalog.provider_settings(&selection, self.web_search).ok()
+                    });
+                if let Some(settings) = selected {
+                    validate_base_url(&settings.base_url)?;
+                    Ok(ProviderSettings {
+                        api_key: settings.api_key,
+                        model: settings.model,
+                        base_url: settings.base_url,
+                        web_search: settings.web_search,
+                    })
+                } else {
+                    // Lets local management APIs start before a model is configured.
+                    // HostResponsesModel rejects turns until a usable default exists.
+                    Ok(ProviderSettings {
+                        api_key: String::new(),
+                        model: "unconfigured".to_string(),
+                        base_url: DEFAULT_BASE_URL.to_string(),
+                        web_search: false,
+                    })
+                }
+            }
+        }
     }
 
     pub fn workspace(&self) -> PathBuf {
@@ -190,6 +212,23 @@ impl RuntimeConfig {
 
     /// Resolves the separate tool-free provider used by Goal verification.
     pub fn verifier_provider_settings(&self) -> Result<ProviderSettings, String> {
+        if self.verifier_model.is_none() {
+            let catalog = crate::models::ModelCatalogStore::machine_default()?;
+            let selection = catalog.verifier_default()?.ok_or_else(|| {
+                "configure a Goal Verifier default model or set VERIFIER_OPENAI_MODEL".to_string()
+            })?;
+            let mut settings = catalog.provider_settings(&selection, false)?;
+            if let Some(api_key) = &self.verifier_api_key {
+                settings.api_key = api_key.value.clone();
+            }
+            validate_base_url(&settings.base_url)?;
+            return Ok(ProviderSettings {
+                api_key: settings.api_key,
+                model: settings.model,
+                base_url: settings.base_url,
+                web_search: false,
+            });
+        }
         let model = self
             .verifier_model
             .as_ref()
@@ -214,6 +253,51 @@ impl RuntimeConfig {
             base_url: base_url.to_string(),
             web_search: false,
         })
+    }
+
+    pub fn has_legacy_verifier_model(&self) -> bool {
+        self.verifier_model.is_some()
+    }
+
+    pub fn verifier_model_for(
+        &self,
+        selection: Option<&ModelSelection>,
+    ) -> Result<OpenAiModel, String> {
+        if let Some(selection) = selection {
+            let catalog = crate::models::ModelCatalogStore::machine_default()?;
+            let provider = catalog.provider_settings_with_overrides(
+                selection,
+                false,
+                self.verifier_api_key
+                    .as_ref()
+                    .map(|value| value.value.as_str()),
+                self.verifier_base_url.as_deref(),
+            )?;
+            let profile = catalog.model_profile(selection)?;
+            return OpenAiModel::new(
+                provider.api_key,
+                provider.model,
+                provider.base_url,
+                false,
+                ImageStore::memory_only(),
+            )
+            .map(|model| {
+                model.with_model_options(
+                    profile.max_output_tokens.map(|value| value as usize),
+                    profile.reasoning_parameter_map,
+                )
+            })
+            .map_err(|error| error.to_string());
+        }
+        let provider = self.verifier_provider_settings()?;
+        OpenAiModel::new(
+            provider.api_key,
+            provider.model,
+            provider.base_url,
+            false,
+            ImageStore::memory_only(),
+        )
+        .map_err(|error| error.to_string())
     }
 
     pub fn model(&self) -> Option<&str> {

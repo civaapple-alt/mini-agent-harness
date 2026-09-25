@@ -89,6 +89,12 @@ pub struct TurnInput {
     pub selected_skills: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<TurnWorkflow>,
+    /// Model chosen for this complete Turn. Provider credentials and
+    /// configuration stay outside the portable protocol.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_selection: Option<crate::ModelSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 /// Starts a protocol-visible Thread with a stable identity.
@@ -156,6 +162,8 @@ impl TurnInput {
             text: text.into(),
             selected_skills: Vec::new(),
             workflow: None,
+            model_selection: None,
+            reasoning_effort: None,
         }
     }
 }

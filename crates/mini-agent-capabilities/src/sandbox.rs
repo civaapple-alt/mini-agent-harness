@@ -224,8 +224,8 @@ mod tests {
 
     #[test]
     fn creates_and_attaches_sandbox_guard() {
-        let sandbox = ProcessSandbox::new(SandboxKind::Native);
+        let _sandbox = ProcessSandbox::new(SandboxKind::Native);
         #[cfg(windows)]
-        assert!(sandbox.job_object.is_some());
+        assert!(_sandbox.job_object.is_some());
     }
 }

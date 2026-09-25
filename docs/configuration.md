@@ -38,6 +38,41 @@ from a workspace or user `.env` by `RuntimeConfig`.
 | `MINI_AGENT_SESSION_ID` | Standalone App Server process | Required when `MINI_AGENT_SESSION_MODE` is `named` or `resume` |
 | `MINI_AGENT_THREAD_ID` | Session process binding | Optional Thread identity used when creating a new Session |
 
+## Machine model catalog
+
+The Host reads provider and model metadata from `~/.mini-agent/model_catalog.json`.
+On Windows, it uses `%USERPROFILE%/.mini-agent/model_catalog.json`.
+The Host stores provider API keys in the operating system credential store.
+The App Server and Web Gateway never return API key values.
+
+The catalog accepts `deepseek`, `kimi`, `glm`, `volcengine`, and `custom`
+providers. Each provider stores a name, an enabled flag, a Responses API Base
+URL, and its model list. The Base URL has no default. Enter the URL root that
+the Host can extend with `/responses`.
+
+Each model stores its provider model ID, display name, enabled state, context
+window, output limit, input modalities, capabilities, reasoning levels, and
+reasoning parameter mappings. The local smart-match list suggests model IDs and
+metadata. The suggestion does not verify a remote endpoint.
+
+The Host resolves the primary model in this order: explicit Thread selection,
+Project default, then global default. A legacy project `OPENAI_MODEL` remains
+usable when that Project has no model setting. `OPENAI_API_KEY` and
+`OPENAI_BASE_URL` continue to configure that legacy path.
+
+The Goal Verifier uses a separate default model. The Host records the selected
+Verifier reference when it creates a Goal. A later change to the global
+Verifier default affects new Goals only. `VERIFIER_OPENAI_MODEL`,
+`VERIFIER_OPENAI_API_KEY`, and `VERIFIER_OPENAI_BASE_URL` remain available for
+legacy verifier configuration. The Verifier does not fall back to the primary
+model when no verifier is configured.
+
+Thread model selections and reasoning levels are stored in the Session's
+`thread_settings.json` file. Forked Threads inherit those settings. A settings
+change applies to the next Turn and does not alter a running Turn. Every
+configured provider uses the Responses API. An endpoint that rejects
+`/responses` returns an error; the Host does not retry with Chat Completions.
+
 ## Runtime composition and prompt/rule sources
 
 The Host assembles a bounded runtime composition before the App Server starts.

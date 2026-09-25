@@ -479,9 +479,11 @@ where
             METHOD_THREAD_SETTINGS_UPDATE,
             ThreadSettingsUpdateParams {
                 thread_id,
-                collaboration_mode: CollaborationMode { mode },
+                collaboration_mode: Some(CollaborationMode { mode }),
                 builtin_tools,
                 continuation_mode,
+                model_selection: None,
+                reasoning_effort: None,
             },
         )
         .await

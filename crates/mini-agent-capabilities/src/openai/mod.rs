@@ -13,6 +13,7 @@ use mini_agent_protocol::ModelUsage;
 use mini_agent_protocol::ToolCall;
 use reqwest::Client;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::future::Future;
@@ -33,6 +34,7 @@ pub struct OpenAiModel {
     web_search: bool,
     images: ImageStore,
     max_output_tokens: Option<usize>,
+    reasoning_parameter_map: BTreeMap<String, serde_json::Value>,
 }
 
 impl OpenAiModel {
@@ -62,7 +64,22 @@ impl OpenAiModel {
             web_search,
             images,
             max_output_tokens: None,
+            reasoning_parameter_map: BTreeMap::new(),
         })
+    }
+
+    pub fn with_model_options(
+        mut self,
+        max_output_tokens: Option<usize>,
+        reasoning_parameter_map: BTreeMap<String, serde_json::Value>,
+    ) -> Self {
+        self.max_output_tokens = max_output_tokens;
+        self.reasoning_parameter_map = reasoning_parameter_map;
+        self
+    }
+
+    pub fn set_images(&mut self, images: ImageStore) {
+        self.images = images;
     }
 }
 

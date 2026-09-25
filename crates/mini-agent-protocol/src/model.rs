@@ -2,6 +2,24 @@ use crate::ToolExecutionStatus;
 use crate::ToolSpec;
 use serde::Deserialize;
 use serde::Serialize;
+
+/// Stable provider/model identity selected by a Thread or Turn.
+/// This carries no endpoint, credential, or provider implementation state.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSelection {
+    pub provider_id: String,
+    pub model_id: String,
+}
+
+impl ModelSelection {
+    pub fn new(provider_id: impl Into<String>, model_id: impl Into<String>) -> Self {
+        Self {
+            provider_id: provider_id.into(),
+            model_id: model_id.into(),
+        }
+    }
+}
 use serde_json::Value;
 use std::error::Error;
 use std::future::Future;
@@ -69,6 +87,8 @@ pub struct ModelRequest<'a> {
     pub messages: &'a [Message],
     pub tools: &'a [ToolSpec],
     pub max_response_bytes: usize,
+    pub model_selection: Option<&'a ModelSelection>,
+    pub reasoning_effort: Option<&'a str>,
 }
 
 /// A model proposes the next assistant text and tool calls.

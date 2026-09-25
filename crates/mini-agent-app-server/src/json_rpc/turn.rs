@@ -58,7 +58,7 @@ where
         &self,
         request: JsonRpcRequest,
     ) -> Option<JsonRpcResponse> {
-        let params = match request.decode_params::<TurnStartParams>() {
+        let mut params = match request.decode_params::<TurnStartParams>() {
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
@@ -70,6 +70,11 @@ where
                 request.id,
                 JsonRpcError::invalid_params("turn/start requires start or start_if_idle"),
             );
+        }
+        if let Ok(settings) = self.thread_settings_service() {
+            let model_settings = settings.model_settings();
+            params.input.model_selection = model_settings.selection;
+            params.input.reasoning_effort = model_settings.reasoning_effort;
         }
         let mut turn = TurnStart::new(params.input);
         turn.operation_id = params.operation_id;

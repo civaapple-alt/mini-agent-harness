@@ -35,18 +35,20 @@ use mini_agent_app_server_protocol::{
     METHOD_THREAD_SETTINGS_UPDATE, METHOD_THREAD_START, METHOD_TURN_EVENT, METHOD_TURN_EVENTS,
     METHOD_TURN_INTERRUPT, METHOD_TURN_READ, METHOD_TURN_START, METHOD_TURN_STEER,
     METHOD_WORLD_REFRESH, METHOD_WORLD_SET_EXECUTION, METHOD_WORLD_STATE,
-    McpRetryResult as ProtocolMcpRetryResult, McpStatusResult, PROTOCOL_VERSION,
-    RuntimeStatusParams, ServerCapabilities, SessionForkConflictData, SessionForkParams,
-    SessionInfoResult, SessionNotebookForgetParams, SessionNotebookReadParams,
+    McpRetryResult as ProtocolMcpRetryResult, McpStatusResult, ModelCatalogManageParams,
+    ModelCatalogManageResult, ModelCatalogOperation, ModelCatalogView as ProtocolModelCatalogView,
+    PROTOCOL_VERSION, RuntimeStatusParams, ServerCapabilities, SessionForkConflictData,
+    SessionForkParams, SessionInfoResult, SessionNotebookForgetParams, SessionNotebookReadParams,
     SessionNotebookWriteParams, ThreadCloseParams, ThreadForkParams, ThreadForkResult,
     ThreadGoalClearParams, ThreadGoalClearResponse, ThreadGoalClearedNotification,
     ThreadGoalGetParams, ThreadGoalGetResponse, ThreadGoalSetParams, ThreadGoalSetResponse,
     ThreadGoalUpdatedNotification, ThreadItemsListParams, ThreadListParams, ThreadListResult,
-    ThreadReadParams, ThreadReadResult, ThreadResumeParams, ThreadResumeResult,
-    ThreadSettingsUpdateParams, ThreadSettingsUpdateResult, ThreadSettingsUpdatedNotification,
-    ThreadStartParams, ThreadStartResult, TurnEventNotification, TurnEventsParams,
-    TurnEventsResult, TurnInterruptParams, TurnReadParams, TurnStartParams, TurnSteerParams,
-    WorldRefreshResult, WorldSetExecutionParams, WorldSetExecutionResult, WorldStateResult,
+    ThreadModelSettingsGetParams, ThreadModelSettingsGetResult, ThreadReadParams, ThreadReadResult,
+    ThreadResumeParams, ThreadResumeResult, ThreadSettingsUpdateParams, ThreadSettingsUpdateResult,
+    ThreadSettingsUpdatedNotification, ThreadStartParams, ThreadStartResult, TurnEventNotification,
+    TurnEventsParams, TurnEventsResult, TurnInterruptParams, TurnReadParams, TurnStartParams,
+    TurnSteerParams, WorldRefreshResult, WorldSetExecutionParams, WorldSetExecutionResult,
+    WorldStateResult,
 };
 use mini_agent_core::SessionState;
 use mini_agent_protocol::EventEnvelope;
@@ -62,6 +64,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::broadcast;
 
 mod background;
+mod model_catalog;
 mod scheduled_task;
 mod thread;
 mod transport;
@@ -259,6 +262,12 @@ where
             METHOD_THREAD_READ => self.handle_thread_read(request).await,
             METHOD_THREAD_CLOSE => self.handle_thread_close(request).await,
             METHOD_THREAD_SETTINGS_UPDATE => self.handle_thread_settings_update(request).await,
+            mini_agent_app_server_protocol::METHOD_THREAD_MODEL_SETTINGS_GET => {
+                self.handle_thread_model_settings_get(request).await
+            }
+            mini_agent_app_server_protocol::METHOD_MODEL_CATALOG_MANAGE => {
+                self.handle_model_catalog_manage(request).await
+            }
             METHOD_THREAD_GOAL_SET => self.handle_thread_goal_set(request).await,
             METHOD_THREAD_GOAL_GET => self.handle_thread_goal_get(request).await,
             METHOD_THREAD_GOAL_CLEAR => self.handle_thread_goal_clear(request).await,
@@ -564,6 +573,8 @@ pub(super) fn settings_notification_request(event: SettingsRuntimeEvent) -> Json
                 },
                 builtin_tools: event.builtin_tools,
                 continuation_mode: event.continuation_mode,
+                model_selection: event.model_selection,
+                reasoning_effort: event.reasoning_effort,
                 state_revision: event.state_revision,
             })
             .expect("settings update notification is serializable"),

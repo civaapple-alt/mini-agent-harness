@@ -736,6 +736,8 @@ pub(super) fn handle<M>(
             active,
             builtin_tools,
             continuation_mode,
+            model_selection,
+            reasoning_effort,
             reply,
         } => {
             let result = mutate::<(crate::management::ThreadSettingsRuntimeSnapshot, bool), _>(
@@ -745,29 +747,45 @@ pub(super) fn handle<M>(
                     let previous_active = state.goal_runtime_handle.plan_active();
                     let previous_tools = state.builtin_tools.names().to_vec();
                     let previous_continuation = state.continuation_mode;
-                    set_thread_settings(threads, state, active, builtin_tools, continuation_mode)
-                        .map(|settings| {
-                            let changed = previous_active != active
-                                || previous_tools != settings.builtin_tools
-                                || previous_continuation != settings.continuation_mode;
-                            ((settings, changed), changed)
-                        })
+                    let previous_model_selection = state.model_selection.clone();
+                    let previous_reasoning_effort = state.reasoning_effort.clone();
+                    set_thread_settings(
+                        threads,
+                        state,
+                        active,
+                        builtin_tools,
+                        continuation_mode,
+                        model_selection,
+                        reasoning_effort,
+                    )
+                    .map(|settings| {
+                        let changed = active.is_some_and(|active| previous_active != active)
+                            || previous_tools != settings.builtin_tools
+                            || previous_continuation != settings.continuation_mode
+                            || previous_model_selection != settings.model_selection
+                            || previous_reasoning_effort != settings.reasoning_effort;
+                        ((settings, changed), changed)
+                    })
                 },
             );
             let changed = result.as_ref().is_ok_and(|(_, changed)| *changed);
             if changed && let Some(state) = runtime.as_ref() {
                 let event = SettingsRuntimeEvent {
                     thread_id: state.management.thread_id(),
-                    active,
+                    active: state.goal_runtime_handle.plan_active(),
                     builtin_tools: state.builtin_tools.names().to_vec(),
                     continuation_mode: state.continuation_mode,
+                    model_selection: state.model_selection.clone(),
+                    reasoning_effort: state.reasoning_effort.clone(),
                     state_revision: state.revision().value(),
                 };
                 let _ = state.settings_notifications.send(event.clone());
                 let _ = state
                     .notifications
                     .send(crate::RuntimeNotification::Settings(event));
-                notify_plan_updated(runtime, active);
+                if active.is_some() {
+                    notify_plan_updated(runtime, state.goal_runtime_handle.plan_active());
+                }
             }
             respond(reply, receipt, result.map(|(settings, _)| settings));
         }
@@ -1054,9 +1072,11 @@ fn check_revision(
 pub(super) fn set_thread_settings<M>(
     threads: &mut ThreadManager<M>,
     state: &mut RuntimeActorState,
-    active: bool,
+    active: Option<bool>,
     builtin_tools: Option<mini_agent_host::BuiltinToolSelection>,
     continuation_mode: Option<ContinuationMode>,
+    model_selection: Option<Option<mini_agent_protocol::ModelSelection>>,
+    reasoning_effort: Option<Option<String>>,
 ) -> Result<crate::management::ThreadSettingsRuntimeSnapshot, AppServerError>
 where
     M: Model + 'static,
@@ -1075,6 +1095,24 @@ where
     let thread = threads
         .get_mut(thread_id.as_str())
         .ok_or_else(|| AppServerError::ThreadNotFound(thread_id.clone()))?;
+    let model_settings_changed = model_selection.is_some() || reasoning_effort.is_some();
+    let next_selection = model_selection.unwrap_or_else(|| state.model_selection.clone());
+    let next_effort = reasoning_effort.unwrap_or_else(|| state.reasoning_effort.clone());
+    if next_effort
+        .as_deref()
+        .is_some_and(|effort| !matches!(effort, "low" | "medium" | "high" | "xhigh" | "max"))
+    {
+        return Err(AppServerError::InvalidThreadSetting(
+            "reasoningEffort must be low, medium, high, xhigh, or max".to_string(),
+        ));
+    }
+    if model_settings_changed {
+        state
+            .management
+            .persist_model_settings(next_selection.clone(), next_effort.clone())?;
+        state.model_selection = next_selection;
+        state.reasoning_effort = next_effort;
+    }
     let was_plan_active = state.goal_runtime_handle.plan_active();
     if let Some(mode) = continuation_mode {
         state.management.persist_continuation_mode(mode)?;
@@ -1089,7 +1127,7 @@ where
         thread.harness_mut().replace_config(config);
         state.continuation_mode = mode;
     }
-    if active {
+    if active == Some(true) {
         let plan_path = state
             .goal_runtime_handle
             .init_plan_mode(None)
@@ -1106,7 +1144,7 @@ where
         thread
             .harness_mut()
             .set_system_prompt(mini_agent_host::with_plan_mode_overlay(&base_prompt));
-    } else {
+    } else if active == Some(false) {
         if was_plan_active {
             notify_plan_cleanup_state(state, None, true, None);
         }
@@ -1133,8 +1171,11 @@ where
         state.builtin_tools = selection;
     }
     Ok(crate::management::ThreadSettingsRuntimeSnapshot {
+        active: state.goal_runtime_handle.plan_active(),
         builtin_tools: state.builtin_tools.names().to_vec(),
         continuation_mode: state.continuation_mode,
+        model_selection: state.model_selection.clone(),
+        reasoning_effort: state.reasoning_effort.clone(),
     })
 }
 
@@ -1162,9 +1203,11 @@ where
     set_thread_settings(
         threads,
         state,
-        active,
+        Some(active),
         None,
         Some(ContinuationMode::Continuous),
+        None,
+        None,
     )
     .map(|_| ())
 }

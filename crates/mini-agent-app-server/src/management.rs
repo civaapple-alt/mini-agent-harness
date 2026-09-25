@@ -7,7 +7,7 @@ use crate::notification::RuntimeNotification;
 use crate::runtime_actor::RuntimeCommand;
 use crate::runtime_command::RuntimeCommandClient;
 use crate::status::RuntimeStatusHandle;
-use crate::thread_settings::ThreadSettingsService;
+use crate::thread_settings::{ThreadModelSettings, ThreadSettingsService};
 use crate::worker::Command;
 use crate::{AppServer, AppServerError, McpRetryResult, RuntimeSessionInfo, RuntimeTurnResult};
 use mini_agent_capabilities::TurnStatus as SessionTurnStatus;
@@ -28,6 +28,8 @@ pub(crate) struct RuntimeActorState {
     pub(crate) approval: ApprovalController,
     pub(crate) builtin_tools: mini_agent_host::BuiltinToolSelection,
     pub(crate) continuation_mode: mini_agent_app_server_protocol::ContinuationMode,
+    pub(crate) model_selection: Option<mini_agent_protocol::ModelSelection>,
+    pub(crate) reasoning_effort: Option<String>,
     pub(crate) stable_system_prompt: Option<String>,
     pub(crate) settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
     pub(crate) notifications: broadcast::Sender<RuntimeNotification>,
@@ -43,13 +45,18 @@ pub(crate) struct SettingsRuntimeEvent {
     pub(crate) active: bool,
     pub(crate) builtin_tools: Vec<String>,
     pub(crate) continuation_mode: mini_agent_app_server_protocol::ContinuationMode,
+    pub(crate) model_selection: Option<mini_agent_protocol::ModelSelection>,
+    pub(crate) reasoning_effort: Option<String>,
     pub(crate) state_revision: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ThreadSettingsRuntimeSnapshot {
+    pub(crate) active: bool,
     pub(crate) builtin_tools: Vec<String>,
     pub(crate) continuation_mode: mini_agent_app_server_protocol::ContinuationMode,
+    pub(crate) model_selection: Option<mini_agent_protocol::ModelSelection>,
+    pub(crate) reasoning_effort: Option<String>,
 }
 
 pub(crate) struct RuntimeManagementState {
@@ -282,6 +289,16 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         } = self;
         let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
         let stable_system_prompt = settings.stable_system_prompt().map(str::to_string);
+        let persisted_model_settings = management
+            .session
+            .as_ref()
+            .map(|opened| ThreadModelSettings {
+                selection: opened.store.model_selection().cloned(),
+                reasoning_effort: opened.store.reasoning_effort().map(str::to_string),
+            })
+            .unwrap_or_default();
+        settings.set_initial_model_settings(persisted_model_settings.clone());
+        let model_settings = settings.model_settings_handle();
         let continuation_mode = management
             .session
             .as_ref()
@@ -319,6 +336,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 approval: approval.clone(),
                 builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
                 continuation_mode,
+                model_selection: persisted_model_settings.selection,
+                reasoning_effort: persisted_model_settings.reasoning_effort,
                 stable_system_prompt: stable_system_prompt.clone(),
                 settings_notifications: settings_notifications.clone(),
                 notifications: notifications.clone(),
@@ -328,7 +347,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 revision: crate::action::RuntimeRevision::default(),
             })
             .map_err(|error| error.to_string())?;
-        let settings = ThreadSettingsService::bound(client.clone(), stable_system_prompt);
+        let settings =
+            ThreadSettingsService::bound(client.clone(), stable_system_prompt, model_settings);
         let goals = ThreadGoalRequestProcessor::bound(client.clone(), verifier_config);
         Ok((
             Self {
@@ -833,6 +853,20 @@ impl RuntimeManagementState {
         session
             .store
             .set_continuation_mode(mode)
+            .map_err(AppServerError::Checkpoint)
+    }
+
+    pub(crate) fn persist_model_settings(
+        &mut self,
+        selection: Option<mini_agent_protocol::ModelSelection>,
+        reasoning_effort: Option<String>,
+    ) -> Result<(), AppServerError> {
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        session
+            .store
+            .set_model_settings(selection, reasoning_effort)
             .map_err(AppServerError::Checkpoint)
     }
 

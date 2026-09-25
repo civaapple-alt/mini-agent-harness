@@ -2,7 +2,6 @@
 
 use crate::{AppServer, AppServerConnection, LocalAppServerClient};
 use mini_agent_app_server_protocol::TurnReadResult;
-use mini_agent_capabilities::{ImageStore, OpenAiModel};
 use mini_agent_core::{ContextLimitBehavior, Harness, HarnessConfig, Thread, ToolRouter};
 use mini_agent_host::config::RuntimeConfig;
 use mini_agent_protocol::{
@@ -36,18 +35,11 @@ impl EventSink for DiscardEvents {
 /// Runs one isolated Goal verifier turn against a settled checkpoint.
 pub async fn verify_goal_checkpoint(
     runtime_config: &RuntimeConfig,
+    verifier_model_selection: Option<&mini_agent_protocol::ModelSelection>,
     messages: &[Message],
     criteria: &str,
 ) -> Result<(String, crate::goal_service::VerifierVerdict), String> {
-    let provider = runtime_config.verifier_provider_settings()?;
-    let model = OpenAiModel::new(
-        provider.api_key,
-        provider.model,
-        provider.base_url,
-        false,
-        ImageStore::memory_only(),
-    )
-    .map_err(|error| error.to_string())?;
+    let model = runtime_config.verifier_model_for(verifier_model_selection)?;
     let config = HarnessConfig {
         system_prompt: verify_system_prompt().to_string(),
         max_steps: 1,

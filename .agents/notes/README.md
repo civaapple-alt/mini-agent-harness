@@ -97,6 +97,7 @@ graph LR
 
 ### Proposed
 
+- [Responses 多供应商目录与 Thread 模型选择](proposed/architecture/2026-09-25-responses-model-catalog-and-thread-selection.zh.md)
 - [子代理多轮协作与消息流恢复](proposed/architecture/2026-09-20-child-agent-rounds-and-message-flow.zh.md)
 - [子代理动态协作与进展跟踪](proposed/architecture/2026-09-20-dynamic-child-agent-coordination.zh.md)
 - [WebStudio Session Doctor：工作区 Session 日志诊断与安全修复](proposed/feature/2026-09-19-web-studio-session-doctor.zh.md)

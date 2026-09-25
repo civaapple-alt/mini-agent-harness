@@ -29,6 +29,8 @@ pub async fn complete(
         model.web_search,
         &model.images,
         model.max_output_tokens,
+        request.reasoning_effort,
+        &model.reasoning_parameter_map,
     );
     let response = post_json(&model.client, &model.endpoint, &model.api_key, &body).await?;
     let mut state = Accumulator::new(request.max_response_bytes);
@@ -54,7 +56,15 @@ fn request_body(
     web_search: bool,
     images: &ImageStore,
 ) -> Value {
-    request_body_with_limit(model, request, web_search, images, None)
+    request_body_with_limit(
+        model,
+        request,
+        web_search,
+        images,
+        None,
+        request.reasoning_effort,
+        &std::collections::BTreeMap::new(),
+    )
 }
 
 fn request_body_with_limit(
@@ -63,6 +73,8 @@ fn request_body_with_limit(
     web_search: bool,
     images: &ImageStore,
     max_output_tokens: Option<usize>,
+    reasoning_effort: Option<&str>,
+    reasoning_parameter_map: &std::collections::BTreeMap<String, Value>,
 ) -> Value {
     let (projected, has_live_image) = project_for_request(request, images);
     let model = vision_model_for(model, has_live_image);
@@ -116,6 +128,17 @@ fn request_body_with_limit(
     });
     if let Some(max_output_tokens) = max_output_tokens {
         body["max_output_tokens"] = json!(max_output_tokens);
+    }
+    if let Some(effort) = reasoning_effort {
+        if let Some(parameters) = reasoning_parameter_map.get(effort) {
+            if let Some(parameters) = parameters.as_object() {
+                for (key, value) in parameters {
+                    body[key] = value.clone();
+                }
+            }
+        } else if matches!(effort, "low" | "medium" | "high" | "xhigh" | "max") {
+            body["reasoning"] = json!({"effort": effort});
+        }
     }
     body
 }
@@ -373,6 +396,8 @@ mod tests {
             messages,
             tools,
             max_response_bytes: config.max_model_response_bytes,
+            model_selection: None,
+            reasoning_effort: None,
         }
     }
 
@@ -510,6 +535,8 @@ mod tests {
             false,
             &images,
             Some(64),
+            None,
+            &std::collections::BTreeMap::new(),
         );
         assert_eq!(body["max_output_tokens"], 64);
     }

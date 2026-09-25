@@ -9,9 +9,11 @@ tool or file output already added to that conversation. The workspace is not
 uploaded wholesale, but selected content can leave the machine when the model
 reads it through a tool or it appears in command output.
 
-Provider credentials belong in the process environment, CI secrets, or
-`~/.mini-agent/.env`. This repository ignores `.env`, but mini-agent cannot
-guarantee another workspace's ignore rules. Never commit provider credentials.
+Legacy provider credentials belong in the process environment, CI secrets, or
+`~/.mini-agent/.env`. The machine model catalog stores provider API keys in the
+operating system credential store. Its JSON file contains provider and model
+metadata, but no API key values. The App Server and Web Gateway report only
+whether a provider key exists. Never commit provider credentials.
 
 Interactive and one-shot conversation history is persisted in durable JSONL
 files under `~/.mini-agent/sessions/<workspace>/<session-id>/`. Web Studio's

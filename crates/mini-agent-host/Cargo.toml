@@ -13,9 +13,11 @@ categories.workspace = true
 
 [dependencies]
 eventsource-stream.workspace = true
+fs2.workspace = true
 futures-util.workspace = true
 htmd = "0.5"
 http.workspace = true
+keyring.workspace = true
 mini-agent-capabilities = { version = "0.8.0", path = "../mini-agent-capabilities" }
 mini-agent-core = { version = "0.8.0", path = "../mini-agent-core" }
 mini-agent-protocol = { version = "0.8.0", path = "../mini-agent-protocol" }
@@ -25,3 +27,6 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 yaml_serde.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }

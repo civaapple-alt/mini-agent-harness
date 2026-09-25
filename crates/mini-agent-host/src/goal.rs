@@ -66,6 +66,8 @@ pub struct GoalState {
     pub milestone_step_budget: usize,
     pub milestone_timeout_secs: u64,
     pub verifier_model: Option<String>,
+    #[serde(default)]
+    pub verifier_model_selection: Option<mini_agent_protocol::ModelSelection>,
     pub last_verifier_score: Option<u32>,
     #[serde(default)]
     pub token_budget: Option<i64>,
@@ -189,6 +191,17 @@ impl HostWorkflowStore {
         state.token_budget = token_budget;
         write_goal_state(&self.session_dir, &state)?;
         Ok(state)
+    }
+
+    pub fn set_goal_verifier_selection(
+        &self,
+        selection: Option<mini_agent_protocol::ModelSelection>,
+    ) -> io::Result<Option<GoalState>> {
+        update_goal_state(&self.session_dir, |state| {
+            state.verifier_model_selection = selection.clone();
+            state.updated_at_ms = current_time_ms();
+            Ok(Some(state.clone()))
+        })
     }
 
     pub fn update_goal(
@@ -608,6 +621,7 @@ pub fn init_goal_workspace_with_limits(
         verifier_model: std::env::var("VERIFIER_OPENAI_MODEL")
             .ok()
             .filter(|value| !value.trim().is_empty()),
+        verifier_model_selection: None,
         last_verifier_score: None,
         token_budget: None,
         tokens_used: 0,

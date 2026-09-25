@@ -9,6 +9,7 @@ pub mod config;
 pub mod env_file;
 mod goal;
 mod harness_builder;
+pub mod models;
 pub mod project_context;
 #[path = "profile.rs"]
 mod runtime_composition;
@@ -41,6 +42,10 @@ pub use harness_builder::HarnessBuild;
 pub use harness_builder::HostRuntime;
 pub use harness_builder::ModelProviderFactory;
 pub use harness_builder::prepare_harness_with_model_factory;
+pub use models::{
+    HostResponsesModel, ModelCatalog, ModelCatalogStore, ModelCatalogView, ModelProfile,
+    ProviderKind, ProviderProfile, ProviderView,
+};
 pub use runtime_composition::AgentKind;
 pub use runtime_composition::BuiltinSkillGroup;
 pub use runtime_composition::CapabilityManifest;

@@ -51,6 +51,27 @@ fn plan_mode_lifecycle_creates_and_toggles_state() {
 }
 
 #[test]
+fn goal_verifier_model_selection_is_snapshotted_in_goal_state() {
+    let dir = test_dir();
+    let store = HostWorkflowStore::new(&dir, GoalLimits::default());
+    store
+        .set_goal("Verify the selected implementation", None)
+        .unwrap();
+    let selection = mini_agent_protocol::ModelSelection {
+        provider_id: "kimi".to_string(),
+        model_id: "kimi-k2".to_string(),
+    };
+
+    store
+        .set_goal_verifier_selection(Some(selection.clone()))
+        .unwrap();
+    let loaded = store.load_goal_state().unwrap().unwrap();
+
+    assert_eq!(loaded.verifier_model_selection, Some(selection));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn plan_mode_prompt_seeds_living_plan_without_clobbering() {
     let dir = test_dir();
     let plan_file = init_plan_mode_with_prompt(&dir, Some("implement auth")).unwrap();

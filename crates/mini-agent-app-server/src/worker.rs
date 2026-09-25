@@ -591,8 +591,15 @@ pub(super) async fn worker_loop<M>(
                 .as_ref()
                 .is_some_and(|state| state.goal_runtime_handle.plan_active())
                 && let Some(state) = runtime.as_mut()
-                && let Err(error) =
-                    runtime_actor::set_thread_settings(&mut threads, state, true, None, None)
+                && let Err(error) = runtime_actor::set_thread_settings(
+                    &mut threads,
+                    state,
+                    Some(true),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
             {
                 let error_text = error.to_string();
                 report_runtime_failure(
@@ -1657,6 +1664,7 @@ fn spawn_goal_verifier(
     tokio::spawn(async move {
         let result = crate::verifier::verify_goal_checkpoint(
             &request.runtime_config,
+            request.verifier_model_selection.as_ref(),
             &request.messages,
             &request.criteria,
         )

@@ -100,17 +100,92 @@ where
             },
             None => None,
         };
-        let active = matches!(params.collaboration_mode.mode, CollaborationModeKind::Plan);
+        let active = params
+            .collaboration_mode
+            .as_ref()
+            .map(|mode| matches!(mode.mode, CollaborationModeKind::Plan));
+        for selection in params.model_selection.iter().flatten() {
+            if !Self::valid_model_identifier(&selection.provider_id)
+                || !Self::valid_model_identifier(&selection.model_id)
+            {
+                return response_error(
+                    request.id,
+                    JsonRpcError::invalid_params(
+                        "model providerId and modelId must be bounded identifiers",
+                    ),
+                );
+            }
+        }
+        if params
+            .reasoning_effort
+            .as_ref()
+            .and_then(Option::as_deref)
+            .is_some_and(|effort| !matches!(effort, "low" | "medium" | "high" | "xhigh" | "max"))
+        {
+            return response_error(
+                request.id,
+                JsonRpcError::invalid_params(
+                    "reasoningEffort must be low, medium, high, xhigh, or max",
+                ),
+            );
+        }
         action_response(
             request.id,
-            settings.update_action(active, builtin_tools, params.continuation_mode),
+            settings.update_action(
+                active,
+                builtin_tools,
+                params.continuation_mode,
+                params.model_selection,
+                params.reasoning_effort,
+            ),
             |settings| ThreadSettingsUpdateResult {
-                collaboration_mode: params.collaboration_mode,
+                collaboration_mode: CollaborationMode {
+                    mode: if settings.active {
+                        CollaborationModeKind::Plan
+                    } else {
+                        CollaborationModeKind::Default
+                    },
+                },
                 builtin_tools: settings.builtin_tools.clone(),
                 continuation_mode: settings.continuation_mode,
+                model_selection: settings.model_selection.clone(),
+                reasoning_effort: settings.reasoning_effort.clone(),
             },
         )
         .await
+    }
+
+    pub(super) async fn handle_thread_model_settings_get(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<ThreadModelSettingsGetParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
+            return response_error(request.id, error);
+        }
+        let settings = match self.thread_settings_service() {
+            Ok(settings) => settings,
+            Err(error) => return response_error(request.id, error),
+        };
+        let model_settings = settings.model_settings();
+        response_value(
+            request.id,
+            ThreadModelSettingsGetResult {
+                model_selection: model_settings.selection,
+                reasoning_effort: model_settings.reasoning_effort,
+            },
+        )
+    }
+
+    fn valid_model_identifier(value: &str) -> bool {
+        !value.is_empty()
+            && value.len() <= 128
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
     }
 
     pub(super) async fn handle_thread_start(

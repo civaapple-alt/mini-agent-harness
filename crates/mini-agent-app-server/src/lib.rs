@@ -381,6 +381,7 @@ pub enum AppServerError {
     ThreadFactoryUnavailable,
     RuntimeUnavailable,
     GoalOwnsContinuationMode,
+    InvalidThreadSetting(String),
     SkillActivation(String),
 }
 
@@ -452,6 +453,7 @@ impl fmt::Display for AppServerError {
             Self::GoalOwnsContinuationMode => formatter.write_str(
                 "active Goal Runtime owns continuation mode; pause or finish the Goal before changing it",
             ),
+            Self::InvalidThreadSetting(error) => write!(formatter, "invalid Thread setting: {error}"),
             Self::SkillActivation(error) => write!(formatter, "skill activation failed: {error}"),
         }
     }
