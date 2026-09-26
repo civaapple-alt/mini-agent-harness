@@ -469,14 +469,15 @@ assistant item from that Turn, bounded to 512 characters. `reports` contains
 only explicit `task_report` updates; an empty report page does not mean the
 final result is missing. Persisted operation results allow ordinary line
 breaks and tabs and are bounded to 16 KiB.
-Child-task Turns use a 16-step minimum when the runtime's configured limit is
-lower and nonzero, unless an active Goal has an explicit milestone step budget.
-A higher configured limit remains in effect. A zero runtime limit remains
-unbounded. This gives delegated work more room than the normal eight-step Turn
-limit without creating a hidden continuation Turn. A step-limited attempt
-remains failed and records its stop reason, step count, and bounded diagnostic;
-the parent can retry it explicitly. A steer accepted during a child-task Turn
-adds input to that same Turn, so it does not mark the operation failed or release
+Child operation Turns use the same continuous loop profile as main-thread
+Continuous mode: `max_steps=0` and context compaction. They continue within the
+same Turn until a final response, failure, or explicit control action. An active
+Goal's explicit milestone step budget still takes precedence. This does not
+create a hidden follow-up Turn. The Gateway's SDK wait window is 60 seconds and
+is polled again after timeout; there is no five-minute total child Turn deadline.
+A Turn stopped by an explicit Goal step budget records its stop reason, step
+count, and bounded diagnostic. A steer accepted during a child-task Turn adds
+input to that same Turn, so it does not mark the operation failed or release
 its concurrency slot. Regular Turns keep their existing stop-at-checkpoint steer
 behavior.
 Every per-child `task_control` intent identifies `child_thread_id`,

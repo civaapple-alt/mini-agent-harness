@@ -530,10 +530,10 @@ impl Model for ManyStepModel {
         _request: ModelRequest<'a>,
         _events: &'a mut (dyn ModelEventSink + Send),
     ) -> Result<ModelResponse, Self::Error> {
-        if self.calls == 10 {
+        if self.calls == 24 {
             return Ok(ModelResponse {
                 reasoning: String::new(),
-                text: "completed after ten tool steps".to_string(),
+                text: "completed after twenty-four tool steps".to_string(),
                 tool_calls: Vec::new(),
                 usage: None,
             });
@@ -1510,7 +1510,7 @@ async fn child_operation_steer_completes_on_the_same_turn() {
 }
 
 #[tokio::test]
-async fn child_operations_get_a_bounded_step_allowance_without_changing_regular_turns() {
+async fn child_operations_use_continuous_steps_without_changing_regular_turns() {
     for (operation_id, expected_status) in [
         (
             Some("child:many-steps"),
@@ -1532,7 +1532,7 @@ async fn child_operations_get_a_bounded_step_allowance_without_changing_regular_
         let mut events = server.subscribe();
         let mut request = TurnStart::new(TurnInput::new(
             TurnInputMode::Start,
-            "run ten fixture steps",
+            "run twenty-four fixture steps",
         ));
         request.operation_id = operation_id.map(str::to_string);
         request.operation_attempt = Some(1);

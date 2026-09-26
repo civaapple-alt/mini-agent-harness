@@ -23,7 +23,6 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 const EVENT_REPLAY_BUFFER: usize = 512;
-const CHILD_TASK_MIN_STEPS: usize = 16;
 
 fn skill_display_name(skill: &mini_agent_protocol::SkillLoadRecord) -> String {
     skill
@@ -942,8 +941,8 @@ pub(super) async fn worker_loop<M>(
                     let original_config = thread.harness().config().clone();
                     let is_child_task = operation_id.is_some();
                     let mut turn_config = original_config.clone();
-                    if is_child_task && turn_config.max_steps != 0 {
-                        turn_config.max_steps = turn_config.max_steps.max(CHILD_TASK_MIN_STEPS);
+                    if is_child_task {
+                        turn_config = turn_config.with_copilot_loop();
                     }
                     if let Some(goal) = goal_state.as_ref() {
                         turn_config = turn_config.with_copilot_loop();
