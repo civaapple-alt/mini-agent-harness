@@ -21,6 +21,10 @@ use mini_agent_host::WorldState;
 use mini_agent_protocol::{Message, Model, ReasoningSelection, ThreadId, TurnSource, TurnStatus};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+fn required_child_param<'a>(value: Option<&'a str>, name: &str) -> Result<&'a str, AppServerError> {
+    value.ok_or_else(|| AppServerError::Checkpoint(format!("{name} is required")))
+}
+
 pub(crate) struct RuntimeActorState {
     pub(crate) management: RuntimeManagementState,
     pub(crate) goal_runtime_handle: GoalRuntimeHandle,
@@ -962,34 +966,58 @@ impl RuntimeManagementState {
             mini_agent_app_server_protocol::ChildTaskAction::Report => {
                 opened.store.record_child_report(
                     &context,
-                    params.report_id.as_deref().ok_or_else(|| {
-                        AppServerError::Checkpoint("reportId is required".to_string())
-                    })?,
-                    params.report.as_deref().ok_or_else(|| {
-                        AppServerError::Checkpoint("report is required".to_string())
-                    })?,
+                    required_child_param(params.report_id.as_deref(), "reportId")?,
+                    required_child_param(params.report.as_deref(), "report")?,
                 )
             }
             mini_agent_app_server_protocol::ChildTaskAction::UpdateQueued => {
                 opened.store.update_queued_child_task(
                     &context,
-                    params.prompt.clone().ok_or_else(|| {
-                        AppServerError::Checkpoint("prompt is required".to_string())
-                    })?,
+                    required_child_param(params.prompt.as_deref(), "prompt")?.to_string(),
+                    params.request_id.as_deref(),
                 )
             }
-            mini_agent_app_server_protocol::ChildTaskAction::CancelQueued => {
-                opened.store.cancel_queued_child_task(&context)
-            }
+            mini_agent_app_server_protocol::ChildTaskAction::CancelQueued => opened
+                .store
+                .cancel_queued_child_task(&context, params.request_id.as_deref()),
             mini_agent_app_server_protocol::ChildTaskAction::QueueFollowUp => {
                 opened.store.queue_child_follow_up(
                     &context,
-                    params.request_id.as_deref().ok_or_else(|| {
-                        AppServerError::Checkpoint("requestId is required".to_string())
-                    })?,
-                    params.prompt.clone().ok_or_else(|| {
-                        AppServerError::Checkpoint("prompt is required".to_string())
-                    })?,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                    required_child_param(params.prompt.as_deref(), "prompt")?.to_string(),
+                )
+            }
+            mini_agent_app_server_protocol::ChildTaskAction::Pause => {
+                opened.store.pause_child_task(
+                    &context,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                    required_child_param(params.turn_id.as_deref(), "turnId")?,
+                )
+            }
+            mini_agent_app_server_protocol::ChildTaskAction::CancelActive => {
+                opened.store.cancel_active_child_task(
+                    &context,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                    required_child_param(params.turn_id.as_deref(), "turnId")?,
+                )
+            }
+            mini_agent_app_server_protocol::ChildTaskAction::Resume => {
+                opened.store.resume_child_task(
+                    &context,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                )
+            }
+            mini_agent_app_server_protocol::ChildTaskAction::Retry => {
+                opened.store.retry_child_task(
+                    &context,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                )
+            }
+            mini_agent_app_server_protocol::ChildTaskAction::StartFailure => {
+                opened.store.record_child_start_failure(
+                    &context,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                    required_child_param(params.error.as_deref(), "error")?,
                 )
             }
         }

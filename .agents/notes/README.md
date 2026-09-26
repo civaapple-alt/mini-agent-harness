@@ -98,7 +98,6 @@ graph LR
 ### Proposed
 
 - [Responses 多供应商目录与 Thread 模型选择](proposed/architecture/2026-09-25-responses-model-catalog-and-thread-selection.zh.md)
-- [子代理多轮协作与消息流恢复](proposed/architecture/2026-09-20-child-agent-rounds-and-message-flow.zh.md)
 - [子代理动态协作与进展跟踪](proposed/architecture/2026-09-20-dynamic-child-agent-coordination.zh.md)
 - [WebStudio Session Doctor：工作区 Session 日志诊断与安全修复](proposed/feature/2026-09-19-web-studio-session-doctor.zh.md)
 - [Session 状态、Notebook 与 Subagent 执行策略](proposed/architecture/2026-09-17-session-state-notebook-and-subagent-execution-policy.zh.md)
@@ -111,6 +110,7 @@ graph LR
 
 ### Implemented
 
+- [子任务多轮协作、自主控制与恢复](implemented/architecture/2026-09-20-child-agent-rounds-and-message-flow.zh.md)
 - [跨 Turn 的本地后台 Shell 任务](implemented/architecture/2026-09-18-background-shell-task.zh.md)
 - [跨 Turn 延时标记](implemented/architecture/2026-09-18-scheduled-task.zh.md)
 - [Child Session、operation 与 Session notebook](implemented/architecture/2026-09-17-time-extended-child-session-and-notebook.zh.md)

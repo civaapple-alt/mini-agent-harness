@@ -984,6 +984,10 @@ pub struct ChildTaskParams {
     pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -993,6 +997,11 @@ pub enum ChildTaskAction {
     UpdateQueued,
     CancelQueued,
     QueueFollowUp,
+    Pause,
+    Resume,
+    CancelActive,
+    Retry,
+    StartFailure,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

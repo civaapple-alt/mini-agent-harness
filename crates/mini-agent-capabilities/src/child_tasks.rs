@@ -1,3 +1,4 @@
+use crate::SessionOperation;
 use mini_agent_protocol::{Tool, ToolError, ToolHandler, ToolRuntime, ToolSpec};
 use serde_json::{Value, json};
 use std::fs;
@@ -9,6 +10,8 @@ const MAX_OPERATION_GROUP_ID_BYTES: usize = 128;
 const MAX_CHILD_REPORT_BYTES: usize = 4 * 1024;
 const MAX_REPORT_PAGE: usize = 32;
 const MAX_REPORT_PAGE_BYTES: usize = 10 * 1024;
+const MAX_TASK_LIST_PAGE: usize = 32;
+const MAX_THREAD_INDEX_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CHILD_TASK_RESULT_CHARS: usize = 512;
 
 /// Host-side request for WebStudio to create an independent child runtime.
@@ -108,6 +111,136 @@ struct TaskReadTool {
     parent_session_dir: PathBuf,
 }
 
+struct TaskListTool {
+    parent_session_dir: PathBuf,
+}
+
+impl ToolHandler for TaskListTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "task_list".to_string(),
+            description: "List bounded summaries of child tasks owned by this parent Session. Pages are ordered by child_thread_id; use after_child_thread_id from next_cursor to continue, and task_read for details and reports.".to_string(),
+            parameters: json!({
+                "type":"object",
+                "properties":{
+                    "after_child_thread_id":{"type":"string"},
+                    "limit":{"type":"integer","minimum":1,"maximum":32}
+                },
+                "additionalProperties":false
+            }),
+        }
+    }
+}
+
+impl ToolRuntime for TaskListTool {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let parent_session_id = self
+            .parent_session_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| ToolError("parent Session identity is unavailable".to_string()))?;
+        let after = arguments
+            .get("after_child_thread_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if arguments.get("after_child_thread_id").is_some()
+            && arguments["after_child_thread_id"].as_str().is_none()
+        {
+            return Err(ToolError(
+                "task_list after_child_thread_id must be a string".to_string(),
+            ));
+        }
+        if !after.is_empty() {
+            validate_child_id(after).map_err(ToolError)?;
+        }
+        let limit = arguments.get("limit").and_then(Value::as_u64).unwrap_or(16);
+        if arguments.get("limit").is_some() && arguments["limit"].as_u64().is_none() {
+            return Err(ToolError("task_list limit must be an integer".to_string()));
+        }
+        if !(1..=MAX_TASK_LIST_PAGE as u64).contains(&limit) {
+            return Err(ToolError(format!(
+                "task_list limit must be between 1 and {MAX_TASK_LIST_PAGE}"
+            )));
+        }
+        let base = self
+            .parent_session_dir
+            .parent()
+            .ok_or_else(|| ToolError("parent Session directory is invalid".to_string()))?;
+        let index_path = base.join("thread_index.json");
+        let index_bytes = fs::metadata(&index_path)
+            .map_err(|error| ToolError(format!("cannot inspect child task index: {error}")))?
+            .len();
+        if index_bytes > MAX_THREAD_INDEX_BYTES {
+            return Err(ToolError(
+                "child task index exceeds its bounded read limit".to_string(),
+            ));
+        }
+        let index = fs::read_to_string(index_path)
+            .map_err(|error| ToolError(format!("cannot read child task index: {error}")))?;
+        let index: Value = serde_json::from_str(&index)
+            .map_err(|error| ToolError(format!("invalid child task index: {error}")))?;
+        let threads = index
+            .get("threads")
+            .and_then(Value::as_object)
+            .ok_or_else(|| ToolError("child task index has no thread map".to_string()))?;
+        let canonical_base = base
+            .canonicalize()
+            .map_err(|error| ToolError(format!("cannot resolve child task index: {error}")))?;
+        let mut child_ids = threads
+            .keys()
+            .filter(|child_id| child_id.as_str() > after)
+            .cloned()
+            .collect::<Vec<_>>();
+        child_ids.sort();
+        let mut children = Vec::new();
+        let mut next_cursor = None;
+        for child_thread_id in child_ids {
+            let Some(session_id) = threads
+                .get(&child_thread_id)
+                .and_then(|entry| entry.get("session_id"))
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            if validate_child_id(&child_thread_id).is_err()
+                || validate_child_id(session_id).is_err()
+            {
+                continue;
+            }
+            let path = base.join(session_id).join("session.jsonl");
+            let Ok(canonical_path) = path.canonicalize() else {
+                continue;
+            };
+            if !canonical_path.starts_with(&canonical_base) {
+                return Err(ToolError(
+                    "child Session path escaped the Session root".to_string(),
+                ));
+            }
+            let (summary, _, _) =
+                read_child_task(&canonical_path, parent_session_id, 0, false).map_err(ToolError)?;
+            let Some(mut summary) = summary else {
+                continue;
+            };
+            summary.as_object_mut().unwrap().remove("result");
+            if children.len() == limit as usize {
+                next_cursor = children
+                    .last()
+                    .and_then(|value: &Value| value.get("child_thread_id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                break;
+            }
+            children.push(json!({"child_thread_id":child_thread_id,"operation":summary}));
+        }
+        serde_json::to_string(&json!({
+            "children": children,
+            "next_cursor": next_cursor,
+            "limit": limit,
+        }))
+        .map_err(|error| ToolError(error.to_string()))
+    }
+}
+
 impl ToolHandler for TaskReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -175,7 +308,8 @@ impl ToolRuntime for TaskReadTool {
             ));
         }
         let (operation, reports, next_cursor) =
-            read_child_task(&canonical_path, parent_session_id, after_cursor).map_err(ToolError)?;
+            read_child_task(&canonical_path, parent_session_id, after_cursor, true)
+                .map_err(ToolError)?;
         serde_json::to_string(&json!({
             "child_thread_id": child_thread_id,
             "status": operation
@@ -238,12 +372,13 @@ impl ToolHandler for TaskControlTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task_control".to_string(),
-            description: "Request Gateway-mediated control of a delegated child task. This tool returns an intent, not completion; the Gateway performs it and sends a bounded outcome to the parent at a safe Turn boundary or idle continuation. Re-read task state before deciding what to do next.".to_string(),
+            description: "Request Gateway-mediated control of a delegated child task. For every per-child action, use the current child_thread_id, operation_id, and positive attempt from task_list or task_read. This tool returns an intent, not completion; the Gateway performs it and sends a bounded outcome to the parent at a safe Turn boundary or idle continuation. Re-read task state before deciding what to do next.".to_string(),
             parameters: json!({
                 "type":"object", "required":["action"],
                 "properties":{
-                    "action":{"type":"string","enum":["update_queued","steer","assign","cancel","retry","cancel_group"]},
+                    "action":{"type":"string","enum":["update_queued","steer","assign","queue_follow_up","pause","resume","cancel","retry","cancel_group"]},
                     "child_thread_id":{"type":"string"}, "operation_id":{"type":"string"},
+                    "attempt":{"type":"integer","minimum":1,"description":"Expected current child operation attempt; required for every per-child action."},
                     "group_id":{"type":"string"}, "prompt":{"type":"string","maxLength":32768},
                     "text":{"type":"string","maxLength":4096}
                 }, "additionalProperties":false
@@ -260,40 +395,86 @@ impl ToolRuntime for TaskControlTool {
             .ok_or_else(|| ToolError("task_control requires action".to_string()))?;
         if !matches!(
             action,
-            "update_queued" | "steer" | "assign" | "cancel" | "retry" | "cancel_group"
+            "update_queued"
+                | "steer"
+                | "assign"
+                | "queue_follow_up"
+                | "pause"
+                | "resume"
+                | "cancel"
+                | "retry"
+                | "cancel_group"
         ) {
             return Err(ToolError("task_control action is invalid".to_string()));
         }
-        if action == "assign" {
+        let attempt = if action == "cancel_group" {
+            None
+        } else {
             let child_thread_id = arguments
                 .get("child_thread_id")
                 .and_then(Value::as_str)
                 .ok_or_else(|| {
-                    ToolError("task_control assign requires child_thread_id".to_string())
+                    ToolError(format!("task_control {action} requires child_thread_id"))
                 })?;
             validate_child_id(child_thread_id).map_err(ToolError)?;
             let operation_id = arguments
                 .get("operation_id")
                 .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    ToolError("task_control assign requires operation_id".to_string())
-                })?;
+                .ok_or_else(|| ToolError(format!("task_control {action} requires operation_id")))?;
             if operation_id.trim().is_empty() || operation_id.len() > 128 {
-                return Err(ToolError(
-                    "task_control assign operation_id must be non-empty and bounded".to_string(),
-                ));
+                return Err(ToolError(format!(
+                    "task_control {action} operation_id must be non-empty and bounded"
+                )));
             }
+            let attempt = arguments
+                .get("attempt")
+                .and_then(Value::as_u64)
+                .and_then(|attempt| u32::try_from(attempt).ok())
+                .filter(|attempt| *attempt > 0)
+                .ok_or_else(|| {
+                    ToolError(format!("task_control {action} requires a positive attempt"))
+                })?;
+            Some(attempt)
+        };
+        if matches!(action, "update_queued" | "assign" | "queue_follow_up") {
             let prompt = arguments
                 .get("prompt")
                 .and_then(Value::as_str)
-                .ok_or_else(|| ToolError("task_control assign requires prompt".to_string()))?;
+                .ok_or_else(|| ToolError(format!("task_control {action} requires prompt")))?;
             if prompt.trim().is_empty() || prompt.len() > MAX_CHILD_PROMPT_BYTES {
+                return Err(ToolError(format!(
+                    "task_control {action} prompt must be non-empty and at most 32 KiB"
+                )));
+            }
+        }
+        if action == "steer" {
+            let text = arguments
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ToolError("task_control steer requires text".to_string()))?;
+            if text.trim().is_empty() || text.len() > 4 * 1024 {
                 return Err(ToolError(
-                    "task_control assign prompt must be non-empty and at most 32 KiB".to_string(),
+                    "task_control steer text must be non-empty and at most 4 KiB".to_string(),
+                ));
+            }
+        }
+        if action == "cancel_group" {
+            let group_id = arguments
+                .get("group_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    ToolError("task_control cancel_group requires group_id".to_string())
+                })?;
+            if group_id.trim().is_empty() || group_id.len() > MAX_OPERATION_GROUP_ID_BYTES {
+                return Err(ToolError(
+                    "task_control cancel_group group_id must be non-empty and bounded".to_string(),
                 ));
             }
         }
         let mut intent = json!({"status":"requested","action":action});
+        if let Some(attempt) = attempt {
+            intent["attempt"] = json!(attempt);
+        }
         for key in [
             "child_thread_id",
             "operation_id",
@@ -322,6 +503,9 @@ pub fn child_task_tools(
         vec![
             Box::new(DelegateTaskTool),
             Box::new(TaskReadTool {
+                parent_session_dir: session_dir.clone(),
+            }),
+            Box::new(TaskListTool {
                 parent_session_dir: session_dir,
             }),
             Box::new(TaskControlTool),
@@ -360,11 +544,14 @@ fn read_child_task(
     path: &Path,
     parent_session_id: &str,
     after_cursor: u64,
+    include_reports: bool,
 ) -> Result<(Option<Value>, Vec<Value>, u64), String> {
     let bytes = fs::read(path).map_err(|error| format!("cannot read child Session: {error}"))?;
     let mut valid_lineage = false;
     let mut operation_id: Option<String> = None;
     let mut latest = None;
+    let mut follow_up = None;
+    let mut control = None;
     let mut reports = Vec::new();
     let mut next_cursor = after_cursor;
     for line in bytes.split(|byte| *byte == b'\n') {
@@ -389,42 +576,54 @@ fn read_child_task(
                 .get("operation_id")
                 .and_then(Value::as_str)
                 .map(str::to_string);
-            let mut bounded = serde_json::Map::new();
-            for key in [
-                "operation_id",
-                "operation_kind",
-                "status",
-                "turn_id",
-                "operation_group_id",
-                "execution_mode",
-            ] {
+            let Ok(operation_record) = serde_json::from_value::<SessionOperation>(record.clone())
+            else {
+                continue;
+            };
+            let mut bounded =
+                serde_json::to_value(operation_record).expect("SessionOperation is serializable");
+            for key in ["prompt", "result", "error"] {
                 if let Some(value) = record.get(key).and_then(Value::as_str) {
-                    let value = value.to_string();
-                    bounded.insert(key.to_string(), json!(value));
-                }
-            }
-            if let Some(sequence) = record.get("group_sequence").and_then(Value::as_u64) {
-                bounded.insert("group_sequence".to_string(), json!(sequence));
-            }
-            if let Some(attempt) = record.get("attempt").and_then(Value::as_u64) {
-                bounded.insert("attempt".to_string(), json!(attempt));
-            }
-            for key in ["result", "error"] {
-                if let Some(value) = record.get(key).and_then(Value::as_str) {
-                    bounded.insert(
-                        key.to_string(),
-                        json!(
-                            value
-                                .chars()
-                                .take(MAX_CHILD_TASK_RESULT_CHARS)
-                                .collect::<String>()
-                        ),
+                    bounded[key] = json!(
+                        value
+                            .chars()
+                            .take(MAX_CHILD_TASK_RESULT_CHARS)
+                            .collect::<String>()
                     );
                 }
             }
-            latest = Some(Value::Object(bounded));
+            control = match record.get("status").and_then(Value::as_str) {
+                Some("pausing" | "cancelling") => Some(json!({
+                    "action": if record["status"] == "pausing" { "pause" } else { "cancel_active" },
+                    "status": if record["status"] == "pausing" { "pending" } else { "accepted" },
+                    "request_id": record.get("control_request_id").and_then(Value::as_str),
+                })),
+                _ => None,
+            };
+            latest = Some(bounded);
         }
-        if !valid_lineage
+        if valid_lineage
+            && record.get("kind").and_then(Value::as_str) == Some("child_control_request")
+            && record.get("operation_id").and_then(Value::as_str) == operation_id.as_deref()
+        {
+            let action = record.get("action").and_then(Value::as_str);
+            if action == Some("queue_follow_up") {
+                follow_up = Some(json!({
+                    "status": record.get("request_status").and_then(Value::as_str).unwrap_or("accepted"),
+                    "prompt": record.get("prompt").and_then(Value::as_str)
+                        .map(|prompt| prompt.chars().take(256).collect::<String>()),
+                    "request_id": record.get("request_id").and_then(Value::as_str),
+                }));
+            } else if matches!(action, Some("pause" | "cancel_active")) {
+                control = Some(json!({
+                    "action": action,
+                    "status": record.get("request_status").and_then(Value::as_str),
+                    "request_id": record.get("request_id").and_then(Value::as_str),
+                }));
+            }
+        }
+        if !include_reports
+            || !valid_lineage
             || record.get("kind").and_then(Value::as_str) != Some("child_report")
             || record.get("operation_id").and_then(Value::as_str) != operation_id.as_deref()
         {
@@ -457,6 +656,18 @@ fn read_child_task(
         }
         next_cursor = cursor;
         reports.push(report);
+    }
+    if let Some(latest) = latest.as_mut() {
+        if let Some(follow_up) = follow_up
+            .filter(|request| matches!(request["status"].as_str(), Some("accepted" | "blocked")))
+        {
+            latest["follow_up"] = follow_up;
+        }
+        if let Some(control) = control
+            .filter(|request| matches!(request["status"].as_str(), Some("pending" | "accepted")))
+        {
+            latest["control"] = control;
+        }
     }
     Ok((latest, reports, next_cursor))
 }
@@ -532,17 +743,94 @@ mod tests {
                 .contains("sends a bounded outcome to the parent")
         );
         let result = TaskControlTool.execute(&json!({
-            "action":"steer","child_thread_id":"child-1","operation_id":"child:child-1","text":"inspect the failing test"
+            "action":"steer","child_thread_id":"child-1","operation_id":"child:child-1","attempt":2,"text":"inspect the failing test"
         })).unwrap();
         let value: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(value["status"], "requested");
         assert_eq!(value["action"], "steer");
+        assert_eq!(value["attempt"], 2);
         assert_eq!(value["text"], "inspect the failing test");
+        let pause = TaskControlTool.execute(&json!({
+            "action":"pause","child_thread_id":"child-1","operation_id":"child:child-1","attempt":2
+        })).unwrap();
+        assert!(!pause.contains("turn_id"));
+        assert!(
+            TaskControlTool
+                .execute(&json!({
+                    "action":"cancel","child_thread_id":"child-1","operation_id":"child:child-1"
+                }))
+                .is_err()
+        );
+        assert!(
+            TaskControlTool
+                .execute(&json!({"action":"cancel_group","group_id":"review"}))
+                .is_ok()
+        );
         assert!(
             TaskControlTool
                 .execute(&json!({"action":"destroy"}))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn task_list_paginates_child_summaries_without_reports() {
+        let root = crate::test_support::test_root();
+        let parent_session_dir = root.join("parent-session");
+        fs::create_dir_all(&parent_session_dir).unwrap();
+        let mut threads = serde_json::Map::new();
+        for (child_id, session_id, parent_id) in [
+            ("child-c", "session-c", "parent-session"),
+            ("child-a", "session-a", "parent-session"),
+            ("child-b", "session-b", "parent-session"),
+            ("other-child", "session-other", "other-parent"),
+        ] {
+            threads.insert(
+                child_id.to_string(),
+                json!({"session_id":session_id,"updated_at_ms":1}),
+            );
+            let session_dir = root.join(session_id);
+            fs::create_dir_all(&session_dir).unwrap();
+            fs::write(
+                session_dir.join("session.jsonl"),
+                [
+                    json!({"kind":"session_created","forked_from":{"parent_session_id":parent_id}}),
+                    json!({"kind":"operation","operation_kind":"child_task","operation_id":format!("child:{child_id}"),"parent_thread_id":"parent-thread","status":"running","attempt":1,"prompt":"short prompt","timestamp_ms":1}),
+                    json!({"kind":"child_report","operation_id":format!("child:{child_id}"),"report":"private detail"}),
+                ]
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            )
+            .unwrap();
+        }
+        fs::write(
+            root.join("thread_index.json"),
+            json!({"threads":threads}).to_string(),
+        )
+        .unwrap();
+
+        let tool = TaskListTool { parent_session_dir };
+        let first: Value =
+            serde_json::from_str(&tool.execute(&json!({"limit":2})).unwrap()).unwrap();
+        assert_eq!(first["children"].as_array().unwrap().len(), 2);
+        assert_eq!(first["children"][0]["child_thread_id"], "child-a");
+        assert_eq!(first["children"][1]["child_thread_id"], "child-b");
+        assert_eq!(first["next_cursor"], "child-b");
+        assert_eq!(first["children"][0]["operation"]["status"], "running");
+        assert!(first["children"][0]["operation"].get("reports").is_none());
+
+        let second: Value = serde_json::from_str(
+            &tool
+                .execute(&json!({"limit":2,"after_child_thread_id":"child-b"}))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(second["children"].as_array().unwrap().len(), 1);
+        assert_eq!(second["children"][0]["child_thread_id"], "child-c");
+        assert!(second["next_cursor"].is_null());
+        crate::test_support::remove_test_root(&root);
     }
 
     #[test]
@@ -589,10 +877,10 @@ mod tests {
                 .join("\n"),
         )
         .unwrap();
-        let (_, first, cursor) = read_child_task(&path, "parent", 2).unwrap();
+        let (_, first, cursor) = read_child_task(&path, "parent", 2, true).unwrap();
         assert_eq!(first.len(), MAX_REPORT_PAGE);
         assert_eq!(cursor, 34);
-        let (_, second, next) = read_child_task(&path, "parent", cursor).unwrap();
+        let (_, second, next) = read_child_task(&path, "parent", cursor, true).unwrap();
         assert_eq!(second.len(), 3);
         assert_eq!(second[0]["report"], "report 35");
         assert_eq!(next, 37);

@@ -28,20 +28,43 @@ where
                 ),
             );
         }
+        let request_id_valid = params
+            .request_id
+            .as_deref()
+            .is_some_and(|id| !id.is_empty() && id.len() <= 192);
+        let optional_request_id_valid = params
+            .request_id
+            .as_deref()
+            .is_none_or(|id| !id.is_empty() && id.len() <= 192);
         let payload_valid = match params.action {
             mini_agent_app_server_protocol::ChildTaskAction::Report => {
                 params.report_id.is_some() && params.report.is_some()
             }
             mini_agent_app_server_protocol::ChildTaskAction::UpdateQueued => {
-                params.prompt.is_some()
+                params.prompt.is_some() && optional_request_id_valid
             }
-            mini_agent_app_server_protocol::ChildTaskAction::CancelQueued => true,
+            mini_agent_app_server_protocol::ChildTaskAction::CancelQueued => {
+                optional_request_id_valid
+            }
             mini_agent_app_server_protocol::ChildTaskAction::QueueFollowUp => {
-                params.prompt.is_some()
+                params.prompt.is_some() && request_id_valid
+            }
+            mini_agent_app_server_protocol::ChildTaskAction::Pause
+            | mini_agent_app_server_protocol::ChildTaskAction::CancelActive => {
+                request_id_valid
                     && params
-                        .request_id
+                        .turn_id
                         .as_deref()
-                        .is_some_and(|id| !id.is_empty() && id.len() <= 192)
+                        .is_some_and(|id| !id.is_empty() && id.len() <= 128)
+            }
+            mini_agent_app_server_protocol::ChildTaskAction::Resume
+            | mini_agent_app_server_protocol::ChildTaskAction::Retry => request_id_valid,
+            mini_agent_app_server_protocol::ChildTaskAction::StartFailure => {
+                request_id_valid
+                    && params
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| !error.trim().is_empty() && error.len() <= 2048)
             }
         };
         if !payload_valid {
@@ -54,12 +77,21 @@ where
             Ok(management) => management,
             Err(error) => return response_error(request.id, error),
         };
-        let _request_guard =
-            if params.action == mini_agent_app_server_protocol::ChildTaskAction::QueueFollowUp {
-                Some(self.server.lock_child_steer_request().await)
-            } else {
-                None
-            };
+        let _request_guard = if matches!(
+            params.action,
+            mini_agent_app_server_protocol::ChildTaskAction::QueueFollowUp
+                | mini_agent_app_server_protocol::ChildTaskAction::Pause
+                | mini_agent_app_server_protocol::ChildTaskAction::Resume
+                | mini_agent_app_server_protocol::ChildTaskAction::CancelActive
+                | mini_agent_app_server_protocol::ChildTaskAction::Retry
+                | mini_agent_app_server_protocol::ChildTaskAction::StartFailure
+                | mini_agent_app_server_protocol::ChildTaskAction::UpdateQueued
+                | mini_agent_app_server_protocol::ChildTaskAction::CancelQueued
+        ) {
+            Some(self.server.lock_child_steer_request().await)
+        } else {
+            None
+        };
         action_response(
             request.id,
             management.child_task_action(params),

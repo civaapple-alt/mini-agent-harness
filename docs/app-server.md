@@ -246,7 +246,7 @@ Thread returned by `thread/start`.
 | `thread/items/list` | `threadId`; optional `turnId`, `cursor`, `limit`, `sortDirection` | Returns cursor-bounded `data` entries, `nextCursor`, and `backwardsCursor`. |
 | `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
 | `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`), `operationId`, `operationAttempt`, `operationPrompt`, `operationGroupId`, `executionMode`, `groupSequence` | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. Fork metadata is a bounded operation projection only; it does not make Core a scheduler. |
-| `child/task` | `threadId`, `parentThreadId`, `operationId`, `attempt`, `action`; action-specific bounded report, prompt, report/request identity | Persists a validated child report or queued-task mutation. `queue_follow_up` uses the expected completed attempt and stable `requestId` to allocate the next attempt on the same child operation; repeats return the same allocation. |
+| `child/task` | `threadId`, `parentThreadId`, `operationId`, `attempt`, `action`; action-specific bounded report, prompt, report/request identity, and for pause/active cancellation the `turnId` | Persists a validated child report or operation control. Queued updates and cancellation, follow-up, pause/resume, active cancellation, retry, and start-failure actions validate parent lineage and operation attempt. `queue_follow_up` is idempotent by `requestId`, allows one pending instruction, and allocates the next attempt on success. |
 | `session/notebook/read` | `threadId`, optional `scope` (`self` or `parent`) | Reads the current Session notebook or a Host-validated parent snapshot. Parent scope is read-only and cannot select an arbitrary Session or path. |
 | `session/notebook/write` | `threadId`, `key`, `content`, optional `append`, `importance` (`critical`, `high`, `normal`, `temporary`), `keywords`, and bounded `evidence` | Upserts the current Session's bounded Notebook entry and returns the new snapshot. Evidence is bounded caller-supplied provenance metadata; subject normalization and truncation are applied, but Git/file-system verification is not claimed. |
 | `session/notebook/forget` | `threadId`, `key` | Removes one current-Session entry and advances the Notebook revision without rewriting checkpoint history. |
@@ -387,14 +387,13 @@ only `name`, `qualifiedName`, compatibility `aliases`, `description`, `source`,
 
 #### Child operations and Session notebook
 
-`delegate_task`, `task_read`, `task_report`, and `task_control` are Host-owned
-capabilities. `delegate_task` returns a bounded queue request; the surrounding
-Host/App Server control seam creates an exact child Session and starts a separate
-child runtime. Child Sessions receive `task_report`, but not delegation tools, so
-delegation remains one level deep. `task_read` reads the child’s canonical
-Session projection and returns bounded status, attempt, result, error, and
-incremental reports (`after_cursor`, at most 32 reports / 10 KiB per page).
-Neither tool adds a scheduler or a second history authority to Core. WebStudio
+`delegate_task`, `task_list`, `task_read`, `task_report`, and `task_control` are
+Host-owned capabilities. `delegate_task` returns a bounded queue request; the
+surrounding Host/App Server control seam creates an exact child Session and
+starts a separate child runtime. Child Sessions receive `task_report`, but not
+delegation tools, so delegation remains one level deep. `task_list` and
+`task_read` read the canonical child operation and Session projection. They do
+not add a scheduler or a second history authority to Core. WebStudio
 defaults to two active children per parent, with a Host setting bounded to
 `1..=8`; overflow is durable `queued` state and starts automatically when a slot
 frees. Queued operation prompts retain ordinary line breaks and tabs, remain
@@ -433,6 +432,34 @@ guarantee. If the child settles between Gateway inspection and reservation, the
 App Server returns `not_submitted`; the Gateway rereads the child and may queue
 the completed follow-up with the same request ID.
 
+`task_list` returns parent-owned child operation summaries in pages of at most
+32 entries, ordered by `child_thread_id`; use `next_cursor` as
+`after_child_thread_id` to continue. It does not return reports or transcripts.
+`task_read` returns bounded status, attempt, result, error, and incremental
+reports (`after_cursor`, at most 32 reports / 10 KiB per page).
+Every per-child `task_control` intent identifies `child_thread_id`,
+`operation_id`, and the expected positive `attempt`. The Gateway compares that
+identity against the persisted projection before it acts; stale attempts return
+a visible stale outcome. `cancel_group` instead targets a sequential group in
+the current parent Turn.
+
+At most one follow-up can be pending for an operation. Duplicate request IDs
+return the same result; a second pending request is rejected without replacing
+the first. A pending follow-up starts on the same child Session after the
+current attempt succeeds. If that attempt fails, the follow-up remains durably
+blocked until a retry succeeds; cancelling the operation cancels the pending
+follow-up. Retry increments `attempt` on the same operation and Session.
+
+Pause and stop first persist their request in the child Session, then ask the
+Gateway to interrupt the active Turn cooperatively. The operation remains
+`pausing` or `cancelling` and occupies a concurrency slot until the Turn settles.
+Only a settled pause projects `paused` and frees the slot. Resume returns the
+same operation and attempt to `queued`; it does not count as a retry. The
+Gateway uses one control executor for parent `task_control` intents and
+WebStudio panel actions. Each request is bound to a stable request ID, operation,
+and attempt. A tool control is dispatched only after App Server reports its
+validated `tool_finished` result, not from the unvalidated start event.
+
 Task control execution remains Gateway-mediated. The Gateway sends each control
 action through the child runtime, then coalesces its bounded outcome into a
 parent wake-up. An active parent is not interrupted; the Gateway starts one
@@ -447,7 +474,7 @@ with a count and up to eight sample IDs. A per-Session start lock serializes
 automatic wake-up admission with user Turn starts.
 
 The Session store appends operation lifecycle records (`queued`, `running`,
-`awaiting_approval`, `completed`, `failed`, or `cancelled`) to the existing
+`awaiting_approval`, `paused`, `completed`, `failed`, or `cancelled`) to the existing
 bounded JSONL persistence. A child operation keeps the same `operationId` across
 attempts and increments `operationAttempt`; `attemptKind` distinguishes `initial`,
 `retry`, and `follow_up`. A retry or follow-up is a new child Turn, not a replay of

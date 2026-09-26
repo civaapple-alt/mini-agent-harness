@@ -1192,6 +1192,98 @@ async fn child_task_report_rpc_checks_attempt_and_persists_idempotently() {
 }
 
 #[tokio::test]
+async fn active_child_follow_up_rpc_is_idempotent_and_survives_restart() {
+    let root = rpc_root("active-child-follow-up");
+    let mut operation = mini_agent_capabilities::SessionOperation::new(
+        "child:active-follow-up",
+        "child_task",
+        "running",
+    );
+    operation.turn_id = Some("turn-active".to_string());
+    operation.prompt = Some("Initial task".to_string());
+    operation.attempt_kind = Some(mini_agent_protocol::ChildTaskAttemptKind::Initial);
+    let (parent_thread_id, child_session_id, child) =
+        forked_child_session(&root, "active-follow-up-child", operation);
+    let mut connection = managed_connection_with_session(DoneModel, root.clone(), child);
+    initialize_connection(&mut connection, "active-child-follow-up-test").await;
+    let params = serde_json::json!({
+        "threadId":"active-follow-up-child",
+        "parentThreadId":parent_thread_id,
+        "operationId":"child:active-follow-up",
+        "attempt":1,
+        "action":"queue_follow_up",
+        "requestId":"follow-up-active-1",
+        "prompt":"Review the first result"
+    });
+    let first = rpc_call(&mut connection, 2, METHOD_CHILD_TASK, params.clone()).await;
+    let duplicate = rpc_call(&mut connection, 3, METHOD_CHILD_TASK, params).await;
+    assert_eq!(first["value"]["status"], "queued");
+    assert_eq!(first["value"]["attempt"], 1);
+    assert_eq!(duplicate["value"]["duplicate"], true);
+    assert_eq!(duplicate["value"]["status"], "queued");
+
+    let overflow = connection
+        .handle_request(JsonRpcRequest::request(
+            4,
+            METHOD_CHILD_TASK,
+            serde_json::json!({
+                "threadId":"active-follow-up-child",
+                "parentThreadId":parent_thread_id,
+                "operationId":"child:active-follow-up",
+                "attempt":1,
+                "action":"queue_follow_up",
+                "requestId":"follow-up-active-2",
+                "prompt":"A second follow-up"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(overflow.error.is_some());
+    connection.shutdown().await.unwrap();
+
+    let mut resumed =
+        SessionStore::open(&root, SessionStoreRequest::Resume(child_session_id.clone())).unwrap();
+    let operation = resumed
+        .store
+        .operation("child:active-follow-up")
+        .unwrap()
+        .unwrap();
+    assert_eq!(operation.status, "running");
+    assert_eq!(operation.attempt, 1);
+    assert_eq!(operation.prompt.as_deref(), Some("Initial task"));
+    let session_log = std::fs::read_to_string(resumed.store.path()).unwrap();
+    assert!(session_log.contains("\"request_status\":\"accepted\""));
+    assert!(session_log.contains("Review the first result"));
+    let mut completed = mini_agent_capabilities::SessionOperation::new(
+        "child:active-follow-up",
+        "child_task",
+        "completed",
+    );
+    completed.turn_id = Some("turn-active".to_string());
+    resumed.store.record_operation(completed).unwrap();
+    let promoted = resumed
+        .store
+        .operation("child:active-follow-up")
+        .unwrap()
+        .unwrap();
+    assert_eq!(promoted.status, "queued");
+    assert_eq!(promoted.attempt, 2);
+    assert_eq!(promoted.prompt.as_deref(), Some("Review the first result"));
+    drop(resumed);
+    let recovered =
+        SessionStore::open(&root, SessionStoreRequest::Resume(child_session_id)).unwrap();
+    let promoted = recovered
+        .store
+        .operation("child:active-follow-up")
+        .unwrap()
+        .unwrap();
+    assert_eq!(promoted.status, "queued");
+    assert_eq!(promoted.attempt, 2);
+    drop(recovered);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn completed_child_follow_up_starts_a_new_turn_on_the_same_session() {
     let root = rpc_root("child-follow-up-round");
     let mut operation = mini_agent_capabilities::SessionOperation::new(
