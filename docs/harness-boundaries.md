@@ -196,10 +196,11 @@ fail-closed 行为，再增加政策和跨平台边界测试。
 
 ### Provider 与 retry
 
-单一 provider 的行为不能自动产生 provider-specific 分支。Responses adapter 对 HTTP
-请求阶段的连接建立错误执行最多两次短延迟重试；HTTP 429、其他 HTTP 状态和已开始的
-SSE 响应保持 fail-fast，避免重放已被 provider 接收或已向用户输出部分内容的请求。错误
-信息保留有界的底层传输原因。此策略不另起执行循环，也不调用付费 provider。
+单一 provider 的行为不能自动产生 provider-specific 分支。Responses adapter 只对连接
+建立失败执行最多两次短延迟重试。连接建立后、收到完整 HTTP 响应前的传输错误不自动
+重试：provider 可能已经接收并处理请求，客户端无法判断结果；HTTP 状态和已开始的 SSE
+响应也保持 fail-fast，避免重复执行请求或重放部分输出。错误信息保留有界的底层传输
+原因。此策略不另起执行循环，也不调用付费 provider。
 
 ### Cargo dependency direction
 

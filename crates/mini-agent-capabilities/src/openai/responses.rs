@@ -545,6 +545,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn does_not_retry_after_server_received_request_without_returning_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .unwrap();
+
+            let mut headers = Vec::new();
+            let mut byte = [0_u8; 1];
+            while !headers.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).unwrap();
+                headers.push(byte[0]);
+            }
+            let headers = String::from_utf8(headers).unwrap();
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+                .expect("the JSON request has a content length");
+            let mut body = vec![0; content_length];
+            stream.read_exact(&mut body).unwrap();
+
+            // The server received the full request but lost its response. The
+            // client cannot know whether the provider already processed it.
+            stream.shutdown(std::net::Shutdown::Both).unwrap();
+        });
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let url = format!("http://{address}/responses");
+        let mut send_attempts = 0;
+        let result = super::super::send_with_connect_retries(|| {
+            send_attempts += 1;
+            let client = client.clone();
+            let url = url.clone();
+            async move {
+                client
+                    .post(url)
+                    .json(&json!({"input": "fully delivered"}))
+                    .send()
+                    .await
+            }
+        })
+        .await;
+        server.join().unwrap();
+
+        let (error, attempts) = result.expect_err("a closed response must remain visible");
+        assert_eq!(send_attempts, 1);
+        assert_eq!(attempts, 1);
+        assert!(!error.is_connect());
+    }
+
+    #[tokio::test]
     async fn bounds_connection_retries_and_reports_the_final_attempt_count() {
         let reserved = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = reserved.local_addr().unwrap();

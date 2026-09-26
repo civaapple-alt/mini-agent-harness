@@ -110,6 +110,7 @@ graph LR
 
 ### Implemented
 
+- [Responses 传输中断与安全重试边界](implemented/bug-fix/2026-09-26-responses-transport-retry-boundary.zh.md)
 - [子任务多轮协作、自主控制与恢复](implemented/architecture/2026-09-20-child-agent-rounds-and-message-flow.zh.md)
 - [跨 Turn 的本地后台 Shell 任务](implemented/architecture/2026-09-18-background-shell-task.zh.md)
 - [跨 Turn 延时标记](implemented/architecture/2026-09-18-scheduled-task.zh.md)
