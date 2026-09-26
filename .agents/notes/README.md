@@ -10,6 +10,7 @@
 
 当前相关决策：
 
+- [Session 级冻结、恢复与子任务报告送达](implemented/architecture/2026-09-26-session-wide-freeze-and-child-report-delivery.zh.md)
 - [Workspace Roots、Session Artifacts 与 Prompt Cache](implemented/architecture/2026-09-18-workspace-roots-session-artifacts-and-prompt-cache.zh.md)
 - [Trusted 公网 web_fetch 审批修正](implemented/bug-fix/2026-09-20-trusted-web-fetch-approval.zh.md)
 - [全局 Skill 发现、按需加载与阶段事件](implemented/feature/2026-09-17-global-skill-discovery-and-observability.zh.md)

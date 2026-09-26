@@ -59,6 +59,7 @@ pub const METHOD_THREAD_GOAL_CLEAR: &str = "thread/goal/clear";
 pub const METHOD_THREAD_GOAL_UPDATED: &str = "thread/goal/updated";
 pub const METHOD_THREAD_GOAL_CLEARED: &str = "thread/goal/cleared";
 pub const METHOD_SESSION_INFO: &str = "session/info";
+pub const METHOD_SESSION_CONTROL: &str = "session/control";
 pub const METHOD_SESSION_FORK: &str = "session/fork";
 pub const METHOD_SESSION_NOTEBOOK_READ: &str = "session/notebook/read";
 pub const METHOD_SESSION_NOTEBOOK_WRITE: &str = "session/notebook/write";
@@ -977,6 +978,8 @@ pub struct ChildTaskParams {
     pub attempt: u32,
     pub action: ChildTaskAction,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_source: Option<ChildTaskControlSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report: Option<String>,
@@ -988,6 +991,53 @@ pub struct ChildTaskParams {
     pub turn_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildTaskControlSource {
+    MainAgent,
+    UserPanel,
+    ParentFreeze,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionControlParams {
+    pub thread_id: ThreadId,
+    pub action: SessionControlAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionControlAction {
+    Read,
+    Freeze,
+    FreezeSettled,
+    Resume,
+    ResumeSettled,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionControlStatus {
+    Running,
+    Freezing,
+    Frozen,
+    Resuming,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionControlResult {
+    pub thread_id: ThreadId,
+    pub session_id: String,
+    pub status: SessionControlStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    pub updated_at_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -34,6 +34,9 @@ const MAX_OPERATION_ERROR_BYTES: usize = 4096;
 const MAX_OPERATION_RESULT_BYTES: usize = 16 * 1024;
 const MAX_OPERATION_PROMPT_BYTES: usize = 32 * 1024;
 const MAX_CHILD_REPORT_BYTES: usize = 4 * 1024;
+const MAX_SESSION_CONTROL_BYTES: u64 = 16 * 1024;
+const MAX_CHILD_REPORT_RECEIPTS: usize = 4096;
+const MAX_CHILD_REPORT_RECEIPTS_BYTES: u64 = 1024 * 1024;
 /// A single Turn can activate a bounded number of explicit skills, and may
 /// additionally load a small number of skills on demand. Keep the replay
 /// projection bounded independently of the raw event stream.
@@ -46,6 +49,9 @@ pub const SIGNALS_FILE_NAME: &str = "signals.json";
 pub const PROMPT_CONTEXT_FILE_NAME: &str = "prompt_context.json";
 pub const THREAD_INDEX_FILE_NAME: &str = "thread_index.json";
 pub const THREAD_SETTINGS_FILE_NAME: &str = "thread_settings.json";
+pub const SESSION_CONTROL_FILE_NAME: &str = "session_control.json";
+pub const CHILD_REPORT_RECEIPTS_FILE_NAME: &str = "child_report_receipts.json";
+const CHILD_REPORT_RECEIPTS_LOCK_NAME: &str = "child_report_receipts";
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 pub enum SessionRequest {
@@ -359,6 +365,8 @@ pub struct SessionOperation {
     pub control_request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_source: Option<ChildTaskControlSource>,
     #[serde(
         rename = "operation_group_id",
         default,
@@ -380,6 +388,50 @@ pub struct SessionOperation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub timestamp_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildTaskControlSource {
+    MainAgent,
+    UserPanel,
+    ParentFreeze,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionControlStatus {
+    Running,
+    Freezing,
+    Frozen,
+    Resuming,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionControlAction {
+    Freeze,
+    FreezeSettled,
+    Resume,
+    ResumeSettled,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionControlState {
+    pub session_id: String,
+    pub status: SessionControlStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildReportReceipt {
+    pub child_thread_id: String,
+    pub operation_id: String,
+    pub attempt: u32,
+    pub cursor: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -430,6 +482,7 @@ impl SessionOperation {
             attempt_kind: None,
             control_request_id: None,
             control_action: None,
+            control_source: None,
             group_id: None,
             execution_mode: None,
             sequence: None,
@@ -582,6 +635,112 @@ impl SessionStore {
         &self.path
     }
 
+    pub fn session_control(&self) -> Result<SessionControlState, String> {
+        read_session_control(&self.session_dir, &self.session_id)
+    }
+
+    pub fn transition_session_control(
+        &mut self,
+        action: SessionControlAction,
+        request_id: &str,
+    ) -> Result<SessionControlState, String> {
+        validate_operation_text(request_id, 192, "session control request id")?;
+        let mut state = self.session_control()?;
+        match action {
+            SessionControlAction::Freeze => {
+                if matches!(
+                    state.status,
+                    SessionControlStatus::Freezing | SessionControlStatus::Frozen
+                ) {
+                    return Ok(state);
+                }
+                state.status = SessionControlStatus::Freezing;
+                state.request_id = Some(request_id.to_string());
+            }
+            SessionControlAction::FreezeSettled => {
+                if state.status == SessionControlStatus::Frozen {
+                    return Ok(state);
+                }
+                if state.status != SessionControlStatus::Freezing
+                    || state.request_id.as_deref() != Some(request_id)
+                {
+                    return Err("session freeze request is stale".to_string());
+                }
+                state.status = SessionControlStatus::Frozen;
+            }
+            SessionControlAction::Resume => {
+                if matches!(state.status, SessionControlStatus::Running) {
+                    return Ok(state);
+                }
+                if state.status == SessionControlStatus::Resuming {
+                    return Ok(state);
+                }
+                if state.status != SessionControlStatus::Frozen {
+                    return Err("Session freeze has not settled yet".to_string());
+                }
+                state.status = SessionControlStatus::Resuming;
+                state.request_id = Some(request_id.to_string());
+            }
+            SessionControlAction::ResumeSettled => {
+                if state.status == SessionControlStatus::Running {
+                    return Ok(state);
+                }
+                if state.status != SessionControlStatus::Resuming
+                    || state.request_id.as_deref() != Some(request_id)
+                {
+                    return Err("session resume request is stale".to_string());
+                }
+                state.status = SessionControlStatus::Running;
+            }
+        }
+        state.updated_at_ms = timestamp_ms();
+        persist_session_control(&self.session_dir, &state)?;
+        Ok(state)
+    }
+
+    pub fn read_child_report_receipts(
+        session_dir: &Path,
+    ) -> Result<Vec<ChildReportReceipt>, String> {
+        read_child_report_receipts(session_dir)
+    }
+
+    pub fn record_child_report_receipt(
+        session_dir: &Path,
+        receipt: ChildReportReceipt,
+    ) -> Result<(), String> {
+        validate_child_report_receipt(&receipt)?;
+        let session_id = session_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "parent Session identity is unavailable".to_string())?;
+        validate_session_id(session_id)?;
+        let _lock = acquire_lock(session_dir, CHILD_REPORT_RECEIPTS_LOCK_NAME)?;
+        let mut receipts = read_child_report_receipts(session_dir)?;
+        if let Some(existing) = receipts.iter_mut().find(|existing| {
+            existing.child_thread_id == receipt.child_thread_id
+                && existing.operation_id == receipt.operation_id
+                && existing.attempt == receipt.attempt
+        }) {
+            existing.cursor = existing.cursor.max(receipt.cursor);
+        } else {
+            if receipts.len() >= MAX_CHILD_REPORT_RECEIPTS {
+                return Err("child report receipt limit reached".to_string());
+            }
+            receipts.push(receipt);
+        }
+        let value = json!({
+            "version": 1,
+            "session_id": session_id,
+            "receipts": receipts,
+        });
+        let encoded = serde_json::to_vec(&value)
+            .map_err(|error| format!("cannot encode child report receipts: {error}"))?;
+        if encoded.len() as u64 > MAX_CHILD_REPORT_RECEIPTS_BYTES {
+            return Err("child report receipts exceed their storage limit".to_string());
+        }
+        write_json_atomic(&session_dir.join(CHILD_REPORT_RECEIPTS_FILE_NAME), &value)
+    }
+
     /// Reads the latest committed checkpoint without acquiring the Session's
     /// live writer lock.
     ///
@@ -723,6 +882,7 @@ impl SessionStore {
             operation.control_action = operation
                 .control_action
                 .or_else(|| previous.control_action.clone());
+            operation.control_source = operation.control_source.or(previous.control_source);
             if operation.status == "cancelled"
                 && previous.status == "pausing"
                 && previous.attempt == operation.attempt
@@ -1000,7 +1160,22 @@ impl SessionStore {
         request_id: &str,
         turn_id: &str,
     ) -> Result<ChildTaskMutationResult, String> {
-        self.record_active_child_control(context, request_id, turn_id, "pause", false)
+        self.pause_child_task_from(
+            context,
+            request_id,
+            turn_id,
+            ChildTaskControlSource::MainAgent,
+        )
+    }
+
+    pub fn pause_child_task_from(
+        &mut self,
+        context: &ChildTaskContext,
+        request_id: &str,
+        turn_id: &str,
+        source: ChildTaskControlSource,
+    ) -> Result<ChildTaskMutationResult, String> {
+        self.record_active_child_control(context, request_id, turn_id, "pause", false, source)
     }
 
     pub fn cancel_active_child_task(
@@ -1009,13 +1184,44 @@ impl SessionStore {
         request_id: &str,
         turn_id: &str,
     ) -> Result<ChildTaskMutationResult, String> {
-        self.record_active_child_control(context, request_id, turn_id, "cancel_active", true)
+        self.cancel_active_child_task_from(
+            context,
+            request_id,
+            turn_id,
+            ChildTaskControlSource::MainAgent,
+        )
+    }
+
+    pub fn cancel_active_child_task_from(
+        &mut self,
+        context: &ChildTaskContext,
+        request_id: &str,
+        turn_id: &str,
+        source: ChildTaskControlSource,
+    ) -> Result<ChildTaskMutationResult, String> {
+        self.record_active_child_control(
+            context,
+            request_id,
+            turn_id,
+            "cancel_active",
+            true,
+            source,
+        )
     }
 
     pub fn resume_child_task(
         &mut self,
         context: &ChildTaskContext,
         request_id: &str,
+    ) -> Result<ChildTaskMutationResult, String> {
+        self.resume_child_task_from(context, request_id, ChildTaskControlSource::MainAgent)
+    }
+
+    pub fn resume_child_task_from(
+        &mut self,
+        context: &ChildTaskContext,
+        request_id: &str,
+        source: ChildTaskControlSource,
     ) -> Result<ChildTaskMutationResult, String> {
         validate_operation_text(request_id, 192, "control request id")?;
         if let Some(existing) = self.child_control_replay(context, "resume", request_id)? {
@@ -1026,6 +1232,7 @@ impl SessionStore {
         operation.turn_id = None;
         operation.control_request_id = Some(request_id.to_string());
         operation.control_action = Some("resume".to_string());
+        operation.control_source = Some(source);
         self.record_control_operation(operation, false, None)
     }
 
@@ -1036,6 +1243,7 @@ impl SessionStore {
         turn_id: &str,
         action: &str,
         cancel_follow_up: bool,
+        source: ChildTaskControlSource,
     ) -> Result<ChildTaskMutationResult, String> {
         validate_operation_text(request_id, 192, "control request id")?;
         validate_operation_text(turn_id, MAX_OPERATION_ID_BYTES, "turn id")?;
@@ -1058,6 +1266,7 @@ impl SessionStore {
         operation.status = status.to_string();
         operation.control_request_id = Some(request_id.to_string());
         operation.control_action = Some(action.to_string());
+        operation.control_source = Some(source);
         operation.timestamp_ms = timestamp_ms();
         let mut records = vec![operation_record_value(&operation)];
         if cancel_follow_up
@@ -1378,7 +1587,7 @@ impl SessionStore {
         if prompt.trim().is_empty() || prompt.len() > MAX_OPERATION_PROMPT_BYTES {
             return Err("prompt must be non-empty and bounded".to_string());
         }
-        self.mutate_queued_child_task(context, Some(prompt), request_id)
+        self.mutate_queued_child_task(context, Some(prompt), request_id, None)
     }
 
     pub fn cancel_queued_child_task(
@@ -1386,13 +1595,31 @@ impl SessionStore {
         context: &ChildTaskContext,
         request_id: Option<&str>,
     ) -> Result<ChildTaskMutationResult, String> {
-        self.mutate_queued_child_task(context, None, request_id)
+        self.cancel_queued_child_task_from(context, request_id, ChildTaskControlSource::MainAgent)
+    }
+
+    pub fn cancel_queued_child_task_from(
+        &mut self,
+        context: &ChildTaskContext,
+        request_id: Option<&str>,
+        source: ChildTaskControlSource,
+    ) -> Result<ChildTaskMutationResult, String> {
+        self.mutate_queued_child_task(context, None, request_id, Some(source))
     }
 
     pub fn retry_child_task(
         &mut self,
         context: &ChildTaskContext,
         request_id: &str,
+    ) -> Result<ChildTaskMutationResult, String> {
+        self.retry_child_task_from(context, request_id, ChildTaskControlSource::MainAgent)
+    }
+
+    pub fn retry_child_task_from(
+        &mut self,
+        context: &ChildTaskContext,
+        request_id: &str,
+        source: ChildTaskControlSource,
     ) -> Result<ChildTaskMutationResult, String> {
         validate_operation_text(request_id, 192, "control request id")?;
         if let Some(existing) = self.child_control_replay(context, "retry", request_id)? {
@@ -1411,6 +1638,7 @@ impl SessionStore {
         operation.attempt_kind = Some(ChildTaskAttemptKind::Retry);
         operation.control_request_id = Some(request_id.to_string());
         operation.control_action = Some("retry".to_string());
+        operation.control_source = Some(source);
         self.record_control_operation(operation, false, None)
     }
 
@@ -1437,6 +1665,7 @@ impl SessionStore {
         context: &ChildTaskContext,
         prompt: Option<String>,
         request_id: Option<&str>,
+        source: Option<ChildTaskControlSource>,
     ) -> Result<ChildTaskMutationResult, String> {
         let action = if prompt.is_some() {
             "update_queued"
@@ -1463,6 +1692,7 @@ impl SessionStore {
         if let Some(request_id) = request_id {
             operation.control_request_id = Some(request_id.to_string());
             operation.control_action = Some(action.to_string());
+            operation.control_source = source;
         }
         operation.timestamp_ms = timestamp_ms();
         let mut records = Vec::new();
@@ -2511,6 +2741,111 @@ fn item_id_for_message(message: &Message) -> String {
     }
 }
 
+fn read_session_control(
+    session_dir: &Path,
+    session_id: &str,
+) -> Result<SessionControlState, String> {
+    let path = session_dir.join(SESSION_CONTROL_FILE_NAME);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(SessionControlState {
+                session_id: session_id.to_string(),
+                status: SessionControlStatus::Running,
+                request_id: None,
+                updated_at_ms: 0,
+            });
+        }
+        Err(error) => return Err(format!("cannot read Session control state: {error}")),
+    };
+    if bytes.len() as u64 > MAX_SESSION_CONTROL_BYTES {
+        return Err("Session control state exceeds its storage limit".to_string());
+    }
+    let state: SessionControlState = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid Session control state: {error}"))?;
+    if state.session_id != session_id {
+        return Err("Session control identity does not match its directory".to_string());
+    }
+    if let Some(request_id) = state.request_id.as_deref() {
+        validate_operation_text(request_id, 192, "session control request id")?;
+    }
+    Ok(state)
+}
+
+fn persist_session_control(session_dir: &Path, state: &SessionControlState) -> Result<(), String> {
+    let value = json!({
+        "version": 1,
+        "sessionId": state.session_id,
+        "status": state.status,
+        "requestId": state.request_id,
+        "updatedAtMs": state.updated_at_ms,
+    });
+    let encoded = serde_json::to_vec(&value)
+        .map_err(|error| format!("cannot encode Session control state: {error}"))?;
+    if encoded.len() as u64 > MAX_SESSION_CONTROL_BYTES {
+        return Err("Session control state exceeds its storage limit".to_string());
+    }
+    write_json_atomic(&session_dir.join(SESSION_CONTROL_FILE_NAME), &value)
+}
+
+fn read_child_report_receipts(session_dir: &Path) -> Result<Vec<ChildReportReceipt>, String> {
+    let path = session_dir.join(CHILD_REPORT_RECEIPTS_FILE_NAME);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("cannot read child report receipts: {error}")),
+    };
+    if bytes.len() as u64 > MAX_CHILD_REPORT_RECEIPTS_BYTES {
+        return Err("child report receipts exceed their storage limit".to_string());
+    }
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid child report receipts: {error}"))?;
+    let session_id = session_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "parent Session identity is unavailable".to_string())?;
+    if value.get("version").and_then(Value::as_u64) != Some(1)
+        || value.get("session_id").and_then(Value::as_str) != Some(session_id)
+    {
+        return Err("child report receipt identity does not match its Session".to_string());
+    }
+    let receipts = serde_json::from_value::<Vec<ChildReportReceipt>>(
+        value
+            .get("receipts")
+            .cloned()
+            .ok_or_else(|| "child report receipts are missing".to_string())?,
+    )
+    .map_err(|error| format!("invalid child report receipts: {error}"))?;
+    if receipts.len() > MAX_CHILD_REPORT_RECEIPTS {
+        return Err("child report receipt count exceeds its limit".to_string());
+    }
+    for receipt in &receipts {
+        validate_child_report_receipt(receipt)?;
+    }
+    Ok(receipts)
+}
+
+fn validate_child_report_receipt(receipt: &ChildReportReceipt) -> Result<(), String> {
+    if receipt.child_thread_id.is_empty()
+        || receipt.child_thread_id.len() > 64
+        || !receipt
+            .child_thread_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return Err("child report receipt has an invalid Thread id".to_string());
+    }
+    validate_operation_text(
+        &receipt.operation_id,
+        MAX_OPERATION_ID_BYTES,
+        "operation id",
+    )?;
+    if receipt.attempt == 0 || receipt.cursor == 0 {
+        return Err("child report receipt attempt and cursor must be positive".to_string());
+    }
+    Ok(())
+}
+
 fn new_id(prefix: &str) -> String {
     let counter = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     format!(
@@ -2790,6 +3125,133 @@ mod tests {
             compacted: true,
             method: "mechanical".to_string(),
         }
+    }
+
+    #[test]
+    fn session_control_freeze_and_resume_are_durable_and_request_bound() {
+        let root = crate::test_support::test_root();
+        let opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let mut store = opened.store;
+
+        let freezing = store
+            .transition_session_control(SessionControlAction::Freeze, "freeze-1")
+            .unwrap();
+        assert_eq!(freezing.status, SessionControlStatus::Freezing);
+        assert_eq!(freezing.request_id.as_deref(), Some("freeze-1"));
+        drop(store);
+
+        let mut resumed = SessionStore::open(&root, SessionRequest::Resume(session_id.clone()))
+            .unwrap()
+            .store;
+        assert_eq!(resumed.session_control().unwrap(), freezing);
+        assert!(
+            resumed
+                .transition_session_control(SessionControlAction::FreezeSettled, "stale-freeze")
+                .is_err()
+        );
+        let frozen = resumed
+            .transition_session_control(SessionControlAction::FreezeSettled, "freeze-1")
+            .unwrap();
+        assert_eq!(frozen.status, SessionControlStatus::Frozen);
+
+        let resuming = resumed
+            .transition_session_control(SessionControlAction::Resume, "resume-1")
+            .unwrap();
+        assert_eq!(resuming.status, SessionControlStatus::Resuming);
+        assert_eq!(resuming.request_id.as_deref(), Some("resume-1"));
+        let settled = resumed
+            .transition_session_control(SessionControlAction::ResumeSettled, "resume-1")
+            .unwrap();
+        assert_eq!(settled.status, SessionControlStatus::Running);
+        assert_eq!(
+            resumed
+                .transition_session_control(SessionControlAction::ResumeSettled, "resume-1")
+                .unwrap(),
+            settled,
+            "settling the same resume request must be idempotent"
+        );
+        drop(resumed);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn child_report_receipts_are_idempotent_and_monotonic_across_reopen() {
+        let root = crate::test_support::test_root();
+        let opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_dir = opened.store.path().parent().unwrap().to_path_buf();
+        let session_id = opened.store.session_id().to_string();
+        let receipt = ChildReportReceipt {
+            child_thread_id: "child-thread".to_string(),
+            operation_id: "child:child-thread".to_string(),
+            attempt: 1,
+            cursor: 4,
+        };
+        SessionStore::record_child_report_receipt(&session_dir, receipt.clone()).unwrap();
+        SessionStore::record_child_report_receipt(
+            &session_dir,
+            ChildReportReceipt {
+                cursor: 2,
+                ..receipt.clone()
+            },
+        )
+        .unwrap();
+        SessionStore::record_child_report_receipt(
+            &session_dir,
+            ChildReportReceipt {
+                cursor: 7,
+                ..receipt.clone()
+            },
+        )
+        .unwrap();
+        drop(opened);
+
+        let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        let receipts =
+            SessionStore::read_child_report_receipts(resumed.store.path().parent().unwrap())
+                .unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].cursor, 7);
+        drop(resumed);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn parent_freeze_control_source_survives_child_turn_settlement() {
+        let root = crate::test_support::test_root();
+        let parent = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let mut queued = SessionOperation::new("child:one", "child_task", "queued");
+        queued.parent_thread_id = Some(parent.store.thread_id().to_string());
+        queued.prompt = Some("inspect issue".to_string());
+        let mut child = fork_child(&root, &parent, "child-thread", queued);
+        let context = child.store.child_task_context().unwrap().unwrap();
+        let mut running = SessionOperation::new("child:one", "child_task", "running");
+        running.turn_id = Some("turn-active".to_string());
+        child.store.record_operation(running).unwrap();
+
+        let pausing = child
+            .store
+            .pause_child_task_from(
+                &context,
+                "parent-freeze-1",
+                "turn-active",
+                ChildTaskControlSource::ParentFreeze,
+            )
+            .unwrap();
+        assert_eq!(pausing.status, "pausing");
+        let mut cancelled = SessionOperation::new("child:one", "child_task", "cancelled");
+        cancelled.turn_id = Some("turn-active".to_string());
+        child.store.record_operation(cancelled).unwrap();
+        let projected = child.store.operation("child:one").unwrap().unwrap();
+        assert_eq!(projected.status, "paused");
+        assert_eq!(
+            projected.control_source,
+            Some(ChildTaskControlSource::ParentFreeze)
+        );
+
+        drop(child);
+        drop(parent);
+        crate::test_support::remove_test_root(&root);
     }
 
     #[test]

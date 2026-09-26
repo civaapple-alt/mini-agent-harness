@@ -60,6 +60,29 @@ fn turn_start_request(id: u64, prompt: &str) -> JsonRpcRequest {
     )
 }
 
+fn session_turn_start_request(
+    id: u64,
+    thread_id: &str,
+    prompt: &str,
+    turn_source: Option<TurnSource>,
+) -> JsonRpcRequest {
+    JsonRpcRequest::request(
+        id,
+        METHOD_TURN_START,
+        serde_json::json!(TurnStartParams {
+            thread_id: ThreadId::new(thread_id),
+            input: TurnInput::new(TurnInputMode::Start, prompt),
+            operation_id: None,
+            operation_attempt: None,
+            operation_attempt_kind: None,
+            operation_group_id: None,
+            execution_mode: None,
+            group_sequence: None,
+            turn_source,
+        }),
+    )
+}
+
 #[tokio::test]
 async fn approval_request_ids_remain_unique_across_brokers() {
     let first = ApprovalBroker::new();
@@ -1724,6 +1747,128 @@ async fn child_wakeup_source_is_live_replayable_and_persisted_on_thread_items() 
             .all(|entry| entry["turnSource"] == "child_wakeup")
     );
     restarted.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn frozen_session_rejects_turns_until_explicit_resume_turn() {
+    let root = rpc_root("session-control-freeze");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let thread_id = opened.store.thread_id().to_string();
+    let mut connection = managed_connection_with_session(DoneModel, root.clone(), opened);
+    initialize_connection(&mut connection, "session-control-test").await;
+
+    let control = |id, action: &str, request_id: Option<&str>| {
+        let mut params = serde_json::json!({
+            "threadId": thread_id,
+            "action": action,
+        });
+        if let Some(request_id) = request_id {
+            params["requestId"] = serde_json::json!(request_id);
+        }
+        JsonRpcRequest::request(id, METHOD_SESSION_CONTROL, params)
+    };
+    let start =
+        |id, turn_source| session_turn_start_request(id, &thread_id, "continue work", turn_source);
+
+    let freezing = rpc_result(&mut connection, control(2, "freeze", Some("freeze-1"))).await;
+    assert_eq!(freezing["value"]["status"], "freezing");
+    let frozen = rpc_result(
+        &mut connection,
+        control(3, "freeze_settled", Some("freeze-1")),
+    )
+    .await;
+    assert_eq!(frozen["value"]["status"], "frozen");
+
+    let rejected = rpc_result(&mut connection, start(4, None)).await;
+    assert_eq!(rejected["value"]["status"], "not_submitted");
+    assert!(
+        rejected["value"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("explicit continue")
+    );
+
+    let resuming = rpc_result(&mut connection, control(5, "resume", Some("resume-1"))).await;
+    assert_eq!(resuming["value"]["status"], "resuming");
+    let rejected_during_resume = rpc_result(&mut connection, start(6, None)).await;
+    assert_eq!(rejected_during_resume["value"]["status"], "not_submitted");
+
+    let resumed_turn = rpc_result(&mut connection, start(7, Some(TurnSource::SessionResume))).await;
+    assert_eq!(resumed_turn["value"]["status"], "started");
+    wait_for_turn_finished(&mut connection).await;
+    let running = rpc_result(&mut connection, control(8, "read", None)).await;
+    assert_eq!(running["value"]["status"], "running");
+
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn active_turn_accepts_freeze_before_gateway_interrupts_it() {
+    let root = rpc_root("session-control-active-freeze");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let thread_id = opened.store.thread_id().to_string();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let mut connection = managed_connection_with_session(
+        ScenarioModel::Timeout(release.clone()),
+        root.clone(),
+        opened,
+    );
+    initialize_connection(&mut connection, "session-control-active-freeze-test").await;
+
+    let start = rpc_result(
+        &mut connection,
+        session_turn_start_request(2, &thread_id, "wait for Session freeze", None),
+    )
+    .await;
+    assert_eq!(start["value"]["status"], "started");
+    let started = loop {
+        let event = next_turn_event(&mut connection).await;
+        if matches!(event.event, mini_agent_protocol::Event::TurnStarted { .. }) {
+            break event;
+        }
+    };
+    let turn_id = started.turn_id.unwrap().as_str().to_string();
+
+    let freezing = rpc_call(
+        &mut connection,
+        3,
+        METHOD_SESSION_CONTROL,
+        serde_json::json!({
+            "threadId": thread_id,
+            "action": "freeze",
+            "requestId": "active-freeze-1",
+        }),
+    )
+    .await;
+    assert_eq!(freezing["value"]["status"], "freezing");
+
+    let interrupt = rpc_call(
+        &mut connection,
+        4,
+        METHOD_TURN_INTERRUPT,
+        serde_json::json!({"threadId": thread_id, "turnId": turn_id}),
+    )
+    .await;
+    assert_eq!(interrupt["value"]["accepted"], true);
+    release.notify_one();
+    wait_for_turn_finished(&mut connection).await;
+
+    let frozen = rpc_call(
+        &mut connection,
+        5,
+        METHOD_SESSION_CONTROL,
+        serde_json::json!({
+            "threadId": thread_id,
+            "action": "freeze_settled",
+            "requestId": "active-freeze-1",
+        }),
+    )
+    .await;
+    assert_eq!(frozen["value"]["status"], "frozen");
+
+    connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 

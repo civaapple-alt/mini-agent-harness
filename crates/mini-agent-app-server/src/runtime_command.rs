@@ -54,6 +54,10 @@ pub(super) enum RuntimeCommand {
         params: mini_agent_app_server_protocol::ChildTaskParams,
         reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::ChildTaskResult>>,
     },
+    SessionControl {
+        params: mini_agent_app_server_protocol::SessionControlParams,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::SessionControlResult>>,
+    },
     ChildSteerRequest {
         thread_id: ThreadId,
         request_id: String,
@@ -169,7 +173,7 @@ impl RuntimeCommand {
                 | Self::BackgroundTaskStop { .. }
                 | Self::BackgroundTaskRestart { .. }
                 | Self::ScheduledTaskCancel { .. }
-        )
+        ) || matches!(self, Self::SessionControl { params, .. } if !matches!(params.action, mini_agent_app_server_protocol::SessionControlAction::Read))
     }
 }
 

@@ -5,6 +5,12 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+- Persist parent Session freeze/resume state in App Server and gate child
+  dispatch, retries, and wake-up continuations until an explicit Continue.
+  Parent freeze pauses active children while preserving queued operations;
+  Continue resumes only parent-frozen children. Persist child control sources
+  and bounded receipts that distinguish reported progress from progress read by
+  the main Thread.
 - Add machine-wide Responses provider and model settings, separate primary and
   Goal Verifier defaults, and persisted per-Thread model selection. Provider
   API keys stay in the operating system credential store.

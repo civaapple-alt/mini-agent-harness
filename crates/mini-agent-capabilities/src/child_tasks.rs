@@ -1,7 +1,8 @@
-use crate::SessionOperation;
+use crate::{ChildReportReceipt, SessionOperation, SessionStore};
 use mini_agent_protocol::{Tool, ToolError, ToolHandler, ToolRuntime, ToolSpec};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -288,7 +289,7 @@ impl ToolHandler for TaskReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task_read".to_string(),
-            description: "Read bounded status, result, and reports for a child Session. Use the child_thread_id returned by delegate_task and read each task once after dispatch to distinguish running from queued. Poll running children for progress; queued tasks start automatically when a slot frees, so do not repeatedly read them. Reports contain only explicit task_report progress updates, not the child's final answer; an empty reports list does not mean a completed result is missing. If a child Session is not materialized yet, skip it and report the missing child ID instead of retrying in a loop.".to_string(),
+            description: "Read bounded status, result, and reports for a child Session. Use the child_thread_id returned by delegate_task and read each task once after dispatch to distinguish running from queued. Poll running children for progress; queued tasks start automatically when a slot frees, so do not repeatedly read them. Reports contain only explicit task_report progress updates, not the child's final answer; an empty reports list does not mean a completed result is missing. Reading a report marks it as received by the parent. If a child Session is not materialized yet, skip it and report the missing child ID instead of retrying in a loop.".to_string(),
             parameters: json!({
                 "type": "object",
                 "required": ["child_thread_id"],
@@ -350,9 +351,64 @@ impl ToolRuntime for TaskReadTool {
                 "task_read after_cursor must be a non-negative integer".to_string(),
             ));
         }
-        let (operation, reports, next_cursor) =
+        let (operation, mut reports, next_cursor) =
             read_child_task(&canonical_path, parent_session_id, after_cursor, true)
                 .map_err(ToolError)?;
+        if let Some(operation_id) = operation
+            .as_ref()
+            .and_then(|value| value.get("operation_id"))
+            .and_then(Value::as_str)
+        {
+            let mut receipt_cursors = BTreeMap::<u32, u64>::new();
+            for report in &reports {
+                let attempt = report
+                    .get("attempt")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .unwrap_or_default();
+                let cursor = report
+                    .get("cursor")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default();
+                if attempt > 0 && cursor > 0 {
+                    receipt_cursors
+                        .entry(attempt)
+                        .and_modify(|current| *current = (*current).max(cursor))
+                        .or_insert(cursor);
+                }
+            }
+            for (attempt, cursor) in &receipt_cursors {
+                SessionStore::record_child_report_receipt(
+                    &self.parent_session_dir,
+                    ChildReportReceipt {
+                        child_thread_id: child_thread_id.to_string(),
+                        operation_id: operation_id.to_string(),
+                        attempt: *attempt,
+                        cursor: *cursor,
+                    },
+                )
+                .map_err(ToolError)?;
+            }
+            for report in &mut reports {
+                let attempt = report
+                    .get("attempt")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .unwrap_or_default();
+                let cursor = report
+                    .get("cursor")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default();
+                let received = receipt_cursors
+                    .get(&attempt)
+                    .is_some_and(|receipt_cursor| cursor <= *receipt_cursor);
+                report["delivery_status"] = json!(if received {
+                    "main_received"
+                } else {
+                    "reported"
+                });
+            }
+        }
         serde_json::to_string(&json!({
             "child_thread_id": child_thread_id,
             "status": operation
@@ -1167,6 +1223,81 @@ mod tests {
         assert_eq!(second.len(), 3);
         assert_eq!(second[0]["report"], "report 35");
         assert_eq!(next, 37);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn task_read_persists_and_returns_main_received_report_receipts() {
+        let root = crate::test_support::test_root();
+        let parent = SessionStore::open(&root, crate::SessionRequest::New).unwrap();
+        let parent_thread_id = parent.store.thread_id().to_string();
+        let parent_session_id = parent.store.session_id().to_string();
+        let mut operation = SessionOperation::new("child:child-thread", "child_task", "queued");
+        operation.parent_thread_id = Some(parent_thread_id);
+        operation.prompt = Some("inspect the fixture".to_string());
+        let fork = SessionStore::fork_from_checkpoint_with_operation(
+            &root,
+            &parent_session_id,
+            0,
+            "child-thread",
+            &[],
+            crate::SessionForkMetadata {
+                context_policy: "exact".to_string(),
+                context_before_bytes: 64,
+                context_after_bytes: 64,
+                compacted: false,
+                method: "exact".to_string(),
+            },
+            Some(operation),
+        )
+        .unwrap();
+        let mut child = SessionStore::open(
+            &root,
+            crate::SessionRequest::Resume(fork.session_id.clone()),
+        )
+        .unwrap();
+        let context = child.store.child_task_context().unwrap().unwrap();
+        child
+            .store
+            .record_child_report(&context, "report-1", "first report")
+            .unwrap();
+
+        let parent_session_dir = parent.store.path().parent().unwrap().to_path_buf();
+        let tool = TaskReadTool {
+            parent_session_dir: parent_session_dir.clone(),
+        };
+        let first: Value = serde_json::from_str(
+            &tool
+                .execute(&json!({"child_thread_id":"child-thread"}))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(first["reports"][0]["delivery_status"], "main_received");
+
+        let receipts = SessionStore::read_child_report_receipts(&parent_session_dir).unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].child_thread_id, "child-thread");
+        assert_eq!(receipts[0].operation_id, "child:child-thread");
+        assert_eq!(
+            receipts[0].cursor,
+            first["reports"][0]["cursor"].as_u64().unwrap()
+        );
+
+        let repeated: Value = serde_json::from_str(
+            &tool
+                .execute(&json!({"child_thread_id":"child-thread"}))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(repeated["reports"][0]["delivery_status"], "main_received");
+        assert_eq!(
+            SessionStore::read_child_report_receipts(&parent_session_dir)
+                .unwrap()
+                .len(),
+            1
+        );
+        drop(child);
+        drop(parent);
         crate::test_support::remove_test_root(&root);
     }
 }

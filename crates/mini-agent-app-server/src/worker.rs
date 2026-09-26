@@ -700,6 +700,48 @@ pub(super) async fn worker_loop<M>(
                 turn_source,
                 reply,
             } => {
+                if let Some(state) = runtime.as_ref() {
+                    match state.management.session_control_state_if_persisted() {
+                        Ok(Some(control))
+                            if matches!(
+                                control.status,
+                                mini_agent_capabilities::SessionControlStatus::Freezing
+                                    | mini_agent_capabilities::SessionControlStatus::Frozen
+                            ) =>
+                        {
+                            respond(
+                                reply,
+                                receipt,
+                                Ok(TurnSubmission::NotSubmitted {
+                                    reason:
+                                        "parent Session is frozen; an explicit continue is required"
+                                            .to_string(),
+                                }),
+                            );
+                            continue;
+                        }
+                        Ok(Some(control))
+                            if control.status
+                                == mini_agent_capabilities::SessionControlStatus::Resuming
+                                && turn_source
+                                    != Some(mini_agent_protocol::TurnSource::SessionResume) =>
+                        {
+                            respond(
+                                reply,
+                                receipt,
+                                Ok(TurnSubmission::NotSubmitted {
+                                    reason: "Session resume is in progress; an explicit continue is required".to_string(),
+                                }),
+                            );
+                            continue;
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            respond(reply, receipt, Err(error));
+                            continue;
+                        }
+                    }
+                }
                 if expected_turn_id.is_some() {
                     respond(reply, receipt, Err(AppServerError::NoActiveTurn));
                     continue;
@@ -1046,6 +1088,26 @@ pub(super) async fn worker_loop<M>(
                     let previous_message_count = thread.harness().messages().len();
                     let stopping = Arc::new(AtomicBool::new(false));
                     if let Some(reply) = initial_reply.take() {
+                        if current_turn_source
+                            == Some(mini_agent_protocol::TurnSource::SessionResume)
+                            && let Some(state) = runtime.as_mut()
+                            && let Ok(Some(control)) =
+                                state.management.session_control_state_if_persisted()
+                            && control.status
+                                == mini_agent_capabilities::SessionControlStatus::Resuming
+                            && let Some(request_id) = control.request_id.as_deref()
+                        {
+                            let params = mini_agent_app_server_protocol::SessionControlParams {
+                                thread_id: state.management.thread_id(),
+                                action: mini_agent_app_server_protocol::SessionControlAction::ResumeSettled,
+                                request_id: Some(request_id.to_string()),
+                            };
+                            if let Err(error) = state.management.session_control_action(&params) {
+                                eprintln!(
+                                    "warning: failed to settle Session resume state: {error}"
+                                );
+                            }
+                        }
                         runtime_actor::advance_revision(&mut runtime, &runtime_revision);
                         respond(
                             reply,
@@ -1461,6 +1523,25 @@ pub(super) async fn worker_loop<M>(
                     next_input = control
                         .take_steer_input()
                         .or_else(|| control.take_follow_up_input());
+                    if next_input.is_some() {
+                        let session_allows_continuation = runtime.as_mut().is_none_or(|state| {
+                            state
+                                .management
+                                .session_control_state_if_persisted()
+                                .is_ok_and(|control| {
+                                    control.is_none_or(|control| {
+                                        control.status
+                                            == mini_agent_capabilities::SessionControlStatus::Running
+                                    })
+                                })
+                        });
+                        if !session_allows_continuation {
+                            // A queued steer/follow-up is another Turn on this same
+                            // Session. Do not let the in-worker continuation path
+                            // bypass a parent freeze that arrived during the Turn.
+                            next_input = None;
+                        }
+                    }
                     if next_input.is_none() {
                         while let Some(command) = deferred_goal_verifications.pop_front() {
                             if let Command::GoalVerificationCompleted {

@@ -149,6 +149,49 @@ where
         .await
     }
 
+    pub(super) async fn handle_session_control(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params =
+            match request.decode_params::<mini_agent_app_server_protocol::SessionControlParams>() {
+                Ok(params) => params,
+                Err(error) => return response_error(request.id, error),
+            };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        let request_id_valid = params
+            .request_id
+            .as_deref()
+            .is_some_and(|id| !id.is_empty() && id.len() <= 192);
+        let valid = match params.action {
+            mini_agent_app_server_protocol::SessionControlAction::Read => true,
+            mini_agent_app_server_protocol::SessionControlAction::Freeze
+            | mini_agent_app_server_protocol::SessionControlAction::FreezeSettled
+            | mini_agent_app_server_protocol::SessionControlAction::Resume
+            | mini_agent_app_server_protocol::SessionControlAction::ResumeSettled => {
+                request_id_valid
+            }
+        };
+        if !valid {
+            return response_error(
+                request.id,
+                JsonRpcError::invalid_params("session control changes require a bounded requestId"),
+            );
+        }
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        action_response(
+            request.id,
+            management.session_control_action(params),
+            Clone::clone,
+        )
+        .await
+    }
+
     pub(super) async fn handle_session_notebook_read(
         &self,
         request: JsonRpcRequest,

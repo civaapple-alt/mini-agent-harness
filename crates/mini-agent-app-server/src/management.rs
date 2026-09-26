@@ -428,6 +428,16 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
+    pub(crate) async fn session_control_action(
+        &self,
+        params: mini_agent_app_server_protocol::SessionControlParams,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::SessionControlResult>, ActionFailure>
+    {
+        self.client
+            .request_action(|reply| RuntimeCommand::SessionControl { params, reply })
+            .await
+    }
+
     pub(crate) async fn child_steer_request_action(
         &self,
         thread_id: ThreadId,
@@ -962,6 +972,20 @@ impl RuntimeManagementState {
             operation_id: params.operation_id.clone(),
             attempt: params.attempt,
         };
+        let control_source = match params
+            .control_source
+            .unwrap_or(mini_agent_app_server_protocol::ChildTaskControlSource::MainAgent)
+        {
+            mini_agent_app_server_protocol::ChildTaskControlSource::MainAgent => {
+                mini_agent_capabilities::ChildTaskControlSource::MainAgent
+            }
+            mini_agent_app_server_protocol::ChildTaskControlSource::UserPanel => {
+                mini_agent_capabilities::ChildTaskControlSource::UserPanel
+            }
+            mini_agent_app_server_protocol::ChildTaskControlSource::ParentFreeze => {
+                mini_agent_capabilities::ChildTaskControlSource::ParentFreeze
+            }
+        };
         let result = match params.action {
             mini_agent_app_server_protocol::ChildTaskAction::Report => {
                 opened.store.record_child_report(
@@ -977,9 +1001,13 @@ impl RuntimeManagementState {
                     params.request_id.as_deref(),
                 )
             }
-            mini_agent_app_server_protocol::ChildTaskAction::CancelQueued => opened
-                .store
-                .cancel_queued_child_task(&context, params.request_id.as_deref()),
+            mini_agent_app_server_protocol::ChildTaskAction::CancelQueued => {
+                opened.store.cancel_queued_child_task_from(
+                    &context,
+                    params.request_id.as_deref(),
+                    control_source,
+                )
+            }
             mini_agent_app_server_protocol::ChildTaskAction::QueueFollowUp => {
                 opened.store.queue_child_follow_up(
                     &context,
@@ -988,29 +1016,33 @@ impl RuntimeManagementState {
                 )
             }
             mini_agent_app_server_protocol::ChildTaskAction::Pause => {
-                opened.store.pause_child_task(
+                opened.store.pause_child_task_from(
                     &context,
                     required_child_param(params.request_id.as_deref(), "requestId")?,
                     required_child_param(params.turn_id.as_deref(), "turnId")?,
+                    control_source,
                 )
             }
             mini_agent_app_server_protocol::ChildTaskAction::CancelActive => {
-                opened.store.cancel_active_child_task(
+                opened.store.cancel_active_child_task_from(
                     &context,
                     required_child_param(params.request_id.as_deref(), "requestId")?,
                     required_child_param(params.turn_id.as_deref(), "turnId")?,
-                )
-            }
-            mini_agent_app_server_protocol::ChildTaskAction::Resume => {
-                opened.store.resume_child_task(
-                    &context,
-                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                    control_source,
                 )
             }
             mini_agent_app_server_protocol::ChildTaskAction::Retry => {
-                opened.store.retry_child_task(
+                opened.store.retry_child_task_from(
                     &context,
                     required_child_param(params.request_id.as_deref(), "requestId")?,
+                    control_source,
+                )
+            }
+            mini_agent_app_server_protocol::ChildTaskAction::Resume => {
+                opened.store.resume_child_task_from(
+                    &context,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                    control_source,
                 )
             }
             mini_agent_app_server_protocol::ChildTaskAction::StartFailure => {
@@ -1042,6 +1074,81 @@ impl RuntimeManagementState {
             turn_id: result.turn_id,
             duplicate: result.duplicate,
             timestamp_ms: result.timestamp_ms,
+        })
+    }
+
+    pub(crate) fn session_control_state_if_persisted(
+        &self,
+    ) -> Result<Option<mini_agent_capabilities::SessionControlState>, AppServerError> {
+        let Some(opened) = self.session.as_ref() else {
+            return Ok(None);
+        };
+        opened
+            .store
+            .session_control()
+            .map(Some)
+            .map_err(AppServerError::Checkpoint)
+    }
+
+    pub(crate) fn session_control_action(
+        &mut self,
+        params: &mini_agent_app_server_protocol::SessionControlParams,
+    ) -> Result<mini_agent_app_server_protocol::SessionControlResult, AppServerError> {
+        let opened = self.session.as_mut().ok_or_else(|| {
+            AppServerError::Checkpoint("session persistence is disabled".to_string())
+        })?;
+        if opened.store.thread_id() != params.thread_id.as_str() {
+            return Err(AppServerError::ThreadNotFound(params.thread_id.clone()));
+        }
+        let state = match params.action {
+            mini_agent_app_server_protocol::SessionControlAction::Read => {
+                opened.store.session_control()
+            }
+            mini_agent_app_server_protocol::SessionControlAction::Freeze => {
+                opened.store.transition_session_control(
+                    mini_agent_capabilities::SessionControlAction::Freeze,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                )
+            }
+            mini_agent_app_server_protocol::SessionControlAction::FreezeSettled => {
+                opened.store.transition_session_control(
+                    mini_agent_capabilities::SessionControlAction::FreezeSettled,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                )
+            }
+            mini_agent_app_server_protocol::SessionControlAction::Resume => {
+                opened.store.transition_session_control(
+                    mini_agent_capabilities::SessionControlAction::Resume,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                )
+            }
+            mini_agent_app_server_protocol::SessionControlAction::ResumeSettled => {
+                opened.store.transition_session_control(
+                    mini_agent_capabilities::SessionControlAction::ResumeSettled,
+                    required_child_param(params.request_id.as_deref(), "requestId")?,
+                )
+            }
+        }
+        .map_err(AppServerError::Checkpoint)?;
+        Ok(mini_agent_app_server_protocol::SessionControlResult {
+            thread_id: params.thread_id.clone(),
+            session_id: state.session_id,
+            status: match state.status {
+                mini_agent_capabilities::SessionControlStatus::Running => {
+                    mini_agent_app_server_protocol::SessionControlStatus::Running
+                }
+                mini_agent_capabilities::SessionControlStatus::Freezing => {
+                    mini_agent_app_server_protocol::SessionControlStatus::Freezing
+                }
+                mini_agent_capabilities::SessionControlStatus::Frozen => {
+                    mini_agent_app_server_protocol::SessionControlStatus::Frozen
+                }
+                mini_agent_capabilities::SessionControlStatus::Resuming => {
+                    mini_agent_app_server_protocol::SessionControlStatus::Resuming
+                }
+            },
+            request_id: state.request_id,
+            updated_at_ms: state.updated_at_ms,
         })
     }
 

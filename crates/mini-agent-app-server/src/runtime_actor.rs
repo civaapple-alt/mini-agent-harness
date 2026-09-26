@@ -486,6 +486,25 @@ pub(super) fn handle<M>(
             });
             respond(reply, receipt, result);
         }
+        RuntimeCommand::SessionControl { params, reply } => {
+            let result = if matches!(
+                params.action,
+                mini_agent_app_server_protocol::SessionControlAction::Read
+            ) {
+                runtime
+                    .as_mut()
+                    .ok_or(AppServerError::RuntimeUnavailable)
+                    .and_then(|state| state.management.session_control_action(&params))
+            } else {
+                mutate(runtime, runtime_revision, |state| {
+                    state
+                        .management
+                        .session_control_action(&params)
+                        .map(|value| (value, true))
+                })
+            };
+            respond(reply, receipt, result);
+        }
         RuntimeCommand::ChildSteerRequest {
             thread_id,
             request_id,
@@ -887,6 +906,7 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::ThreadGoalSet { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ThreadGoalGet { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::ThreadGoalClear { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::SessionControl { reply, .. } => respond(reply, receipt, Err(error)),
     }
 }
 
@@ -1043,6 +1063,10 @@ fn is_safe_goal_mutation_while_running(command: &RuntimeCommand) -> bool {
                 token_budget: None,
                 ..
             }
+    ) || matches!(
+        command,
+        RuntimeCommand::SessionControl { params, .. }
+            if params.action == mini_agent_app_server_protocol::SessionControlAction::Freeze
     )
 }
 

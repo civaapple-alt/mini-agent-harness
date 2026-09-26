@@ -34,6 +34,7 @@ impl TurnId {
 #[serde(rename_all = "snake_case")]
 pub enum TurnSource {
     ChildWakeup,
+    SessionResume,
 }
 
 /// Identifies why a durable child operation is running this attempt.

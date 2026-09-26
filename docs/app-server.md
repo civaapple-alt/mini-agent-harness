@@ -246,6 +246,7 @@ Thread returned by `thread/start`.
 | `thread/items/list` | `threadId`; optional `turnId`, `cursor`, `limit`, `sortDirection` | Returns cursor-bounded `data` entries, `nextCursor`, and `backwardsCursor`. |
 | `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
 | `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`), `operationId`, `operationAttempt`, `operationPrompt`, `operationGroupId`, `executionMode`, `groupSequence` | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. Fork metadata is a bounded operation projection only; it does not make Core a scheduler. |
+| `session/control` | `threadId`, `action` (`read`, `freeze`, `freeze_settled`, `resume`, `resume_settled`); state changes require a bounded `requestId` | Reads or transitions the durable Session-control state (`running`, `freezing`, `frozen`, `resuming`). Freeze intent is persisted before the Gateway interrupts the parent and active children. Only the matching request may settle a freeze or resume. |
 | `child/task` | `threadId`, `parentThreadId`, `operationId`, `attempt`, `action`; action-specific bounded report, prompt, report/request identity, and for pause/active cancellation the `turnId` | Persists a validated child report or operation control. Queued updates and cancellation, follow-up, pause/resume, active cancellation, retry, and start-failure actions validate parent lineage and operation attempt. `queue_follow_up` is idempotent by `requestId`, allows one pending instruction, and allocates the next attempt on success. |
 | `session/notebook/read` | `threadId`, optional `scope` (`self` or `parent`) | Reads the current Session notebook or a Host-validated parent snapshot. Parent scope is read-only and cannot select an arbitrary Session or path. |
 | `session/notebook/write` | `threadId`, `key`, `content`, optional `append`, `importance` (`critical`, `high`, `normal`, `temporary`), `keywords`, and bounded `evidence` | Upserts the current Session's bounded Notebook entry and returns the new snapshot. Evidence is bounded caller-supplied provenance metadata; subject normalization and truncation are applied, but Git/file-system verification is not claimed. |
@@ -422,8 +423,11 @@ report to the child Session with its operation ID, attempt, report ID, timestamp
 and Session cursor. Repeated report IDs within an attempt are idempotent. A report
 is attributed to the attempt active when the tool ran, so a late report can still
 be stored after that attempt settles or a retry starts. The parent reads reports
-incrementally with `task_read`; full child tool activity and transcript stay in
-the child Session. The JSON-RPC `child/task` action supports report persistence,
+incrementally with `task_read`; a bounded receipt in the parent Session marks
+each returned report as `main_received`, while unread reports remain `reported`.
+This receipt is idempotent by child Thread, operation, attempt, and cursor. Full
+child tool activity and transcript stay in the child Session. The JSON-RPC
+`child/task` action supports report persistence,
 queued-task updates/cancellation, and `queue_follow_up`. Follow-up requests validate
 the parent lineage, stable operation ID, expected completed attempt, bounded
 32 KiB prompt, and request ID before allocating the next attempt. Repeating a
@@ -495,6 +499,29 @@ Gateway restart. WebStudio retains at most 64 distinct pending child states per 
 and submits at most 16 child updates per continuation; overflow is summarized
 with a count and up to eight sample IDs. A per-Session start lock serializes
 automatic wake-up admission with user Turn starts.
+
+#### Session-wide freeze and explicit resume
+
+`session/control` is the durable lifecycle authority for a parent Session. A
+main-thread Stop first writes `freezing`, then Gateway requests cooperative
+interruption of the parent Turn and pauses active child Turns. Queued child
+operations remain queued. The state becomes `frozen` only after the parent and
+active child Turns settle. Queue draining, child retries, and child wake-up
+continuations are gated while the Session is freezing or frozen, including
+after Gateway or App Server restart. An incomplete freeze is reconciled from
+the persisted request and Turn state; the Gateway does not infer settlement
+from an unreadable runtime snapshot.
+
+Only an explicit user Continue changes the Session to `resuming`. It resumes
+children whose persisted control source is `parent_freeze`, drains the preserved
+queue, and starts the parent with `turnSource: "session_resume"` to inspect the
+existing work and continue from the settled point. A child paused or cancelled
+individually by the user or main agent is not resumed by parent Continue. Child
+operation control records retain `control_source` (`main_agent`, `user_panel`,
+or `parent_freeze`) through Turn settlement. A report written while a parent is
+stopping remains durable; its receipt changes from `reported` to
+`main_received` only when `task_read` returns that report. Reports cannot wake a
+frozen parent into a new Turn.
 
 The Session store appends operation lifecycle records (`queued`, `running`,
 `awaiting_approval`, `paused`, `completed`, `failed`, or `cancelled`) to the existing
