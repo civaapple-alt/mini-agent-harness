@@ -51,7 +51,7 @@ use serde_json::json;
 use std::convert::Infallible;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
@@ -149,6 +149,19 @@ impl Model for ChildTaskProjectionModel {
 struct BlockingModel {
     release: Arc<Notify>,
 }
+
+struct ChildSteerModel {
+    calls: usize,
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+    saw_steer: Arc<AtomicBool>,
+}
+
+struct ManyStepModel {
+    calls: usize,
+}
+
+struct NumberedStepTool;
 
 struct ApprovalModel;
 
@@ -469,6 +482,99 @@ impl Model for BlockingModel {
             tool_calls: Vec::new(),
             usage: None,
         })
+    }
+}
+
+impl Model for ChildSteerModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        if self.calls == 0 {
+            self.entered.notify_one();
+            self.release.notified().await;
+            self.calls = 1;
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "pre-steer answer".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        self.saw_steer.store(
+            request.messages.iter().any(|message| {
+                matches!(
+                    message,
+                    Message::User { text } if text == "focus on the report"
+                )
+            }),
+            Ordering::SeqCst,
+        );
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: "completed after steering".to_string(),
+            tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
+
+impl Model for ManyStepModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        _request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        if self.calls == 10 {
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "completed after ten tool steps".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        let index = self.calls;
+        self.calls += 1;
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: format!("step-{index}"),
+                name: "numbered_step".to_string(),
+                arguments: json!({"index":index}),
+            }],
+            usage: None,
+        })
+    }
+}
+
+impl ToolHandler for NumberedStepTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "numbered_step".to_string(),
+            description: "Record one numbered fixture step.".to_string(),
+            parameters: json!({
+                "type":"object",
+                "required":["index"],
+                "properties":{"index":{"type":"integer"}},
+                "additionalProperties":false
+            }),
+        }
+    }
+}
+
+impl ToolRuntime for NumberedStepTool {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let index = arguments
+            .get("index")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| ToolError("step index is missing".to_string()))?;
+        Ok(format!("step {index}"))
     }
 }
 
@@ -1342,6 +1448,111 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
         server.runtime_status().phase,
         mini_agent_app_server_protocol::RuntimePhase::Completed
     );
+}
+
+#[tokio::test]
+async fn child_operation_steer_completes_on_the_same_turn() {
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let saw_steer = Arc::new(AtomicBool::new(false));
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(
+            ThreadId::new("initial"),
+            Harness::new(
+                ChildSteerModel {
+                    calls: 0,
+                    entered: entered.clone(),
+                    release: release.clone(),
+                    saw_steer: saw_steer.clone(),
+                },
+                ToolRouter::default(),
+                HarnessConfig::default(),
+            ),
+        ),
+    );
+    let mut events = server.subscribe();
+    let mut request = TurnStart::new(TurnInput::new(TurnInputMode::Start, "review the child"));
+    request.operation_id = Some("child:test".to_string());
+    request.operation_attempt = Some(1);
+    let turn_id = match server
+        .turn_start_for(ThreadId::new("thread-1"), request)
+        .await
+        .unwrap()
+    {
+        TurnSubmission::Started { turn_id } => turn_id,
+        other => panic!("unexpected submission: {other:?}"),
+    };
+
+    entered.notified().await;
+    assert_eq!(
+        server
+            .turn_steer_for(
+                ThreadId::new("thread-1"),
+                turn_id.clone(),
+                "focus on the report",
+            )
+            .await
+            .unwrap(),
+        TurnSubmission::Steered {
+            turn_id: turn_id.clone()
+        }
+    );
+    release.notify_one();
+
+    while !matches!(
+        events.recv().await.unwrap().event,
+        Event::TurnFinished { .. }
+    ) {}
+    let settled = server.turn_read(turn_id).await.unwrap();
+    assert_eq!(settled.status, mini_agent_protocol::TurnStatus::Completed);
+    assert!(saw_steer.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn child_operations_get_a_bounded_step_allowance_without_changing_regular_turns() {
+    for (operation_id, expected_status) in [
+        (
+            Some("child:many-steps"),
+            mini_agent_protocol::TurnStatus::Completed,
+        ),
+        (None, mini_agent_protocol::TurnStatus::StepLimit),
+    ] {
+        let server = AppServer::new(
+            ThreadStart::new(ThreadId::new("thread-1")),
+            Thread::new(
+                ThreadId::new("initial"),
+                Harness::new(
+                    ManyStepModel { calls: 0 },
+                    ToolRouter::new(vec![Box::new(NumberedStepTool)]),
+                    HarnessConfig::default(),
+                ),
+            ),
+        );
+        let mut events = server.subscribe();
+        let mut request = TurnStart::new(TurnInput::new(
+            TurnInputMode::Start,
+            "run ten fixture steps",
+        ));
+        request.operation_id = operation_id.map(str::to_string);
+        request.operation_attempt = Some(1);
+        let turn_id = match server
+            .turn_start_for(ThreadId::new("thread-1"), request)
+            .await
+            .unwrap()
+        {
+            TurnSubmission::Started { turn_id } => turn_id,
+            other => panic!("unexpected submission: {other:?}"),
+        };
+        while !matches!(
+            events.recv().await.unwrap().event,
+            Event::TurnFinished { .. }
+        ) {}
+        assert_eq!(
+            server.turn_read(turn_id).await.unwrap().status,
+            expected_status
+        );
+    }
 }
 
 #[tokio::test]

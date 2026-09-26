@@ -452,6 +452,11 @@ the completed follow-up with the same request ID.
 `after_child_thread_id` to continue. It does not return reports or transcripts.
 `task_read` returns bounded status, attempt, result, error, and incremental
 reports (`after_cursor`, at most 32 reports / 10 KiB per page).
+Each operation summary keeps `status` separate from `turn_outcome` and
+`latest_session_turn`. `turn_outcome` describes the Turn bound to the current
+operation attempt. `latest_session_turn` describes the newest Turn in the child
+Session, which may belong to a later follow-up. Use `operation.status` to decide
+whether the child task attempt succeeded.
 Both tools reconcile a nonterminal operation with its matching settled Turn.
 This includes operations left in `pausing` or `cancelling`: the settled Turn is
 authoritative, so an interrupted Turn after a pause request projects as `paused`,
@@ -464,6 +469,16 @@ assistant item from that Turn, bounded to 512 characters. `reports` contains
 only explicit `task_report` updates; an empty report page does not mean the
 final result is missing. Persisted operation results allow ordinary line
 breaks and tabs and are bounded to 16 KiB.
+Child-task Turns use a 16-step minimum when the runtime's configured limit is
+lower and nonzero, unless an active Goal has an explicit milestone step budget.
+A higher configured limit remains in effect. A zero runtime limit remains
+unbounded. This gives delegated work more room than the normal eight-step Turn
+limit without creating a hidden continuation Turn. A step-limited attempt
+remains failed and records its stop reason, step count, and bounded diagnostic;
+the parent can retry it explicitly. A steer accepted during a child-task Turn
+adds input to that same Turn, so it does not mark the operation failed or release
+its concurrency slot. Regular Turns keep their existing stop-at-checkpoint steer
+behavior.
 Every per-child `task_control` intent identifies `child_thread_id`,
 `operation_id`, and the expected positive `attempt`. The Gateway compares that
 identity against the persisted projection before it acts; stale attempts return

@@ -155,6 +155,8 @@ struct SettledTurn {
     prompt: Option<String>,
     started_at_ms: Option<u64>,
     status: Option<String>,
+    stop_reason: Option<String>,
+    steps: Option<u64>,
     error: Option<String>,
     result: Option<String>,
 }
@@ -163,7 +165,7 @@ impl ToolHandler for TaskListTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task_list".to_string(),
-            description: "List bounded summaries of child tasks owned by this parent Session. Pages are ordered by child_thread_id; use after_child_thread_id from next_cursor to continue, and task_read for details and reports.".to_string(),
+            description: "List bounded summaries of child tasks owned by this parent Session. Pages are ordered by child_thread_id; use after_child_thread_id from next_cursor to continue, and task_read for details and reports. Each operation keeps its own status and matching turn_outcome separate from latest_session_turn; use operation.status to decide whether that task attempt succeeded.".to_string(),
             parameters: json!({
                 "type":"object",
                 "properties":{
@@ -289,7 +291,7 @@ impl ToolHandler for TaskReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task_read".to_string(),
-            description: "Read bounded status, result, and reports for a child Session. Use the child_thread_id returned by delegate_task and read each task once after dispatch to distinguish running from queued. Poll running children for progress; queued tasks start automatically when a slot frees, so do not repeatedly read them. Reports contain only explicit task_report progress updates, not the child's final answer; an empty reports list does not mean a completed result is missing. Reading a report marks it as received by the parent. If a child Session is not materialized yet, skip it and report the missing child ID instead of retrying in a loop.".to_string(),
+            description: "Read bounded operation status, the matching Turn outcome, the latest Session Turn, and reports for a child Session. Use operation.status to decide whether that task attempt succeeded; operation.turn_outcome describes its exact Turn, while operation.latest_session_turn may belong to a later Turn. Use the child_thread_id returned by delegate_task and read each task once after dispatch to distinguish running from queued. Poll running children for progress; queued tasks start automatically when a slot frees, so do not repeatedly read them. Reports contain only explicit task_report progress updates, not the child's final answer; an empty reports list does not mean a completed result is missing. Reading a report marks it as received by the parent. If a child Session is not materialized yet, skip it and report the missing child ID instead of retrying in a loop.".to_string(),
             parameters: json!({
                 "type": "object",
                 "required": ["child_thread_id"],
@@ -650,12 +652,13 @@ fn read_child_task(
     let bytes = fs::read(path).map_err(|error| format!("cannot read child Session: {error}"))?;
     let mut valid_lineage = false;
     let mut operation_id: Option<String> = None;
-    let mut latest = None;
+    let mut latest: Option<Value> = None;
     let mut follow_up = None;
     let mut control = None;
     let mut reports = Vec::new();
     let mut next_cursor = after_cursor;
-    let mut settled_turn = SettledTurn::default();
+    let mut latest_session_turn = SettledTurn::default();
+    let mut operation_turn_outcome = None;
     for line in bytes.split(|byte| *byte == b'\n') {
         if line.len() > 64 * 1024 {
             continue;
@@ -671,7 +674,7 @@ fn read_child_task(
                 == Some(parent_session_id);
         }
         if valid_lineage && record.get("kind").and_then(Value::as_str) == Some("turn_started") {
-            settled_turn = SettledTurn {
+            latest_session_turn = SettledTurn {
                 turn_id: record
                     .get("turn_id")
                     .and_then(Value::as_str)
@@ -681,37 +684,63 @@ fn read_child_task(
                     .and_then(Value::as_str)
                     .map(str::to_string),
                 started_at_ms: record.get("timestamp_ms").and_then(Value::as_u64),
+                status: Some("in_progress".to_string()),
                 ..SettledTurn::default()
             };
         }
         if valid_lineage
             && record.get("kind").and_then(Value::as_str) == Some("item")
-            && record.get("turn_id").and_then(Value::as_str) == settled_turn.turn_id.as_deref()
+            && record.get("turn_id").and_then(Value::as_str)
+                == latest_session_turn.turn_id.as_deref()
             && let Some(message) = record.get("message")
             && message.get("role").and_then(Value::as_str) == Some("assistant")
         {
-            settled_turn.result = message
+            latest_session_turn.result = message
                 .get("text")
                 .and_then(Value::as_str)
                 .map(str::to_string);
         }
         if valid_lineage
             && record.get("kind").and_then(Value::as_str) == Some("turn_settled")
-            && record.get("turn_id").and_then(Value::as_str) == settled_turn.turn_id.as_deref()
+            && record.get("turn_id").and_then(Value::as_str)
+                == latest_session_turn.turn_id.as_deref()
         {
-            settled_turn.status = record
+            latest_session_turn.status = record
                 .get("status")
                 .and_then(Value::as_str)
                 .map(str::to_string);
-            settled_turn.error = record
+            latest_session_turn.stop_reason = record
+                .get("stop_reason")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            latest_session_turn.steps = record.get("steps").and_then(Value::as_u64);
+            latest_session_turn.error = record
                 .get("error")
                 .and_then(Value::as_str)
                 .map(str::to_string);
+            if latest
+                .as_ref()
+                .and_then(|operation| operation.get("turn_id"))
+                .and_then(Value::as_str)
+                == latest_session_turn.turn_id.as_deref()
+            {
+                operation_turn_outcome = turn_summary(&latest_session_turn);
+            }
         }
         if valid_lineage
             && record.get("kind").and_then(Value::as_str) == Some("operation")
             && record.get("operation_kind").and_then(Value::as_str) == Some("child_task")
         {
+            let new_turn_id = record.get("turn_id").and_then(Value::as_str);
+            let previous_turn_id = latest
+                .as_ref()
+                .and_then(|operation| operation.get("turn_id"))
+                .and_then(Value::as_str);
+            if new_turn_id != previous_turn_id {
+                operation_turn_outcome = new_turn_id
+                    .filter(|turn_id| latest_session_turn.turn_id.as_deref() == Some(*turn_id))
+                    .and_then(|_| turn_summary(&latest_session_turn));
+            }
             operation_id = record
                 .get("operation_id")
                 .and_then(Value::as_str)
@@ -798,7 +827,13 @@ fn read_child_task(
         reports.push(report);
     }
     if let Some(latest) = latest.as_mut() {
-        reconcile_with_settled_turn(latest, &settled_turn);
+        reconcile_with_settled_turn(latest, &latest_session_turn);
+        if let Some(turn_outcome) = operation_turn_outcome {
+            latest["turn_outcome"] = turn_outcome;
+        }
+        if let Some(session_turn) = turn_summary(&latest_session_turn) {
+            latest["latest_session_turn"] = session_turn;
+        }
         if let Some(follow_up) = follow_up
             .filter(|request| matches!(request["status"].as_str(), Some("accepted" | "blocked")))
         {
@@ -812,6 +847,20 @@ fn read_child_task(
         }
     }
     Ok((latest, reports, next_cursor))
+}
+
+fn turn_summary(turn: &SettledTurn) -> Option<Value> {
+    let turn_id = turn.turn_id.as_deref()?;
+    let status = turn.status.as_deref()?;
+    Some(json!({
+        "turn_id": turn_id,
+        "status": status,
+        "stop_reason": turn.stop_reason,
+        "steps": turn.steps,
+        "error": turn.error.as_ref().map(|error| {
+            error.chars().take(MAX_CHILD_TASK_RESULT_CHARS).collect::<String>()
+        }),
+    }))
 }
 
 fn reconcile_with_settled_turn(operation: &mut Value, turn: &SettledTurn) {
@@ -1170,6 +1219,92 @@ mod tests {
 
             crate::test_support::remove_test_root(&root);
         }
+    }
+
+    #[test]
+    fn task_read_separates_attempt_turn_outcome_from_latest_session_turn() {
+        let root = crate::test_support::test_root();
+        let path = root.join("child.jsonl");
+        let records = [
+            json!({
+                "kind":"session_created",
+                "forked_from":{"parent_session_id":"parent"}
+            }),
+            json!({
+                "kind":"turn_started",
+                "turn_id":"turn-one",
+                "timestamp_ms":10,
+                "prompt":"Generate the page"
+            }),
+            json!({
+                "kind":"operation",
+                "operation_id":"child:one",
+                "operation_kind":"child_task",
+                "status":"running",
+                "turn_id":"turn-one",
+                "parent_thread_id":"parent-thread",
+                "attempt":1,
+                "prompt":"Generate the page",
+                "timestamp_ms":10
+            }),
+            json!({
+                "kind":"turn_settled",
+                "turn_id":"turn-one",
+                "status":"step_limit",
+                "stop_reason":"step_limit",
+                "steps":8
+            }),
+            json!({
+                "kind":"operation",
+                "operation_id":"child:one",
+                "operation_kind":"child_task",
+                "status":"failed",
+                "turn_id":"turn-one",
+                "parent_thread_id":"parent-thread",
+                "attempt":1,
+                "prompt":"Generate the page",
+                "error":"Turn reached its step limit after 8 steps",
+                "timestamp_ms":11
+            }),
+            json!({
+                "kind":"turn_started",
+                "turn_id":"turn-two",
+                "timestamp_ms":20,
+                "prompt":"Continue the Session"
+            }),
+            json!({
+                "kind":"turn_settled",
+                "turn_id":"turn-two",
+                "status":"completed",
+                "stop_reason":"completed",
+                "steps":2
+            }),
+        ];
+        fs::write(
+            &path,
+            records
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+
+        let (operation, _, _) = read_child_task(&path, "parent", 0, false).unwrap();
+        let operation = operation.expect("the child operation is readable");
+        assert_eq!(operation["status"], "failed");
+        assert_eq!(operation["turn_outcome"]["turn_id"], "turn-one");
+        assert_eq!(operation["turn_outcome"]["status"], "step_limit");
+        assert_eq!(operation["turn_outcome"]["stop_reason"], "step_limit");
+        assert_eq!(operation["turn_outcome"]["steps"], 8);
+        assert_eq!(
+            operation["error"],
+            "Turn reached its step limit after 8 steps"
+        );
+        assert_eq!(operation["latest_session_turn"]["turn_id"], "turn-two");
+        assert_eq!(operation["latest_session_turn"]["status"], "completed");
+
+        crate::test_support::remove_test_root(&root);
     }
 
     #[test]

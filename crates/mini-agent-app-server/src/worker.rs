@@ -23,6 +23,7 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 const EVENT_REPLAY_BUFFER: usize = 512;
+const CHILD_TASK_MIN_STEPS: usize = 16;
 
 fn skill_display_name(skill: &mini_agent_protocol::SkillLoadRecord) -> String {
     skill
@@ -939,12 +940,19 @@ pub(super) async fn worker_loop<M>(
                         }
                     }
                     let original_config = thread.harness().config().clone();
+                    let is_child_task = operation_id.is_some();
+                    let mut turn_config = original_config.clone();
+                    if is_child_task && turn_config.max_steps != 0 {
+                        turn_config.max_steps = turn_config.max_steps.max(CHILD_TASK_MIN_STEPS);
+                    }
                     if let Some(goal) = goal_state.as_ref() {
-                        let mut config = original_config.clone().with_copilot_loop();
+                        turn_config = turn_config.with_copilot_loop();
                         if goal.milestone_step_budget != 0 {
-                            config.max_steps = goal.milestone_step_budget;
+                            turn_config.max_steps = goal.milestone_step_budget;
                         }
-                        thread.harness_mut().replace_config(config);
+                    }
+                    if is_child_task || goal_state.is_some() {
+                        thread.harness_mut().replace_config(turn_config);
                     }
                     let workflow = input.workflow.clone();
                     let mut selected_skills = Vec::new();
@@ -1151,7 +1159,11 @@ pub(super) async fn worker_loop<M>(
                         input,
                         &mut sink,
                         &control,
-                        SteeringMode::StopAtCheckpoint,
+                        if is_child_task {
+                            SteeringMode::ContinueSameTurn
+                        } else {
+                            SteeringMode::StopAtCheckpoint
+                        },
                         &skill_prelude,
                         skill_error.as_deref(),
                     ));
@@ -1249,6 +1261,25 @@ pub(super) async fn worker_loop<M>(
                                         _ => "failed",
                                     }
                                 };
+                                let step_limit_error = (result.status
+                                    == mini_agent_protocol::TurnStatus::StepLimit)
+                                    .then(|| {
+                                        format!(
+                                            "Turn reached its step limit after {} steps",
+                                            result.outcome.steps
+                                        )
+                                    });
+                                let operation_error = match (
+                                    persistence_error.as_deref(),
+                                    step_limit_error.as_deref(),
+                                ) {
+                                    (Some(persistence), Some(step_limit)) => {
+                                        Some(format!("{step_limit}; {persistence}"))
+                                    }
+                                    (Some(persistence), None) => Some(persistence.to_string()),
+                                    (None, Some(step_limit)) => Some(step_limit.to_string()),
+                                    (None, None) => None,
+                                };
                                 let operation_result = if operation_status == "completed" {
                                     Some(result.outcome.final_text.as_str())
                                 } else {
@@ -1261,7 +1292,7 @@ pub(super) async fn worker_loop<M>(
                                     operation_attempt,
                                     operation_attempt_kind,
                                     operation_result,
-                                    persistence_error.as_deref(),
+                                    operation_error.as_deref(),
                                     operation_group_id.as_deref(),
                                     execution_mode.as_deref(),
                                     group_sequence,
@@ -1349,6 +1380,7 @@ pub(super) async fn worker_loop<M>(
                             .map(|persist_error| {
                                 format!("{error}; session persistence failed: {persist_error}")
                             });
+                            let operation_error = persistence_error.as_deref().unwrap_or(&error);
                             if let Some(operation_id) = operation_id.as_deref()
                                 && let Err(persist_error) = runtime_actor::record_operation(
                                     &mut runtime,
@@ -1359,7 +1391,7 @@ pub(super) async fn worker_loop<M>(
                                         operation_attempt,
                                         operation_attempt_kind,
                                         None,
-                                        persistence_error.as_deref(),
+                                        Some(operation_error),
                                         operation_group_id.as_deref(),
                                         execution_mode.as_deref(),
                                         group_sequence,
@@ -1396,7 +1428,7 @@ pub(super) async fn worker_loop<M>(
                                     id: turn_id.clone(),
                                     status: mini_agent_protocol::TurnStatus::Failed,
                                     outcome: None,
-                                    error: Some(persistence_error.unwrap_or(error)),
+                                    error: Some(operation_error.to_string()),
                                 },
                             );
                         }
