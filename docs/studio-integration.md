@@ -111,6 +111,66 @@ ToolCall 的稳定 item identity 是模型 `callId`。浏览器可以据此合�
 工具完成与重放投影；`ThreadItem.status` 是生命周期，`ThreadItem.outcome` 是结构化
 工具结果，必须分开处理。
 
+### Session 活动、重启恢复与 UI 一致性标准
+
+Web Studio 将活动分成持久活动和实时状态。持久活动来自 App Server 的 Thread checkpoint
+和 `ThreadItem` 投影；实时状态来自 `runtime/status`、有序 `turn/event` 和生命周期通知。
+实时事件更新对应的活动项，不能替代 Session 历史。Gateway 广播和浏览器本地状态也不能成为
+第二份历史或授权来源。
+
+#### 活动身份与状态
+
+- 用 `(projectId, threadId)` 标识 Web 活动范围。同名 Thread 可以属于不同 Project；切换范围时，
+  取消旧请求、清理旧 Session 投影，并拒绝旧请求和旧事件的迟到结果。
+- 用 `turnId` 归属 Turn 活动，用稳定 item identity 合并同一活动的开始、完成、历史和回放版本。
+  ToolCall 使用 `callId`。不要用工具输出文本推断状态或结果。
+- `ThreadItem.status` 表示活动项的生命周期，`ThreadItem.outcome` 表示结构化执行结果。
+  `turn/event.sequence` 表示 Thread 事件顺序；`actionSequence`、`stateRevision` 和
+  `runtimeGeneration` 各有自己的用途，不能互相比较或替代。
+- 将连接状态和运行生命周期分开显示。断线表示当前状态尚未确认，不表示 Turn 已停止或 Session
+  已空闲。`turn/interrupt` 的成功响应只表示取消请求已接纳；只有 `turn_finished` 或恢复得到的
+  权威 Session/runtime 状态能确认 Turn 结算。`run_finished` 和 `run_failed` 是运行诊断，不能代替
+  `turn_finished` 的 Turn 结算边界。
+- 审批卡以 `requestId`、Project、Thread 和 Turn 关联。恢复时重新读取 pending approvals；收到
+  `approval/resolved` 后关闭对应请求，不能把旧审批卡当作仍有效的授权。
+
+#### 首次打开与断线恢复
+
+首次打开 Session、切换 Session 和恢复连接时，按以下顺序对账：
+
+1. 首次打开或切换 Session 时，先 attach 当前 Session。若 App Server 报告 Session 被其他进程锁定，
+   进入只读观察状态；继续读取 canonical 历史，不启动第二个 writer。
+2. WebSocket 重连时保留最后一份完整活动投影，并显示“正在恢复”。连接恢复本身不代表 Turn 已停止；
+   不重复提交输入。
+3. 对同一运行代次，从最后一个已接受的 `sequence` 回放事件，并读取 `runtime/status`、工作流状态和
+   待审批请求。运行代次变化、回放返回 `hasGap` 或回放失败时，丢弃旧代次的事件游标并完整对账。
+4. 完整对账时读取 `thread/read`、分页的 `thread/items/list`、`runtime/status`、工作流状态和待审批请求。
+   这些结果恢复历史活动、当前 Turn、Session 设置和可执行操作。若尚未 attach，则先尝试 attach。
+5. 同步期间到达的 WebSocket 事件先缓冲，再按 `sequence` 排序应用。用稳定 item identity 合并重复投影，
+   丢弃已应用事件。事件缓存用于补齐短暂断线，不是持久历史。
+6. 所有读取和回放都确认属于当前 Project、Thread 和请求代次后，才把界面标记为在线并解除同步状态。
+
+浏览器与 Gateway 的 WebSocket 断开时，已接纳的 Gateway Turn stream 可以继续运行。重连后应观察并
+对账该 Turn，不得因连接重建而重新提交相同输入。Gateway 或 App Server 进程重启后，未结算的普通
+Turn 不会从中断点继续；Session 从最近一次已结算 checkpoint 恢复。Core 不重放中断的 Turn 或工具副作用。
+界面显示持久化的中断或失败状态，等待用户操作或 App Server 创建一个新的 Turn。Goal 和 Child operation 按其各自的
+持久生命周期恢复；客户端不得自行重跑 Goal 输入或重复启动已有 Child Turn。
+
+#### 实时活动的方向提示和交互
+
+状态栏始终给出当前 Project/Session 范围、Turn 生命周期、连接状态、最近运行阶段和下一步可执行操作。
+连接恢复中时明确显示“正在恢复”或“连接中断”，同时保留最后的活动上下文。不要把未知状态显示为
+“空闲”或“已完成”。审批、停止确认、计划审阅、只读锁和失败状态都提供对应的下一步操作或原因。
+
+对话时间线按 Session 活动顺序呈现 Turn 和活动项。当前 Turn 有清晰标记；Session Turn 导航可定位到
+历史 Turn，并提供输入摘要、来源、结果摘要和有界运行指标。Child 的父级视图展示 operation 摘要，
+Child transcript 留在自己的 Session 活动时间线。
+
+实时更新不能打断用户查看旧活动。用户停留在最新活动附近时，时间线可以跟随新增内容；用户滚动查看
+历史时，保持其滚动位置并显示“有新活动”入口。该入口跳到当前 Turn 的最新活动，历史 Turn 选择则
+跳到所选 Turn。工具调用和结果使用可折叠的结构化卡片；推理等大段细节默认折叠，避免实时流淹没
+当前步骤和下一步操作。
+
 ## 审批与执行设置
 
 敏感工具调用从 Host/App Server 以 `approval/request` 发到 SDK。Gateway 将它按
