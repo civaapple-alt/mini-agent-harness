@@ -748,9 +748,10 @@ fn read_child_task(
         {
             latest["follow_up"] = follow_up;
         }
-        if let Some(control) = control
-            .filter(|request| matches!(request["status"].as_str(), Some("pending" | "accepted")))
-        {
+        if let Some(control) = control.filter(|request| {
+            matches!(request["status"].as_str(), Some("pending" | "accepted"))
+                && matches!(latest["status"].as_str(), Some("pausing" | "cancelling"))
+        }) {
             latest["control"] = control;
         }
     }
@@ -764,7 +765,10 @@ fn reconcile_with_settled_turn(operation: &mut Value, turn: &SettledTurn) {
     let Some(operation_status) = operation.get("status").and_then(Value::as_str) else {
         return;
     };
-    if !matches!(operation_status, "queued" | "running" | "awaiting_approval") {
+    if !matches!(
+        operation_status,
+        "queued" | "running" | "awaiting_approval" | "pausing" | "cancelling"
+    ) {
         return;
     }
 
@@ -789,11 +793,15 @@ fn reconcile_with_settled_turn(operation: &mut Value, turn: &SettledTurn) {
     };
     let operation_status = match settled_status {
         "completed" => "completed",
+        "cancelled" | "interrupted" if operation_status == "pausing" => "paused",
         "cancelled" | "interrupted" => "cancelled",
         "failed" | "step_limit" => "failed",
         _ => return,
     };
     operation["status"] = json!(operation_status);
+    if operation_status == "paused" {
+        operation["turn_id"] = Value::Null;
+    }
     if operation_status == "completed"
         && operation.get("result").is_none_or(Value::is_null)
         && let Some(result) = turn.result.as_deref()
@@ -1031,6 +1039,81 @@ mod tests {
         assert_eq!(second["children"][0]["child_thread_id"], "child-c");
         assert!(second["next_cursor"].is_null());
         crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn task_read_reconciles_settled_turns_over_stale_pause_and_cancel_states() {
+        for (operation_status, control_action, turn_status, expected_status) in [
+            ("pausing", "pause", "interrupted", "paused"),
+            ("pausing", "pause", "completed", "completed"),
+            ("cancelling", "cancel_active", "cancelled", "cancelled"),
+        ] {
+            let root = crate::test_support::test_root();
+            let path = root.join("child.jsonl");
+            let records = [
+                json!({
+                    "kind":"session_created",
+                    "forked_from":{"parent_session_id":"parent"}
+                }),
+                json!({
+                    "kind":"turn_started",
+                    "turn_id":"turn-one",
+                    "timestamp_ms":1100,
+                    "prompt":"Original task"
+                }),
+                json!({
+                    "kind":"operation",
+                    "operation_id":"child:one",
+                    "operation_kind":"child_task",
+                    "status":"running",
+                    "turn_id":"turn-one",
+                    "parent_thread_id":"parent-thread",
+                    "attempt":1,
+                    "attempt_kind":"initial",
+                    "prompt":"Original task",
+                    "timestamp_ms":1100
+                }),
+                json!({
+                    "kind":"operation",
+                    "operation_id":"child:one",
+                    "operation_kind":"child_task",
+                    "status":operation_status,
+                    "turn_id":"turn-one",
+                    "parent_thread_id":"parent-thread",
+                    "attempt":1,
+                    "attempt_kind":"initial",
+                    "prompt":"Original task",
+                    "control_action":control_action,
+                    "control_request_id":"control-request-1",
+                    "timestamp_ms":1200
+                }),
+                json!({
+                    "kind":"turn_settled",
+                    "turn_id":"turn-one",
+                    "status":turn_status
+                }),
+            ];
+            fs::write(
+                &path,
+                records
+                    .iter()
+                    .map(Value::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+            .unwrap();
+
+            let (operation, reports, _) = read_child_task(&path, "parent", 0, false).unwrap();
+            let operation = operation.expect("the child operation is readable");
+            assert!(reports.is_empty());
+            assert_eq!(operation["status"], expected_status);
+            assert!(operation.get("control").is_none());
+            if expected_status == "paused" {
+                assert!(operation["turn_id"].is_null());
+            }
+
+            crate::test_support::remove_test_root(&root);
+        }
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use super::*;
+use std::process::Stdio;
 
 pub(super) fn write_json_atomic(path: &Path, value: &Value) -> Result<(), String> {
     if let Some(parent) = path.parent() {
@@ -266,6 +267,7 @@ fn process_exists(pid: u32) -> bool {
     } else {
         Command::new("kill")
             .args(["-0", &pid])
+            .stderr(Stdio::null())
             .status()
             .map(|status| status.success())
             .unwrap_or(true)

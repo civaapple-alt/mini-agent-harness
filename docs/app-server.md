@@ -449,6 +449,12 @@ the completed follow-up with the same request ID.
 `task_read` returns bounded status, attempt, result, error, and incremental
 reports (`after_cursor`, at most 32 reports / 10 KiB per page).
 Both tools reconcile a nonterminal operation with its matching settled Turn.
+This includes operations left in `pausing` or `cancelling`: the settled Turn is
+authoritative, so an interrupted Turn after a pause request projects as `paused`,
+an interrupted Turn after active cancellation projects as `cancelled`, and any
+completed or failed Turn keeps its actual terminal status. The projection drops
+the stale control request so Gateway recovery does not interrupt a settled Turn
+again.
 If a completed operation has no stored result, `task_read` recovers the final
 assistant item from that Turn, bounded to 512 characters. `reports` contains
 only explicit `task_report` updates; an empty report page does not mean the
