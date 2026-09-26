@@ -400,6 +400,17 @@ frees. Queued operation prompts retain ordinary line breaks and tabs, remain
 bounded to 32 KiB, and reject other control characters. `task_read` should be
 used to check a queued task once and to follow active children; queued tasks do
 not need repeated polling.
+`delegate_task` accepts `child_key`, a bounded key unique within the creating
+parent Session. Capabilities derives the canonical `child_thread_id` from the
+parent Session ID and key and returns that ID with the queue request. The same
+key in another parent Session maps to a different child Thread; display titles
+may repeat and never define identity. `task_read`, `task_list`, and
+`task_control` use the returned canonical ID. The bounded tool result carries
+identity and scheduling metadata but omits the prompt. Gateway first persists
+the `tool_started` arguments in a bounded receipt, then materializes a task only
+after the matching successful `delegate_task` result arrives. This keeps
+maximum-size prompts out of the model-visible tool result and binds recovery to
+the parent Turn and tool call.
 The setting controls only the active-child capacity. Every `delegate_task` call
 must provide `execution_mode` as `parallel` or `sequential`. Sequential work
 also requires `group_id` and a zero-based `sequence`. Missing sequence positions

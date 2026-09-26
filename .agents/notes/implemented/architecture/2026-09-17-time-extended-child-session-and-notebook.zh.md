@@ -15,11 +15,14 @@ Child Session 不进入 `mini-agent-core`。Core 继续运行一个 Thread 的�
 
 ## 已落地的控制接缝
 
-- `delegate_task` 是 Host capability。它只返回有界的排队请求，不在 Core 中
-  创建 scheduler。
-- WebStudio 观察父 runtime 的真实 `delegate_task` `tool_started` 事件，调用
-  相同的 child control seam。Gateway 只编排和转发，不维护第二份历史或授权
-  状态。
+- `delegate_task` 是 Host capability。它接受父 Session 内唯一的 `child_key`，
+  返回有界的排队请求和 canonical `child_thread_id`。Capabilities 将父
+  Session ID 与 key 做域分离 SHA-256 派生；不同父 Session 不会因为重复 key
+  或显示标题而共享 Child Thread。
+- Gateway 先用父 Turn 与工具调用 ID 持久化有界 `tool_started` 参数 receipt，
+  再与成功的 `delegate_task` `tool_finished` 结果配对后物化 Child。结果只回传
+  canonical 身份和调度元数据，不重复回显最多 32 KiB 的提示词。它不维护第二份
+  历史或授权状态。
 - `task_read` 从 child Session 的 canonical projection 读取状态、attempt、
   result 和 error。完整 child history 不内联到父上下文。
 - 每个父 Thread 最多两个 active child，child 深度限制为一层。Retry 使用

@@ -110,6 +110,7 @@ graph LR
 
 ### Implemented
 
+- [父 Session 子任务身份与事件恢复一致性](implemented/bug-fix/2026-09-26-parent-session-child-identity-and-event-recovery.zh.md)
 - [子任务终态与最终结果恢复](implemented/bug-fix/2026-09-26-child-task-settled-result-recovery.zh.md)
 - [Responses 传输中断与安全重试边界](implemented/bug-fix/2026-09-26-responses-transport-retry-boundary.zh.md)
 - [子任务多轮协作、自主控制与恢复](implemented/architecture/2026-09-20-child-agent-rounds-and-message-flow.zh.md)

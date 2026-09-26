@@ -197,6 +197,11 @@ checkpoint；compact fork 要求来源 Turn 空闲。两者都不复制进行中
 Child 运行在独立 App Server runtime 中。`delegate_task` 的 `execution_mode` 必须
 是 `parallel` 或 `sequential`；顺序任务还需要 `group_id`。Gateway 只把 operation
 的有限状态投影给父 Thread，Child transcript 始终留在 Child Session。
+委派使用父 Session 内唯一的 `child_key`。Capabilities 根据父 Session ID 和该 key
+生成 canonical `child_thread_id`；同名标题不会共享 Thread。Gateway 只在成功的
+`delegate_task` 结果中取得 canonical ID 后才物化子 Session。结果只携带身份和调度元数据，
+不回显提示词；Gateway 先按父 Turn 与工具调用 ID 持久化 `tool_started` 参数，再与成功结果配对，
+这样最大 32 KiB 的提示词不会被重复放进模型可见工具输出。
 
 Child 可用 `task_report` 发送有界进展；Gateway 通过 App Server `child/task`
 写入 Child Session，再刷新 `/children` 和父 Turn 批次卡。父 Thread 活跃时，报告和

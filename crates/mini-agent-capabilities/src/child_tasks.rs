@@ -1,11 +1,13 @@
 use crate::SessionOperation;
 use mini_agent_protocol::{Tool, ToolError, ToolHandler, ToolRuntime, ToolSpec};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const MAX_CHILD_ID_BYTES: usize = 64;
 const MAX_CHILD_PROMPT_BYTES: usize = 32 * 1024;
+const MAX_CHILD_TITLE_CHARS: usize = 160;
 const MAX_OPERATION_GROUP_ID_BYTES: usize = 128;
 const MAX_CHILD_REPORT_BYTES: usize = 4 * 1024;
 const MAX_REPORT_PAGE: usize = 32;
@@ -15,22 +17,24 @@ const MAX_THREAD_INDEX_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CHILD_TASK_RESULT_CHARS: usize = 512;
 
 /// Host-side request for WebStudio to create an independent child runtime.
-/// The tool only returns a bounded request; the Gateway observes the event and
-/// calls the normal Session fork/control seam.
-struct DelegateTaskTool;
+/// The Gateway joins ToolStarted arguments with this bounded successful result
+/// before calling the normal Session fork/control seam.
+struct DelegateTaskTool {
+    parent_session_dir: PathBuf,
+}
 
 impl ToolHandler for DelegateTaskTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "delegate_task".to_string(),
-            description: "Queue one bounded task for an independent child Session. Choose parallel for independent work or sequential with a group_id and zero-based sequence for dependent work. The child runs with the same Host permissions and can be queried with task_read.".to_string(),
+            description: "Queue one bounded task for an independent child Session. child_key is a short key unique only within this parent Session; the runtime returns the canonical child_thread_id for task_read and task_control. Titles are display labels and may repeat. Choose parallel for independent work or sequential with a group_id and zero-based sequence for dependent work.".to_string(),
             parameters: json!({
                 "type": "object",
-                "required": ["child_thread_id", "prompt", "execution_mode"],
+                "required": ["child_key", "prompt", "execution_mode"],
                 "properties": {
-                    "child_thread_id": {"type": "string"},
+                    "child_key": {"type": "string", "maxLength": 64},
                     "prompt": {"type": "string"},
-                    "title": {"type": "string"},
+                    "title": {"type": "string", "maxLength": 160},
                     "group_id": {"type": "string"},
                     "execution_mode": {"type": "string", "enum": ["parallel", "sequential"]},
                     "sequence": {"type": "integer", "minimum": 0}
@@ -43,10 +47,10 @@ impl ToolHandler for DelegateTaskTool {
 
 impl ToolRuntime for DelegateTaskTool {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
-        let child_thread_id = arguments
-            .get("child_thread_id")
+        let child_key = arguments
+            .get("child_key")
             .and_then(Value::as_str)
-            .ok_or_else(|| ToolError("delegate_task requires child_thread_id".to_string()))?;
+            .ok_or_else(|| ToolError("delegate_task requires child_key".to_string()))?;
         let prompt = arguments
             .get("prompt")
             .and_then(Value::as_str)
@@ -84,27 +88,56 @@ impl ToolRuntime for DelegateTaskTool {
                 "delegate_task sequence must be a non-negative integer".to_string(),
             ));
         }
-        validate_child_id(child_thread_id).map_err(ToolError)?;
+        validate_child_id(child_key).map_err(ToolError)?;
         if prompt.trim().is_empty() || prompt.len() > MAX_CHILD_PROMPT_BYTES {
             return Err(ToolError(
                 "delegate_task prompt must be non-empty and bounded".to_string(),
             ));
         }
+        let parent_session_id = self
+            .parent_session_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| ToolError("parent Session identity is unavailable".to_string()))?;
+        validate_child_id(parent_session_id).map_err(ToolError)?;
+        let child_thread_id = scoped_child_thread_id(parent_session_id, child_key);
+        let title = arguments
+            .get("title")
+            .and_then(Value::as_str)
+            .map(|value| {
+                value
+                    .chars()
+                    .take(MAX_CHILD_TITLE_CHARS)
+                    .collect::<String>()
+            })
+            .filter(|value| !value.trim().is_empty());
         let mut result = json!({
             "status": "queued",
             "operation_id": format!("child:{child_thread_id}"),
             "child_thread_id": child_thread_id,
-            "prompt": prompt,
+            "child_key": child_key,
             "execution_mode": execution_mode,
         });
         if let Some(group_id) = group_id {
             result["group_id"] = json!(group_id);
+        }
+        if let Some(title) = title {
+            result["title"] = json!(title);
         }
         if let Some(sequence) = sequence {
             result["sequence"] = json!(sequence);
         }
         serde_json::to_string(&result).map_err(|error| ToolError(error.to_string()))
     }
+}
+
+fn scoped_child_thread_id(parent_session_id: &str, child_key: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"mini-agent/child-thread/v1\0");
+    digest.update(parent_session_id.as_bytes());
+    digest.update([0]);
+    digest.update(child_key.as_bytes());
+    format!("{:x}", digest.finalize())
 }
 
 struct TaskReadTool {
@@ -511,7 +544,9 @@ pub fn child_task_tools(
         })]
     } else {
         vec![
-            Box::new(DelegateTaskTool),
+            Box::new(DelegateTaskTool {
+                parent_session_dir: session_dir.clone(),
+            }),
             Box::new(TaskReadTool {
                 parent_session_dir: session_dir.clone(),
             }),
@@ -789,26 +824,59 @@ mod tests {
 
     #[test]
     fn delegate_task_returns_a_bounded_queue_request() {
-        let tool = DelegateTaskTool;
+        let root = crate::test_support::test_root();
+        let parent_session_dir = root.join("parent-session");
+        fs::create_dir_all(&parent_session_dir).unwrap();
+        let tool = DelegateTaskTool { parent_session_dir };
         let result = tool
             .execute(&json!({
-                "child_thread_id": "child-1",
+                "child_key": "child-1",
                 "prompt": "inspect the module",
                 "execution_mode": "parallel"
             }))
             .unwrap();
         let value: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(value["status"], "queued");
-        assert_eq!(value["operation_id"], "child:child-1");
+        assert_eq!(value["child_thread_id"].as_str().unwrap().len(), 64);
+        assert_eq!(
+            value["operation_id"],
+            format!("child:{}", value["child_thread_id"].as_str().unwrap())
+        );
+        assert_eq!(value["child_key"], "child-1");
         assert_eq!(value["execution_mode"], "parallel");
+        assert!(value.get("prompt").is_none());
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn delegate_task_result_stays_bounded_for_maximum_prompt() {
+        let root = crate::test_support::test_root();
+        let parent_session_dir = root.join("parent-session");
+        fs::create_dir_all(&parent_session_dir).unwrap();
+        let tool = DelegateTaskTool { parent_session_dir };
+        let result = tool
+            .execute(&json!({
+                "child_key": "child-large",
+                "prompt": "x".repeat(MAX_CHILD_PROMPT_BYTES),
+                "execution_mode": "parallel"
+            }))
+            .unwrap();
+        assert!(result.len() < 16 * 1024);
+        let value: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(value["status"], "queued");
+        assert!(value.get("prompt").is_none());
+        crate::test_support::remove_test_root(&root);
     }
 
     #[test]
     fn delegate_task_preserves_main_thread_scheduling_intent() {
-        let tool = DelegateTaskTool;
+        let root = crate::test_support::test_root();
+        let parent_session_dir = root.join("parent-session");
+        fs::create_dir_all(&parent_session_dir).unwrap();
+        let tool = DelegateTaskTool { parent_session_dir };
         let result = tool
             .execute(&json!({
-                "child_thread_id": "child-2",
+                "child_key": "child-2",
                 "prompt": "apply the reviewed change",
                 "group_id": "refactor",
                 "execution_mode": "sequential",
@@ -819,30 +887,51 @@ mod tests {
         assert_eq!(value["group_id"], "refactor");
         assert_eq!(value["execution_mode"], "sequential");
         assert_eq!(value["sequence"], 2);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn child_thread_identity_is_stable_within_one_parent_and_scoped_across_parents() {
+        let first = scoped_child_thread_id("session-a", "review");
+        assert_eq!(
+            first,
+            "ef5d24b7c5e3c18f62c2d610b73a1e00768e4fd506aa524abfde52841b08037c"
+        );
+        assert_eq!(first, scoped_child_thread_id("session-a", "review"));
+        assert_ne!(first, scoped_child_thread_id("session-b", "review"));
+        assert_ne!(first, scoped_child_thread_id("session-a", "another-review"));
+        assert_eq!(first.len(), MAX_CHILD_ID_BYTES);
+        assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
     }
 
     #[test]
     fn delegate_task_rejects_missing_execution_mode() {
-        let error = DelegateTaskTool
-            .execute(&json!({
-                "child_thread_id": "child-3",
-                "prompt": "inspect the module"
-            }))
-            .expect_err("delegation must declare its scheduling mode");
+        let error = DelegateTaskTool {
+            parent_session_dir: PathBuf::from("parent-session"),
+        }
+        .execute(&json!({
+            "child_key": "child-3",
+            "prompt": "inspect the module"
+        }))
+        .expect_err("delegation must declare its scheduling mode");
         assert_eq!(error.0, "delegate_task requires execution_mode");
     }
 
     #[test]
     fn delegate_task_rejects_sequential_group_without_sequence() {
-        let error = DelegateTaskTool
+        let root = crate::test_support::test_root();
+        let parent_session_dir = root.join("parent-session");
+        fs::create_dir_all(&parent_session_dir).unwrap();
+        let error = DelegateTaskTool { parent_session_dir }
             .execute(&json!({
-                "child_thread_id": "child-4",
+                "child_key": "child-4",
                 "prompt": "inspect the module",
                 "group_id": "ordered-review",
                 "execution_mode": "sequential"
             }))
             .expect_err("sequential tasks need their explicit queue position");
         assert_eq!(error.0, "delegate_task sequential mode requires sequence");
+        crate::test_support::remove_test_root(&root);
     }
 
     #[test]
