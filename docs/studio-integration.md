@@ -210,7 +210,9 @@ Gateway 每个父 Session 最多缓存 64 个不同子任务的最新状态；�
 父代理可以通过 `task_control` 修改/取消排队项、引导或取消运行项、重试失败项、取消顺序组，或用
 `delegate_task` 追加新方向。顺序组缺号时等待，前序失败或取消时暂停后续项。运行面板展示相同的持久
 状态和最近报告；只有已创建 Session 的任务可打开。Gateway 事件是刷新提示，Session operation/report
-仍是状态权威。手动 steer 只在客户端收到 `steer_ack` 后提示一次。
+仍是状态依据。若终态 operation 快照未写入，读取方会用同一 Child Session 中匹配的
+`turn_settled` 和最终 assistant item 恢复终态与结果；`reports` 仍只代表显式 `task_report` 进展，
+不会代替最终回复。手动 steer 只在客户端收到 `steer_ack` 后提示一次。
 
 `task_control.assign` 根据 App Server 持久投影中的实时状态自动路由：运行中（包括已报告进展但仍继续执行）
 或等待审批的 child 使用带稳定 `requestId` 的 `turn/steer`；已完成 child 使用 `child/task` 的

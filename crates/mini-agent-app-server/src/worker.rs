@@ -53,7 +53,7 @@ fn operation_record(
     operation.turn_id = turn_id.map(str::to_string);
     operation.attempt = attempt;
     operation.attempt_kind = attempt_kind;
-    operation.result = result.map(str::to_string);
+    operation.result = result.map(mini_agent_capabilities::SessionOperation::bounded_result);
     operation.error = error.map(str::to_string);
     operation.group_id = group_id.map(str::to_string);
     operation.execution_mode = execution_mode.map(str::to_string);
@@ -582,6 +582,7 @@ pub(super) async fn worker_loop<M>(
             {
                 eprintln!("warning: failed to clear scheduled tasks: {error}");
             }
+            drop(runtime.take());
             let _ = reply.send(Ok(()));
             break;
         }
@@ -1191,25 +1192,37 @@ pub(super) async fn worker_loop<M>(
                                 } else {
                                     None
                                 };
-                                if let Err(error) = runtime_actor::record_operation(
-                                    &mut runtime,
-                                    operation_record(
-                                        operation_id,
-                                        operation_status,
-                                        Some(result.id.as_str()),
-                                        operation_attempt,
-                                        operation_attempt_kind,
-                                        operation_result,
-                                        persistence_error.as_deref(),
-                                        operation_group_id.as_deref(),
-                                        execution_mode.as_deref(),
-                                        group_sequence,
-                                        Some(prompt.as_str()),
-                                    ),
-                                ) {
+                                let operation = operation_record(
+                                    operation_id,
+                                    operation_status,
+                                    Some(result.id.as_str()),
+                                    operation_attempt,
+                                    operation_attempt_kind,
+                                    operation_result,
+                                    persistence_error.as_deref(),
+                                    operation_group_id.as_deref(),
+                                    execution_mode.as_deref(),
+                                    group_sequence,
+                                    Some(prompt.as_str()),
+                                );
+                                if let Err(error) =
+                                    runtime_actor::record_operation(&mut runtime, operation.clone())
+                                {
                                     eprintln!(
                                         "warning: failed to persist child operation result: {error}"
                                     );
+                                    if operation.result.is_some() {
+                                        let mut status_only = operation;
+                                        status_only.result = None;
+                                        if let Err(status_error) = runtime_actor::record_operation(
+                                            &mut runtime,
+                                            status_only,
+                                        ) {
+                                            eprintln!(
+                                                "warning: failed to persist child operation status: {status_error}"
+                                            );
+                                        }
+                                    }
                                 }
                             }
                             if persistence_error.is_none()

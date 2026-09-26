@@ -13,6 +13,7 @@ use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ApprovalPolicy;
 use mini_agent_capabilities::SandboxKind;
 use mini_agent_capabilities::SecurityPreset;
+use mini_agent_capabilities::child_task_tools;
 use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::Thread;
@@ -70,6 +71,76 @@ impl Model for DoneModel {
             reasoning: String::new(),
             text: "done".to_string(),
             tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct ChildTaskProjectionModel {
+    observed: Arc<Mutex<Option<(Value, Value)>>>,
+}
+
+impl Model for ChildTaskProjectionModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        let task_list = request
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::Tool {
+                    name,
+                    content,
+                    is_error: false,
+                    ..
+                } if name == "task_list" => Some(content.clone()),
+                _ => None,
+            });
+        let task_read = request
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::Tool {
+                    name,
+                    content,
+                    is_error: false,
+                    ..
+                } if name == "task_read" => Some(content.clone()),
+                _ => None,
+            });
+        let tool_calls = match (task_list.as_deref(), task_read.as_deref()) {
+            (None, _) => vec![ToolCall {
+                id: "read-child-list".to_string(),
+                name: "task_list".to_string(),
+                arguments: json!({"limit": 4}),
+            }],
+            (Some(_), None) => vec![ToolCall {
+                id: "read-child-detail".to_string(),
+                name: "task_read".to_string(),
+                arguments: json!({"child_thread_id": "child-1"}),
+            }],
+            (Some(listed), Some(read)) => {
+                let listed = from_str(listed).expect("task_list returns JSON");
+                let read = from_str(read).expect("task_read returns JSON");
+                *self.observed.lock().unwrap() = Some((listed, read));
+                Vec::new()
+            }
+        };
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: if tool_calls.is_empty() {
+                "Recovered the settled child result.".to_string()
+            } else {
+                String::new()
+            },
+            tool_calls,
             usage: None,
         })
     }
@@ -461,6 +532,93 @@ async fn run_turn_to_finished<M: Model + Send + 'static>(
         received.push(events.recv().await.unwrap().event);
     }
     received
+}
+
+#[tokio::test]
+async fn child_task_tools_reconcile_a_settled_turn_and_recover_its_result() {
+    let root = test_root("child-task-settled-projection");
+    let parent_session_dir = root.join("parent-session");
+    let child_session_dir = root.join("child-session");
+    fs::create_dir_all(&parent_session_dir).unwrap();
+    fs::create_dir_all(&child_session_dir).unwrap();
+
+    let final_text = format!("人物线索：\n{}", "余华作品人物关系。\n".repeat(1_200));
+    assert!(final_text.len() > 16 * 1024);
+    let child_records = [
+        json!({
+            "kind":"session_created",
+            "forked_from":{"parent_session_id":"parent-session"}
+        }),
+        json!({
+            "kind":"operation",
+            "operation_kind":"child_task",
+            "operation_id":"child:child-1",
+            "parent_thread_id":"thread-1",
+            "turn_id":"turn-child-1",
+            "status":"running",
+            "attempt":1,
+            "prompt":"review the child output",
+            "timestamp_ms":10
+        }),
+        json!({
+            "kind":"turn_started",
+            "turn_id":"turn-child-1",
+            "timestamp_ms":20,
+            "prompt":"review the child output"
+        }),
+        json!({
+            "kind":"item",
+            "turn_id":"turn-child-1",
+            "message":{
+                "role":"assistant",
+                "reasoning":"",
+                "text":final_text.clone(),
+                "tool_calls":[]
+            }
+        }),
+        json!({"kind":"turn_settled","turn_id":"turn-child-1","status":"completed"}),
+    ];
+    fs::write(
+        child_session_dir.join("session.jsonl"),
+        child_records
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+    fs::write(
+        root.join("thread_index.json"),
+        json!({"threads":{"child-1":{"session_id":"child-session"}}}).to_string(),
+    )
+    .unwrap();
+
+    let observed = Arc::new(Mutex::new(None));
+    let harness = Harness::new(
+        ChildTaskProjectionModel {
+            observed: Arc::clone(&observed),
+        },
+        ToolRouter::new(child_task_tools(parent_session_dir, None)),
+        HarnessConfig::default(),
+    );
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(ThreadId::new("initial"), harness),
+    );
+    run_turn_to_finished(&server, "Read the current child task state.").await;
+
+    let (listed, read) = observed.lock().unwrap().clone().unwrap();
+    let expected_result = final_text.chars().take(512).collect::<String>();
+    assert_eq!(listed["children"][0]["operation"]["status"], "completed");
+    assert!(listed["children"][0]["operation"].get("result").is_none());
+    assert_eq!(read["status"], "completed");
+    assert_eq!(read["operation"]["status"], "completed");
+    assert_eq!(read["reports"], json!([]));
+    assert_eq!(
+        read["operation"]["result"].as_str(),
+        Some(expected_result.as_str())
+    );
+    fs::remove_dir_all(root).unwrap();
 }
 
 fn knowledge_work_client(

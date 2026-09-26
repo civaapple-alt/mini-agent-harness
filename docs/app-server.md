@@ -437,6 +437,12 @@ the completed follow-up with the same request ID.
 `after_child_thread_id` to continue. It does not return reports or transcripts.
 `task_read` returns bounded status, attempt, result, error, and incremental
 reports (`after_cursor`, at most 32 reports / 10 KiB per page).
+Both tools reconcile a nonterminal operation with its matching settled Turn.
+If a completed operation has no stored result, `task_read` recovers the final
+assistant item from that Turn, bounded to 512 characters. `reports` contains
+only explicit `task_report` updates; an empty report page does not mean the
+final result is missing. Persisted operation results allow ordinary line
+breaks and tabs and are bounded to 16 KiB.
 Every per-child `task_control` intent identifies `child_thread_id`,
 `operation_id`, and the expected positive `attempt`. The Gateway compares that
 identity against the persisted projection before it acts; stale attempts return

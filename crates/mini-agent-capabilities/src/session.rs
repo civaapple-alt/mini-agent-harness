@@ -440,6 +440,26 @@ impl SessionOperation {
         }
     }
 
+    /// Bounds model-produced results to the size accepted by the durable
+    /// operation record. Line breaks and tabs are preserved; other control
+    /// characters are replaced so one unusual response cannot strand the
+    /// operation in a nonterminal state.
+    pub fn bounded_result(value: &str) -> String {
+        let mut result = String::with_capacity(value.len().min(MAX_OPERATION_RESULT_BYTES));
+        for character in value.chars() {
+            let character = if character.is_control() && !matches!(character, '\n' | '\r' | '\t') {
+                ' '
+            } else {
+                character
+            };
+            if result.len() + character.len_utf8() > MAX_OPERATION_RESULT_BYTES {
+                break;
+            }
+            result.push(character);
+        }
+        result
+    }
+
     fn validate(&self) -> Result<(), String> {
         validate_operation_text(&self.operation_id, MAX_OPERATION_ID_BYTES, "operation id")?;
         validate_operation_text(&self.kind, MAX_OPERATION_KIND_BYTES, "operation kind")?;
@@ -479,11 +499,6 @@ impl SessionOperation {
             ),
             (self.turn_id.as_deref(), MAX_OPERATION_ID_BYTES, "turn id"),
             (
-                self.result.as_deref(),
-                MAX_OPERATION_RESULT_BYTES,
-                "operation result",
-            ),
-            (
                 self.error.as_deref(),
                 MAX_OPERATION_ERROR_BYTES,
                 "operation error",
@@ -492,6 +507,9 @@ impl SessionOperation {
             if let Some(value) = value {
                 validate_operation_text(value, limit, label)?;
             }
+        }
+        if let Some(result) = self.result.as_deref() {
+            validate_operation_result(result)?;
         }
         if let Some(prompt) = self.prompt.as_deref() {
             validate_operation_prompt(prompt)?;
@@ -2512,6 +2530,19 @@ fn validate_operation_text(value: &str, max_bytes: usize, label: &str) -> Result
     Ok(())
 }
 
+fn validate_operation_result(value: &str) -> Result<(), String> {
+    if value.len() > MAX_OPERATION_RESULT_BYTES
+        || value
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err(
+            "operation result is oversized or contains unsupported control characters".to_string(),
+        );
+    }
+    Ok(())
+}
+
 fn validate_operation_prompt(value: &str) -> Result<(), String> {
     if value.trim().is_empty()
         || value.len() > MAX_OPERATION_PROMPT_BYTES
@@ -2870,6 +2901,34 @@ mod tests {
         assert!(text.contains("\"status\":\"completed\""));
         assert_eq!(resumed.state.messages().len(), 0);
         drop(resumed);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn operation_results_preserve_formatting_and_fit_the_durable_bound() {
+        let root = crate::test_support::test_root();
+        let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let response = format!("\u{1}first line\n\t{}", "🤖".repeat(5_000));
+        let result = SessionOperation::bounded_result(&response);
+        assert!(result.len() <= MAX_OPERATION_RESULT_BYTES);
+        assert!(result.starts_with(" first line\n\t"));
+
+        let mut operation = SessionOperation::new("child:formatted", "child_task", "completed");
+        operation.result = Some(result.clone());
+        opened.store.record_operation(operation).unwrap();
+
+        let record = fs::read_to_string(opened.store.path())
+            .unwrap()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find(|record| {
+                record.get("operation_id").and_then(Value::as_str) == Some("child:formatted")
+            })
+            .unwrap();
+        assert_eq!(record["result"].as_str(), Some(result.as_str()));
+        assert!(result.contains('\n'));
+        assert!(result.contains('\t'));
+        drop(opened);
         crate::test_support::remove_test_root(&root);
     }
 

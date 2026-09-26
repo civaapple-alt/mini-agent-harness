@@ -115,6 +115,16 @@ struct TaskListTool {
     parent_session_dir: PathBuf,
 }
 
+#[derive(Default)]
+struct SettledTurn {
+    turn_id: Option<String>,
+    prompt: Option<String>,
+    started_at_ms: Option<u64>,
+    status: Option<String>,
+    error: Option<String>,
+    result: Option<String>,
+}
+
 impl ToolHandler for TaskListTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -245,7 +255,7 @@ impl ToolHandler for TaskReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task_read".to_string(),
-            description: "Read bounded status, result, and reports for a child Session. Use the child_thread_id returned by delegate_task and read each task once after dispatch to distinguish running from queued. Poll running children for progress; queued tasks start automatically when a slot frees, so do not repeatedly read them. If a child Session is not materialized yet, skip it and report the missing child ID instead of retrying in a loop.".to_string(),
+            description: "Read bounded status, result, and reports for a child Session. Use the child_thread_id returned by delegate_task and read each task once after dispatch to distinguish running from queued. Poll running children for progress; queued tasks start automatically when a slot frees, so do not repeatedly read them. Reports contain only explicit task_report progress updates, not the child's final answer; an empty reports list does not mean a completed result is missing. If a child Session is not materialized yet, skip it and report the missing child ID instead of retrying in a loop.".to_string(),
             parameters: json!({
                 "type": "object",
                 "required": ["child_thread_id"],
@@ -554,6 +564,7 @@ fn read_child_task(
     let mut control = None;
     let mut reports = Vec::new();
     let mut next_cursor = after_cursor;
+    let mut settled_turn = SettledTurn::default();
     for line in bytes.split(|byte| *byte == b'\n') {
         if line.len() > 64 * 1024 {
             continue;
@@ -567,6 +578,44 @@ fn read_child_task(
                 .and_then(|value| value.get("parent_session_id"))
                 .and_then(Value::as_str)
                 == Some(parent_session_id);
+        }
+        if valid_lineage && record.get("kind").and_then(Value::as_str) == Some("turn_started") {
+            settled_turn = SettledTurn {
+                turn_id: record
+                    .get("turn_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                prompt: record
+                    .get("prompt")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                started_at_ms: record.get("timestamp_ms").and_then(Value::as_u64),
+                ..SettledTurn::default()
+            };
+        }
+        if valid_lineage
+            && record.get("kind").and_then(Value::as_str) == Some("item")
+            && record.get("turn_id").and_then(Value::as_str) == settled_turn.turn_id.as_deref()
+            && let Some(message) = record.get("message")
+            && message.get("role").and_then(Value::as_str) == Some("assistant")
+        {
+            settled_turn.result = message
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
+        if valid_lineage
+            && record.get("kind").and_then(Value::as_str) == Some("turn_settled")
+            && record.get("turn_id").and_then(Value::as_str) == settled_turn.turn_id.as_deref()
+        {
+            settled_turn.status = record
+                .get("status")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            settled_turn.error = record
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_string);
         }
         if valid_lineage
             && record.get("kind").and_then(Value::as_str) == Some("operation")
@@ -658,6 +707,7 @@ fn read_child_task(
         reports.push(report);
     }
     if let Some(latest) = latest.as_mut() {
+        reconcile_with_settled_turn(latest, &settled_turn);
         if let Some(follow_up) = follow_up
             .filter(|request| matches!(request["status"].as_str(), Some("accepted" | "blocked")))
         {
@@ -670,6 +720,67 @@ fn read_child_task(
         }
     }
     Ok((latest, reports, next_cursor))
+}
+
+fn reconcile_with_settled_turn(operation: &mut Value, turn: &SettledTurn) {
+    let Some(turn_id) = turn.turn_id.as_deref() else {
+        return;
+    };
+    let Some(operation_status) = operation.get("status").and_then(Value::as_str) else {
+        return;
+    };
+    if !matches!(operation_status, "queued" | "running" | "awaiting_approval") {
+        return;
+    }
+
+    let same_turn = operation.get("turn_id").and_then(Value::as_str) == Some(turn_id);
+    let queued_turn_match = operation_status == "queued"
+        && operation.get("turn_id").is_none_or(Value::is_null)
+        && operation.get("prompt").and_then(Value::as_str) == turn.prompt.as_deref()
+        && turn.prompt.is_some()
+        && operation
+            .get("timestamp_ms")
+            .and_then(Value::as_u64)
+            .is_some_and(|operation_timestamp| {
+                turn.started_at_ms
+                    .is_some_and(|started_at| operation_timestamp <= started_at)
+            });
+    if !same_turn && !queued_turn_match {
+        return;
+    }
+
+    let Some(settled_status) = turn.status.as_deref() else {
+        return;
+    };
+    let operation_status = match settled_status {
+        "completed" => "completed",
+        "cancelled" | "interrupted" => "cancelled",
+        "failed" | "step_limit" => "failed",
+        _ => return,
+    };
+    operation["status"] = json!(operation_status);
+    if operation_status == "completed"
+        && operation.get("result").is_none_or(Value::is_null)
+        && let Some(result) = turn.result.as_deref()
+    {
+        operation["result"] = json!(
+            result
+                .chars()
+                .take(MAX_CHILD_TASK_RESULT_CHARS)
+                .collect::<String>()
+        );
+    }
+    if operation_status == "failed"
+        && operation.get("error").is_none_or(Value::is_null)
+        && let Some(error) = turn.error.as_deref()
+    {
+        operation["error"] = json!(
+            error
+                .chars()
+                .take(MAX_CHILD_TASK_RESULT_CHARS)
+                .collect::<String>()
+        );
+    }
 }
 
 #[cfg(test)]
