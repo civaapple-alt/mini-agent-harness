@@ -7,8 +7,9 @@
 ## 结论
 
 模型目录是运行 Host 所在机器上的共享配置。供应商和模型用稳定的
-`{provider_id, model_id}` 引用；API Key 由 Host 写入系统凭据库，普通配置查询只
-返回是否已配置。主模型统一走现有 Responses 路径；不兼容的端点明确失败，不降级
+`{provider_id, model_id}` 引用；API Key 由 Host 以明文写入用户目录中的独立文件，普通配置查询只
+检查文件状态并返回是否已配置。系统凭据库中已有的 Key 不自动迁移，用户需要重新填写。
+主模型统一走现有 Responses 路径；不兼容的端点明确失败，不降级
 到 Chat Completions。
 
 全局默认由模型引用和推理选择组成；推理选择可以是省略推理参数的
@@ -31,7 +32,7 @@ Gateway 负责传递，Web Studio 提供设置页和输入框选择器。智能�
 | 状态或行为 | 权威 | 其他层职责 | 禁止事项 |
 | --- | --- | --- | --- |
 | 供应商目录、模型资料、全局与项目默认值 | Host `ModelCatalogStore` | App Server 暴露受限管理接口 | Gateway、SDK、Web 保存第二份配置或凭据 |
-| API Key | Host 系统凭据库 | Web 只提交新值并读取 `apiKeyConfigured` | 将 Key 放进目录、查询响应、事件或日志 |
+| API Key | Host 用户目录明文文件 | Web 只提交新值并读取 `apiKeyConfigured` | 将 Key 放进模型元数据、查询响应、事件或日志 |
 | Thread 模型覆盖与推理选择 | Session 的 Thread 设置 | SDK/Gateway/Web 发起设置更新 | 正在运行的 Turn 中途换模型 |
 | 当前 Turn 的模型引用 | Turn 输入快照，由 Host 解析并构建 Provider | Core 保留可移植模型引用 | Core 管理供应商、凭据或配置存储 |
 | Goal Verifier 选择 | Goal 创建时保存的模型引用 | Host 独立构建无工具 Verifier | 回退到主模型或读取主会话历史 |
@@ -49,7 +50,7 @@ Gateway 负责传递，Web Studio 提供设置页和输入框选择器。智能�
 ### 批次二：机器级目录和设置
 
 - Host 机器级目录保存供应商、模型资料、全局主模型及其推理选择、独立 Verifier
-  默认值和项目默认值；凭据写入操作系统凭据库。
+  默认值和项目默认值；API Key 明文保存在 `~/.mini-agent/provider-credentials/`。
 - 管理 API 不回传 Key。模型改名在一次目录写入中同步更新主模型、Verifier 和项目
   引用；删除则清除相应默认引用。
 - 设置页可新增、编辑、启停、删除供应商和模型。智能匹配不是远程探测，也不能
@@ -96,13 +97,12 @@ Gateway 负责传递，Web Studio 提供设置页和输入框选择器。智能�
   映射到 Responses 请求、`api_default` 省略推理字段、改名引用同步和 Thread 持久化。
 - Web 模型选择/管理组件测试通过；Gateway/SDK 定向测试通过；前端 lint、生产构建、
   Python Ruff 和 `git diff --check` 通过。
-- 当前 Rust 硬预算为 Core + Protocol 4,767/6,000、Control Plane 29,999/30,000、
-  Release 43,036/45,000。Control Plane 仅剩 1 行预算；后续实现应先删减或替换现有代码。
-- 相对 `origin/main` 的增量检查为 Release +2,144，有效行数超过每个 PR 的 +1,000
+- 当前 Rust 硬预算为 Core + Protocol 4,767/6,000、Control Plane 30,000/30,000、
+  Release 43,037/45,000。Control Plane 已到上限；后续实现必须先删减或替换现有代码。
+- 相对 `origin/main` 的增量检查为 Release +2,145，有效行数超过每个 PR 的 +1,000
   增量额度。集成应按可独立审查的批次拆分，或先减少净增量。
 - Windows Host 完整交叉编译尚未验证：当前 Mac 缺少 Windows SDK `windows.h`，使
-  `aws-lc-sys` 跨目标构建停止。新增 `MoveFileExW` 用法已在独立 Windows 目标探针中
-  编译通过；仍需 Windows 原生环境验证凭据库及运行时文件替换。
+  `aws-lc-sys` 跨目标构建停止。仍需 Windows 原生环境验证用户目录 ACL 和运行时文件替换。
 - 没有调用付费供应商 API。
 
 ## Change admission 回答
@@ -113,15 +113,14 @@ Gateway 负责传递，Web Studio 提供设置页和输入框选择器。智能�
    生命周期和 App Server 通信；未在 Web/Gateway 建立第二套模型运行时。
 3. **替换旧概念**：旧 `OPENAI_*` 配置保留为迁移兼容入口；目录模型是新配置权威。
    没有加入 Chat Completions fallback。
-4. **预算**：当前总量均在硬上限内；Release 增量 +1,809 超出单 PR +1,000 额度，需
+4. **预算**：当前总量均在硬上限内；Release 增量 +2,145 超出单 PR +1,000 额度，需
    在 PR 集成前按批次拆开或精简。
 5. **可见变化**：新增模型选择、模型管理、Thread 持久化及 Goal Verifier 模型快照；
-   凭据仅进入系统凭据库，不进入公共协议响应。
+   凭据仅进入 Host 管理的本地 Key 文件，不进入公共协议响应；本批不加密。
 6. **边界证据**：Rust 单元测试、Web/Gateway/SDK 测试和本地 mock Responses 覆盖
    主要契约；Windows 原生环境与全 Host 跨编译仍缺证据。
 
 ## 待集成事项
 
-本记录保持提案状态，直到实现被合并并按目标平台补齐验证。当前硬行数上限有余量，
-但 Control Plane 仅余 259 行；任何追加都应先删除或替换已有概念。PR 增量需要重新
-按最终基线计算。
+本记录保持提案状态，直到实现被合并并按目标平台补齐验证。Control Plane 已达到硬行数
+上限；任何追加都应先删除或替换已有概念。PR 增量需要按最终基线重新计算。

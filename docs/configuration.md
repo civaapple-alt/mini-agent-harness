@@ -42,8 +42,15 @@ from a workspace or user `.env` by `RuntimeConfig`.
 
 The Host reads provider and model metadata from `~/.mini-agent/model_catalog.json`.
 On Windows, it uses `%USERPROFILE%/.mini-agent/model_catalog.json`.
-The Host stores provider API keys in the operating system credential store.
-The App Server and Web Gateway never return API key values.
+The Host stores provider API keys as plaintext in
+`~/.mini-agent/provider-credentials/<providerId>.key` (or under
+`%USERPROFILE%/.mini-agent/provider-credentials/` on Windows). On Unix, the
+credential directory is restricted to mode `0700` and key files to `0600`.
+This storage is not encrypted. The App Server and Web Gateway never return API
+key values, and catalog reads check file presence without reading key contents.
+Keys saved by earlier builds in the operating system credential store are not
+imported; enter them again in Web Studio. Remove old credential-store entries
+manually if they are no longer needed.
 
 The catalog accepts `deepseek`, `kimi`, `glm`, `volcengine`, and `custom`
 providers. Each provider stores a name, an enabled flag, a Responses API Base

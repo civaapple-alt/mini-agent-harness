@@ -17,7 +17,6 @@ fs2.workspace = true
 futures-util.workspace = true
 htmd = "0.5"
 http.workspace = true
-keyring.workspace = true
 mini-agent-capabilities = { version = "0.8.0", path = "../mini-agent-capabilities" }
 mini-agent-core = { version = "0.8.0", path = "../mini-agent-core" }
 mini-agent-protocol = { version = "0.8.0", path = "../mini-agent-protocol" }

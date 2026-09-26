@@ -10,10 +10,14 @@ uploaded wholesale, but selected content can leave the machine when the model
 reads it through a tool or it appears in command output.
 
 Legacy provider credentials belong in the process environment, CI secrets, or
-`~/.mini-agent/.env`. The machine model catalog stores provider API keys in the
-operating system credential store. Its JSON file contains provider and model
-metadata, but no API key values. The App Server and Web Gateway report only
-whether a provider key exists. Never commit provider credentials.
+`~/.mini-agent/.env`. Provider API keys for the machine model catalog are stored
+as plaintext in `~/.mini-agent/provider-credentials/<providerId>.key` (under
+`%USERPROFILE%/.mini-agent/provider-credentials/` on Windows). Unix restricts
+the credential directory and files to the current user. This storage is not
+encrypted; any process running with access to the user account can read it. The
+catalog JSON contains provider and model metadata, but no API key values. The
+App Server and Web Gateway report only whether a provider key exists. Never
+commit provider credentials.
 
 Interactive and one-shot conversation history is persisted in durable JSONL
 files under `~/.mini-agent/sessions/<workspace>/<session-id>/`. Web Studio's

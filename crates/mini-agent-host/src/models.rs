@@ -9,10 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 const STORE_FILE: &str = "model_catalog.json";
-const KEYRING_SERVICE: &str = "mini-agent-model-provider";
+const CREDENTIAL_DIRECTORY: &str = "provider-credentials";
 const MAX_ID_BYTES: usize = 128;
 const MAX_BASE_URL_BYTES: usize = 2048;
 const REASONING_RESERVED_FIELDS: &str =
@@ -104,42 +103,71 @@ pub struct ModelCatalogView {
 #[derive(Clone)]
 pub struct ModelCatalogStore {
     path: PathBuf,
-    credentials: Arc<dyn ProviderCredentialStore>,
+    credentials: FileCredentialStore,
 }
 
-trait ProviderCredentialStore: Send + Sync {
-    fn get(&self, provider_id: &str) -> Result<Option<String>, String>;
-    fn set(&self, provider_id: &str, api_key: &str) -> Result<(), String>;
-    fn delete(&self, provider_id: &str) -> Result<(), String>;
-}
+#[derive(Clone)]
+struct FileCredentialStore(PathBuf);
 
-struct SystemCredentialStore;
+impl FileCredentialStore {
+    fn path(&self, provider_id: &str) -> Result<PathBuf, String> {
+        validate_identifier(provider_id, "providerId")?;
+        Ok(self.0.join(format!("{provider_id}.key")))
+    }
 
-impl ProviderCredentialStore for SystemCredentialStore {
+    fn configured(&self, provider_id: &str) -> Result<bool, String> {
+        match self.path(provider_id)?.metadata() {
+            Ok(metadata) => Ok(metadata.is_file() && metadata.len() > 0),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(_) => Err("cannot inspect provider credential file".to_string()),
+        }
+    }
+
     fn get(&self, provider_id: &str) -> Result<Option<String>, String> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, provider_id)
-            .map_err(|_| "cannot access the operating system credential store".to_string())?;
-        match entry.get_password() {
-            Ok(value) => Ok(Some(value)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err("cannot access the operating system credential store".to_string()),
+        match fs::read_to_string(self.path(provider_id)?) {
+            Ok(value) if !value.is_empty() => Ok(Some(value)),
+            Ok(_) => Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_) => Err("cannot read provider credential file".to_string()),
         }
     }
 
     fn set(&self, provider_id: &str, api_key: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, provider_id)
-            .map_err(|_| "cannot access the operating system credential store".to_string())?;
-        entry
-            .set_password(api_key)
-            .map_err(|_| "cannot write the operating system credential store".to_string())
+        fs::create_dir_all(&self.0)
+            .map_err(|_| "cannot create provider credential directory".to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700))
+                .map_err(|_| "cannot restrict provider credential directory".to_string())?;
+        }
+        let path = self.path(provider_id)?;
+        let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temporary)
+            .map_err(|_| "cannot write provider credential file".to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
+                .map_err(|_| "cannot restrict provider credential file".to_string())?;
+        }
+        use std::io::Write;
+        file.write_all(api_key.as_bytes())
+            .map_err(|_| "cannot write provider credential file".to_string())?;
+        drop(file);
+        replace_catalog_file(&temporary, &path)
+            .map_err(|_| "cannot replace provider credential file".to_string())
     }
 
     fn delete(&self, provider_id: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, provider_id)
-            .map_err(|_| "cannot access the operating system credential store".to_string())?;
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err("cannot update the operating system credential store".to_string()),
+        match fs::remove_file(self.path(provider_id)?) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err("cannot delete provider credential file".to_string()),
         }
     }
 }
@@ -155,14 +183,9 @@ impl ModelCatalogStore {
 
     pub fn at(path: PathBuf) -> Self {
         Self {
+            credentials: FileCredentialStore(path.with_file_name(CREDENTIAL_DIRECTORY)),
             path,
-            credentials: Arc::new(SystemCredentialStore),
         }
-    }
-
-    #[cfg(test)]
-    fn at_with_credentials(path: PathBuf, credentials: Arc<dyn ProviderCredentialStore>) -> Self {
-        Self { path, credentials }
     }
 
     pub fn path(&self) -> &Path {
@@ -201,7 +224,7 @@ impl ModelCatalogStore {
             .into_iter()
             .map(|profile| {
                 Ok(ProviderView {
-                    api_key_configured: self.credentials.get(&profile.id)?.is_some(),
+                    api_key_configured: self.credentials.configured(&profile.id)?,
                     profile,
                 })
             })
@@ -951,31 +974,8 @@ mod tests {
     use mini_agent_protocol::{Message, ModelEvent, ModelUsage, ToolSpec};
     use std::io::{Read, Write};
     use std::net::TcpListener;
-    use std::sync::Mutex;
     use std::thread;
     use std::time::Duration;
-
-    #[derive(Default)]
-    struct MemoryCredentials(Mutex<BTreeMap<String, String>>);
-
-    impl ProviderCredentialStore for MemoryCredentials {
-        fn get(&self, provider_id: &str) -> Result<Option<String>, String> {
-            Ok(self.0.lock().unwrap().get(provider_id).cloned())
-        }
-
-        fn set(&self, provider_id: &str, api_key: &str) -> Result<(), String> {
-            self.0
-                .lock()
-                .unwrap()
-                .insert(provider_id.to_string(), api_key.to_string());
-            Ok(())
-        }
-
-        fn delete(&self, provider_id: &str) -> Result<(), String> {
-            self.0.lock().unwrap().remove(provider_id);
-            Ok(())
-        }
-    }
 
     struct EventCollector(Vec<ModelEvent>);
 
@@ -987,10 +987,7 @@ mod tests {
 
     fn test_store(base_url: String) -> ModelCatalogStore {
         let root = crate::test_support::test_root();
-        let store = ModelCatalogStore::at_with_credentials(
-            root.join(STORE_FILE),
-            Arc::new(MemoryCredentials::default()),
-        );
+        let store = ModelCatalogStore::at(root.join(STORE_FILE));
         store
             .upsert_provider(
                 ProviderProfile {
@@ -1035,10 +1032,9 @@ mod tests {
         let json = serde_json::to_string(&view).unwrap();
 
         assert!(view.providers[0].api_key_configured);
-        assert_eq!(
-            serde_json::to_value(ProviderKind::DeepSeek).unwrap(),
-            "deepseek"
-        );
+        let stored_key = store.credentials.get("deepseek").unwrap();
+        assert_eq!(stored_key.as_deref(), Some("test-secret-key"));
+        assert!(serde_json::to_value(ProviderKind::DeepSeek).unwrap() == "deepseek");
         assert!(!json.contains("test-secret-key"));
         assert!(!json.contains("apiKey\""));
     }
