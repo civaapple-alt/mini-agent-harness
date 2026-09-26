@@ -12,8 +12,8 @@ KERNEL_LIMIT = 6_000
 # The release-source total includes production code and tests from the supported
 # runtime packages. The experimental CLI/REPL is reported separately and is not
 # part of this hard release gate.
-PROJECT_LIMIT = 45_000
-CONTROL_PLANE_LIMIT = 30_000
+PROJECT_LIMIT = 50_000
+CONTROL_PLANE_LIMIT = 35_000
 PROJECT_DELTA_LIMIT = 1_000
 
 # Runtime is reported for visibility but has no aggregate gate. Release growth

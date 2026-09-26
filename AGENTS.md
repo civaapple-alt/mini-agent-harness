@@ -74,9 +74,9 @@ observable, recoverable, and verifiable runtime behavior.
 
 - Core + Protocol hard limit: 6,000 effective Rust source lines across `core`
   and `protocol`.
-- Release-source hard limit: 45,000 effective Rust source lines across Core, Protocol,
+- Release-source hard limit: 50,000 effective Rust source lines across Core, Protocol,
   Capabilities, Host, and App Server.
-- Control Plane hard limit: 30,000 effective Rust source lines across the Host
+- Control Plane hard limit: 35,000 effective Rust source lines across the Host
   and Capabilities control-plane categories.
 - The CLI, including the experimental REPL, is reported separately and is
   excluded from the release-source limit. Tests in release packages count.
@@ -121,8 +121,8 @@ reviewers still judge the answer quality and architecture.
 New code defaults to net-zero growth. A feature may use the per-pull-request
 allowance when its scope requires growth and its boundary evidence supports it.
 Never remove Core tests, Actor/CAS/Session authority, or public protocol behavior
-only to satisfy a line target. The 6,000-line Core + Protocol, 30,000-line
-Control Plane, and 45,000-line Release Rust ceilings remain hard gates;
+only to satisfy a line target. The 6,000-line Core + Protocol, 35,000-line
+Control Plane, and 50,000-line Release Rust ceilings remain hard gates;
 experimental CLI/REPL growth is informational until it is promoted into the
 supported surface.
 

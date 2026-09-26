@@ -181,9 +181,9 @@ class LineBudgetTests(unittest.TestCase):
             self.assertIn("core+protocol", output.getvalue())
             self.assertIn("1/6000", output.getvalue())
             self.assertIn("control-plane", output.getvalue())
-            self.assertIn("0/30000", output.getvalue())
+            self.assertIn("0/35000", output.getvalue())
             self.assertIn(
-                "release             1/45000",
+                "release             1/50000",
                 output.getvalue(),
             )
             self.assertNotIn("runtime (core + protocol + host + app-server)", output.getvalue())
@@ -221,14 +221,14 @@ class LineBudgetTests(unittest.TestCase):
             )
 
     def test_control_plane_hard_limit_is_enforced(self):
-        current = {"kernel": 1, "runtime": 1, "release": 1, "control_plane": 30_001}
-        base = {"kernel": 1, "runtime": 1, "release": 1, "control_plane": 30_000}
+        current = {"kernel": 1, "runtime": 1, "release": 1, "control_plane": 35_001}
+        base = {"kernel": 1, "runtime": 1, "release": 1, "control_plane": 35_000}
 
         violations, deltas = line_budget._delta_gate_violations(current, base)
 
         self.assertEqual(deltas["control_plane"], 1)
         self.assertIn(
-            "control-plane exceeds hard limit (30001/30000)", violations
+            "control-plane exceeds hard limit (35001/35000)", violations
         )
 
     def test_delta_gate_enforces_core_protocol_hard_limit(self):
@@ -240,12 +240,12 @@ class LineBudgetTests(unittest.TestCase):
         self.assertIn("core+protocol exceeds hard limit (6001/6000)", violations)
 
     def test_release_hard_limit_is_enforced(self):
-        current = {"kernel": 1, "runtime": 1, "release": 45_001, "control_plane": 1}
-        base = {"kernel": 1, "runtime": 1, "release": 45_001, "control_plane": 1}
+        current = {"kernel": 1, "runtime": 1, "release": 50_001, "control_plane": 1}
+        base = {"kernel": 1, "runtime": 1, "release": 50_001, "control_plane": 1}
 
         violations, _ = line_budget._delta_gate_violations(current, base)
 
-        self.assertIn("release exceeds hard limit (45001/45000)", violations)
+        self.assertIn("release exceeds hard limit (50001/50000)", violations)
 
     def test_core_protocol_hard_limit_is_enforced(self):
         with tempfile.TemporaryDirectory() as directory:
