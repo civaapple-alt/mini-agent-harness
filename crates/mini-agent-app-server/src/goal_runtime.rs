@@ -198,12 +198,10 @@ impl GoalRuntimeHandle {
         self.scheduled_goal = None;
         self.store.set_goal(objective, token_budget.flatten())?;
         let verifier_selection = match self.verifier_config.as_ref() {
-            Some(config) if !config.has_legacy_verifier_model() => {
-                ModelCatalogStore::machine_default()
-                    .and_then(|catalog| catalog.verifier_default())
-                    .map_err(io::Error::other)?
-            }
-            _ => None,
+            Some(_) => ModelCatalogStore::machine_default()
+                .and_then(|catalog| catalog.verifier_default())
+                .map_err(io::Error::other)?,
+            None => None,
         };
         self.store
             .set_goal_verifier_selection(verifier_selection)?

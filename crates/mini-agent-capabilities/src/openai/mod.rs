@@ -48,7 +48,7 @@ impl OpenAiModel {
         let base_url = trim_base(&base_url);
         if base_url.is_empty() {
             return Err(OpenAiError::Protocol(
-                "OPENAI_BASE_URL must not be empty".to_string(),
+                "Responses API Base URL must not be empty".to_string(),
             ));
         }
         let client = Client::builder()

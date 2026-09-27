@@ -127,7 +127,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
         } = options;
         let workspace = runtime_config.workspace();
         let goal_limits = runtime_config.goal_limits();
-        let model_name = runtime_config.model().unwrap_or_default().to_string();
+        let model_name = runtime_config.provider_settings()?.model;
         let include_session_tools = composition.tools == mini_agent_host::ToolScope::All;
         let session = match session_request {
             SessionRequest::Disabled => None,

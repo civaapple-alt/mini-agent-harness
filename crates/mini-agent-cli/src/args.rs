@@ -25,8 +25,8 @@ COMMON OPTIONS:
     --json                              Machine-readable output for run
 
 CONFIG:
-    OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL
-    Goal Runtime limits are configured separately by the App Server.
+    Model providers and defaults are shared with Web Studio's model settings.
+    Goal Runtime safety limits are configured separately by the App Server.
 
 PROJECT:
     GitHub:  https://github.com/civaapple-alt/mini-agent-harness

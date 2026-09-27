@@ -1,33 +1,20 @@
 # Configuration
 
-mini-agent resolves provider settings in this order:
+Provider credentials, models, and defaults are configured in Web Studio and
+stored by Host in the machine model catalog. The CLI and Web Studio use this
+same catalog. `.env` and process environment variables do not configure or
+override provider settings. The App Server initialize response reports the
+bounded non-secret capability manifest.
 
-1. process environment;
-2. `.env` in the startup workspace;
-3. `~/.mini-agent/.env` (`%USERPROFILE%\.mini-agent\.env` on Windows);
-4. a built-in default, where one exists.
-
-A PATH-installed binary should keep credentials in the user file so they are
-not copied into every workspace. A workspace `.env` still overrides the user
-file when a project needs a different key or model. The App Server initialize
-response reports the bounded non-secret capability manifest.
-
-Provider settings, verifier settings, Goal limits, and web-search settings use
-the precedence above. Project/workspace bindings and standalone App Server
-session selectors are process-level controls: the Web Gateway injects them when
-it starts one App Server process for a Project/Thread, and they are not read
-from a workspace or user `.env` by `RuntimeConfig`.
+`RuntimeConfig` reads Goal safety limits from process environment, startup
+workspace `.env`, and user `~/.mini-agent/.env` (Windows:
+`%USERPROFILE%\.mini-agent\.env`) in that precedence order. Project/workspace
+bindings and standalone App Server session selectors are process-level controls:
+the Web Gateway injects them when it starts one App Server process for a
+Project/Thread.
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | for primary commands | Bearer credential for the Responses endpoint |
-| `OPENAI_MODEL` | for primary commands | Provider model identifier. Current DeepSeek unified entrypoint is `deepseek-flash`; image-bearing requests use `deepseek-v4-flash-vision-exp` |
-| `OPENAI_BASE_URL` | no | Responses API root; defaults to `https://api.openai.com/v1`. Files API is `{base}/files` |
-| `VERIFIER_OPENAI_MODEL` | for Goal verification | Goal verifier model identifier |
-| `VERIFIER_OPENAI_API_KEY` | no | Goal verifier credential override; otherwise inherits `OPENAI_API_KEY` |
-| `VERIFIER_OPENAI_BASE_URL` | no | Goal verifier API root override; otherwise inherits `OPENAI_BASE_URL` |
-| `MINI_AGENT_WEB_SEARCH` | no | Boolean provider-side web-search override; official OpenAI/DeepSeek endpoints enable it by default when unset. It is independent from Host function tools and is not an approval-gated Host action |
-| `OPENAI_WEB_SEARCH` | no | Accepted web-search configuration alias; `MINI_AGENT_WEB_SEARCH` takes precedence |
 | `MINI_AGENT_GOAL_MAX_LOOPS` | no | Maximum Goal continuation loops; defaults to `100` |
 | `MINI_AGENT_GOAL_STEP_BUDGET` | no | Maximum Core model steps per Goal milestone; defaults to `200` |
 | `MINI_AGENT_GOAL_TIMEOUT_SECS` | no | Wall-clock timeout for one Goal milestone; defaults to `1800` seconds |
@@ -48,14 +35,19 @@ The Host stores provider API keys as plaintext in
 credential directory is restricted to mode `0700` and key files to `0600`.
 This storage is not encrypted. The App Server and Web Gateway never return API
 key values, and catalog reads check file presence without reading key contents.
-Keys saved by earlier builds in the operating system credential store are not
-imported; enter them again in Web Studio. Remove old credential-store entries
-manually if they are no longer needed.
+Earlier `.env` provider values are not imported or read. Enter provider
+credentials and defaults in Web Studio. Keys saved by earlier builds in the
+operating system credential store are not imported; remove old entries manually
+if they are no longer needed.
 
 The catalog accepts `deepseek`, `kimi`, `glm`, `volcengine`, and `custom`
 providers. Each provider stores a name, an enabled flag, a Responses API Base
-URL, and its model list. The Base URL has no default. Enter the URL root that
-the Host can extend with `/responses`.
+URL, an optional provider-side search choice, and its model list. Web Studio
+offers offline Base URL suggestions for built-in providers; custom providers
+are entered manually. The Host appends `/responses` to the configured URL root.
+Provider search can follow endpoint detection or be explicitly enabled or
+disabled. The provider and model must also advertise `web_search`, and CLI
+`--no-web-search` can temporarily disable it.
 
 Each model stores its provider model ID, display name, enabled state, context
 window, output limit, input modalities, capabilities, its supported reasoning
@@ -65,19 +57,19 @@ are the choices shown for a Thread; they do not indicate a default setting.
 parameters for disabling reasoning. The global default pairs a model with
 either one of its supported levels or `api_default`, which omits reasoning
 parameters from the request. The local smart-match list suggests model IDs and
-metadata. The suggestion does not verify a remote endpoint.
+metadata. The suggestion does not verify a remote endpoint. **Test connection**
+sends one bounded request without tools, only after a user clicks the button;
+the provider may charge for that request. The result is reduced to a status and
+a short message, without returning the key or raw request/response.
 
 The Host resolves the primary model in this order: explicit Thread selection,
-Project default, then global default. A legacy project `OPENAI_MODEL` remains
-usable when that Project has no model setting. `OPENAI_API_KEY` and
-`OPENAI_BASE_URL` continue to configure that legacy path.
+Project default, then global default. There is no environment-variable fallback.
 
 The Goal Verifier uses a separate default model. The Host records the selected
 Verifier reference when it creates a Goal. A later change to the global
-Verifier default affects new Goals only. `VERIFIER_OPENAI_MODEL`,
-`VERIFIER_OPENAI_API_KEY`, and `VERIFIER_OPENAI_BASE_URL` remain available for
-legacy verifier configuration. The Verifier does not fall back to the primary
-model when no verifier is configured.
+Verifier default affects new Goals only. The Verifier does not fall back to the
+primary model when no verifier is configured; this does not affect ordinary
+chat Turns.
 
 Thread model selections and reasoning selections are stored in the Session's
 `thread_settings.json` file. A Thread can choose `api_default` or one of its
@@ -182,17 +174,9 @@ same protocol and workflow control plane for every model implementation.
 `read_image` bytes stay in the session `attachments/` directory (not `session.jsonl`). Resume reloads
 them; fork copies them. Compaction does not attach images.
 
-The adapter appends `/responses` to `OPENAI_BASE_URL`. DeepSeek's Responses API
-therefore uses:
-
-```dotenv
-OPENAI_API_KEY=
-OPENAI_MODEL=deepseek-flash
-OPENAI_BASE_URL=https://api.deepseek.com
-```
-
-All provider requests use `{OPENAI_BASE_URL}/responses`. DeepSeek image turns
-use `function_call_output` `input_image.file_id`; mini-agent does not select a
+The adapter appends `/responses` to the Base URL stored in the Host model
+catalog. All provider requests use that Responses endpoint. Image turns use
+`function_call_output` `input_image.file_id`; mini-agent does not select a
 second provider protocol or rewrite the endpoint based on the model name.
 
 Use the App Server `initialize` response to inspect the bounded non-secret
@@ -313,17 +297,17 @@ converted into tokens.
 
 ## Goal verification
 
-When Goal Mode has a verifier gate, set `VERIFIER_OPENAI_MODEL` to run a separate,
-tool-free check against the latest settled checkpoint. There is currently no
-fallback from `VERIFIER_OPENAI_MODEL` to `OPENAI_MODEL`; omitting it makes
-verifier preparation fail. On restart, an unsettled
+When Goal Mode has a verifier gate, configure the independent Goal Verifier
+default in Web Studio to run a separate, tool-free check against the latest
+settled checkpoint. It is optional for ordinary chat. There is no fallback to
+the primary model; omitting it makes verifier preparation fail. On restart, an unsettled
 Goal schedules a new ordinary turn; a settled Goal checkpoint is verified again
 without replaying that turn. A clear operation invalidates pending verifier
 results, so a late result cannot advance a cleared or replaced Goal:
 
-The verifier inherits the primary credential and endpoint unless the
-verifier-specific overrides are set. It has a separate system role, exactly one
-model step, and an empty tool catalog. Its bounded verdict is stored in the
+The selected verifier model uses its provider's configured credential and
+endpoint. It has a separate system role, exactly one model step, and an empty
+tool catalog. Its bounded verdict is stored in the
 Goal workspace and is not replayed as primary conversation history.
 If verifier preparation fails, or the verifier is not configured, the active
 Goal is durably marked failed with a bounded reason. A verifier result is only

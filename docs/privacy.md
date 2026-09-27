@@ -3,15 +3,15 @@
 Mini Agent Harness sends no product telemetry, analytics, update checks, or crash
 reports. It has no project service of its own.
 
-Inference requests go to the configured `OPENAI_BASE_URL`. A request contains
+Inference requests go to the Responses endpoint configured for the selected
+Host model catalog provider. A request contains
 the system prompt, the current bounded conversation, tool definitions, and any
 tool or file output already added to that conversation. The workspace is not
 uploaded wholesale, but selected content can leave the machine when the model
 reads it through a tool or it appears in command output.
 
-Legacy provider credentials belong in the process environment, CI secrets, or
-`~/.mini-agent/.env`. Provider API keys for the machine model catalog are stored
-as plaintext in `~/.mini-agent/provider-credentials/<providerId>.key` (under
+Provider API keys for the machine model catalog are stored as plaintext in
+`~/.mini-agent/provider-credentials/<providerId>.key` (under
 `%USERPROFILE%/.mini-agent/provider-credentials/` on Windows). Unix restricts
 the credential directory and files to the current user. This storage is not
 encrypted; any process running with access to the user account can read it. The
@@ -35,7 +35,8 @@ retention and review requirements as other Session content; Web Studio projects
 only bounded reports into the parent view and does not copy the child transcript.
 
 Goal verification can send the complete latest settled checkpoint to the
-effective verifier endpoint, which may differ from `OPENAI_BASE_URL`. This can
+selected verifier model's endpoint, which may differ from the primary provider.
+This can
 include all of the durable content described above. The verifier runs with one
 model step and no tools, and stores only a bounded verdict in the Goal
 workspace. The verdict is not appended to later primary-turn history; an

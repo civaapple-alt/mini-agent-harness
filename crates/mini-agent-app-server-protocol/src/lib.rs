@@ -690,6 +690,8 @@ pub struct ModelProviderConfig {
     pub base_url: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<bool>,
     #[serde(default)]
     pub models: Vec<ModelProfileConfig>,
 }
@@ -717,6 +719,7 @@ pub struct ModelCatalogView {
 #[serde(rename_all = "snake_case")]
 pub enum ModelCatalogOperation {
     Get,
+    TestConnection,
     UpsertProvider,
     DeleteProvider,
     UpsertModel,
@@ -758,6 +761,27 @@ pub struct ModelCatalogManageParams {
 #[serde(rename_all = "camelCase")]
 pub struct ModelCatalogManageResult {
     pub catalog: ModelCatalogView,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_test: Option<ModelConnectionTestResult>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelConnectionTestStatus {
+    Succeeded,
+    InvalidCredentials,
+    ProviderRejected,
+    TimedOut,
+    Unreachable,
+    InvalidResponse,
+    Failed,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelConnectionTestResult {
+    pub status: ModelConnectionTestStatus,
+    pub message: String,
 }
 
 const fn default_true() -> bool {
@@ -1648,6 +1672,39 @@ mod tests {
         let decoded: JsonRpcResponse =
             serde_json::from_str(&serde_json::to_string(&response).unwrap()).unwrap();
         assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn model_catalog_connection_test_contract_is_bounded_and_camel_case() {
+        assert_eq!(
+            serde_json::to_value(ModelCatalogOperation::TestConnection).unwrap(),
+            "test_connection"
+        );
+        let provider = serde_json::to_value(ModelProviderConfig {
+            id: "deepseek".to_string(),
+            name: "DeepSeek".to_string(),
+            kind: ModelProviderKind::DeepSeek,
+            base_url: "https://api.deepseek.com".to_string(),
+            enabled: true,
+            web_search: Some(false),
+            models: Vec::new(),
+        })
+        .unwrap();
+        assert_eq!(provider["webSearch"], false);
+        assert!(provider.get("apiKey").is_none());
+
+        let result = serde_json::to_value(ModelCatalogManageResult {
+            catalog: ModelCatalogView::default(),
+            connection_test: Some(ModelConnectionTestResult {
+                status: ModelConnectionTestStatus::InvalidCredentials,
+                message: "The provider rejected the API key.".to_string(),
+            }),
+        })
+        .unwrap();
+        assert_eq!(result["connectionTest"]["status"], "invalid_credentials");
+        assert!(result.get("request").is_none());
+        assert!(result.get("response").is_none());
+        assert!(result["connectionTest"].get("apiKey").is_none());
     }
 
     #[test]

@@ -56,8 +56,9 @@ Windows 需要 PowerShell 7 (`pwsh`)。
 
 ### 运行
 
-Provider-backed 命令需要配置 `OPENAI_API_KEY`、`OPENAI_MODEL`，以及可选的
-`OPENAI_BASE_URL`。凭证优先级、Goal verifier 和运行时组合见
+首次使用先启动 Web Studio，在 **设置 → Agent 能力 → 模型设置** 配置供应商、API
+Key 和全局默认模型。CLI 与 Web Studio 共用 Host 保存的模型目录；项目默认模型在
+项目设置中配置。Goal Verifier 可选，未配置时不影响普通对话。环境配置范围见
 [`docs/configuration.md`](docs/configuration.md)。
 
 ```sh

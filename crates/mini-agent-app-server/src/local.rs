@@ -57,6 +57,7 @@ pub fn prepare(request: LocalRuntimeRequest) -> Result<LocalRuntimeLaunch, Strin
         .with_builtin_skill_groups(runtime_config.builtin_skill_groups());
     if request.no_tools {
         composition = composition.without_tools();
+        runtime_config = runtime_config.with_web_search(false);
     }
     if request.sandbox_kind_explicit {
         composition = composition.with_sandbox(request.sandbox_kind);

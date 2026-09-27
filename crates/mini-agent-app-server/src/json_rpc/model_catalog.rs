@@ -16,8 +16,39 @@ where
             Ok(store) => store,
             Err(error) => return response_error(request.id, JsonRpcError::server_error(error)),
         };
+        if params.operation == ModelCatalogOperation::TestConnection {
+            let (Some(provider_id), Some(model_id)) = (params.provider_id, params.model_id) else {
+                return response_error(
+                    request.id,
+                    JsonRpcError::invalid_params(
+                        "providerId and modelId are required for test_connection",
+                    ),
+                );
+            };
+            let selection = mini_agent_protocol::ModelSelection::new(provider_id, model_id);
+            let status = match store.test_connection(&selection).await {
+                Ok(status) => status,
+                Err(error) => {
+                    return response_error(request.id, JsonRpcError::server_error(error));
+                }
+            };
+            let catalog = match store.view().and_then(project_catalog) {
+                Ok(catalog) => catalog,
+                Err(error) => {
+                    return response_error(request.id, JsonRpcError::server_error(error));
+                }
+            };
+            return response_value(
+                request.id,
+                ModelCatalogManageResult {
+                    catalog,
+                    connection_test: Some(protocol_connection_test(status)),
+                },
+            );
+        }
         let result = match params.operation {
             ModelCatalogOperation::Get => store.view(),
+            ModelCatalogOperation::TestConnection => unreachable!("handled above"),
             ModelCatalogOperation::UpsertProvider => {
                 let Some(provider) = params.provider else {
                     return response_error(
@@ -100,11 +131,49 @@ where
         };
         match result {
             Ok(catalog) => match project_catalog(catalog) {
-                Ok(catalog) => response_value(request.id, ModelCatalogManageResult { catalog }),
+                Ok(catalog) => response_value(
+                    request.id,
+                    ModelCatalogManageResult {
+                        catalog,
+                        connection_test: None,
+                    },
+                ),
                 Err(error) => response_error(request.id, JsonRpcError::server_error(error)),
             },
             Err(error) => response_error(request.id, JsonRpcError::server_error(error)),
         }
+    }
+}
+
+fn protocol_connection_test(
+    status: mini_agent_host::ModelConnectionTestStatus,
+) -> mini_agent_app_server_protocol::ModelConnectionTestResult {
+    use mini_agent_app_server_protocol::ModelConnectionTestStatus as ProtocolStatus;
+    use mini_agent_host::ModelConnectionTestStatus as HostStatus;
+    let (status, message) = match status {
+        HostStatus::Succeeded => (ProtocolStatus::Succeeded, "Connection succeeded."),
+        HostStatus::InvalidCredentials => (
+            ProtocolStatus::InvalidCredentials,
+            "The provider rejected the API key.",
+        ),
+        HostStatus::ProviderRejected => (
+            ProtocolStatus::ProviderRejected,
+            "The provider rejected the connection test request.",
+        ),
+        HostStatus::TimedOut => (ProtocolStatus::TimedOut, "The provider request timed out."),
+        HostStatus::Unreachable => (
+            ProtocolStatus::Unreachable,
+            "The provider could not be reached.",
+        ),
+        HostStatus::InvalidResponse => (
+            ProtocolStatus::InvalidResponse,
+            "The provider returned an incomplete or invalid response.",
+        ),
+        HostStatus::Failed => (ProtocolStatus::Failed, "The connection test failed."),
+    };
+    mini_agent_app_server_protocol::ModelConnectionTestResult {
+        status,
+        message: message.to_string(),
     }
 }
 

@@ -4,7 +4,6 @@ use crate::env_file::ValueSource;
 use crate::goal::GoalLimits;
 use mini_agent_capabilities::{ImageStore, OpenAiModel};
 use mini_agent_protocol::ModelSelection;
-use reqwest::Url;
 use std::env;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -12,19 +11,10 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
-const VERIFIER_OPENAI_API_KEY: &str = "VERIFIER_OPENAI_API_KEY";
-const VERIFIER_OPENAI_MODEL: &str = "VERIFIER_OPENAI_MODEL";
-const VERIFIER_OPENAI_BASE_URL: &str = "VERIFIER_OPENAI_BASE_URL";
 
 #[derive(Clone)]
 pub struct RuntimeConfig {
     workspace: PathBuf,
-    api_key: Option<ResolvedValue>,
-    model: Option<ResolvedValue>,
-    base_url: String,
-    verifier_api_key: Option<ResolvedValue>,
-    verifier_model: Option<ResolvedValue>,
-    verifier_base_url: Option<String>,
     goal_limits: GoalLimits,
     web_search: bool,
     project_id: Option<String>,
@@ -54,15 +44,6 @@ impl RuntimeConfig {
             Some(path) => Environment::load(path)?,
             None => Environment::default(),
         };
-        let api_key = resolve_value("OPENAI_API_KEY", &workspace_env, &user_env);
-        let model = resolve_value("OPENAI_MODEL", &workspace_env, &user_env);
-        let base_url = resolve_value("OPENAI_BASE_URL", &workspace_env, &user_env)
-            .map(|value| value.value)
-            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
-        let verifier_api_key = resolve_value(VERIFIER_OPENAI_API_KEY, &workspace_env, &user_env);
-        let verifier_model = resolve_value(VERIFIER_OPENAI_MODEL, &workspace_env, &user_env);
-        let verifier_base_url = resolve_value(VERIFIER_OPENAI_BASE_URL, &workspace_env, &user_env)
-            .map(|value| value.value);
         let goal_limits = GoalLimits {
             max_loops: resolve_positive(
                 "MINI_AGENT_GOAL_MAX_LOOPS",
@@ -83,12 +64,6 @@ impl RuntimeConfig {
                 GoalLimits::default().milestone_timeout_secs,
             )?,
         };
-        let web_search = match resolve_value("MINI_AGENT_WEB_SEARCH", &workspace_env, &user_env)
-            .or_else(|| resolve_value("OPENAI_WEB_SEARCH", &workspace_env, &user_env))
-        {
-            Some(value) => parse_bool_setting("MINI_AGENT_WEB_SEARCH", &value.value)?,
-            None => is_official_search_endpoint(&base_url),
-        };
         let project_id = env::var("MINI_AGENT_PROJECT_ID")
             .ok()
             .filter(|value| !value.trim().is_empty());
@@ -99,14 +74,8 @@ impl RuntimeConfig {
             parse_builtin_skill_groups(env::var("MINI_AGENT_BUILTIN_SKILL_GROUPS").ok());
         Ok(Self {
             workspace,
-            api_key,
-            model,
-            base_url,
-            verifier_api_key,
-            verifier_model,
-            verifier_base_url,
             goal_limits,
-            web_search,
+            web_search: true,
             project_id,
             extra_read_roots,
             extra_write_roots,
@@ -116,49 +85,38 @@ impl RuntimeConfig {
     }
 
     pub fn provider_settings(&self) -> Result<ProviderSettings, String> {
-        match (&self.api_key, &self.model) {
-            (Some(api_key), Some(model)) => {
-                validate_base_url(&self.base_url)?;
-                Ok(ProviderSettings {
-                    api_key: api_key.value.clone(),
-                    model: model.value.clone(),
-                    base_url: self.base_url.clone(),
-                    web_search: self.web_search,
-                })
-            }
-            (Some(_), None) => {
-                Err("OPENAI_MODEL is required when OPENAI_API_KEY is configured".to_string())
-            }
-            (None, Some(_)) => {
-                Err("OPENAI_API_KEY is required when OPENAI_MODEL is configured".to_string())
-            }
-            (None, None) => {
-                let catalog = crate::models::ModelCatalogStore::machine_default()?;
-                let selected = catalog
-                    .primary_default(&self.project_id())?
-                    .and_then(|selection| {
-                        catalog.provider_settings(&selection, self.web_search).ok()
-                    });
-                if let Some(settings) = selected {
-                    validate_base_url(&settings.base_url)?;
-                    Ok(ProviderSettings {
-                        api_key: settings.api_key,
-                        model: settings.model,
-                        base_url: settings.base_url,
-                        web_search: settings.web_search,
-                    })
-                } else {
-                    // Lets local management APIs start before a model is configured.
-                    // HostResponsesModel rejects turns until a usable default exists.
-                    Ok(ProviderSettings {
-                        api_key: String::new(),
-                        model: "unconfigured".to_string(),
-                        base_url: DEFAULT_BASE_URL.to_string(),
-                        web_search: false,
-                    })
+        let catalog = crate::models::ModelCatalogStore::machine_default()?;
+        self.provider_settings_from(&catalog)
+    }
+
+    fn provider_settings_from(
+        &self,
+        catalog: &crate::models::ModelCatalogStore,
+    ) -> Result<ProviderSettings, String> {
+        let selected = catalog
+            .primary_default(&self.project_id())?
+            .and_then(|selection| catalog.provider_settings(&selection, true).ok());
+        Ok(match selected {
+            Some(mut settings) => {
+                // The CLI switch can disable provider search, while provider
+                // configuration and endpoint detection decide whether it is available.
+                settings.web_search &= self.web_search;
+                ProviderSettings {
+                    api_key: settings.api_key,
+                    model: settings.model,
+                    base_url: settings.base_url,
+                    web_search: settings.web_search,
                 }
             }
-        }
+            None => ProviderSettings {
+                // Lets management APIs and first-run Studio start without a model.
+                // HostResponsesModel rejects turns until a usable catalog default exists.
+                api_key: String::new(),
+                model: "unconfigured".to_string(),
+                base_url: DEFAULT_BASE_URL.to_string(),
+                web_search: self.web_search,
+            },
+        })
     }
 
     pub fn workspace(&self) -> PathBuf {
@@ -212,84 +170,41 @@ impl RuntimeConfig {
 
     /// Resolves the separate tool-free provider used by Goal verification.
     pub fn verifier_provider_settings(&self) -> Result<ProviderSettings, String> {
-        if self.verifier_model.is_none() {
-            let catalog = crate::models::ModelCatalogStore::machine_default()?;
-            let selection = catalog.verifier_default()?.ok_or_else(|| {
-                "configure a Goal Verifier default model or set VERIFIER_OPENAI_MODEL".to_string()
-            })?;
-            let mut settings = catalog.provider_settings(&selection, false)?;
-            if let Some(api_key) = &self.verifier_api_key {
-                settings.api_key = api_key.value.clone();
-            }
-            validate_base_url(&settings.base_url)?;
-            return Ok(ProviderSettings {
+        let catalog = crate::models::ModelCatalogStore::machine_default()?;
+        let selection = catalog.verifier_default()?.ok_or_else(|| {
+            "configure a Goal Verifier default model in Web Studio model settings".to_string()
+        })?;
+        catalog
+            .provider_settings(&selection, false)
+            .map(|settings| ProviderSettings {
                 api_key: settings.api_key,
                 model: settings.model,
                 base_url: settings.base_url,
                 web_search: false,
-            });
-        }
-        let model = self
-            .verifier_model
-            .as_ref()
-            .ok_or_else(|| "VERIFIER_OPENAI_MODEL is required for Goal verification".to_string())?
-            .value
-            .clone();
-        let api_key = self
-            .verifier_api_key
-            .as_ref()
-            .or(self.api_key.as_ref())
-            .ok_or_else(|| {
-                "VERIFIER_OPENAI_API_KEY or OPENAI_API_KEY is required for Goal verification"
-                    .to_string()
-            })?
-            .value
-            .clone();
-        let base_url = self.verifier_base_url.as_deref().unwrap_or(&self.base_url);
-        validate_base_url_named(VERIFIER_OPENAI_BASE_URL, base_url)?;
-        Ok(ProviderSettings {
-            api_key,
-            model,
-            base_url: base_url.to_string(),
-            web_search: false,
-        })
-    }
-
-    pub fn has_legacy_verifier_model(&self) -> bool {
-        self.verifier_model.is_some()
+            })
     }
 
     pub fn verifier_model_for(
         &self,
         selection: Option<&ModelSelection>,
     ) -> Result<OpenAiModel, String> {
-        if let Some(selection) = selection {
-            let catalog = crate::models::ModelCatalogStore::machine_default()?;
-            let provider = catalog.provider_settings_with_overrides(
-                selection,
-                false,
-                self.verifier_api_key
-                    .as_ref()
-                    .map(|value| value.value.as_str()),
-                self.verifier_base_url.as_deref(),
-            )?;
-            let profile = catalog.model_profile(selection)?;
-            return OpenAiModel::new(
-                provider.api_key,
-                provider.model,
-                provider.base_url,
-                false,
-                ImageStore::memory_only(),
-            )
-            .map(|model| {
-                model.with_model_options(
-                    profile.max_output_tokens.map(|value| value as usize),
-                    profile.reasoning_parameter_map,
-                )
-            })
-            .map_err(|error| error.to_string());
-        }
-        let provider = self.verifier_provider_settings()?;
+        let catalog = crate::models::ModelCatalogStore::machine_default()?;
+        self.verifier_model_for_catalog(selection, &catalog)
+    }
+
+    fn verifier_model_for_catalog(
+        &self,
+        selection: Option<&ModelSelection>,
+        catalog: &crate::models::ModelCatalogStore,
+    ) -> Result<OpenAiModel, String> {
+        let selection = match selection {
+            Some(selection) => selection.clone(),
+            None => catalog.verifier_default()?.ok_or_else(|| {
+                "configure a Goal Verifier default model in Web Studio model settings".to_string()
+            })?,
+        };
+        let provider = catalog.provider_settings(&selection, false)?;
+        let profile = catalog.model_profile(&selection)?;
         OpenAiModel::new(
             provider.api_key,
             provider.model,
@@ -297,17 +212,14 @@ impl RuntimeConfig {
             false,
             ImageStore::memory_only(),
         )
+        .map(|model| {
+            model.with_model_options(
+                profile.max_output_tokens.map(|value| value as usize),
+                profile.reasoning_parameter_map,
+            )
+        })
         .map_err(|error| error.to_string())
     }
-
-    pub fn model(&self) -> Option<&str> {
-        self.model.as_ref().map(|model| model.value.as_str())
-    }
-}
-
-fn is_official_search_endpoint(base_url: &str) -> bool {
-    let val = base_url.to_ascii_lowercase();
-    val.contains("api.openai.com") || val.contains("api.deepseek.com")
 }
 
 fn env_path_list(name: &str) -> Vec<PathBuf> {
@@ -318,19 +230,6 @@ fn env_path_list(name: &str) -> Vec<PathBuf> {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-fn validate_base_url(base_url: &str) -> Result<(), String> {
-    validate_base_url_named("OPENAI_BASE_URL", base_url)
-}
-
-fn validate_base_url_named(name: &str, base_url: &str) -> Result<(), String> {
-    let url =
-        Url::parse(base_url).map_err(|error| format!("{name} is not a valid URL: {error}"))?;
-    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return Err(format!("{name} must be an absolute http or https URL"));
-    }
-    Ok(())
 }
 
 fn resolve_positive<T>(
@@ -350,16 +249,6 @@ where
             .filter(|value| *value > T::default())
             .ok_or_else(|| format!("{name} must be a positive integer")),
         None => Ok(default),
-    }
-}
-
-fn parse_bool_setting(name: &str, value: &str) -> Result<bool, String> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "true" | "1" | "yes" | "on" | "enable" | "enabled" => Ok(true),
-        "false" | "0" | "no" | "off" | "disable" | "disabled" => Ok(false),
-        _ => Err(format!(
-            "{name} must be a boolean (true/false, 1/0, on/off)"
-        )),
     }
 }
 
@@ -403,81 +292,205 @@ fn parse_builtin_skill_groups(value: Option<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{ModelCatalogStore, ModelProfile, ProviderKind, ProviderProfile};
     use std::fs;
 
     #[test]
-    fn validates_absolute_http_urls() {
-        assert!(validate_base_url("https://api.deepseek.com").is_ok());
-        assert!(validate_base_url("http://127.0.0.1:8080/v1").is_ok());
-        assert!(validate_base_url("file:///tmp/api").is_err());
-        assert!(validate_base_url("not a url").is_err());
-    }
-
-    #[test]
-    fn non_official_provider_does_not_enable_builtin_web_search() {
+    fn legacy_provider_environment_values_do_not_configure_the_runtime() {
         let workspace = unique_dir("workspace");
         fs::write(
             workspace.join(".env"),
-            "OPENAI_API_KEY=k\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=https://example.com/api/v1\n",
+            "OPENAI_API_KEY=ignored-key\nOPENAI_MODEL=ignored-model\nOPENAI_BASE_URL=https://example.com/v1\nVERIFIER_OPENAI_API_KEY=ignored-verifier\nVERIFIER_OPENAI_MODEL=ignored-verifier-model\nVERIFIER_OPENAI_BASE_URL=https://example.com/v1\nMINI_AGENT_WEB_SEARCH=false\n",
         )
         .unwrap();
+        let store = ModelCatalogStore::at(workspace.join(".mini-agent/model_catalog.json"));
         let config = RuntimeConfig::load_from(workspace, None).unwrap();
-        assert!(!config.web_search());
-        assert!(!is_official_search_endpoint(&config.base_url));
+        let provider = config.provider_settings_from(&store).unwrap();
+        assert!(provider.api_key.is_empty());
+        assert_eq!(provider.model, "unconfigured");
+        assert!(config.web_search());
     }
 
     #[test]
-    fn user_env_fills_provider_settings_when_workspace_env_is_absent() {
-        let workspace = unique_dir("workspace");
-        let user_env = unique_dir("user").join(".env");
+    fn goal_verifier_requires_a_catalog_default_even_when_legacy_values_exist() {
+        let workspace = unique_dir("verifier-legacy-ignored");
         fs::write(
-            &user_env,
-            "OPENAI_API_KEY=user-key\nOPENAI_MODEL=deepseek-v4-flash\nOPENAI_BASE_URL=https://api.deepseek.com\n",
+            workspace.join(".env"),
+            "VERIFIER_OPENAI_API_KEY=ignored-key\nVERIFIER_OPENAI_MODEL=ignored-model\n",
         )
         .unwrap();
+        let store = ModelCatalogStore::at(workspace.join(".mini-agent/model_catalog.json"));
+        let config = RuntimeConfig::load_from(workspace, None).unwrap();
+        let error = match config.verifier_model_for_catalog(None, &store) {
+            Ok(_) => panic!("legacy verifier environment values must not configure the model"),
+            Err(error) => error,
+        };
+        assert!(error.contains("Goal Verifier default model"));
+    }
+
+    #[test]
+    fn provider_search_defaults_to_endpoint_detection_and_can_be_disabled() {
+        let workspace = unique_dir("search-setting");
+        let store = ModelCatalogStore::at(workspace.join(".mini-agent/model_catalog.json"));
+        let provider = ProviderProfile {
+            id: "deepseek".to_string(),
+            name: "DeepSeek".to_string(),
+            kind: ProviderKind::DeepSeek,
+            base_url: "https://api.deepseek.com".to_string(),
+            enabled: true,
+            web_search: None,
+            models: Vec::new(),
+        };
+        store
+            .upsert_provider(provider, Some("key".to_string()))
+            .unwrap();
+        store
+            .upsert_model(
+                "deepseek",
+                ModelProfile {
+                    id: "search-model".to_string(),
+                    name: "Search Model".to_string(),
+                    enabled: true,
+                    context_window: None,
+                    max_output_tokens: None,
+                    input_modalities: vec!["text".to_string()],
+                    capabilities: vec!["web_search".to_string()],
+                    reasoning_levels: Vec::new(),
+                    reasoning_parameter_map: Default::default(),
+                    smart_managed: false,
+                },
+                None,
+            )
+            .unwrap();
+        let selection = ModelSelection::new("deepseek", "search-model");
+        let config = RuntimeConfig::load_from(workspace, None).unwrap();
+        assert!(
+            store
+                .provider_settings(&selection, config.web_search())
+                .unwrap()
+                .web_search
+        );
+        assert!(
+            !store
+                .provider_settings(&selection, config.with_web_search(false).web_search())
+                .unwrap()
+                .web_search
+        );
+    }
+
+    #[test]
+    fn runtime_provider_settings_preserve_explicit_search_choice() {
+        let workspace = unique_dir("explicit-search-setting");
+        let store = ModelCatalogStore::at(workspace.join(".mini-agent/model_catalog.json"));
+        let selection = ModelSelection::new("custom", "search-model");
+        store
+            .upsert_provider(
+                ProviderProfile {
+                    id: "custom".to_string(),
+                    name: "Custom".to_string(),
+                    kind: ProviderKind::Custom,
+                    base_url: "https://example.test/v1".to_string(),
+                    enabled: true,
+                    web_search: Some(false),
+                    models: Vec::new(),
+                },
+                Some("key".to_string()),
+            )
+            .unwrap();
+        store
+            .upsert_model(
+                "custom",
+                ModelProfile {
+                    id: "search-model".to_string(),
+                    name: "Search Model".to_string(),
+                    enabled: true,
+                    context_window: None,
+                    max_output_tokens: None,
+                    input_modalities: vec!["text".to_string()],
+                    capabilities: vec!["web_search".to_string()],
+                    reasoning_levels: Vec::new(),
+                    reasoning_parameter_map: Default::default(),
+                    smart_managed: false,
+                },
+                None,
+            )
+            .unwrap();
+        store.set_defaults(Some(selection), None).unwrap();
+        let config = RuntimeConfig::load_from(workspace.clone(), None).unwrap();
+
+        assert!(!config.provider_settings_from(&store).unwrap().web_search);
+
+        store
+            .upsert_provider(
+                ProviderProfile {
+                    id: "custom".to_string(),
+                    name: "Custom".to_string(),
+                    kind: ProviderKind::Custom,
+                    base_url: "https://example.test/v1".to_string(),
+                    enabled: true,
+                    web_search: Some(true),
+                    models: Vec::new(),
+                },
+                None,
+            )
+            .unwrap();
+        assert!(config.provider_settings_from(&store).unwrap().web_search);
+    }
+
+    #[test]
+    fn primary_chat_model_does_not_require_a_goal_verifier() {
+        let workspace = unique_dir("primary-without-verifier");
+        let store = ModelCatalogStore::at(workspace.join(".mini-agent/model_catalog.json"));
+        let provider = ProviderProfile {
+            id: "custom".to_string(),
+            name: "Custom".to_string(),
+            kind: ProviderKind::Custom,
+            base_url: "https://example.test/v1".to_string(),
+            enabled: true,
+            web_search: None,
+            models: Vec::new(),
+        };
+        store
+            .upsert_provider(provider, Some("test-key".to_string()))
+            .unwrap();
+        store
+            .upsert_model(
+                "custom",
+                ModelProfile {
+                    id: "chat-model".to_string(),
+                    name: "Chat Model".to_string(),
+                    enabled: true,
+                    context_window: None,
+                    max_output_tokens: None,
+                    input_modalities: vec!["text".to_string()],
+                    capabilities: Vec::new(),
+                    reasoning_levels: Vec::new(),
+                    reasoning_parameter_map: Default::default(),
+                    smart_managed: false,
+                },
+                None,
+            )
+            .unwrap();
+        let selection = ModelSelection::new("custom", "chat-model");
+        store.set_defaults(Some(selection), None).unwrap();
+        let config = RuntimeConfig::load_from(workspace, None).unwrap();
+
+        let primary = config.provider_settings_from(&store).unwrap();
+        assert_eq!(primary.model, "chat-model");
+        assert_eq!(primary.api_key, "test-key");
+        assert!(config.verifier_model_for_catalog(None, &store).is_err());
+    }
+
+    #[test]
+    fn workspace_goal_limits_override_user_env_limits() {
+        let workspace = unique_dir("workspace");
+        fs::write(workspace.join(".env"), "MINI_AGENT_GOAL_MAX_LOOPS=2\n").unwrap();
+        let user_env = unique_dir("user").join(".env");
+        fs::write(&user_env, "MINI_AGENT_GOAL_MAX_LOOPS=9\n").unwrap();
 
         let config = RuntimeConfig::load_from(workspace, Some(user_env)).unwrap();
 
-        let provider = config.provider_settings().unwrap();
-        assert_eq!(provider.api_key, "user-key");
-        assert_eq!(provider.model, "deepseek-v4-flash");
-    }
-
-    #[test]
-    fn verifier_provider_settings_reads_canonical_names() {
-        let workspace = unique_dir("verifier-canonical");
-        fs::write(
-            workspace.join(".env"),
-            "OPENAI_API_KEY=primary-key\nOPENAI_MODEL=primary-model\nVERIFIER_OPENAI_API_KEY=verifier-key\nVERIFIER_OPENAI_MODEL=verifier-model\nVERIFIER_OPENAI_BASE_URL=http://verifier.test/v1\n",
-        )
-        .unwrap();
-
-        let config = RuntimeConfig::load_from(workspace, None).unwrap();
-
-        let provider = config.verifier_provider_settings().unwrap();
-        assert_eq!(provider.api_key, "verifier-key");
-        assert_eq!(provider.model, "verifier-model");
-        assert_eq!(provider.base_url, "http://verifier.test/v1");
-    }
-
-    #[test]
-    fn workspace_env_overrides_user_env() {
-        let workspace = unique_dir("workspace");
-        fs::write(
-            workspace.join(".env"),
-            "OPENAI_API_KEY=workspace-key\nOPENAI_MODEL=workspace-model\n",
-        )
-        .unwrap();
-        let user_env = unique_dir("user").join(".env");
-        fs::write(
-            &user_env,
-            "OPENAI_API_KEY=user-key\nOPENAI_MODEL=user-model\n",
-        )
-        .unwrap();
-
-        let config = RuntimeConfig::load_from(workspace, Some(user_env)).unwrap();
-
-        assert_eq!(config.api_key.as_ref().unwrap().value, "workspace-key");
+        assert_eq!(config.goal_limits().max_loops, 2);
     }
 
     #[test]

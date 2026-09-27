@@ -10,6 +10,7 @@
 
 当前相关决策：
 
+- [Web Studio 页面配置与首次使用](implemented/architecture/2026-09-27-page-owned-model-configuration-and-first-run.zh.md)
 - [SDK 恢复类型与跨层契约证据](implemented/architecture/2026-09-27-sdk-cross-layer-recovery-contract.zh.md)
 - [主子 Agent 自然交接与轻量复核](implemented/feature/2026-09-27-natural-parent-child-agent-handoff.zh.md)
 - [Session 级冻结、恢复与子任务报告送达](implemented/architecture/2026-09-26-session-wide-freeze-and-child-report-delivery.zh.md)
@@ -112,6 +113,7 @@ graph LR
 
 ### Implemented
 
+- [Web Studio 页面配置与首次使用](implemented/architecture/2026-09-27-page-owned-model-configuration-and-first-run.zh.md)
 - [SDK 恢复类型与跨层契约证据](implemented/architecture/2026-09-27-sdk-cross-layer-recovery-contract.zh.md)
 - [主子 Agent 自然交接与轻量复核](implemented/feature/2026-09-27-natural-parent-child-agent-handoff.zh.md)
 - [Web Studio Session Doctor](implemented/feature/2026-09-27-web-studio-session-doctor.zh.md)

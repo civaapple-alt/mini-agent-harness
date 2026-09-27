@@ -27,20 +27,13 @@ cargo build --release --locked -p mini-agent-cli
 Windows 使用 `target\release\mini-agent.exe`。Unix Shell 使用 `sh`；Windows
 Shell 需要 PowerShell 7 (`pwsh`)。
 
-## Provider 配置
+## 模型配置
 
-Provider-backed 命令需要凭证和模型配置。推荐将它们放在用户级
-`~/.mini-agent/.env`（Windows 为 `%USERPROFILE%\.mini-agent\.env`），避免
-凭证进入项目目录：
-
-```dotenv
-OPENAI_API_KEY=
-OPENAI_MODEL=deepseek-flash
-OPENAI_BASE_URL=https://api.deepseek.com
-```
-
-配置优先级为：进程环境、启动工作区 `.env`、用户级 `.env`、内置默认值。
-完整变量和运行时组合说明见 [`configuration.md`](configuration.md)。
+首次运行前，在 Web Studio 的 **设置 → Agent 能力 → 模型设置** 添加供应商、模型和
+全局默认值。API Key 由 Host 保存在用户目录中；CLI 会读取同一个模型目录，不需要
+在命令行或 `.env` 中重复配置。项目默认模型在 Web Studio 的项目设置中维护。
+Goal Verifier 默认模型是独立的可选项，不影响普通对话。环境变量仅用于 Goal 安全上限
+等部署级配置，详见 [`configuration.md`](configuration.md)。
 
 ## 常用命令
 

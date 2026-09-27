@@ -32,13 +32,7 @@ fn run_reads_stdin_and_keeps_machine_output_clean() {
         write_reasoning_sse_response(&mut stream, "checking", "script answer");
     });
     let root = test_root();
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
+    write_test_model_catalog(&root, &format!("http://{address}/v1"));
     fs::write(root.join("AGENTS.md"), "Use the release contract.\n").unwrap();
     fs::create_dir_all(root.join(".agents/skills/release-review")).unwrap();
     fs::write(
@@ -129,13 +123,7 @@ fn run_exports_a_bounded_redacted_trace_to_a_new_file() {
     });
     let root = test_root();
     let trace_path = root.join("trace.jsonl");
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
+    write_test_model_catalog(&root, &format!("http://{address}/v1"));
 
     let output = mini_agent(&root)
         .args([
@@ -183,12 +171,6 @@ fn run_refuses_to_overwrite_an_existing_trace_file() {
     let root = test_root();
     let trace_path = root.join("trace.jsonl");
     fs::write(&trace_path, "keep this artifact\n").unwrap();
-    fs::write(
-        root.join(".env"),
-        "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://127.0.0.1:1/v1\n",
-    )
-    .unwrap();
-
     let output = mini_agent(&root)
         .args([
             "run",
@@ -224,13 +206,7 @@ fn run_no_tools_uses_model_only_scope_without_extension_tools() {
         write_reasoning_sse_response(&mut stream, "checking", "model only");
     });
     let root = test_root();
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
+    write_test_model_catalog(&root, &format!("http://{address}/v1"));
     fs::create_dir_all(root.join(".agents/skills/should-not-load")).unwrap();
     fs::write(
         root.join(".agents/skills/should-not-load/SKILL.md"),
@@ -283,13 +259,7 @@ fn durable_session_resumes_settled_history_after_restart() {
         }
     });
     let root = test_root();
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
+    write_test_model_catalog(&root, &format!("http://{address}/v1"));
     let run = |arguments: &[&str], input: &[u8]| {
         let mut child = mini_agent(&root)
             .args(arguments)
@@ -356,13 +326,7 @@ fn steer_interrupts_a_running_turn_at_a_checkpoint() {
         write_sse_response(&mut second_stream, "corrected answer");
     });
     let root = test_root();
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
+    write_test_model_catalog(&root, &format!("http://{address}/v1"));
     let mut child = mini_agent(&root)
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
@@ -445,13 +409,7 @@ fn follow_up_is_queued_until_the_running_turn_finishes() {
         write_sse_response(&mut second_stream, "follow-up answer");
     });
     let root = test_root();
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
+    write_test_model_catalog(&root, &format!("http://{address}/v1"));
     let mut child = mini_agent(&root)
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_MODEL")
@@ -527,13 +485,7 @@ fn run_without_auto_approval_denies_shell_when_stdin_is_not_a_tty() {
         write_sse_response(&mut second_stream, "denied and stopped");
     });
     let root = test_root();
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
+    write_test_model_catalog(&root, &format!("http://{address}/v1"));
     let output = mini_agent(&root)
         .args(["run", "inspect the workspace"])
         .env_remove("OPENAI_API_KEY")
@@ -589,13 +541,7 @@ fn run_recovers_from_unknown_tool_on_public_path() {
         write_sse_response(&mut second_stream, "recovered from the tool failure");
     });
     let root = test_root();
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
+    write_test_model_catalog(&root, &format!("http://{address}/v1"));
 
     let output = mini_agent(&root)
         .args(["run", "--json", "recover from the missing tool"])
@@ -649,13 +595,7 @@ fn run_keeps_high_risk_patch_gated_on_public_path() {
     fs::create_dir(root.join("src")).unwrap();
     fs::write(root.join("src/a.txt"), "use shared_name here\n").unwrap();
     fs::write(root.join("src/b.txt"), "also uses shared_name\n").unwrap();
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
+    write_test_model_catalog(&root, &format!("http://{address}/v1"));
 
     let output = mini_agent(&root)
         .args([
@@ -712,13 +652,7 @@ fn repl_is_fail_closed_for_non_interactive_tool_approval() {
         }
     });
     let root = test_root();
-    fs::write(
-        root.join(".env"),
-        format!(
-            "OPENAI_API_KEY=test-key\nOPENAI_MODEL=test-model\nOPENAI_BASE_URL=http://{address}/v1\n"
-        ),
-    )
-    .unwrap();
+    write_test_model_catalog(&root, &format!("http://{address}/v1"));
     let mut child = mini_agent(&root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -899,6 +833,36 @@ fn test_root() -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("mini-agent-interactive-{nonce}-{sequence}"));
     fs::create_dir(&root).unwrap();
     root
+}
+
+fn write_test_model_catalog(root: &Path, base_url: &str) {
+    let config_dir = root.join(".mini-agent");
+    let credentials_dir = config_dir.join("provider-credentials");
+    fs::create_dir_all(&credentials_dir).unwrap();
+    fs::write(
+        config_dir.join("model_catalog.json"),
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "providers": [{
+                "id": "test-provider",
+                "name": "Test Provider",
+                "kind": "custom",
+                "baseUrl": base_url,
+                "enabled": true,
+                "webSearch": false,
+                "models": [{ "id": "test-model", "name": "Test Model", "enabled": true }]
+            }],
+            "defaultModel": {
+                "providerId": "test-provider",
+                "modelId": "test-model"
+            },
+            "defaultReasoningSelection": { "kind": "api_default" },
+            "projectDefaults": {}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(credentials_dir.join("test-provider.key"), "test-key").unwrap();
 }
 
 fn find_session_file(root: &Path, session_id: &str) -> PathBuf {

@@ -1,7 +1,7 @@
 # Troubleshooting
 
-Start with `mini-agent --version`, then configure the provider environment before
-running `run` or the REPL. Inspect effective runtime
+Start with `mini-agent --version`, then configure a provider and global default
+in Web Studio before running `run` or the REPL. Inspect effective runtime
 state through the App Server `initialize`, `world/state`, and `mcp/status`
 interfaces; the REPL does not duplicate that management dashboard.
 
@@ -12,11 +12,13 @@ frontends.
 
 ## Missing provider configuration
 
-`mini-agent --version` works without credentials. Provider-backed turns require
-`OPENAI_API_KEY` and `OPENAI_MODEL`. For a downloaded binary, create
-`~/.mini-agent/.env` (`%USERPROFILE%\.mini-agent\.env` on Windows), copy
-the provider settings into it, and fill `OPENAI_API_KEY`. A workspace `.env`
-overrides the user file; process environment values override both.
+`mini-agent --version` works without credentials. For provider-backed turns,
+open Web Studio and use **Settings → Agent capabilities → Model settings** to
+add a provider, configure its API Key and model, and save a global default.
+Project defaults are set in Project settings. The Host stores the catalog and
+credential under `~/.mini-agent`; legacy model variables in `.env` are ignored.
+Use **Test connection** to check the selected model when needed; this sends one
+small provider request and may incur a charge.
 
 ## AGENTS.md is too large
 
@@ -70,10 +72,10 @@ starting a Goal verifier.
 
 ## Goal verification reports missing configuration
 
-Set `VERIFIER_OPENAI_MODEL`. The verifier uses `OPENAI_API_KEY` and
-`OPENAI_BASE_URL` unless `VERIFIER_OPENAI_API_KEY` or
-`VERIFIER_OPENAI_BASE_URL` overrides them. It runs with one model step and no
-tools, and stores only its bounded verdict in the Goal workspace.
+Choose a separate Goal Verifier default in Web Studio's Model settings. The
+verifier uses that model's configured provider credentials, runs with one model
+step and no tools, and stores only its bounded verdict in the Goal workspace.
+It is optional for ordinary chat.
 
 ## A workspace skill or plugin is missing
 
@@ -129,11 +131,11 @@ writing. The removed `write_file` and `edit_file` names are not accepted.
 
 ## Real-time web search and network data
 
-For official OpenAI and DeepSeek endpoints, mini-agent enables built-in Responses API
-`web_search` (`{"type": "web_search"}`) by default; custom endpoints must opt in
-explicitly. The model can then query the internet without writing raw local shell/PowerShell scrape scripts.
-To disable web search, pass `--no-web-search` (or `--no-search`) or set `MINI_AGENT_WEB_SEARCH=false`
-in `.env`. Use host `web_fetch` for a known URL when the provider does not expose built-in search.
+Provider-side Responses API `web_search` defaults to endpoint detection and can
+be enabled, disabled, or left on auto in that provider's Model settings. The
+selected model must advertise the capability. The CLI `--no-web-search` (or
+`--no-search`) option can temporarily disable it. Use host `web_fetch` for a
+known URL when the provider does not expose built-in search.
 
 `web_search` is for discovery. To read a known public URL, or a local Vite/Next/Vue/React
 dev server, use `web_fetch` instead of `curl` or PowerShell download cmdlets. `web_fetch` admits
@@ -161,8 +163,8 @@ out-of-scope path appear allowed.
 It uploads the file once through DeepSeek Files API (`POST /files`, `purpose=user_data`) and later
 turns reuse the returned `file_id`. Inline base64 is only a fallback if that upload fails.
 
-DeepSeek text models ignore `input_image` (they replace it with a placeholder). When the current
-`OPENAI_MODEL` is `deepseek-flash`, `deepseek-v4-flash`, or `deepseek-v4-pro` and the request actually contains images,
+DeepSeek text models ignore `input_image` (they replace it with a placeholder). When a selected
+DeepSeek text model is `deepseek-flash`, `deepseek-v4-flash`, or `deepseek-v4-pro` and the request actually contains images,
 that one request is sent as `deepseek-v4-flash-vision-exp`. All requests use the Responses endpoint;
 DeepSeek keeps using `file_id` from the envelope when present. Resume and fork reload session
 `attachments/` so image turns can be retried without losing the local bytes.

@@ -7,6 +7,7 @@
 use crate::HostRuntime;
 use crate::RuntimeComposition;
 use crate::RuntimeConfig;
+use crate::ToolScope;
 use crate::harness_builder::prepare_harness_with_model_factory;
 use crate::models::{HostResponsesModel, ModelCatalogStore};
 use mini_agent_capabilities::ApprovalController;
@@ -14,7 +15,6 @@ use mini_agent_capabilities::CapabilityRegistry;
 use mini_agent_capabilities::ImageStore;
 use mini_agent_capabilities::ModelProviderSettings;
 use mini_agent_capabilities::ResultStore;
-use mini_agent_capabilities::build_model;
 use mini_agent_core::HarnessConfig;
 
 /// Builds a concrete host runtime for an App Server service boundary.
@@ -59,8 +59,8 @@ impl<'a> HostRuntimeFactory<'a> {
             .set_read_only_agent(composition.agent.is_read_only());
         let catalog = ModelCatalogStore::machine_default()?;
         let project_id = self.runtime_config.project_id();
-        let legacy_environment_model = self.runtime_config.model().is_some();
-        let fallback_available = legacy_environment_model;
+        let web_search_allowed =
+            self.runtime_config.web_search() && composition.tools == ToolScope::All;
         prepare_harness_with_model_factory(
             self.runtime_config,
             self.approval.clone(),
@@ -68,17 +68,12 @@ impl<'a> HostRuntimeFactory<'a> {
             composition,
             results,
             self.registry.clone(),
-            move |provider_id: &str, settings: ModelProviderSettings, images: ImageStore| {
-                let fallback = build_model(provider_id, settings.clone(), images.clone())
-                    .map_err(|error| error.to_string())?;
+            move |_provider_id: &str, _settings: ModelProviderSettings, images: ImageStore| {
                 Ok(HostResponsesModel::new(
-                    fallback,
                     catalog.clone(),
                     project_id.clone(),
-                    legacy_environment_model,
-                    fallback_available,
                     images,
-                    settings.web_search,
+                    web_search_allowed,
                 ))
             },
         )

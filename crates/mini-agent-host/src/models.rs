@@ -3,7 +3,8 @@
 use fs2::FileExt;
 use mini_agent_capabilities::{ImageStore, ModelProviderSettings, OpenAiError, OpenAiModel};
 use mini_agent_protocol::{
-    Model, ModelEventSink, ModelRequest, ModelResponse, ModelSelection, ReasoningSelection,
+    Message, Model, ModelEvent, ModelEventSink, ModelRequest, ModelResponse, ModelSelection,
+    ReasoningSelection,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -16,6 +17,11 @@ const MAX_ID_BYTES: usize = 128;
 const MAX_BASE_URL_BYTES: usize = 2048;
 const REASONING_RESERVED_FIELDS: &str =
     "model instructions input tools tool_choice parallel_tool_calls store stream max_output_tokens";
+const MODEL_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+const MODEL_TEST_MAX_OUTPUT_TOKENS: usize = 32;
+const MODEL_TEST_MAX_RESPONSE_BYTES: usize = 4 * 1024;
+const MODEL_TEST_PROMPT: &str = "Reply with OK.";
+const PROVIDER_WEB_SEARCH_PROMPT: &str = "## Provider web search\nThe selected provider may expose its server-side `web_search` tool. Use it for current or broad web research when it is available. It is separate from the Host `web_fetch` tool, which is only for reading an exact URL. If the provider does not support it or returns a tool error, report that limitation.";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,8 +67,22 @@ pub struct ProviderProfile {
     pub base_url: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// `None` preserves endpoint-based behavior; `Some` is an explicit user setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<bool>,
     #[serde(default)]
     pub models: Vec<ModelProfile>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModelConnectionTestStatus {
+    Succeeded,
+    InvalidCredentials,
+    ProviderRejected,
+    TimedOut,
+    Unreachable,
+    InvalidResponse,
+    Failed,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -437,7 +457,7 @@ impl ModelCatalogStore {
         &self,
         selection: &ModelSelection,
         web_search: bool,
-    ) -> Result<(OpenAiModel, ModelProfile), String> {
+    ) -> Result<(OpenAiModel, ModelProfile, bool), String> {
         let catalog = self.read()?;
         let (provider, model) = find_model(&catalog, selection)?;
         validate_model(model)?;
@@ -457,11 +477,17 @@ impl ModelCatalogStore {
             .credentials
             .get(&provider.id)?
             .ok_or_else(|| format!("API Key is not configured for provider {}", provider.name))?;
+        let provider_web_search = provider
+            .web_search
+            .unwrap_or_else(|| is_official_search_endpoint(&provider.base_url));
+        let model_web_search = web_search
+            && provider_web_search
+            && model.capabilities.iter().any(|value| value == "web_search");
         let model_instance = OpenAiModel::new(
             api_key,
             model.id.clone(),
             provider.base_url.clone(),
-            web_search && model.capabilities.iter().any(|value| value == "web_search"),
+            model_web_search,
             ImageStore::memory_only(),
         )
         .map_err(|error| error.to_string())?
@@ -469,7 +495,7 @@ impl ModelCatalogStore {
             model.max_output_tokens.map(|value| value as usize),
             model.reasoning_parameter_map.clone(),
         );
-        Ok((model_instance, model.clone()))
+        Ok((model_instance, model.clone(), model_web_search))
     }
 
     pub fn provider_settings(
@@ -508,7 +534,49 @@ impl ModelCatalogStore {
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or(&provider.base_url)
                 .to_string(),
-            web_search: web_search && model.capabilities.iter().any(|value| value == "web_search"),
+            web_search: web_search
+                && provider
+                    .web_search
+                    .unwrap_or_else(|| is_official_search_endpoint(&provider.base_url))
+                && model.capabilities.iter().any(|value| value == "web_search"),
+        })
+    }
+
+    /// Sends one bounded, tool-free request to the selected configured model.
+    /// Provider error bodies and response text are intentionally discarded.
+    pub async fn test_connection(
+        &self,
+        selection: &ModelSelection,
+    ) -> Result<ModelConnectionTestStatus, String> {
+        self.test_connection_with_timeout(selection, MODEL_TEST_TIMEOUT)
+            .await
+    }
+
+    async fn test_connection_with_timeout(
+        &self,
+        selection: &ModelSelection,
+        timeout: std::time::Duration,
+    ) -> Result<ModelConnectionTestStatus, String> {
+        let (mut model, _, _) = self.resolve(selection, false)?;
+        model = model.with_model_options(Some(MODEL_TEST_MAX_OUTPUT_TOKENS), BTreeMap::new());
+        let messages = [Message::User {
+            text: MODEL_TEST_PROMPT.to_string(),
+        }];
+        let request = ModelRequest {
+            system_prompt: "Reply only with OK.",
+            messages: &messages,
+            tools: &[],
+            max_response_bytes: MODEL_TEST_MAX_RESPONSE_BYTES,
+            model_selection: None,
+            reasoning_selection: None,
+            reasoning_effort: None,
+        };
+        let mut events = DiscardModelEvents;
+        let result = tokio::time::timeout(timeout, model.respond(request, &mut events)).await;
+        Ok(match result {
+            Err(_) => ModelConnectionTestStatus::TimedOut,
+            Ok(Ok(_)) => ModelConnectionTestStatus::Succeeded,
+            Ok(Err(error)) => classify_connection_error(error),
         })
     }
 
@@ -622,31 +690,22 @@ impl ModelCatalogStore {
 
 /// Resolves a model reference at the Host boundary on every new Turn.
 pub struct HostResponsesModel {
-    fallback: OpenAiModel,
     catalog: ModelCatalogStore,
     project_id: String,
-    legacy_environment_model: bool,
-    fallback_available: bool,
     images: ImageStore,
     web_search: bool,
 }
 
 impl HostResponsesModel {
     pub fn new(
-        fallback: OpenAiModel,
         catalog: ModelCatalogStore,
         project_id: String,
-        legacy_environment_model: bool,
-        fallback_available: bool,
         images: ImageStore,
         web_search: bool,
     ) -> Self {
         Self {
-            fallback,
             catalog,
             project_id,
-            legacy_environment_model,
-            fallback_available,
             images,
             web_search,
         }
@@ -680,7 +739,6 @@ impl Model for HostResponsesModel {
                     Some(selection),
                     Some(thread_reasoning.unwrap_or(ReasoningSelection::ApiDefault)),
                 ),
-                None if self.legacy_environment_model => (None, thread_reasoning),
                 None => (
                     self.catalog
                         .global_default()
@@ -697,30 +755,59 @@ impl Model for HostResponsesModel {
         };
         if let Some(selection) = selection {
             let reasoning_selection = reasoning_selection.unwrap_or(ReasoningSelection::ApiDefault);
-            let (mut model, profile) = self
+            let (mut model, profile, provider_web_search) = self
                 .catalog
                 .resolve(&selection, self.web_search)
                 .map_err(OpenAiError::Protocol)?;
             validate_reasoning_for_profile(&profile, &reasoning_selection)
                 .map_err(OpenAiError::Protocol)?;
             model.set_images(self.images.clone());
+            let system_prompt = if provider_web_search {
+                format!(
+                    "{}\n\n{}",
+                    request.system_prompt, PROVIDER_WEB_SEARCH_PROMPT
+                )
+            } else {
+                request.system_prompt.to_string()
+            };
             let resolved_request = ModelRequest {
+                system_prompt: &system_prompt,
                 reasoning_selection: Some(&reasoning_selection),
                 reasoning_effort: None,
                 ..request
             };
             model.respond(resolved_request, events).await
-        } else if self.fallback_available {
-            let resolved_request = ModelRequest {
-                reasoning_selection: reasoning_selection.as_ref(),
-                ..request
-            };
-            self.fallback.respond(resolved_request, events).await
         } else {
             Err(OpenAiError::Protocol(
                 "no enabled default Responses model is configured".to_string(),
             ))
         }
+    }
+}
+
+struct DiscardModelEvents;
+
+impl ModelEventSink for DiscardModelEvents {
+    fn emit(&mut self, _event: ModelEvent) {}
+}
+
+fn is_official_search_endpoint(base_url: &str) -> bool {
+    let val = base_url.to_ascii_lowercase();
+    val.contains("api.openai.com") || val.contains("api.deepseek.com")
+}
+
+fn classify_connection_error(error: OpenAiError) -> ModelConnectionTestStatus {
+    match error {
+        OpenAiError::IdleTimeout => ModelConnectionTestStatus::TimedOut,
+        OpenAiError::Transport(_) => ModelConnectionTestStatus::Unreachable,
+        OpenAiError::Api {
+            status: 401 | 403, ..
+        } => ModelConnectionTestStatus::InvalidCredentials,
+        OpenAiError::Api { .. } => ModelConnectionTestStatus::ProviderRejected,
+        OpenAiError::IncompleteStream | OpenAiError::Stream(_) => {
+            ModelConnectionTestStatus::InvalidResponse
+        }
+        OpenAiError::Protocol(_) => ModelConnectionTestStatus::Failed,
     }
 }
 
@@ -996,6 +1083,7 @@ mod tests {
                     kind: ProviderKind::DeepSeek,
                     base_url,
                     enabled: true,
+                    web_search: None,
                     models: Vec::new(),
                 },
                 Some("test-secret-key".to_string()),
@@ -1025,6 +1113,63 @@ mod tests {
         store
     }
 
+    fn start_test_provider(
+        status: u16,
+        body: &'static str,
+        delay: Duration,
+    ) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            let mut body_start = None;
+            let mut body_length = 0;
+            loop {
+                let read = stream.read(&mut buffer).unwrap();
+                assert!(read > 0, "client closed before sending the test request");
+                request.extend_from_slice(&buffer[..read]);
+                if body_start.is_none()
+                    && let Some(index) = request.windows(4).position(|part| part == b"\r\n\r\n")
+                {
+                    body_start = Some(index + 4);
+                    let headers = String::from_utf8_lossy(&request[..index]);
+                    body_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or_default();
+                }
+                if body_start.is_some_and(|start| request.len() >= start + body_length) {
+                    break;
+                }
+            }
+            thread::sleep(delay);
+            let reason = match status {
+                200 => "OK",
+                401 => "Unauthorized",
+                404 => "Not Found",
+                _ => "Error",
+            };
+            write!(
+                stream,
+                "HTTP/1.1 {status} {reason}\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len(),
+            )
+            .unwrap();
+            stream.flush().unwrap();
+            String::from_utf8_lossy(&request).into_owned()
+        });
+        (format!("http://{address}/v1"), server)
+    }
+
     #[test]
     fn catalog_views_never_serialize_provider_credentials() {
         let store = test_store("https://example.test/v1".to_string());
@@ -1037,6 +1182,79 @@ mod tests {
         assert!(serde_json::to_value(ProviderKind::DeepSeek).unwrap() == "deepseek");
         assert!(!json.contains("test-secret-key"));
         assert!(!json.contains("apiKey\""));
+    }
+
+    #[tokio::test]
+    async fn connection_test_sends_one_bounded_tool_free_request() {
+        let body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}\n\n"
+        );
+        let (base_url, server) = start_test_provider(200, body, Duration::ZERO);
+        let store = test_store(base_url);
+        let status = store
+            .test_connection(&ModelSelection::new("deepseek", "deepseek-test"))
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+        let request_body = request.split_once("\r\n\r\n").unwrap().1;
+        let payload: serde_json::Value = serde_json::from_str(request_body).unwrap();
+
+        assert_eq!(status, ModelConnectionTestStatus::Succeeded);
+        assert!(request.starts_with("POST /v1/responses HTTP/1.1"));
+        assert_eq!(payload["tools"], serde_json::json!([]));
+        assert_eq!(payload["max_output_tokens"], MODEL_TEST_MAX_OUTPUT_TOKENS);
+        assert!(payload["input"].to_string().contains(MODEL_TEST_PROMPT));
+    }
+
+    #[tokio::test]
+    async fn connection_test_classifies_auth_and_endpoint_errors_without_returning_the_body() {
+        let (base_url, server) =
+            start_test_provider(401, "private provider response body", Duration::ZERO);
+        let store = test_store(base_url);
+        let status = store
+            .test_connection(&ModelSelection::new("deepseek", "deepseek-test"))
+            .await
+            .unwrap();
+        let _request = server.join().unwrap();
+
+        assert_eq!(status, ModelConnectionTestStatus::InvalidCredentials);
+        assert_ne!(status, ModelConnectionTestStatus::Failed);
+
+        let (base_url, server) =
+            start_test_provider(404, "private endpoint response body", Duration::ZERO);
+        let store = test_store(base_url);
+        let status = store
+            .test_connection(&ModelSelection::new("deepseek", "deepseek-test"))
+            .await
+            .unwrap();
+        let _request = server.join().unwrap();
+
+        assert_eq!(status, ModelConnectionTestStatus::ProviderRejected);
+    }
+
+    #[test]
+    fn connection_test_classifies_transport_errors_as_unreachable() {
+        let status =
+            classify_connection_error(OpenAiError::Transport("connection refused".to_string()));
+
+        assert_eq!(status, ModelConnectionTestStatus::Unreachable);
+    }
+
+    #[tokio::test]
+    async fn connection_test_stops_at_its_timeout() {
+        let (base_url, server) = start_test_provider(200, "", Duration::from_millis(80));
+        let store = test_store(base_url);
+        let status = store
+            .test_connection_with_timeout(
+                &ModelSelection::new("deepseek", "deepseek-test"),
+                Duration::from_millis(10),
+            )
+            .await
+            .unwrap();
+        let _request = server.join().unwrap();
+
+        assert_eq!(status, ModelConnectionTestStatus::TimedOut);
     }
 
     #[test]
@@ -1203,20 +1421,9 @@ mod tests {
         });
 
         let store = test_store(format!("http://{address}/v1"));
-        let fallback = OpenAiModel::new(
-            "unused".to_string(),
-            "fallback-model".to_string(),
-            "https://fallback.example.test/v1".to_string(),
-            false,
-            ImageStore::memory_only(),
-        )
-        .unwrap();
         let mut model = HostResponsesModel::new(
-            fallback,
             store,
             "project-a".to_string(),
-            false,
-            false,
             ImageStore::memory_only(),
             false,
         );
