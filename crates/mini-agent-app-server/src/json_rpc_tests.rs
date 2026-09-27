@@ -1841,9 +1841,33 @@ async fn turn_resume_continues_the_same_turn_from_a_persisted_execution_checkpoi
     let mut connection = managed_connection_with_session(DoneModel, root.clone(), resumed);
     initialize_connection(&mut connection, "execution-checkpoint-resume-test").await;
 
-    let blocked_start = rpc_call(
+    let checkpoint = rpc_call(
         &mut connection,
         2,
+        "thread/read",
+        serde_json::json!({"threadId": thread_id}),
+    )
+    .await;
+    assert_eq!(
+        checkpoint["value"]["executionRecovery"]["turnId"],
+        turn_id.as_str()
+    );
+    assert_eq!(
+        checkpoint["value"]["executionRecovery"]["status"],
+        "waiting_for_continue"
+    );
+    assert_eq!(
+        checkpoint["value"]["executionRecovery"]["phase"],
+        "model_request"
+    );
+    assert_eq!(
+        checkpoint["value"]["executionRecovery"]["checkpointSeq"],
+        checkpoint_seq
+    );
+
+    let blocked_start = rpc_call(
+        &mut connection,
+        3,
         METHOD_TURN_START,
         serde_json::json!({
             "threadId": thread_id,
@@ -1861,7 +1885,7 @@ async fn turn_resume_continues_the_same_turn_from_a_persisted_execution_checkpoi
 
     let submission = rpc_call(
         &mut connection,
-        3,
+        4,
         METHOD_TURN_RESUME,
         serde_json::json!({
             "threadId": thread_id,
@@ -1877,7 +1901,7 @@ async fn turn_resume_continues_the_same_turn_from_a_persisted_execution_checkpoi
     wait_for_turn_finished(&mut connection).await;
     let result = rpc_call(
         &mut connection,
-        4,
+        5,
         METHOD_TURN_READ,
         serde_json::json!({"turnId": turn_id}),
     )

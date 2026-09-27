@@ -10,6 +10,7 @@
 
 当前相关决策：
 
+- [SDK 恢复类型与跨层契约证据](implemented/architecture/2026-09-27-sdk-cross-layer-recovery-contract.zh.md)
 - [主子 Agent 自然交接与轻量复核](implemented/feature/2026-09-27-natural-parent-child-agent-handoff.zh.md)
 - [Session 级冻结、恢复与子任务报告送达](implemented/architecture/2026-09-26-session-wide-freeze-and-child-report-delivery.zh.md)
 - [Workspace Roots、Session Artifacts 与 Prompt Cache](implemented/architecture/2026-09-18-workspace-roots-session-artifacts-and-prompt-cache.zh.md)
@@ -111,6 +112,7 @@ graph LR
 
 ### Implemented
 
+- [SDK 恢复类型与跨层契约证据](implemented/architecture/2026-09-27-sdk-cross-layer-recovery-contract.zh.md)
 - [主子 Agent 自然交接与轻量复核](implemented/feature/2026-09-27-natural-parent-child-agent-handoff.zh.md)
 - [Web Studio Session Doctor](implemented/feature/2026-09-27-web-studio-session-doctor.zh.md)
 - [Main 与 Child 的会话检查点和执行恢复](implemented/architecture/2026-09-27-main-child-execution-checkpoints-and-recovery.zh.md)
