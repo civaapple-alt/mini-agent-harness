@@ -2388,8 +2388,31 @@ fn handle_running_command<M>(
         Command::CloseThread { reply, .. } => {
             respond(reply, receipt, Err(AppServerError::Busy));
         }
-        Command::ReadTurn { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy));
+        Command::ReadTurn {
+            turn_id: requested_turn_id,
+            reply,
+        } => {
+            if requested_turn_id != *turn_id {
+                respond(reply, receipt, Err(AppServerError::Busy));
+                return;
+            }
+            let recovery = context
+                .runtime
+                .as_ref()
+                .and_then(|state| state.management.execution_state())
+                .filter(|state| state.checkpoint.turn_id == requested_turn_id)
+                .map(execution_recovery_info);
+            respond(
+                reply,
+                receipt,
+                Ok(Some(SettledTurn {
+                    id: requested_turn_id,
+                    status: mini_agent_protocol::TurnStatus::InProgress,
+                    outcome: None,
+                    error: None,
+                    recovery,
+                })),
+            );
         }
         Command::ReadItems { reply, .. } => {
             respond(reply, receipt, Err(AppServerError::Busy));
