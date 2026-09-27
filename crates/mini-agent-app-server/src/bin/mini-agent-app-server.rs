@@ -21,11 +21,20 @@ use mini_agent_host::RuntimeConfig;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
 use mini_agent_protocol::ToolApprovalRequest;
+use std::env;
 use std::error::Error;
+use std::io;
+use std::path::Path;
 use tokio::io::BufReader;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if let Some(output) = maintenance_command_output(&args, &env::current_dir()?)? {
+        println!("{output}");
+        return Ok(());
+    }
+
     let runtime_config = RuntimeConfig::load().map_err(std::io::Error::other)?;
     let broker = ApprovalBroker::new();
     let approval_store = ApprovalStore::new();
@@ -214,6 +223,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn maintenance_command_output(
+    args: &[String],
+    workspace: &Path,
+) -> Result<Option<String>, Box<dyn Error>> {
+    if args.first().map(String::as_str) != Some("doctor") {
+        return Ok(None);
+    }
+    let output = if args.len() == 2 && args[1] == "--json" {
+        let report = mini_agent_capabilities::SessionStore::inspect_workspace(workspace)
+            .map_err(io::Error::other)?;
+        serde_json::to_string(&report)?
+    } else if args.len() == 5
+        && args[1] == "repair"
+        && args[2] == "--session-id"
+        && args[4] == "--json"
+    {
+        let result =
+            mini_agent_capabilities::SessionStore::repair_incomplete_tail(workspace, &args[3])
+                .map_err(io::Error::other)?;
+        serde_json::to_string(&result)?
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: mini-agent-app-server doctor --json | doctor repair --session-id <id> --json",
+        )
+        .into());
+    };
+    Ok(Some(output))
+}
+
 fn open_session(runtime_config: &RuntimeConfig) -> Result<Option<OpenedSession>, String> {
     let mode = std::env::var("MINI_AGENT_SESSION_MODE").unwrap_or_else(|_| "disabled".to_string());
     let request = match mode.as_str() {
@@ -298,5 +337,32 @@ fn security_preset(access: mini_agent_app_server_protocol::AccessScope) -> Secur
     match access {
         mini_agent_app_server_protocol::AccessScope::Project => SecurityPreset::Default,
         mini_agent_app_server_protocol::AccessScope::FullMachine => SecurityPreset::FullMachine,
+    }
+}
+
+#[cfg(test)]
+mod doctor_tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn doctor_command_returns_json_without_starting_the_agent_runtime() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace = env::temp_dir().join(format!("mini-agent-doctor-{nonce}"));
+        fs::create_dir(&workspace).unwrap();
+        let args = vec!["doctor".to_string(), "--json".to_string()];
+
+        let output = maintenance_command_output(&args, &workspace)
+            .unwrap()
+            .unwrap();
+        let report: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(report["schema_version"], 1);
+        assert_eq!(report["scanned_sessions"], 0);
+
+        let _ = fs::remove_dir_all(workspace);
     }
 }

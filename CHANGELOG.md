@@ -5,7 +5,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
-No changes yet.
+- Add project-level Session diagnostics to Web Studio. A bounded App Server
+  maintenance command checks Session JSONL records without opening the Agent
+  runtime; users can back up and repair only an incomplete final record.
 
 ## [0.9.0] - 2026-09-27
 

@@ -23,8 +23,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "session/diagnostics.rs"]
+mod diagnostics;
 #[path = "session/storage.rs"]
 mod storage;
+pub use diagnostics::{
+    SESSION_DOCTOR_SCHEMA_VERSION, SessionDiagnosticCounts, SessionDiagnosticFinding,
+    SessionDiagnosticIssue, SessionDiagnosticReport, SessionInspectionCounts,
+    SessionInspectionStatus, SessionIntegrityCounts, SessionIntegrityStatus, SessionRecoveryCounts,
+    SessionRecoveryStatus, SessionRepairResult,
+};
 use storage::{
     acquire_lock, copy_attachments, load_records, validate_session_id, write_json_atomic,
     write_prompt_context,
@@ -2512,8 +2520,8 @@ impl SessionStore {
         let parent_bytes = fs::read(&parent_path).map_err(|error| {
             SessionForkError::Storage(format!("cannot read parent session: {error}"))
         })?;
-        let parent_loaded =
-            load_records(parent_session_id, &parent_bytes).map_err(SessionForkError::Storage)?;
+        let parent_loaded = load_records(parent_session_id, &parent_bytes)
+            .map_err(|error| SessionForkError::Storage(error.to_string()))?;
         let (_, parent_model_selection, parent_reasoning_selection) =
             load_thread_settings(&parent_dir, &parent_loaded.thread_id);
 

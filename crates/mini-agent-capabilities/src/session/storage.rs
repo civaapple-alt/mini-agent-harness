@@ -50,9 +50,59 @@ pub(super) struct LoadedRecords {
     pub(super) created_at_ms: u64,
     pub(super) valid_bytes: usize,
     pub(super) execution_state: Option<SessionExecutionState>,
+    pub(super) recovery_gap: Option<Option<u64>>,
 }
 
-pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecords, String> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SessionLoadIssue {
+    InvalidRecord,
+    SequenceGap,
+    MissingCheckpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SessionLoadError {
+    pub(super) issue: SessionLoadIssue,
+    pub(super) byte_offset: Option<usize>,
+    pub(super) expected_seq: Option<u64>,
+    pub(super) found_seq: Option<u64>,
+    message: String,
+}
+
+impl SessionLoadError {
+    fn invalid_record(message: impl Into<String>, byte_offset: Option<usize>) -> Self {
+        Self {
+            issue: SessionLoadIssue::InvalidRecord,
+            byte_offset,
+            expected_seq: None,
+            found_seq: None,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<String> for SessionLoadError {
+    fn from(message: String) -> Self {
+        Self::invalid_record(message, None)
+    }
+}
+
+impl std::fmt::Display for SessionLoadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl From<SessionLoadError> for String {
+    fn from(error: SessionLoadError) -> Self {
+        error.to_string()
+    }
+}
+
+pub(super) fn load_records(
+    session_id: &str,
+    bytes: &[u8],
+) -> Result<LoadedRecords, SessionLoadError> {
     let mut offset = 0usize;
     let mut valid_bytes = 0usize;
     let mut expected_seq = 1u64;
@@ -65,6 +115,7 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
     let mut thread_turn_counts: HashMap<String, usize> = HashMap::new();
     let mut created_at_ms = 0u64;
     let mut execution_state: Option<SessionExecutionState> = None;
+    let mut recovery_gap = None;
     while offset < bytes.len() {
         let remaining = &bytes[offset..];
         let Some(end) = remaining.iter().position(|byte| *byte == b'\n') else {
@@ -72,24 +123,35 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
         };
         let line = &remaining[..end];
         if line.len() > MAX_RECORD_BYTES {
-            return Err(format!(
-                "session record exceeds {MAX_RECORD_BYTES} byte limit"
+            return Err(SessionLoadError::invalid_record(
+                format!("session record exceeds {MAX_RECORD_BYTES} byte limit"),
+                Some(offset),
             ));
         }
-        let record: Value = serde_json::from_slice(line)
-            .map_err(|error| format!("invalid session record at byte {offset}: {error}"))?;
-        let seq = record
-            .get("seq")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| format!("session record at byte {offset} is missing seq"))?;
+        let record: Value = serde_json::from_slice(line).map_err(|error| {
+            SessionLoadError::invalid_record(
+                format!("invalid session record at byte {offset}: {error}"),
+                Some(offset),
+            )
+        })?;
+        let seq = record.get("seq").and_then(Value::as_u64).ok_or_else(|| {
+            SessionLoadError::invalid_record(
+                format!("session record at byte {offset} is missing seq"),
+                Some(offset),
+            )
+        })?;
         let record_timestamp_ms = record
             .get("timestamp_ms")
             .and_then(Value::as_u64)
             .unwrap_or(0);
         if seq != expected_seq {
-            return Err(format!(
-                "session sequence mismatch: expected {expected_seq}, found {seq}"
-            ));
+            return Err(SessionLoadError {
+                issue: SessionLoadIssue::SequenceGap,
+                byte_offset: Some(offset),
+                expected_seq: Some(expected_seq),
+                found_seq: Some(seq),
+                message: format!("session sequence mismatch: expected {expected_seq}, found {seq}"),
+            });
         }
         expected_seq = expected_seq.saturating_add(1);
         match record.get("kind").and_then(Value::as_str) {
@@ -99,10 +161,10 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                     .and_then(Value::as_str)
                     .ok_or_else(|| "session header is missing session_id".to_string())?;
                 if stored_id != session_id {
-                    return Err("session id does not match its file name".to_string());
+                    return Err("session id does not match its file name".to_string().into());
                 }
                 if record.get("schema_version").and_then(Value::as_u64) != Some(SCHEMA_VERSION) {
-                    return Err("unsupported session schema version".to_string());
+                    return Err("unsupported session schema version".to_string().into());
                 }
                 created_at_ms = record
                     .get("timestamp_ms")
@@ -189,7 +251,9 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                     .iter()
                     .any(|message| matches!(message, Message::Tool { outcome: None, .. }))
                 {
-                    return Err("session checkpoint has a tool record without outcome".to_string());
+                    return Err("session checkpoint has a tool record without outcome"
+                        .to_string()
+                        .into());
                 }
                 latest_checkpoint = Some((seq, thread_id, messages));
             }
@@ -228,7 +292,11 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                             "execution checkpoint append has no conversation base".to_string()
                         })?,
                     "replace" => Vec::new(),
-                    _ => return Err("invalid execution checkpoint message mode".to_string()),
+                    _ => {
+                        return Err("invalid execution checkpoint message mode"
+                            .to_string()
+                            .into());
+                    }
                 };
                 if mode == "append" {
                     messages.extend(delta);
@@ -306,15 +374,36 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                     entry,
                 );
             }
+            Some("recovery_gap") if header_seen => {
+                if recovery_gap.is_none() {
+                    recovery_gap = Some(record.get("missing_seq").and_then(Value::as_u64));
+                }
+            }
             Some(_) if header_seen => {}
-            Some(_) => return Err("session header must be the first record".to_string()),
-            None => return Err("session record is missing kind".to_string()),
+            Some(_) => {
+                return Err(SessionLoadError::invalid_record(
+                    "session header must be the first record",
+                    Some(offset),
+                ));
+            }
+            None => {
+                return Err(SessionLoadError::invalid_record(
+                    "session record is missing kind",
+                    Some(offset),
+                ));
+            }
         }
         offset = offset.saturating_add(end + 1);
         valid_bytes = offset;
     }
-    let (checkpoint_seq, thread_id, messages) = latest_checkpoint
-        .ok_or_else(|| "session has no settled checkpoint to resume".to_string())?;
+    let (checkpoint_seq, thread_id, messages) =
+        latest_checkpoint.ok_or_else(|| SessionLoadError {
+            issue: SessionLoadIssue::MissingCheckpoint,
+            byte_offset: None,
+            expected_seq: None,
+            found_seq: None,
+            message: "session has no settled checkpoint to resume".to_string(),
+        })?;
     let thread_turn_count = thread_turn_counts.get(&thread_id).copied().unwrap_or(0);
     Ok(LoadedRecords {
         thread_id,
@@ -329,6 +418,7 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
         created_at_ms,
         valid_bytes,
         execution_state,
+        recovery_gap,
     })
 }
 
@@ -491,13 +581,30 @@ pub(super) fn apply_execution_journal_entry(
 }
 
 pub(super) fn acquire_lock(directory: &Path, session_id: &str) -> Result<SessionLock, String> {
+    acquire_lock_with_reclaim(directory, session_id, true)
+}
+
+pub(super) fn acquire_lock_without_reclaim(
+    directory: &Path,
+    session_id: &str,
+) -> Result<SessionLock, String> {
+    acquire_lock_with_reclaim(directory, session_id, false)
+}
+
+fn acquire_lock_with_reclaim(
+    directory: &Path,
+    session_id: &str,
+    allow_stale_reclaim: bool,
+) -> Result<SessionLock, String> {
     fs::create_dir_all(directory)
         .map_err(|error| format!("cannot create session directory: {error}"))?;
     let path = directory.join(format!("{session_id}.lock"));
     let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
         Ok(file) => file,
         Err(error)
-            if error.kind() == std::io::ErrorKind::AlreadyExists && reclaim_stale_lock(&path) =>
+            if allow_stale_reclaim
+                && error.kind() == std::io::ErrorKind::AlreadyExists
+                && reclaim_stale_lock(&path) =>
         {
             OpenOptions::new()
                 .write(true)
@@ -602,7 +709,7 @@ pub fn resolve_session_file(
     Ok((session_dir, path))
 }
 
-fn mini_agent_home() -> Option<PathBuf> {
+pub(super) fn mini_agent_home() -> Option<PathBuf> {
     let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     env::var_os(key)
         .or_else(|| {

@@ -70,12 +70,29 @@ Gateway 提供的跨层读取路径如下：
 | `/api/threads/{thread_id}/runtime/status` | 非阻塞运行时状态 |
 | `/api/threads/{thread_id}/attach` | 恢复可写 Session，或报告外部锁 |
 | `/api/threads/{thread_id}/children` | Child Session 的控制与观察投影 |
+| `/api/threads/project/{project_id}/sessions/doctor` | 手动检查项目 Session 日志 |
+| `/api/threads/project/{project_id}/sessions/{session_id}/doctor/repair` | 备份并修复一个不完整尾记录 |
 | `/api/workflows/files` | 列出当前 Project 文件与 Session 计划产物 |
 | `/api/workflows/file/content` | 读取受控 Project 文件或 Session 计划产物 |
 | `/api/threads/{thread_id}/notebook` | Session-owned Notebook 投影 |
 
 读取历史不会 attach 或修改 Session。若另一个 App Server 持有 Session lock，Gateway
 只返回只读历史或锁定信息，绝不启动第二个 writer。
+
+### 检查项目 Session 日志
+
+用户从项目菜单手动发起检查。Gateway 只根据已登记的 `project_id` 找到项目主工作区，
+然后调用 App Server 的本地维护命令。浏览器不能提交 workspace 路径。该命令直接复用
+Capabilities 的 `load_records` 解析器，不加载目标 Session 的 Agent runtime。
+
+报告将检查状态、历史完整性和恢复可用性分开显示。活动锁对应
+`locked_unverified`，不能当作损坏。单次扫描最多读取 8,192 个目录项、检查 4,096 个
+Session 目录，并返回至多 256 条 finding。报告不含 prompt、工具参数、工具结果或绝对路径。
+
+只有有效 settled checkpoint 后的未完成日志尾部可以修复。Web Studio 要求用户二次确认；
+修复端取得独占锁并重新检查，再将原始日志保存到
+`~/.mini-agent/recovery-backups/`，然后截去未完成尾部。序号断档、`recovery_gap`、无效完整
+记录和缺失 checkpoint 不会自动修复。修复后 Gateway 返回新报告，Studio 重新扫描项目。
 
 ## Plan Mode 与计划查看
 

@@ -29,6 +29,32 @@ resume a Thread, or query the remote task. Use it only when a later Turn will be
 explicitly by the user or Host and needs a record of when to check. For a local process,
 use the Shell task's `status` and `logs` actions instead.
 
+## Session log maintenance
+
+The executable has two local maintenance commands for the Gateway. They bypass normal
+runtime startup and call the Capabilities Session parser directly:
+
+```sh
+mini-agent-app-server doctor --json
+mini-agent-app-server doctor repair --session-id <id> --json
+```
+
+Run them with the Project workspace as the current directory. The scan reads at most
+8,192 directory entries, examines at most 4,096 Session directories, and returns at most
+256 findings. It reports inspection,
+history integrity, and recovery availability as separate states. The report contains
+no prompts, tool arguments, or tool results.
+
+Repair takes the Session lock without reclaiming stale locks, re-reads the log, and
+accepts only an incomplete final record after a valid settled checkpoint. It writes
+and syncs the original log under `~/.mini-agent/recovery-backups/` before truncating
+the tail. It does not repair sequence gaps, `recovery_gap`, invalid complete records,
+or missing checkpoints. A locked Session remains unverified.
+
+These commands are local maintenance entry points, not JSON-RPC methods. The Gateway
+resolves a registered Project ID to its primary workspace and invokes the executable
+there. It does not accept a browser-supplied path or parse Session JSONL itself.
+
 Ordered `turn/event` notifications preserve `thread_id`, `turn_id`, sequence,
 and bounded ThreadItem identity. Each model response also carries an optional
 `item_id` shared by its `model_started`, reasoning/text delta, and

@@ -100,7 +100,6 @@ graph LR
 
 - [Responses 多供应商目录与 Thread 模型选择](proposed/architecture/2026-09-25-responses-model-catalog-and-thread-selection.zh.md)
 - [子代理动态协作与进展跟踪](proposed/architecture/2026-09-20-dynamic-child-agent-coordination.zh.md)
-- [WebStudio Session Doctor：工作区 Session 日志诊断与安全修复](proposed/feature/2026-09-19-web-studio-session-doctor.zh.md)
 - [Session 状态、Notebook 与 Subagent 执行策略](proposed/architecture/2026-09-17-session-state-notebook-and-subagent-execution-policy.zh.md)
 - [时间上延展、结构上并发：Agent Harness Charter](proposed/architecture/2026-09-17-time-extended-structural-concurrency.zh.md)
 - [Result-Oriented Long-Term Bot Agents](proposed/architecture/2026-09-04-result-oriented-long-term-bot-agents.zh.md)
@@ -111,6 +110,7 @@ graph LR
 
 ### Implemented
 
+- [Web Studio Session Doctor](implemented/feature/2026-09-27-web-studio-session-doctor.zh.md)
 - [Main 与 Child 的会话检查点和执行恢复](implemented/architecture/2026-09-27-main-child-execution-checkpoints-and-recovery.zh.md)
 - [子任务 Turn 连续性与失败诊断](implemented/bug-fix/2026-09-27-child-task-attempt-settlement-and-step-diagnostics.zh.md)
 - [父 Session 子任务身份与事件恢复一致性](implemented/bug-fix/2026-09-26-parent-session-child-identity-and-event-recovery.zh.md)
