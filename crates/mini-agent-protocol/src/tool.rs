@@ -222,6 +222,17 @@ pub struct ToolExecutionOutcome {
     pub content: String,
 }
 
+/// Whether a Host can safely repeat a tool call whose result was not durably
+/// recorded before execution stopped.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolReplaySafety {
+    /// Repeating the call may duplicate an external side effect.
+    Never,
+    /// The Host guarantees that repeating the call cannot duplicate effects.
+    Safe,
+}
+
 impl ToolExecutionOutcome {
     pub fn completed(content: impl Into<String>) -> Self {
         Self {
@@ -317,6 +328,12 @@ fn classify_execution(result: Result<String, ToolError>) -> ToolExecutionOutcome
 /// owns the common approval and lifecycle ordering around these methods.
 pub trait ToolRuntime: Send + Sync {
     fn execute(&self, arguments: &Value) -> Result<String, ToolError>;
+
+    /// Declares whether an interrupted call may be replayed after a process
+    /// restart. Side-effecting tools remain conservative by default.
+    fn recovery_replay_safety(&self, _request: &ToolExecutionRequest) -> ToolReplaySafety {
+        ToolReplaySafety::Never
+    }
 
     /// Executes a call after the host has completed its typed admission.
     /// Implementations returning `ApprovalRequired` must override this method

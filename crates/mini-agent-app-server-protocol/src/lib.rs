@@ -42,6 +42,7 @@ pub const METHOD_THREAD_MODEL_SETTINGS_GET: &str = "thread/model-settings/get";
 pub const METHOD_THREAD_SETTINGS_UPDATED: &str = "thread/settings/updated";
 pub const METHOD_MODEL_CATALOG_MANAGE: &str = "model/catalog/manage";
 pub const METHOD_TURN_START: &str = "turn/start";
+pub const METHOD_TURN_RESUME: &str = "turn/resume";
 pub const METHOD_TURN_READ: &str = "turn/read";
 pub const METHOD_TURN_STEER: &str = "turn/steer";
 pub const METHOD_TURN_INTERRUPT: &str = "turn/interrupt";
@@ -1327,6 +1328,8 @@ pub struct ThreadReadResult {
     pub next_turn_number: u64,
     pub last_turn_id: Option<TurnId>,
     pub next_event_sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_recovery: Option<ExecutionRecoveryInfo>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -1365,6 +1368,50 @@ pub struct TurnStartResult {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TurnResumeParams {
+    pub thread_id: ThreadId,
+    pub turn_id: TurnId,
+    pub checkpoint_seq: u64,
+    pub request_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnResumeResult {
+    pub turn_id: TurnId,
+    pub status: TurnStatus,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionRecoveryStatus {
+    Running,
+    WaitingForContinue,
+    NeedsReconciliation,
+    Settled,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionRecoveryPhase {
+    ModelRequest,
+    ToolBatch,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionRecoveryInfo {
+    pub turn_id: TurnId,
+    pub status: ExecutionRecoveryStatus,
+    pub phase: ExecutionRecoveryPhase,
+    pub last_heartbeat_ms: Option<u64>,
+    pub last_progress_ms: Option<u64>,
+    pub checkpoint_seq: u64,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TurnReadParams {
     pub turn_id: TurnId,
 }
@@ -1380,6 +1427,8 @@ pub struct TurnReadResult {
     pub messages: Vec<Message>,
     pub items: Vec<ThreadItem>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<ExecutionRecoveryInfo>,
 }
 
 /// A lifecycle notification for one ThreadItem becoming visible.

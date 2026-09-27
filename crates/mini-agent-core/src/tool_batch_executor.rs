@@ -2,24 +2,75 @@ use mini_agent_protocol::Event;
 use mini_agent_protocol::Observer;
 use mini_agent_protocol::ToolCall;
 use mini_agent_protocol::ToolExecutionContext;
+use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionRequest;
+use mini_agent_protocol::TurnId;
 
 use crate::RunControl;
 use crate::SessionState;
 use crate::ToolRouter;
 
+pub(super) struct ToolBatchOptions<'context, 'journal, 'sink> {
+    pub max_output_bytes: usize,
+    pub context: Option<&'context ToolExecutionContext>,
+    pub turn_id: Option<&'context TurnId>,
+    pub step: usize,
+    pub journal: &'journal mut Option<&'sink mut dyn crate::ExecutionJournalSink>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ToolBatchRecoveryError {
+    NeedsReconciliation(String),
+    Journal(String),
+}
+
+pub(super) fn validate_tool_batch_recovery(
+    tools: &ToolRouter,
+    batch: &crate::ExecutionToolBatch,
+) -> Result<(), String> {
+    for call in &batch.calls {
+        if call.started && call.outcome.is_none() {
+            let request = ToolExecutionRequest::from(call.call.clone());
+            if tools.recovery_replay_safety(&request) != mini_agent_protocol::ToolReplaySafety::Safe
+            {
+                return Err(format!(
+                    "tool call {} ({}) started without a durable result",
+                    call.call.id, call.call.name
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Executes one complete tool batch and records its bounded outputs.
 pub(super) fn execute_tool_batch<O: Observer>(
     tools: &ToolRouter,
     calls: Vec<ToolCall>,
-    max_output_bytes: usize,
     session: &mut SessionState,
     observer: &mut O,
     control: &RunControl,
-    context: Option<&ToolExecutionContext>,
-) -> Vec<(String, serde_json::Value, String)> {
+    options: ToolBatchOptions<'_, '_, '_>,
+) -> Result<Vec<(String, serde_json::Value, String)>, String> {
+    let ToolBatchOptions {
+        max_output_bytes,
+        context,
+        turn_id,
+        step,
+        journal,
+    } = options;
     let mut executed = Vec::with_capacity(calls.len());
     for call in calls {
+        if let Some(turn_id) = turn_id {
+            crate::execution::append_if_present(
+                journal,
+                crate::ExecutionJournalEntry::ToolCallStarted {
+                    turn_id: turn_id.clone(),
+                    step,
+                    call_id: call.id.clone(),
+                },
+            )?;
+        }
         observer.observe(&Event::ToolStarted { call: call.clone() });
         let request = ToolExecutionRequest::from(call.clone());
         let request = if let Some(context) = context {
@@ -43,6 +94,17 @@ pub(super) fn execute_tool_batch<O: Observer>(
             truncated,
             outcome: Some(outcome.status),
         });
+        if let Some(turn_id) = turn_id {
+            crate::execution::append_if_present(
+                journal,
+                crate::ExecutionJournalEntry::ToolCallFinished {
+                    turn_id: turn_id.clone(),
+                    step,
+                    call_id: call.id.clone(),
+                    outcome: outcome.clone(),
+                },
+            )?;
+        }
         session.push(mini_agent_protocol::Message::Tool {
             call_id: call.id,
             name: call.name.clone(),
@@ -52,7 +114,119 @@ pub(super) fn execute_tool_batch<O: Observer>(
         });
         executed.push((call.name, call.arguments, content));
     }
-    executed
+    Ok(executed)
+}
+
+/// Restores a journaled batch from durable outcomes and safely replayable calls.
+pub(super) fn recover_tool_batch<O: Observer>(
+    tools: &ToolRouter,
+    batch: crate::ExecutionToolBatch,
+    session: &mut SessionState,
+    observer: &mut O,
+    control: &RunControl,
+    options: ToolBatchOptions<'_, '_, '_>,
+) -> Result<Vec<(String, serde_json::Value, String)>, ToolBatchRecoveryError> {
+    let ToolBatchOptions {
+        max_output_bytes,
+        context,
+        journal,
+        ..
+    } = options;
+    if let Err(reason) = validate_tool_batch_recovery(tools, &batch) {
+        return Err(ToolBatchRecoveryError::NeedsReconciliation(reason));
+    }
+
+    let intent = batch.intent;
+    let mut executed = Vec::with_capacity(batch.calls.len());
+    for call in batch.calls {
+        let outcome = if let Some(outcome) = call.outcome {
+            outcome
+        } else {
+            crate::execution::append_if_present(
+                journal,
+                crate::ExecutionJournalEntry::ToolCallStarted {
+                    turn_id: intent.turn_id.clone(),
+                    step: intent.step,
+                    call_id: call.call.id.clone(),
+                },
+            )
+            .map_err(ToolBatchRecoveryError::Journal)?;
+            let request = recovery_request(&call.call, context, control);
+            tools.execute_outcome(&request)
+        };
+        append_recovered_call(
+            &intent,
+            call.call,
+            outcome,
+            max_output_bytes,
+            session,
+            observer,
+            journal,
+            &mut executed,
+        )?;
+    }
+    Ok(executed)
+}
+
+fn recovery_request(
+    call: &ToolCall,
+    context: Option<&ToolExecutionContext>,
+    control: &RunControl,
+) -> ToolExecutionRequest {
+    let request = ToolExecutionRequest::from(call.clone());
+    let request = if let Some(context) = context {
+        request.with_context(context.clone())
+    } else {
+        request
+    };
+    request.with_cancellation(control.cancellation_token())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_recovered_call<O: Observer>(
+    intent: &crate::ToolBatchIntent,
+    call: ToolCall,
+    outcome: ToolExecutionOutcome,
+    max_output_bytes: usize,
+    session: &mut SessionState,
+    observer: &mut O,
+    journal: &mut Option<&mut dyn crate::ExecutionJournalSink>,
+    executed: &mut Vec<(String, serde_json::Value, String)>,
+) -> Result<(), ToolBatchRecoveryError> {
+    let durable_outcome = outcome.clone();
+    let content = outcome.content;
+    let is_error = outcome.status.is_error();
+    let truncated = content.len() > max_output_bytes;
+    let content = truncate_utf8(content, max_output_bytes);
+    observer.observe(&Event::ToolStarted { call: call.clone() });
+    observer.observe(&Event::ToolFinished {
+        call_id: call.id.clone(),
+        name: call.name.clone(),
+        arguments: call.arguments.clone(),
+        content: content.clone(),
+        is_error,
+        truncated,
+        outcome: Some(outcome.status),
+    });
+    crate::execution::append_if_present(
+        journal,
+        crate::ExecutionJournalEntry::ToolCallFinished {
+            turn_id: intent.turn_id.clone(),
+            step: intent.step,
+            call_id: call.id.clone(),
+            outcome: durable_outcome,
+        },
+    )
+    .map_err(ToolBatchRecoveryError::Journal)?;
+    session.push(mini_agent_protocol::Message::Tool {
+        call_id: call.id,
+        name: call.name.clone(),
+        content: content.clone(),
+        is_error,
+        outcome: Some(outcome.status),
+    });
+    executed.push((call.name, call.arguments, content));
+    Ok(())
 }
 
 pub(super) fn truncate_utf8(mut content: String, max_bytes: usize) -> String {

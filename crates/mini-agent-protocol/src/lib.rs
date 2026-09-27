@@ -35,6 +35,7 @@ pub use tool::ToolExecutionOutcome;
 pub use tool::ToolExecutionRequest;
 pub use tool::ToolExecutionStatus;
 pub use tool::ToolHandler;
+pub use tool::ToolReplaySafety;
 pub use tool::ToolRuntime;
 pub use tool::ToolSpec;
 pub use turn::ChildTaskAttemptKind;

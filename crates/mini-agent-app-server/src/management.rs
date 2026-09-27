@@ -80,6 +80,7 @@ pub(crate) struct TurnPersistence<'a> {
     pub(crate) messages: &'a [Message],
     pub(crate) tool_arguments: &'a [(String, serde_json::Value)],
     pub(crate) presentation: Option<&'a mini_agent_capabilities::TurnPresentation>,
+    pub(crate) execution_resume: bool,
 }
 
 struct McpRuntimeState {
@@ -711,6 +712,50 @@ impl RuntimeActorState {
 }
 
 impl RuntimeManagementState {
+    pub(crate) fn execution_journal(
+        &self,
+        base_messages: &[Message],
+    ) -> Option<mini_agent_capabilities::SessionExecutionJournal> {
+        self.session
+            .as_ref()
+            .map(|opened| opened.store.execution_journal(base_messages))
+    }
+
+    pub(crate) fn execution_state(&self) -> Option<mini_agent_capabilities::SessionExecutionState> {
+        self.session
+            .as_ref()
+            .and_then(|opened| opened.store.execution_state())
+    }
+
+    pub(crate) fn reserve_execution_resume(
+        &self,
+        turn_id: &mini_agent_protocol::TurnId,
+        checkpoint_seq: u64,
+        request_id: &str,
+    ) -> Result<mini_agent_capabilities::ExecutionResumeReservation, AppServerError> {
+        self.session
+            .as_ref()
+            .ok_or_else(|| {
+                AppServerError::Checkpoint("session persistence is disabled".to_string())
+            })?
+            .store
+            .reserve_execution_resume(turn_id, checkpoint_seq, request_id)
+            .map_err(AppServerError::Checkpoint)
+    }
+
+    pub(crate) fn session_operation_for_turn(
+        &self,
+        turn_id: &str,
+    ) -> Result<Option<mini_agent_capabilities::SessionOperation>, AppServerError> {
+        match self.session.as_ref() {
+            Some(opened) => opened
+                .store
+                .operation_for_turn(turn_id)
+                .map_err(AppServerError::Checkpoint),
+            None => Ok(None),
+        }
+    }
+
     pub(crate) fn session_info(&self) -> Option<RuntimeSessionInfo> {
         self.session.as_ref().map(|opened| RuntimeSessionInfo {
             session_id: opened.store.session_id().to_string(),
@@ -1039,11 +1084,20 @@ impl RuntimeManagementState {
                 )
             }
             mini_agent_app_server_protocol::ChildTaskAction::Resume => {
-                opened.store.resume_child_task_from(
-                    &context,
-                    required_child_param(params.request_id.as_deref(), "requestId")?,
-                    control_source,
-                )
+                let request_id = required_child_param(params.request_id.as_deref(), "requestId")?;
+                match params.turn_id.as_deref() {
+                    Some(turn_id) => opened.store.resume_child_execution_from(
+                        &context,
+                        request_id,
+                        turn_id,
+                        control_source,
+                    ),
+                    None => {
+                        opened
+                            .store
+                            .resume_child_task_from(&context, request_id, control_source)
+                    }
+                }
             }
             mini_agent_app_server_protocol::ChildTaskAction::StartFailure => {
                 opened.store.record_child_start_failure(
@@ -1197,22 +1251,26 @@ impl RuntimeManagementState {
             TurnStatus::Cancelled => SessionTurnStatus::Cancelled,
             TurnStatus::Failed | TurnStatus::InProgress => SessionTurnStatus::Failed,
         };
-        session
-            .store
-            .record_turn_with_id(
-                turn.result.turn_id.as_str(),
-                TurnCommit {
-                    started_at_ms,
-                    prompt,
-                    status,
-                    steps: turn.result.steps,
-                    error: turn.result.error.as_deref(),
-                    messages: turn.messages,
-                    tool_arguments: turn.tool_arguments,
-                    presentation: turn.presentation,
-                    checkpoint,
-                },
-            )
-            .map_err(AppServerError::Checkpoint)
+        let commit = TurnCommit {
+            started_at_ms,
+            prompt,
+            status,
+            steps: turn.result.steps,
+            error: turn.result.error.as_deref(),
+            messages: turn.messages,
+            tool_arguments: turn.tool_arguments,
+            presentation: turn.presentation,
+            checkpoint,
+        };
+        let result = if turn.execution_resume {
+            session
+                .store
+                .record_resumed_turn_with_id(turn.result.turn_id.as_str(), commit)
+        } else {
+            session
+                .store
+                .record_turn_with_id(turn.result.turn_id.as_str(), commit)
+        };
+        result.map_err(AppServerError::Checkpoint)
     }
 }

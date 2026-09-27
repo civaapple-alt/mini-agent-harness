@@ -96,6 +96,25 @@ where
         .await
     }
 
+    pub(super) async fn handle_turn_resume(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<TurnResumeParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        action_response(
+            request.id,
+            self.server.turn_resume_action(params),
+            Clone::clone,
+        )
+        .await
+    }
+
     pub(super) async fn handle_turn_read(
         &self,
         request: JsonRpcRequest,
@@ -128,6 +147,7 @@ where
                             )
                         }),
                         error: result.error,
+                        recovery: result.recovery,
                     },
                 ),
                 None => response_error(

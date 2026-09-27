@@ -7,7 +7,6 @@ use mini_agent_protocol::Model;
 use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::Observer;
 use mini_agent_protocol::StopReason;
-use mini_agent_protocol::ToolExecutionContext;
 use std::error::Error;
 use std::fmt;
 
@@ -17,6 +16,10 @@ use crate::context_controller::bounded_compaction_prompt;
 use crate::context_controller::mechanical_compact;
 use crate::context_controller::split_compaction_parts;
 use crate::context_controller::trim_prefix_to_fit;
+use crate::execution::ExecutionCheckpoint;
+use crate::execution::ExecutionJournalEntry;
+use crate::execution::ExecutionPhase;
+use crate::execution::ToolBatchIntent;
 use crate::run_control::RunControl;
 use crate::run_control::SteeringMode;
 use crate::session::context_bytes_for;
@@ -114,6 +117,8 @@ pub enum HarnessError<E> {
     Compaction(String),
     Limit(LimitExceeded),
     Thread(String),
+    ExecutionJournal(String),
+    NeedsReconciliation(String),
 }
 
 impl<E: fmt::Display> fmt::Display for HarnessError<E> {
@@ -123,6 +128,18 @@ impl<E: fmt::Display> fmt::Display for HarnessError<E> {
             Self::Compaction(error) => write!(formatter, "context compaction failed: {error}"),
             Self::Limit(error) => error.fmt(formatter),
             Self::Thread(error) => write!(formatter, "thread operation failed: {error}"),
+            Self::ExecutionJournal(error) => {
+                write!(
+                    formatter,
+                    "execution checkpoint could not be persisted: {error}"
+                )
+            }
+            Self::NeedsReconciliation(reason) => {
+                write!(
+                    formatter,
+                    "execution needs reconciliation before continuing: {reason}"
+                )
+            }
         }
     }
 }
@@ -399,8 +416,14 @@ impl<M: Model> Harness<M> {
         control: &RunControl,
         steering_mode: SteeringMode,
     ) -> Result<RunOutcome, HarnessError<M::Error>> {
-        self.run_with_control_mode_and_tool_context(prompt, observer, control, steering_mode, None)
-            .await
+        self.run_with_control_mode_and_tool_context(
+            prompt,
+            observer,
+            control,
+            steering_mode,
+            crate::ExecutionRunOptions::default(),
+        )
+        .await
     }
 
     pub(crate) async fn run_with_control_mode_and_tool_context<O: Observer + Send>(
@@ -409,12 +432,24 @@ impl<M: Model> Harness<M> {
         observer: &mut O,
         control: &RunControl,
         steering_mode: SteeringMode,
-        tool_context: Option<ToolExecutionContext>,
+        options: crate::ExecutionRunOptions<'_>,
     ) -> Result<RunOutcome, HarnessError<M::Error>> {
+        let crate::ExecutionRunOptions {
+            tool_context,
+            execution_context,
+            mut journal,
+            resume: execution_resume,
+        } = options;
         // Recover histories produced by the pre-fix steering boundary before
         // appending another user message or making a provider request.
         self.session.repair_incomplete_tool_groups();
         let prompt = prompt.into();
+        let resume_checkpoint = execution_resume
+            .as_ref()
+            .map(|(checkpoint, _)| checkpoint.clone());
+        let prompt = resume_checkpoint
+            .as_ref()
+            .map_or(prompt, |checkpoint| checkpoint.input.text.clone());
         if prompt.len() > self.config.max_user_input_bytes {
             return Err(fail_limit(
                 LimitExceeded {
@@ -430,16 +465,123 @@ impl<M: Model> Harness<M> {
         });
 
         let previous_message_count = self.session.messages().len();
-        self.session.push(Message::User { text: prompt });
         let tool_specs = self.tools.specs();
-        if let Err(error) = self.prepare_context(&tool_specs, observer).await {
-            if self.config.context_limit_behavior == ContextLimitBehavior::Reject {
-                self.session.truncate_messages(previous_message_count);
+        let (mut final_text, mut step) = if let Some(checkpoint) = resume_checkpoint.as_ref() {
+            self.restore_history(checkpoint.messages.clone())
+                .map_err(HarnessError::Limit)?;
+            self.ensure_context_limit(&tool_specs)
+                .map_err(HarnessError::Limit)?;
+            (
+                checkpoint.final_text.clone(),
+                checkpoint.next_model_step.saturating_sub(1),
+            )
+        } else {
+            self.session.push(Message::User { text: prompt });
+            if let Some(execution) = execution_context.as_ref() {
+                crate::execution::append_if_present(
+                    &mut journal,
+                    ExecutionJournalEntry::Checkpoint {
+                        checkpoint: ExecutionCheckpoint {
+                            turn_id: execution.turn_id.clone(),
+                            input: execution.input.clone(),
+                            messages: self.session.messages().to_vec(),
+                            next_model_step: 1,
+                            final_text: String::new(),
+                            phase: ExecutionPhase::ModelRequest,
+                        },
+                    },
+                )
+                .map_err(HarnessError::ExecutionJournal)?;
             }
-            return Err(error);
+            if let Err(error) = self.prepare_context(&tool_specs, observer).await {
+                if self.config.context_limit_behavior == ContextLimitBehavior::Reject {
+                    self.session.truncate_messages(previous_message_count);
+                }
+                return Err(error);
+            }
+            (String::new(), 0)
+        };
+
+        if let Some((checkpoint, Some(batch))) = execution_resume {
+            if checkpoint.turn_id != batch.intent.turn_id
+                || checkpoint.next_model_step != batch.intent.step
+            {
+                return Err(HarnessError::NeedsReconciliation(
+                    "checkpoint and pending tool batch do not identify the same model step"
+                        .to_string(),
+                ));
+            }
+            if let Err(reason) =
+                crate::tool_batch_executor::validate_tool_batch_recovery(&self.tools, &batch)
+            {
+                if let Some(execution) = execution_context.as_ref() {
+                    crate::execution::append_if_present(
+                        &mut journal,
+                        ExecutionJournalEntry::NeedsReconciliation {
+                            turn_id: execution.turn_id.clone(),
+                            reason: reason.clone(),
+                        },
+                    )
+                    .map_err(HarnessError::ExecutionJournal)?;
+                }
+                return Err(HarnessError::NeedsReconciliation(reason));
+            }
+            self.session.push(Message::Assistant {
+                reasoning: batch.intent.reasoning.clone(),
+                text: batch.intent.text.clone(),
+                tool_calls: batch.intent.calls.clone(),
+            });
+            final_text.clone_from(&batch.intent.text);
+            step = batch.intent.step;
+            let current_executed_batch = crate::tool_batch_executor::recover_tool_batch(
+                &self.tools,
+                batch,
+                &mut self.session,
+                observer,
+                control,
+                crate::tool_batch_executor::ToolBatchOptions {
+                    max_output_bytes: self.config.max_tool_output_bytes,
+                    context: tool_context.as_ref(),
+                    turn_id: None,
+                    step,
+                    journal: &mut journal,
+                },
+            )
+            .map_err(|error| match error {
+                crate::tool_batch_executor::ToolBatchRecoveryError::NeedsReconciliation(reason) => {
+                    HarnessError::NeedsReconciliation(reason)
+                }
+                crate::tool_batch_executor::ToolBatchRecoveryError::Journal(error) => {
+                    HarnessError::ExecutionJournal(error)
+                }
+            })?;
+            let _ = current_executed_batch;
+            if let Some(execution) = execution_context.as_ref() {
+                crate::execution::append_if_present(
+                    &mut journal,
+                    ExecutionJournalEntry::ToolBatchSettled {
+                        turn_id: execution.turn_id.clone(),
+                        step,
+                    },
+                )
+                .map_err(HarnessError::ExecutionJournal)?;
+                crate::execution::append_if_present(
+                    &mut journal,
+                    ExecutionJournalEntry::Checkpoint {
+                        checkpoint: ExecutionCheckpoint {
+                            turn_id: execution.turn_id.clone(),
+                            input: execution.input.clone(),
+                            messages: self.session.messages().to_vec(),
+                            next_model_step: step.saturating_add(1),
+                            final_text: final_text.clone(),
+                            phase: ExecutionPhase::ModelRequest,
+                        },
+                    },
+                )
+                .map_err(HarnessError::ExecutionJournal)?;
+            }
         }
-        let mut final_text = String::new();
-        let mut step = 0usize;
+
         let mut consecutive_duplicate_tool_batches = 0usize;
         let mut last_tool_batch: Option<Vec<(String, serde_json::Value, String)>> = None;
 
@@ -460,6 +602,22 @@ impl<M: Model> Harness<M> {
                 ));
             }
             self.prepare_context(&tool_specs, observer).await?;
+            if let Some(execution) = execution_context.as_ref() {
+                crate::execution::append_if_present(
+                    &mut journal,
+                    ExecutionJournalEntry::Checkpoint {
+                        checkpoint: ExecutionCheckpoint {
+                            turn_id: execution.turn_id.clone(),
+                            input: execution.input.clone(),
+                            messages: self.session.messages().to_vec(),
+                            next_model_step: step,
+                            final_text: final_text.clone(),
+                            phase: ExecutionPhase::ModelRequest,
+                        },
+                    },
+                )
+                .map_err(HarnessError::ExecutionJournal)?;
+            }
             observer.observe(&Event::ModelStarted {
                 step,
                 input_bytes: self.context_bytes(&self.config.system_prompt, &tool_specs),
@@ -530,8 +688,8 @@ impl<M: Model> Harness<M> {
             });
             final_text = response.text.clone();
             self.session.push(Message::Assistant {
-                reasoning: response.reasoning,
-                text: response.text,
+                reasoning: response.reasoning.clone(),
+                text: response.text.clone(),
                 tool_calls: response.tool_calls.clone(),
             });
 
@@ -556,15 +714,62 @@ impl<M: Model> Harness<M> {
                 ));
             }
 
+            if let Some(execution) = execution_context.as_ref() {
+                crate::execution::append_if_present(
+                    &mut journal,
+                    ExecutionJournalEntry::ToolBatchStarted {
+                        batch: ToolBatchIntent {
+                            turn_id: execution.turn_id.clone(),
+                            step,
+                            reasoning: response.reasoning.clone(),
+                            text: response.text.clone(),
+                            calls: response.tool_calls.clone(),
+                        },
+                    },
+                )
+                .map_err(HarnessError::ExecutionJournal)?;
+            }
+
             let current_executed_batch = execute_tool_batch(
                 &self.tools,
                 response.tool_calls,
-                self.config.max_tool_output_bytes,
                 &mut self.session,
                 observer,
                 control,
-                tool_context.as_ref(),
-            );
+                crate::tool_batch_executor::ToolBatchOptions {
+                    max_output_bytes: self.config.max_tool_output_bytes,
+                    context: tool_context.as_ref(),
+                    turn_id: execution_context.as_ref().map(|context| &context.turn_id),
+                    step,
+                    journal: &mut journal,
+                },
+            )
+            .map_err(HarnessError::ExecutionJournal)?;
+
+            if let Some(execution) = execution_context.as_ref() {
+                crate::execution::append_if_present(
+                    &mut journal,
+                    ExecutionJournalEntry::ToolBatchSettled {
+                        turn_id: execution.turn_id.clone(),
+                        step,
+                    },
+                )
+                .map_err(HarnessError::ExecutionJournal)?;
+                crate::execution::append_if_present(
+                    &mut journal,
+                    ExecutionJournalEntry::Checkpoint {
+                        checkpoint: ExecutionCheckpoint {
+                            turn_id: execution.turn_id.clone(),
+                            input: execution.input.clone(),
+                            messages: self.session.messages().to_vec(),
+                            next_model_step: step.saturating_add(1),
+                            final_text: final_text.clone(),
+                            phase: ExecutionPhase::ModelRequest,
+                        },
+                    },
+                )
+                .map_err(HarnessError::ExecutionJournal)?;
+            }
 
             if last_tool_batch.as_ref() == Some(&current_executed_batch) {
                 consecutive_duplicate_tool_batches =

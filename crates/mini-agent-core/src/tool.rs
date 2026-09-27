@@ -2,6 +2,7 @@ use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolExecutionDelegate;
 use mini_agent_protocol::ToolExecutionOutcome;
 use mini_agent_protocol::ToolExecutionRequest;
+use mini_agent_protocol::ToolReplaySafety;
 use mini_agent_protocol::ToolSpec;
 use std::sync::Arc;
 
@@ -62,6 +63,15 @@ impl ToolRouter {
             return ToolExecutionOutcome::failed(format!("unknown tool: {}", request.name));
         };
         self.executor.execute(tool.as_ref(), request)
+    }
+
+    pub fn recovery_replay_safety(&self, request: &ToolExecutionRequest) -> ToolReplaySafety {
+        self.tools
+            .iter()
+            .find(|tool| tool.spec().name == request.name && !self.is_hidden(&request.name))
+            .map_or(ToolReplaySafety::Never, |tool| {
+                tool.recovery_replay_safety(request)
+            })
     }
 
     fn is_hidden(&self, name: &str) -> bool {

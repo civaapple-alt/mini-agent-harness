@@ -329,7 +329,8 @@ attachment references and explicit external paths remain dynamic input.
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
 | `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?}`, optional `operationId`, `operationAttempt`, `operationAttemptKind`, `turnSource` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. `turnSource` is bounded metadata; the currently defined value `child_wakeup` marks an automatic parent continuation and does not change the input text. `operationAttemptKind` is child lifecycle metadata (`initial`, `retry`, `follow_up`); it does not change Core execution. |
-| `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, and optional error. |
+| `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, optional error, and bounded execution recovery metadata. An unsettled Turn with an execution checkpoint returns `in_progress`. |
+| `turn/resume` | `threadId`, `turnId`, `checkpointSeq`, stable `requestId` | Explicitly resumes the same logical Turn from the matching persisted execution checkpoint. The request fails if the Turn or checkpoint sequence is stale. Repeating an accepted request ID is idempotent. |
 | `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of ordered `turn/event` notifications with `nextCursor`, `oldestSequence`, and `hasGap`. |
 | `turn/steer` | `threadId`, `turnId`, `text`, optional bounded `requestId` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. Child control supplies a stable request ID so a replayed accepted steer is idempotent. |
 | `turn/interrupt` | `threadId`, `turnId` | Requests cooperative cancellation and returns `{accepted: true}` when admitted; settlement remains pending until `turn_finished`. |
@@ -338,6 +339,32 @@ attachment references and explicit external paths remain dynamic input.
 notifications while the turn is running, then use `turn/read` for the settled
 result. Steering and interruption are requests to the runtime; they do not
 force an immediate stop before the runtime reaches a cancellation boundary.
+
+The Session checkpoint and execution checkpoint serve different purposes. The
+Session checkpoint stores model context after a Turn settles. New Turns and
+forked Child Sessions use that context. The execution journal stores the input
+and model context for one logical Turn, its next model step, and durable tool
+batch outcomes. Core writes a checkpoint before each model request and after a
+whole tool batch. A failed checkpoint write stops execution before the next
+model request or side effect.
+
+App Server startup never resumes an execution checkpoint automatically. A
+persisted active Turn becomes `waiting_for_continue` after restart. A tool call
+that started without a recorded outcome becomes `needs_reconciliation`; clients
+must verify that side effect before they continue. A completed tool batch with
+recorded outcomes can continue without rerunning those calls. `turn/read`
+returns bounded status, phase, heartbeat and progress timestamps, checkpoint
+sequence, and recovery reason. `turn/resume` requires the current Turn ID and
+checkpoint sequence, then continues that same Turn without creating a new Turn
+or child operation attempt. While an execution checkpoint is waiting or needs
+reconciliation, `turn/start` returns `not_submitted` and preserves that
+checkpoint. The caller must resume or reconcile it before starting another Turn.
+The App Server records an executor heartbeat every 10 seconds. The Responses
+provider treats 120 seconds without provider data as a stalled request and does
+not retry that silent stream. Recognized transient transport, incomplete-stream,
+HTTP 408/429, and 5xx failures use exponential delays of 1, 2, 4, and 8 seconds,
+bounded by five attempts and a 120-second retry window. Partial events from a
+failed attempt are discarded.
 
 When a Turn is waiting for tool approval, the control plane queues
 `turn/interrupt` before it releases the approval wait. The App Server worker

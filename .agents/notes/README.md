@@ -111,6 +111,7 @@ graph LR
 
 ### Implemented
 
+- [Main 与 Child 的会话检查点和执行恢复](implemented/architecture/2026-09-27-main-child-execution-checkpoints-and-recovery.zh.md)
 - [子任务 Turn 连续性与失败诊断](implemented/bug-fix/2026-09-27-child-task-attempt-settlement-and-step-diagnostics.zh.md)
 - [父 Session 子任务身份与事件恢复一致性](implemented/bug-fix/2026-09-26-parent-session-child-identity-and-event-recovery.zh.md)
 - [子任务终态与最终结果恢复](implemented/bug-fix/2026-09-26-child-task-settled-result-recovery.zh.md)

@@ -1,4 +1,5 @@
 mod context_controller;
+mod execution;
 mod harness;
 mod input;
 mod run_control;
@@ -8,6 +9,16 @@ mod tool;
 mod tool_batch_executor;
 mod turn_engine;
 
+pub use execution::ExecutionCheckpoint;
+pub use execution::ExecutionJournalEntry;
+pub use execution::ExecutionJournalSink;
+pub use execution::ExecutionPhase;
+pub use execution::ExecutionRunContext;
+pub use execution::ExecutionRunOptions;
+pub use execution::ExecutionToolBatch;
+pub use execution::ExecutionToolCall;
+pub use execution::ToolBatchIntent;
+pub use execution::TurnExecutionOptions;
 pub use harness::ContextLimitBehavior;
 pub use harness::ForkCompactionMethod;
 pub use harness::ForkContextPolicy;

@@ -49,6 +49,7 @@ pub(super) struct LoadedRecords {
     pub(super) thread_turn_count: usize,
     pub(super) created_at_ms: u64,
     pub(super) valid_bytes: usize,
+    pub(super) execution_state: Option<SessionExecutionState>,
 }
 
 pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecords, String> {
@@ -56,13 +57,14 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
     let mut valid_bytes = 0usize;
     let mut expected_seq = 1u64;
     let mut header_seen = false;
-    let mut latest_checkpoint = None;
+    let mut latest_checkpoint: Option<(u64, String, Vec<Message>)> = None;
     let mut items = Vec::new();
     let mut turn_sources = HashMap::new();
     let mut is_forked = false;
     let mut turn_count = 0usize;
     let mut thread_turn_counts: HashMap<String, usize> = HashMap::new();
     let mut created_at_ms = 0u64;
+    let mut execution_state: Option<SessionExecutionState> = None;
     while offset < bytes.len() {
         let remaining = &bytes[offset..];
         let Some(end) = remaining.iter().position(|byte| *byte == b'\n') else {
@@ -80,6 +82,10 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
             .get("seq")
             .and_then(Value::as_u64)
             .ok_or_else(|| format!("session record at byte {offset} is missing seq"))?;
+        let record_timestamp_ms = record
+            .get("timestamp_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         if seq != expected_seq {
             return Err(format!(
                 "session sequence mismatch: expected {expected_seq}, found {seq}"
@@ -106,7 +112,13 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                 header_seen = true;
             }
             Some("turn_started") if header_seen => {
-                turn_count = turn_count.saturating_add(1);
+                let execution_resume = record
+                    .get("execution_resume")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                if !execution_resume {
+                    turn_count = turn_count.saturating_add(1);
+                }
                 let thread_id = record
                     .get("thread_id")
                     .and_then(Value::as_str)
@@ -121,8 +133,10 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                 ) {
                     turn_sources.insert(turn_id.to_string(), source);
                 }
-                let count = thread_turn_counts.entry(thread_id.to_string()).or_insert(0);
-                *count = (*count).saturating_add(1);
+                if !execution_resume {
+                    let count = thread_turn_counts.entry(thread_id.to_string()).or_insert(0);
+                    *count = (*count).saturating_add(1);
+                }
             }
             Some("item") if header_seen => {
                 let thread_id = record
@@ -179,6 +193,119 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
                 }
                 latest_checkpoint = Some((seq, thread_id, messages));
             }
+            Some("execution_checkpoint") if header_seen => {
+                let record_thread = record
+                    .get("thread_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "execution checkpoint is missing thread_id".to_string())?;
+                let turn_id = record
+                    .get("turn_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "execution checkpoint is missing turn_id".to_string())?;
+                let mode = record
+                    .get("message_mode")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "execution checkpoint is missing message_mode".to_string())?;
+                let delta: Vec<Message> = serde_json::from_value(
+                    record
+                        .get("messages")
+                        .cloned()
+                        .ok_or_else(|| "execution checkpoint is missing messages".to_string())?,
+                )
+                .map_err(|error| format!("invalid execution checkpoint messages: {error}"))?;
+                let mut messages = match mode {
+                    "append" => execution_state
+                        .as_ref()
+                        .filter(|state| state.checkpoint.turn_id.as_str() == turn_id)
+                        .map(|state| state.checkpoint.messages.clone())
+                        .or_else(|| {
+                            latest_checkpoint
+                                .as_ref()
+                                .filter(|(_, id, _)| id == record_thread)
+                                .map(|(_, _, messages)| messages.clone())
+                        })
+                        .ok_or_else(|| {
+                            "execution checkpoint append has no conversation base".to_string()
+                        })?,
+                    "replace" => Vec::new(),
+                    _ => return Err("invalid execution checkpoint message mode".to_string()),
+                };
+                if mode == "append" {
+                    messages.extend(delta);
+                } else {
+                    messages = delta;
+                }
+                let checkpoint = ExecutionCheckpoint {
+                    turn_id: TurnId::new(turn_id),
+                    input: serde_json::from_value(
+                        record
+                            .get("input")
+                            .cloned()
+                            .ok_or_else(|| "execution checkpoint is missing input".to_string())?,
+                    )
+                    .map_err(|error| format!("invalid execution checkpoint input: {error}"))?,
+                    messages,
+                    next_model_step: record
+                        .get("next_model_step")
+                        .and_then(Value::as_u64)
+                        .and_then(|step| usize::try_from(step).ok())
+                        .ok_or_else(|| {
+                            "execution checkpoint is missing next_model_step".to_string()
+                        })?,
+                    final_text: record
+                        .get("final_text")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "execution checkpoint is missing final_text".to_string())?
+                        .to_string(),
+                    phase: serde_json::from_value(
+                        record
+                            .get("phase")
+                            .cloned()
+                            .ok_or_else(|| "execution checkpoint is missing phase".to_string())?,
+                    )
+                    .map_err(|error| format!("invalid execution checkpoint phase: {error}"))?,
+                };
+                apply_execution_journal_entry(
+                    &mut execution_state,
+                    seq,
+                    record_timestamp_ms,
+                    ExecutionJournalEntry::Checkpoint { checkpoint },
+                );
+            }
+            Some("execution_tool_batch_started")
+            | Some("execution_tool_call_started")
+            | Some("execution_tool_call_finished")
+            | Some("execution_tool_batch_settled")
+            | Some("execution_waiting_for_continue")
+            | Some("execution_resumed")
+            | Some("execution_heartbeat")
+            | Some("execution_needs_reconciliation")
+            | Some("execution_settled")
+                if header_seen =>
+            {
+                let mut journal_record = record.clone();
+                let kind = journal_record
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .trim_start_matches("execution_");
+                journal_record["kind"] = json!(kind);
+                let entry: ExecutionJournalEntry = serde_json::from_value(journal_record)
+                    .map_err(|error| format!("invalid execution journal record: {error}"))?;
+                let entry_turn_id = execution_entry_turn_id(&entry);
+                if execution_state
+                    .as_ref()
+                    .is_some_and(|state| state.checkpoint.turn_id != entry_turn_id)
+                {
+                    execution_state = None;
+                }
+                apply_execution_journal_entry(
+                    &mut execution_state,
+                    seq,
+                    record_timestamp_ms,
+                    entry,
+                );
+            }
             Some(_) if header_seen => {}
             Some(_) => return Err("session header must be the first record".to_string()),
             None => return Err("session record is missing kind".to_string()),
@@ -201,7 +328,166 @@ pub(super) fn load_records(session_id: &str, bytes: &[u8]) -> Result<LoadedRecor
         thread_turn_count,
         created_at_ms,
         valid_bytes,
+        execution_state,
     })
+}
+
+fn execution_entry_turn_id(entry: &ExecutionJournalEntry) -> TurnId {
+    match entry {
+        ExecutionJournalEntry::Checkpoint { checkpoint } => checkpoint.turn_id.clone(),
+        ExecutionJournalEntry::ToolBatchStarted { batch } => batch.turn_id.clone(),
+        ExecutionJournalEntry::ToolCallStarted { turn_id, .. }
+        | ExecutionJournalEntry::ToolCallFinished { turn_id, .. }
+        | ExecutionJournalEntry::ToolBatchSettled { turn_id, .. }
+        | ExecutionJournalEntry::WaitingForContinue { turn_id, .. }
+        | ExecutionJournalEntry::Resumed { turn_id, .. }
+        | ExecutionJournalEntry::Heartbeat { turn_id, .. }
+        | ExecutionJournalEntry::NeedsReconciliation { turn_id, .. }
+        | ExecutionJournalEntry::Settled { turn_id } => turn_id.clone(),
+    }
+}
+
+pub(super) fn apply_execution_journal_entry(
+    current: &mut Option<SessionExecutionState>,
+    seq: u64,
+    record_timestamp_ms: u64,
+    entry: ExecutionJournalEntry,
+) {
+    match entry {
+        ExecutionJournalEntry::Checkpoint { checkpoint } => {
+            *current = Some(SessionExecutionState {
+                phase: checkpoint.phase,
+                checkpoint,
+                checkpoint_seq: seq,
+                status: SessionExecutionStatus::Running,
+                last_heartbeat_ms: None,
+                last_progress_ms: Some(record_timestamp_ms),
+                reason: None,
+                pending_batch: None,
+                resume_requests: HashMap::new(),
+            });
+        }
+        ExecutionJournalEntry::ToolBatchStarted { batch } => {
+            if let Some(state) = current.as_mut() {
+                state.phase = ExecutionPhase::ToolBatch;
+                state.last_progress_ms = Some(record_timestamp_ms);
+                state.pending_batch = Some(ExecutionToolBatch {
+                    calls: batch
+                        .calls
+                        .iter()
+                        .cloned()
+                        .map(|call| ExecutionToolCall {
+                            call,
+                            started: false,
+                            outcome: None,
+                        })
+                        .collect(),
+                    intent: batch,
+                });
+            }
+        }
+        ExecutionJournalEntry::ToolCallStarted {
+            turn_id,
+            step,
+            call_id,
+        } => {
+            if let Some(state) = current.as_mut()
+                && state.checkpoint.turn_id == turn_id
+                && let Some(batch) = state
+                    .pending_batch
+                    .as_mut()
+                    .filter(|batch| batch.intent.step == step)
+                && let Some(call) = batch.calls.iter_mut().find(|call| call.call.id == call_id)
+            {
+                call.started = true;
+                state.last_progress_ms = Some(record_timestamp_ms);
+            }
+        }
+        ExecutionJournalEntry::ToolCallFinished {
+            turn_id,
+            step,
+            call_id,
+            outcome,
+        } => {
+            if let Some(state) = current.as_mut()
+                && state.checkpoint.turn_id == turn_id
+                && let Some(batch) = state
+                    .pending_batch
+                    .as_mut()
+                    .filter(|batch| batch.intent.step == step)
+                && let Some(call) = batch.calls.iter_mut().find(|call| call.call.id == call_id)
+            {
+                call.outcome = Some(outcome);
+                state.last_progress_ms = Some(record_timestamp_ms);
+            }
+        }
+        ExecutionJournalEntry::ToolBatchSettled { turn_id, step } => {
+            if let Some(state) = current.as_mut()
+                && state.checkpoint.turn_id == turn_id
+                && state
+                    .pending_batch
+                    .as_ref()
+                    .is_some_and(|batch| batch.intent.step == step)
+            {
+                // Keep the completed batch until the post-batch checkpoint is
+                // durable. A crash between these records can then replay the
+                // journaled outcomes without asking the model or rerunning tools.
+                state.last_progress_ms = Some(record_timestamp_ms);
+            }
+        }
+        ExecutionJournalEntry::WaitingForContinue { turn_id, reason } => {
+            if let Some(state) = current.as_mut()
+                && state.checkpoint.turn_id == turn_id
+            {
+                state.status = SessionExecutionStatus::WaitingForContinue;
+                state.reason = Some(reason);
+            }
+        }
+        ExecutionJournalEntry::Resumed {
+            turn_id,
+            request_id,
+            checkpoint_seq,
+        } => {
+            if let Some(state) = current.as_mut()
+                && state.checkpoint.turn_id == turn_id
+            {
+                state.status = SessionExecutionStatus::Running;
+                state.reason = None;
+                state.resume_requests.insert(request_id, checkpoint_seq);
+            }
+        }
+        ExecutionJournalEntry::Heartbeat {
+            turn_id,
+            phase,
+            at_ms,
+            last_progress_ms,
+        } => {
+            if let Some(state) = current.as_mut()
+                && state.checkpoint.turn_id == turn_id
+            {
+                state.phase = phase;
+                state.last_heartbeat_ms = Some(at_ms);
+                state.last_progress_ms = Some(last_progress_ms);
+            }
+        }
+        ExecutionJournalEntry::NeedsReconciliation { turn_id, reason } => {
+            if let Some(state) = current.as_mut()
+                && state.checkpoint.turn_id == turn_id
+            {
+                state.status = SessionExecutionStatus::NeedsReconciliation;
+                state.reason = Some(reason);
+            }
+        }
+        ExecutionJournalEntry::Settled { turn_id } => {
+            if let Some(state) = current.as_mut()
+                && state.checkpoint.turn_id == turn_id
+            {
+                state.status = SessionExecutionStatus::Settled;
+                state.reason = None;
+                state.pending_batch = None;
+            }
+        }
+    }
 }
 
 pub(super) fn acquire_lock(directory: &Path, session_id: &str) -> Result<SessionLock, String> {

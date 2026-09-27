@@ -1,3 +1,4 @@
+use crate::ExecutionRunContext;
 use crate::Harness;
 use crate::HarnessError;
 use crate::RunControl;
@@ -220,18 +221,21 @@ impl<M: Model> Thread<M> {
         let outcome = self
             .harness
             .run_with_control_mode_and_tool_context(
-                input.text,
+                input.text.clone(),
                 observer,
                 control,
                 steering_mode,
-                Some(ToolExecutionContext {
-                    thread_id: self.id.clone(),
-                    turn_id: id.clone(),
-                    project_id: None,
-                    workspace_id: None,
-                    workspace_revision: None,
-                    session_id: None,
-                }),
+                crate::ExecutionRunOptions {
+                    tool_context: Some(ToolExecutionContext {
+                        thread_id: self.id.clone(),
+                        turn_id: id.clone(),
+                        project_id: None,
+                        workspace_id: None,
+                        workspace_revision: None,
+                        session_id: None,
+                    }),
+                    ..Default::default()
+                },
             )
             .await;
         observer.observe(&Event::TurnFinished {
@@ -275,7 +279,78 @@ impl<M: Model> Thread<M> {
         prelude: &[Event],
         preflight_error: Option<&str>,
     ) -> Result<TurnResult, ThreadError<M::Error>> {
-        let id = self.begin_turn(&input)?;
+        self.run_turn_with_events_and_preflight_and_journal(
+            input,
+            sink,
+            control,
+            steering_mode,
+            crate::TurnExecutionOptions {
+                prelude,
+                preflight_error,
+                journal: None,
+                resume: None,
+            },
+        )
+        .await
+    }
+
+    /// Runs a Turn while committing Core execution boundaries to a Host-owned
+    /// durable journal. Ordinary embedded Core callers can continue using the
+    /// observer-only methods above.
+    pub async fn run_turn_with_events_and_preflight_and_journal<S: EventSink + Send>(
+        &mut self,
+        input: TurnInput,
+        sink: &mut S,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+        options: crate::TurnExecutionOptions<'_, '_>,
+    ) -> Result<TurnResult, ThreadError<M::Error>> {
+        self.run_turn_with_events_and_preflight_and_journal_resume(
+            input,
+            sink,
+            control,
+            steering_mode,
+            options,
+        )
+        .await
+    }
+
+    /// Continues an explicitly admitted recovery checkpoint on this Thread.
+    pub async fn run_turn_with_events_and_preflight_and_journal_resume<S: EventSink + Send>(
+        &mut self,
+        input: TurnInput,
+        sink: &mut S,
+        control: &RunControl,
+        steering_mode: SteeringMode,
+        options: crate::TurnExecutionOptions<'_, '_>,
+    ) -> Result<TurnResult, ThreadError<M::Error>> {
+        let crate::TurnExecutionOptions {
+            prelude,
+            preflight_error,
+            journal,
+            resume: execution_resume,
+        } = options;
+        let id = if let Some((checkpoint, _)) = execution_resume.as_ref() {
+            if self.status == ThreadStatus::Closed {
+                return Err(ThreadError::Closed);
+            }
+            if self.status == ThreadStatus::Running {
+                return Err(ThreadError::Busy);
+            }
+            if checkpoint.input != input {
+                return Err(ThreadError::InvalidInputMode(input.mode));
+            }
+            self.status = ThreadStatus::Running;
+            self.last_turn_id = Some(checkpoint.turn_id.clone());
+            checkpoint.turn_id.clone()
+        } else {
+            self.begin_turn(&input)?
+        };
+        self.harness.set_model_preferences(
+            input.model_selection.clone(),
+            input.reasoning_selection.clone(),
+            input.reasoning_effort.clone(),
+        );
         let mut observer = EnvelopeObserver {
             sink,
             thread_id: self.id.clone(),
@@ -302,18 +377,26 @@ impl<M: Model> Thread<M> {
         let outcome = self
             .harness
             .run_with_control_mode_and_tool_context(
-                input.text,
+                input.text.clone(),
                 &mut observer,
                 control,
                 steering_mode,
-                Some(ToolExecutionContext {
-                    thread_id: self.id.clone(),
-                    turn_id: id.clone(),
-                    project_id: None,
-                    workspace_id: None,
-                    workspace_revision: None,
-                    session_id: None,
-                }),
+                crate::ExecutionRunOptions {
+                    tool_context: Some(ToolExecutionContext {
+                        thread_id: self.id.clone(),
+                        turn_id: id.clone(),
+                        project_id: None,
+                        workspace_id: None,
+                        workspace_revision: None,
+                        session_id: None,
+                    }),
+                    execution_context: Some(ExecutionRunContext {
+                        turn_id: id.clone(),
+                        input: input.clone(),
+                    }),
+                    journal,
+                    resume: execution_resume,
+                },
             )
             .await;
         observer.observe(&Event::TurnFinished {

@@ -405,6 +405,7 @@ pub struct SettledTurn {
     pub status: mini_agent_protocol::TurnStatus,
     pub outcome: Option<mini_agent_core::RunOutcome>,
     pub error: Option<String>,
+    pub recovery: Option<mini_agent_app_server_protocol::ExecutionRecoveryInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -735,13 +736,25 @@ where
         &self,
         thread_id: ThreadId,
     ) -> Result<ThreadCheckpoint, AppServerError> {
-        self.request_value(self.thread_read_action(thread_id)).await
+        let result = self
+            .request_value(self.thread_read_action(thread_id))
+            .await?;
+        Ok(ThreadCheckpoint {
+            thread_id: result.thread_id,
+            session: mini_agent_core::SessionState::from_messages(result.messages)
+                .with_context_revision(result.context_revision),
+            status: result.status,
+            next_turn_number: result.next_turn_number,
+            last_turn_id: result.last_turn_id,
+            next_event_sequence: result.next_event_sequence,
+        })
     }
 
     pub(crate) async fn thread_read_action(
         &self,
         thread_id: ThreadId,
-    ) -> Result<ActionResponse<ThreadCheckpoint>, ActionFailure> {
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::ThreadReadResult>, ActionFailure>
+    {
         self.request_action(|reply| Command::ReadThread { thread_id, reply })
             .await
     }
@@ -1002,6 +1015,24 @@ where
             expected_turn_id,
             origin: crate::worker::TurnOrigin::Client,
             turn_source,
+            execution_resume: None,
+            reply,
+        })
+        .await
+    }
+
+    pub(crate) async fn turn_resume_action(
+        &self,
+        params: mini_agent_app_server_protocol::TurnResumeParams,
+    ) -> Result<ActionResponse<TurnSubmission>, ActionFailure> {
+        let thread_id = params.thread_id.clone();
+        self.request_action(|reply| Command::Start {
+            thread_id,
+            request: TurnStart::new(TurnInput::new(TurnInputMode::Start, "")),
+            expected_turn_id: None,
+            origin: crate::worker::TurnOrigin::Client,
+            turn_source: Some(mini_agent_protocol::TurnSource::SessionResume),
+            execution_resume: Some(params),
             reply,
         })
         .await

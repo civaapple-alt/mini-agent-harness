@@ -252,6 +252,98 @@ async fn runs_model_tool_model_path() {
 }
 
 #[tokio::test]
+async fn resumes_from_checkpoint_with_the_durable_tool_result_without_replaying_it() {
+    struct RecordingExecutionJournal(Vec<crate::ExecutionJournalEntry>);
+    impl crate::ExecutionJournalSink for RecordingExecutionJournal {
+        fn append(&mut self, entry: crate::ExecutionJournalEntry) -> Result<u64, String> {
+            self.0.push(entry);
+            Ok(self.0.len() as u64)
+        }
+    }
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let model = RecordingModel {
+        responses: VecDeque::from([text_response("resumed answer")]),
+        requests: Arc::clone(&requests),
+    };
+    let mut harness = Harness::new(
+        model,
+        ToolRouter::new(vec![Box::new(Uppercase)]),
+        HarnessConfig::default(),
+    );
+    let input = TurnInput::new(TurnInputMode::Start, "continue this work");
+    let turn_id = mini_agent_protocol::TurnId::new("turn-recovery");
+    let call = ToolCall {
+        id: "call-recovered".to_string(),
+        name: "uppercase".to_string(),
+        arguments: json!({"text": "quiet"}),
+    };
+    let checkpoint = crate::ExecutionCheckpoint {
+        turn_id: turn_id.clone(),
+        input: input.clone(),
+        messages: vec![Message::User {
+            text: input.text.clone(),
+        }],
+        next_model_step: 1,
+        final_text: String::new(),
+        phase: crate::ExecutionPhase::ModelRequest,
+    };
+    let batch = crate::ExecutionToolBatch {
+        intent: crate::ToolBatchIntent {
+            turn_id: turn_id.clone(),
+            step: 1,
+            reasoning: String::new(),
+            text: String::new(),
+            calls: vec![call.clone()],
+        },
+        calls: vec![crate::ExecutionToolCall {
+            call,
+            started: true,
+            outcome: Some(ToolExecutionOutcome::completed("durable tool result")),
+        }],
+    };
+    let mut journal = RecordingExecutionJournal(Vec::new());
+    let mut events = RecordingObserver::default();
+
+    let outcome = harness
+        .run_with_control_mode_and_tool_context(
+            input.text.clone(),
+            &mut events,
+            &RunControl::new(),
+            SteeringMode::StopAtCheckpoint,
+            crate::ExecutionRunOptions {
+                execution_context: Some(crate::ExecutionRunContext {
+                    turn_id: turn_id.clone(),
+                    input,
+                }),
+                journal: Some(&mut journal),
+                resume: Some((checkpoint, Some(batch))),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Completed);
+    assert_eq!(outcome.final_text, "resumed answer");
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].messages.iter().any(|message| matches!(
+        message,
+        Message::Tool { content, .. } if content == "durable tool result"
+    )));
+    assert!(!requests[0].messages.iter().any(|message| matches!(
+        message,
+        Message::Tool { content, .. } if content == "QUIET"
+    )));
+    assert!(journal.0.iter().any(|entry| matches!(
+        entry,
+        crate::ExecutionJournalEntry::Checkpoint { checkpoint }
+            if checkpoint.turn_id == turn_id && checkpoint.next_model_step == 2
+    )));
+}
+
+#[tokio::test]
 async fn recovers_after_partial_tool_batch_without_erasing_completed_action() {
     let model = ScriptedModel {
         responses: VecDeque::from([

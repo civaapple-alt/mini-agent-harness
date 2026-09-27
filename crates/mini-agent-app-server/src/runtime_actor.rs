@@ -1294,6 +1294,7 @@ fn schedule_goal_turn(
                 goal_id: goal.goal_id.clone(),
             },
             turn_source: None,
+            execution_resume: None,
             reply,
         })
         .is_err()

@@ -18,6 +18,16 @@ use mini_agent_protocol::ReasoningSelection;
 use mini_agent_protocol::ToolCall;
 use serde_json::Value;
 use serde_json::json;
+use std::time::{Duration, Instant};
+
+const MAX_TRANSIENT_ATTEMPTS: usize = 5;
+const MAX_RETRY_WINDOW: Duration = Duration::from_secs(120);
+const RETRY_DELAYS: [Duration; MAX_TRANSIENT_ATTEMPTS - 1] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+];
 
 pub async fn complete(
     model: &super::OpenAiModel,
@@ -32,7 +42,39 @@ pub async fn complete(
         model.max_output_tokens,
         &model.reasoning_parameter_map,
     );
-    let response = post_json(&model.client, &model.endpoint, &model.api_key, &body).await?;
+    let started_at = Instant::now();
+    for attempt in 1..=MAX_TRANSIENT_ATTEMPTS {
+        let mut buffered_events = BufferedModelEvents::default();
+        match complete_once(model, request, &body, &mut buffered_events).await {
+            Ok(response) => {
+                for event in buffered_events.0 {
+                    events.emit(event);
+                }
+                return Ok(response);
+            }
+            Err(error)
+                if attempt < MAX_TRANSIENT_ATTEMPTS
+                    && is_transient(&error)
+                    && started_at
+                        .elapsed()
+                        .saturating_add(RETRY_DELAYS[attempt - 1])
+                        <= MAX_RETRY_WINDOW =>
+            {
+                tokio::time::sleep(RETRY_DELAYS[attempt - 1]).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the bounded retry loop always returns")
+}
+
+async fn complete_once(
+    model: &super::OpenAiModel,
+    request: &ModelRequest<'_>,
+    body: &Value,
+    events: &mut (dyn ModelEventSink + Send),
+) -> Result<ModelResponse, OpenAiError> {
+    let response = post_json(&model.client, &model.endpoint, &model.api_key, body).await?;
     let mut state = Accumulator::new(request.max_response_bytes);
     drain_sse(
         response,
@@ -42,11 +84,26 @@ pub async fn complete(
     )
     .await?;
     if !state.completed {
-        return Err(OpenAiError::Protocol(
-            "stream ended before response.completed".to_string(),
-        ));
+        return Err(OpenAiError::IncompleteStream);
     }
     Ok(state.into_response())
+}
+
+#[derive(Default)]
+struct BufferedModelEvents(Vec<ModelEvent>);
+
+impl ModelEventSink for BufferedModelEvents {
+    fn emit(&mut self, event: ModelEvent) {
+        self.0.push(event);
+    }
+}
+
+fn is_transient(error: &OpenAiError) -> bool {
+    match error {
+        OpenAiError::Transport(_) | OpenAiError::IncompleteStream => true,
+        OpenAiError::Api { status, .. } => matches!(*status, 408 | 429 | 500..=599),
+        OpenAiError::IdleTimeout | OpenAiError::Stream(_) | OpenAiError::Protocol(_) => false,
+    }
 }
 
 #[cfg(test)]

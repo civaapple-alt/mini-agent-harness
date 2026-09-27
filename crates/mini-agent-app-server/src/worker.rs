@@ -10,19 +10,67 @@ use mini_agent_app_server_protocol::{
     ItemCompletedNotification, ItemSortDirection, ItemStartedNotification, RuntimePhase,
     ThreadItem, ThreadItemEntry, ThreadItemsListParams, ThreadItemsListResult, TurnReadResult,
 };
-use mini_agent_core::{SteeringMode, TurnResult};
+use mini_agent_core::{
+    ExecutionJournalEntry, ExecutionJournalSink, ExecutionPhase, SteeringMode, TurnResult,
+};
 use mini_agent_protocol::{Event, EventEnvelope, EventSink, ModelUsage, SkillLoadPhase};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU8;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
 
 const EVENT_REPLAY_BUFFER: usize = 512;
+
+#[derive(Clone)]
+struct ExecutionProgressMonitor {
+    phase: Arc<AtomicU8>,
+    last_progress_ms: Arc<AtomicU64>,
+}
+
+impl ExecutionProgressMonitor {
+    fn new() -> Self {
+        Self {
+            phase: Arc::new(AtomicU8::new(1)),
+            last_progress_ms: Arc::new(AtomicU64::new(timestamp_ms())),
+        }
+    }
+
+    fn observe(&self, event: &Event) {
+        let phase = match event {
+            Event::ToolStarted { .. } | Event::ToolFinished { .. } => Some(2),
+            Event::ModelStarted { .. }
+            | Event::AssistantReasoningDelta { .. }
+            | Event::AssistantTextDelta { .. }
+            | Event::ModelResponded { .. } => Some(1),
+            Event::ContextCompactionStarted { .. } | Event::ContextCompactionFinished { .. } => {
+                Some(3)
+            }
+            _ => None,
+        };
+        if let Some(phase) = phase {
+            self.phase.store(phase, Ordering::Release);
+            self.last_progress_ms
+                .store(timestamp_ms(), Ordering::Release);
+        }
+    }
+
+    fn phase(&self) -> ExecutionPhase {
+        match self.phase.load(Ordering::Acquire) {
+            2 => ExecutionPhase::ToolBatch,
+            _ => ExecutionPhase::ModelRequest,
+        }
+    }
+
+    fn last_progress_ms(&self) -> u64 {
+        self.last_progress_ms.load(Ordering::Acquire)
+    }
+}
 
 fn skill_display_name(skill: &mini_agent_protocol::SkillLoadRecord) -> String {
     skill
@@ -82,6 +130,7 @@ pub(super) enum Command {
         expected_turn_id: Option<TurnId>,
         origin: TurnOrigin,
         turn_source: Option<mini_agent_protocol::TurnSource>,
+        execution_resume: Option<mini_agent_app_server_protocol::TurnResumeParams>,
         reply: oneshot::Sender<ActionResult<TurnSubmission>>,
     },
     GoalVerificationCompleted {
@@ -98,7 +147,7 @@ pub(super) enum Command {
     },
     ReadThread {
         thread_id: ThreadId,
-        reply: oneshot::Sender<ActionResult<ThreadCheckpoint>>,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::ThreadReadResult>>,
     },
     UpdateThread {
         thread_id: ThreadId,
@@ -158,6 +207,7 @@ struct ThreadListener {
     turn_source: Option<mini_agent_protocol::TurnSource>,
     assistant_segments: u32,
     tokens_used: u64,
+    execution_progress: ExecutionProgressMonitor,
 }
 
 impl ThreadListener {
@@ -413,6 +463,7 @@ impl ThreadListener {
 
 impl EventSink for ThreadListener {
     fn emit(&mut self, event: EventEnvelope) {
+        self.execution_progress.observe(&event.event);
         self.update_status_for_event(&event);
         self.record_presentation_event(&event.event);
         if matches!(&event.event, Event::ToolStarted { .. }) {
@@ -694,10 +745,11 @@ pub(super) async fn worker_loop<M>(
             }
             Command::Start {
                 thread_id,
-                request,
+                mut request,
                 expected_turn_id,
                 origin,
                 turn_source,
+                execution_resume: resume_request,
                 reply,
             } => {
                 if let Some(state) = runtime.as_ref() {
@@ -742,7 +794,37 @@ pub(super) async fn worker_loop<M>(
                         }
                     }
                 }
-                if expected_turn_id.is_some() {
+                if resume_request.is_none()
+                    && let Some(execution) = runtime
+                        .as_ref()
+                        .and_then(|state| state.management.execution_state())
+                        .filter(|execution| {
+                            execution.status
+                                != mini_agent_capabilities::SessionExecutionStatus::Settled
+                        })
+                {
+                    let reason = match execution.status {
+                        mini_agent_capabilities::SessionExecutionStatus::WaitingForContinue => {
+                            "an execution checkpoint is waiting; continue that Turn before starting another"
+                        }
+                        mini_agent_capabilities::SessionExecutionStatus::NeedsReconciliation => {
+                            "an execution checkpoint needs reconciliation; verify the tool result before starting another Turn"
+                        }
+                        mini_agent_capabilities::SessionExecutionStatus::Running => {
+                            "an execution checkpoint belongs to an active Turn"
+                        }
+                        mini_agent_capabilities::SessionExecutionStatus::Settled => unreachable!(),
+                    };
+                    respond(
+                        reply,
+                        receipt,
+                        Ok(TurnSubmission::NotSubmitted {
+                            reason: reason.to_string(),
+                        }),
+                    );
+                    continue;
+                }
+                if expected_turn_id.is_some() && resume_request.is_none() {
                     respond(reply, receipt, Err(AppServerError::NoActiveTurn));
                     continue;
                 }
@@ -778,6 +860,84 @@ pub(super) async fn worker_loop<M>(
                     continue;
                 }
 
+                let mut execution_resume = None;
+                let mut turn_source = turn_source;
+                if let Some(resume_request) = resume_request {
+                    if resume_request.thread_id != thread_id {
+                        respond(
+                            reply,
+                            receipt,
+                            Err(AppServerError::ThreadNotFound(resume_request.thread_id)),
+                        );
+                        threads.insert(thread);
+                        continue;
+                    }
+                    let reservation = runtime
+                        .as_ref()
+                        .ok_or_else(|| {
+                            AppServerError::Checkpoint(
+                                "execution recovery requires a persisted Session".to_string(),
+                            )
+                        })
+                        .and_then(|state| {
+                            state.management.reserve_execution_resume(
+                                &resume_request.turn_id,
+                                resume_request.checkpoint_seq,
+                                &resume_request.request_id,
+                            )
+                        });
+                    match reservation {
+                        Ok(
+                            mini_agent_capabilities::ExecutionResumeReservation::AlreadyAccepted,
+                        ) => {
+                            respond(
+                                reply,
+                                receipt,
+                                Ok(TurnSubmission::Started {
+                                    turn_id: resume_request.turn_id,
+                                }),
+                            );
+                            threads.insert(thread);
+                            continue;
+                        }
+                        Ok(mini_agent_capabilities::ExecutionResumeReservation::Accepted(
+                            state,
+                        )) => {
+                            request.input = state.checkpoint.input.clone();
+                            if let Some(runtime) = runtime.as_ref() {
+                                turn_source = runtime
+                                    .management
+                                    .session_turn_source(state.checkpoint.turn_id.as_str());
+                                match runtime
+                                    .management
+                                    .session_operation_for_turn(state.checkpoint.turn_id.as_str())
+                                {
+                                    Ok(Some(operation)) => {
+                                        request.operation_id = Some(operation.operation_id);
+                                        request.operation_attempt = Some(operation.attempt);
+                                        request.operation_attempt_kind = operation.attempt_kind;
+                                        request.operation_group_id = operation.group_id;
+                                        request.execution_mode = operation.execution_mode;
+                                        request.group_sequence = operation.sequence;
+                                    }
+                                    Ok(None) => {}
+                                    Err(error) => {
+                                        respond(reply, receipt, Err(error));
+                                        threads.insert(thread);
+                                        continue;
+                                    }
+                                }
+                            }
+                            execution_resume = Some((state.checkpoint, state.pending_batch));
+                        }
+                        Err(error) => {
+                            respond(reply, receipt, Err(error));
+                            threads.insert(thread);
+                            continue;
+                        }
+                    }
+                }
+
                 let operation_attempt = request.operation_attempt.unwrap_or(1);
                 let operation_attempt_kind =
                     request
@@ -787,7 +947,9 @@ pub(super) async fn worker_loop<M>(
                         } else {
                             mini_agent_protocol::ChildTaskAttemptKind::Initial
                         }));
-                if let Some(operation_id) = request.operation_id.as_deref() {
+                if execution_resume.is_none()
+                    && let Some(operation_id) = request.operation_id.as_deref()
+                {
                     match runtime_actor::session_operation(&runtime, operation_id) {
                         Ok(Some(operation)) => {
                             let is_queued_attempt = operation.attempt == operation_attempt
@@ -859,14 +1021,16 @@ pub(super) async fn worker_loop<M>(
                 let group_sequence = request.group_sequence;
                 let mut initial_reply = Some(reply);
                 let mut origin = origin;
-                let mut turn_source = turn_source;
                 let goal_turn = matches!(&origin, TurnOrigin::Goal { .. });
                 loop {
                     let input = next_input
                         .take()
                         .expect("app-server turn input must exist before execution");
                     let current_turn_source = turn_source.take();
-                    let turn_id = thread.next_turn_id();
+                    let turn_id = execution_resume.as_ref().map_or_else(
+                        || thread.next_turn_id(),
+                        |(checkpoint, _)| checkpoint.turn_id.clone(),
+                    );
                     if let Some(state) = runtime.as_ref()
                         && state.goal_runtime_handle.plan_active()
                         && let Err(error) = state.goal_runtime_handle.set_plan_review_pending(false)
@@ -1124,14 +1288,43 @@ pub(super) async fn worker_loop<M>(
                             }),
                         );
                     }
-                    let mut input = TurnInput::new(TurnInputMode::Start, input.text);
-                    input.selected_skills = selected_skills;
-                    input.workflow = workflow;
+                    let mut input = if execution_resume.is_some() {
+                        input
+                    } else {
+                        let mut input = TurnInput::new(TurnInputMode::Start, input.text);
+                        input.selected_skills = selected_skills;
+                        input.workflow = workflow;
+                        input
+                    };
+                    input.mode = TurnInputMode::Start;
                     let skill_paths = runtime
                         .as_ref()
                         .and_then(|state| state.management.skill_discovery.as_ref())
                         .map(|discovery| discovery.skill_path_records())
                         .unwrap_or_default();
+                    let execution_progress = ExecutionProgressMonitor::new();
+                    let mut execution_journal = runtime.as_ref().and_then(|state| {
+                        state
+                            .management
+                            .execution_journal(thread.harness().messages())
+                    });
+                    let heartbeat_task = execution_journal.clone().map(|mut journal| {
+                        let turn_id = turn_id.clone();
+                        let progress = execution_progress.clone();
+                        tokio::spawn(async move {
+                            let mut heartbeat = tokio::time::interval(Duration::from_secs(10));
+                            heartbeat.tick().await;
+                            loop {
+                                heartbeat.tick().await;
+                                let _ = journal.append(ExecutionJournalEntry::Heartbeat {
+                                    turn_id: turn_id.clone(),
+                                    phase: progress.phase(),
+                                    at_ms: timestamp_ms(),
+                                    last_progress_ms: progress.last_progress_ms(),
+                                });
+                            }
+                        })
+                    });
                     let mut sink = ThreadListener {
                         events: events.clone(),
                         notifications: notifications.clone(),
@@ -1153,19 +1346,30 @@ pub(super) async fn worker_loop<M>(
                         turn_source: current_turn_source,
                         assistant_segments: 0,
                         tokens_used: 0,
+                        execution_progress,
                     };
-                    let mut turn = Box::pin(thread.run_turn_with_events_and_preflight(
-                        input,
-                        &mut sink,
-                        &control,
-                        if is_child_task {
-                            SteeringMode::ContinueSameTurn
-                        } else {
-                            SteeringMode::StopAtCheckpoint
-                        },
-                        &skill_prelude,
-                        skill_error.as_deref(),
-                    ));
+                    let journal = execution_journal
+                        .as_mut()
+                        .map(|journal| journal as &mut dyn ExecutionJournalSink);
+                    let is_execution_resume = execution_resume.is_some();
+                    let mut turn = Box::pin(
+                        thread.run_turn_with_events_and_preflight_and_journal_resume(
+                            input,
+                            &mut sink,
+                            &control,
+                            if is_child_task {
+                                SteeringMode::ContinueSameTurn
+                            } else {
+                                SteeringMode::StopAtCheckpoint
+                            },
+                            mini_agent_core::TurnExecutionOptions {
+                                prelude: &skill_prelude,
+                                preflight_error: skill_error.as_deref(),
+                                journal,
+                                resume: execution_resume.take(),
+                            },
+                        ),
+                    );
                     let timeout_deadline = goal_state
                         .as_ref()
                         .filter(|goal| goal.milestone_timeout_secs > 0)
@@ -1221,6 +1425,9 @@ pub(super) async fn worker_loop<M>(
                         }
                     };
                     drop(turn);
+                    if let Some(heartbeat_task) = heartbeat_task {
+                        heartbeat_task.abort();
+                    }
                     thread.harness_mut().replace_config(original_config);
                     let presentation = sink.take_presentation();
                     let mut goal_turn_completed = false;
@@ -1246,10 +1453,36 @@ pub(super) async fn worker_loop<M>(
                                     messages: turn_messages,
                                     tool_arguments: &tool_arguments,
                                     presentation: Some(&presentation),
+                                    execution_resume: is_execution_resume,
                                 },
                             )
                             .err()
                             .map(|error| error.to_string());
+                            settle_execution_checkpoint(
+                                &runtime,
+                                &mut execution_journal,
+                                &result.id,
+                                persistence_error.is_none()
+                                    && (result.status
+                                        == mini_agent_protocol::TurnStatus::Completed
+                                        || (result.status
+                                            == mini_agent_protocol::TurnStatus::Cancelled
+                                            && !cancelled_execution_requires_resume(
+                                                &runtime,
+                                                operation_id.as_deref(),
+                                                &result.id,
+                                            ))),
+                                if persistence_error.is_some() {
+                                    "session_persistence_failed"
+                                } else {
+                                    match result.status {
+                                        mini_agent_protocol::TurnStatus::Cancelled => "interrupted",
+                                        mini_agent_protocol::TurnStatus::Steered => "steered",
+                                        mini_agent_protocol::TurnStatus::StepLimit => "step_limit",
+                                        _ => "turn_incomplete",
+                                    }
+                                },
+                            );
                             if let Some(operation_id) = operation_id.as_deref() {
                                 let operation_status = if persistence_error.is_some() {
                                     "failed"
@@ -1348,6 +1581,10 @@ pub(super) async fn worker_loop<M>(
                                     status: result.status,
                                     outcome: Some(result.outcome),
                                     error: persistence_error,
+                                    recovery: runtime
+                                        .as_ref()
+                                        .and_then(|state| state.management.execution_state())
+                                        .map(execution_recovery_info),
                                 },
                             );
                         }
@@ -1362,6 +1599,10 @@ pub(super) async fn worker_loop<M>(
                                 messages: Vec::new(),
                                 items: Vec::new(),
                                 error: Some(error.clone()),
+                                recovery: runtime
+                                    .as_ref()
+                                    .and_then(|state| state.management.execution_state())
+                                    .map(execution_recovery_info),
                             };
                             let persistence_error = runtime_actor::persist_turn(
                                 &mut runtime,
@@ -1373,12 +1614,20 @@ pub(super) async fn worker_loop<M>(
                                     messages: &projected.messages,
                                     tool_arguments: &[],
                                     presentation: Some(&presentation),
+                                    execution_resume: is_execution_resume,
                                 },
                             )
                             .err()
                             .map(|persist_error| {
                                 format!("{error}; session persistence failed: {persist_error}")
                             });
+                            settle_execution_checkpoint(
+                                &runtime,
+                                &mut execution_journal,
+                                &turn_id,
+                                false,
+                                "turn_failed",
+                            );
                             let operation_error = persistence_error.as_deref().unwrap_or(&error);
                             if let Some(operation_id) = operation_id.as_deref()
                                 && let Err(persist_error) = runtime_actor::record_operation(
@@ -1428,6 +1677,10 @@ pub(super) async fn worker_loop<M>(
                                     status: mini_agent_protocol::TurnStatus::Failed,
                                     outcome: None,
                                     error: Some(operation_error.to_string()),
+                                    recovery: runtime
+                                        .as_ref()
+                                        .and_then(|state| state.management.execution_state())
+                                        .map(execution_recovery_info),
                                 },
                             );
                         }
@@ -1657,6 +1910,23 @@ pub(super) async fn worker_loop<M>(
                     .and_then(|thread| {
                         thread
                             .checkpoint()
+                            .map(|checkpoint| mini_agent_app_server_protocol::ThreadReadResult {
+                                thread_id: checkpoint.thread_id,
+                                status: checkpoint.status,
+                                messages: checkpoint.session.messages().to_vec(),
+                                context_revision: checkpoint.session.context_revision(),
+                                next_turn_number: checkpoint.next_turn_number,
+                                last_turn_id: checkpoint.last_turn_id,
+                                next_event_sequence: checkpoint.next_event_sequence,
+                                execution_recovery: runtime
+                                    .as_ref()
+                                    .and_then(|state| state.management.execution_state())
+                                    .filter(|state| {
+                                        state.status
+                                            != mini_agent_capabilities::SessionExecutionStatus::Settled
+                                    })
+                                    .map(execution_recovery_info),
+                            })
                             .map_err(|error| AppServerError::Checkpoint(error.to_string()))
                     });
                 respond(reply, receipt, result);
@@ -1718,11 +1988,27 @@ pub(super) async fn worker_loop<M>(
                 respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);
             }
             Command::ReadTurn { turn_id, reply } => {
-                respond(
-                    reply,
-                    receipt,
-                    Ok(settled_turns.get(turn_id.as_str()).cloned()),
-                );
+                let recovery = runtime
+                    .as_ref()
+                    .and_then(|state| state.management.execution_state())
+                    .filter(|state| state.checkpoint.turn_id == turn_id)
+                    .map(execution_recovery_info);
+                let mut result = settled_turns.get(turn_id.as_str()).cloned();
+                if let Some(result) = result.as_mut() {
+                    result.recovery = recovery;
+                } else if let Some(recovery) = recovery.filter(|recovery| {
+                    recovery.status
+                        != mini_agent_app_server_protocol::ExecutionRecoveryStatus::Settled
+                }) {
+                    result = Some(SettledTurn {
+                        id: turn_id.clone(),
+                        status: mini_agent_protocol::TurnStatus::InProgress,
+                        outcome: None,
+                        error: None,
+                        recovery: Some(recovery),
+                    });
+                }
+                respond(reply, receipt, Ok(result));
             }
             Command::ReadItems { params, reply } => {
                 let result = project_thread_items(&threads, runtime.as_ref(), &params);
@@ -1881,6 +2167,108 @@ fn timestamp_ms() -> u64 {
         .as_millis() as u64
 }
 
+fn settle_execution_checkpoint(
+    runtime: &Option<RuntimeActorState>,
+    journal: &mut Option<mini_agent_capabilities::SessionExecutionJournal>,
+    turn_id: &TurnId,
+    completed: bool,
+    reason: &str,
+) {
+    let Some(state) = runtime
+        .as_ref()
+        .and_then(|runtime| runtime.management.execution_state())
+        .filter(|state| state.checkpoint.turn_id == *turn_id)
+    else {
+        return;
+    };
+    if state.status == mini_agent_capabilities::SessionExecutionStatus::NeedsReconciliation {
+        return;
+    }
+    let Some(journal) = journal.as_mut() else {
+        return;
+    };
+    let entry = if completed {
+        ExecutionJournalEntry::Settled {
+            turn_id: turn_id.clone(),
+        }
+    } else {
+        ExecutionJournalEntry::WaitingForContinue {
+            turn_id: turn_id.clone(),
+            reason: reason.to_string(),
+        }
+    };
+    if let Err(error) = journal.append(entry) {
+        eprintln!("warning: failed to persist execution recovery state: {error}");
+    }
+}
+
+fn cancelled_execution_requires_resume(
+    runtime: &Option<RuntimeActorState>,
+    operation_id: Option<&str>,
+    turn_id: &TurnId,
+) -> bool {
+    let Some(management) = runtime.as_ref().map(|runtime| &runtime.management) else {
+        return false;
+    };
+    if management
+        .session_control_state_if_persisted()
+        .ok()
+        .flatten()
+        .is_some_and(|control| {
+            matches!(
+                control.status,
+                mini_agent_capabilities::SessionControlStatus::Freezing
+                    | mini_agent_capabilities::SessionControlStatus::Frozen
+                    | mini_agent_capabilities::SessionControlStatus::Resuming
+            )
+        })
+    {
+        return true;
+    }
+    operation_id
+        .and_then(|_| {
+            management
+                .session_operation_for_turn(turn_id.as_str())
+                .ok()
+                .flatten()
+        })
+        .is_some_and(|operation| operation.control_action.as_deref() == Some("pause"))
+}
+
+fn execution_recovery_info(
+    state: mini_agent_capabilities::SessionExecutionState,
+) -> mini_agent_app_server_protocol::ExecutionRecoveryInfo {
+    mini_agent_app_server_protocol::ExecutionRecoveryInfo {
+        turn_id: state.checkpoint.turn_id,
+        status: match state.status {
+            mini_agent_capabilities::SessionExecutionStatus::Running => {
+                mini_agent_app_server_protocol::ExecutionRecoveryStatus::Running
+            }
+            mini_agent_capabilities::SessionExecutionStatus::WaitingForContinue => {
+                mini_agent_app_server_protocol::ExecutionRecoveryStatus::WaitingForContinue
+            }
+            mini_agent_capabilities::SessionExecutionStatus::NeedsReconciliation => {
+                mini_agent_app_server_protocol::ExecutionRecoveryStatus::NeedsReconciliation
+            }
+            mini_agent_capabilities::SessionExecutionStatus::Settled => {
+                mini_agent_app_server_protocol::ExecutionRecoveryStatus::Settled
+            }
+        },
+        phase: match state.phase {
+            ExecutionPhase::ModelRequest => {
+                mini_agent_app_server_protocol::ExecutionRecoveryPhase::ModelRequest
+            }
+            ExecutionPhase::ToolBatch => {
+                mini_agent_app_server_protocol::ExecutionRecoveryPhase::ToolBatch
+            }
+        },
+        last_heartbeat_ms: state.last_heartbeat_ms,
+        last_progress_ms: state.last_progress_ms,
+        checkpoint_seq: state.checkpoint_seq,
+        reason: state.reason,
+    }
+}
+
 fn project_turn_result(result: &TurnResult) -> TurnReadResult {
     TurnReadResult {
         turn_id: result.id.clone(),
@@ -1891,6 +2279,7 @@ fn project_turn_result(result: &TurnResult) -> TurnReadResult {
         messages: result.outcome.messages.clone(),
         items: mini_agent_app_server_protocol::ThreadItem::from_messages(&result.outcome.messages),
         error: None,
+        recovery: None,
     }
 }
 
@@ -1913,6 +2302,7 @@ fn handle_running_command<M>(
             expected_turn_id,
             origin: _,
             turn_source: _,
+            execution_resume: _,
             reply,
         } => {
             if thread_id != *active_thread_id {

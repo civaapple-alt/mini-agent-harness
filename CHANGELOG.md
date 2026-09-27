@@ -5,6 +5,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+- Persist per-Session execution checkpoints and tool-batch outcomes for long
+  Turns. Expose explicit same-Turn resume, recover cleanly after process restart,
+  and require reconciliation when a tool side effect has no durable outcome.
 - Persist parent Session freeze/resume state in App Server and gate child
   dispatch, retries, and wake-up continuations until an explicit Continue.
   Parent freeze pauses active children while preserving queued operations;

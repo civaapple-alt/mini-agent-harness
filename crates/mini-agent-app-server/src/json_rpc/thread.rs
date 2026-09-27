@@ -321,20 +321,8 @@ where
         }
         match self.server.thread_read_action(params.thread_id).await {
             Ok(response) => {
-                let checkpoint = response.value.clone();
-                response_action_with(
-                    request.id,
-                    response,
-                    ThreadReadResult {
-                        thread_id: checkpoint.thread_id,
-                        status: checkpoint.status,
-                        messages: checkpoint.session.messages().to_vec(),
-                        context_revision: checkpoint.session.context_revision(),
-                        next_turn_number: checkpoint.next_turn_number,
-                        last_turn_id: checkpoint.last_turn_id,
-                        next_event_sequence: checkpoint.next_event_sequence,
-                    },
-                )
+                let result = response.value.clone();
+                response_action_with(request.id, response, result)
             }
             Err(error) => response_error(request.id, map_action_error(error)),
         }

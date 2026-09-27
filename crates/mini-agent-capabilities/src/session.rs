@@ -1,7 +1,14 @@
 use crate::skills::MAX_SELECTED_SKILLS;
+use mini_agent_core::ExecutionCheckpoint;
+use mini_agent_core::ExecutionJournalEntry;
+use mini_agent_core::ExecutionJournalSink;
+use mini_agent_core::ExecutionPhase;
+use mini_agent_core::ExecutionToolBatch;
+use mini_agent_core::ExecutionToolCall;
 use mini_agent_core::SessionState;
 use mini_agent_protocol::{
-    ChildTaskAttemptKind, Message, ModelSelection, ReasoningSelection, TurnSource, TurnWorkflow,
+    ChildTaskAttemptKind, Message, ModelSelection, ReasoningSelection, TurnId, TurnSource,
+    TurnWorkflow,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -26,7 +33,7 @@ pub use storage::{resolve_session_file, session_directory};
 
 const SCHEMA_VERSION: u64 = 1;
 const MAX_SESSION_BYTES: u64 = 32 * 1024 * 1024;
-pub(crate) const MAX_RECORD_BYTES: usize = 512 * 1024;
+pub(crate) const MAX_RECORD_BYTES: usize = 2 * 1024 * 1024;
 const MAX_WORKSPACE_KEY: usize = 240;
 const MAX_OPERATION_ID_BYTES: usize = 128;
 const MAX_OPERATION_KIND_BYTES: usize = 64;
@@ -175,7 +182,55 @@ pub struct SessionStore {
     model_selection: Option<ModelSelection>,
     reasoning_selection: Option<ReasoningSelection>,
     pub(crate) append_lock: Arc<Mutex<()>>,
+    execution_state: Arc<Mutex<Option<SessionExecutionState>>>,
     _lock: SessionLock,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionExecutionStatus {
+    Running,
+    WaitingForContinue,
+    NeedsReconciliation,
+    Settled,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExecutionResumeReservation {
+    Accepted(Box<SessionExecutionState>),
+    AlreadyAccepted,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionExecutionState {
+    pub checkpoint: ExecutionCheckpoint,
+    pub checkpoint_seq: u64,
+    pub status: SessionExecutionStatus,
+    pub phase: ExecutionPhase,
+    pub last_heartbeat_ms: Option<u64>,
+    pub last_progress_ms: Option<u64>,
+    pub reason: Option<String>,
+    pub pending_batch: Option<ExecutionToolBatch>,
+    #[serde(default)]
+    pub resume_requests: HashMap<String, u64>,
+}
+
+#[derive(Clone)]
+pub struct SessionExecutionJournal {
+    session_id: String,
+    thread_id: String,
+    path: PathBuf,
+    append_lock: Arc<Mutex<()>>,
+    execution_state: Arc<Mutex<Option<SessionExecutionState>>>,
+    writer_state: Arc<Mutex<ExecutionJournalWriterState>>,
+}
+
+#[derive(Default)]
+struct ExecutionJournalWriterState {
+    turn_id: Option<TurnId>,
+    messages: Vec<Message>,
+    checkpoint_seq: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -631,6 +686,85 @@ impl SessionStore {
         self.checkpoint_seq
     }
 
+    pub fn execution_state(&self) -> Option<SessionExecutionState> {
+        self.execution_state.lock().unwrap().clone()
+    }
+
+    /// Reserves one explicit recovery request before any execution is started.
+    pub fn reserve_execution_resume(
+        &self,
+        turn_id: &TurnId,
+        checkpoint_seq: u64,
+        request_id: &str,
+    ) -> Result<ExecutionResumeReservation, String> {
+        if request_id.trim().is_empty() || request_id.len() > 128 {
+            return Err("resume request id must be non-empty and at most 128 bytes".to_string());
+        }
+        let state = self
+            .execution_state()
+            .ok_or_else(|| "no execution checkpoint is available".to_string())?;
+        if state.checkpoint.turn_id != *turn_id {
+            return Err("resume request does not match the current execution Turn".to_string());
+        }
+        if state.checkpoint_seq != checkpoint_seq {
+            return Err(format!(
+                "execution checkpoint is stale: expected {}, current {}",
+                checkpoint_seq, state.checkpoint_seq
+            ));
+        }
+        if let Some(previous_seq) = state.resume_requests.get(request_id) {
+            if *previous_seq == checkpoint_seq {
+                if state.status != SessionExecutionStatus::WaitingForContinue {
+                    return Ok(ExecutionResumeReservation::AlreadyAccepted);
+                }
+                // The App Server may have crashed after durably admitting this
+                // request but before the worker began. Startup changes Running
+                // back to WaitingForContinue; the same id must then be able to
+                // start the original Turn exactly once again.
+                let mut journal = self.execution_journal(&state.checkpoint.messages);
+                journal.append(ExecutionJournalEntry::Resumed {
+                    turn_id: turn_id.clone(),
+                    request_id: request_id.to_string(),
+                    checkpoint_seq,
+                })?;
+                return Ok(ExecutionResumeReservation::Accepted(Box::new(state)));
+            }
+            return Err("resume request id was already used for another checkpoint".to_string());
+        }
+        if state.status != SessionExecutionStatus::WaitingForContinue {
+            return Err(format!(
+                "execution cannot resume while status is {:?}",
+                state.status
+            ));
+        }
+        let mut journal = self.execution_journal(&state.checkpoint.messages);
+        journal.append(ExecutionJournalEntry::Resumed {
+            turn_id: turn_id.clone(),
+            request_id: request_id.to_string(),
+            checkpoint_seq,
+        })?;
+        Ok(ExecutionResumeReservation::Accepted(Box::new(state)))
+    }
+
+    pub fn execution_journal(&self, base_messages: &[Message]) -> SessionExecutionJournal {
+        let state = self.execution_state();
+        SessionExecutionJournal {
+            session_id: self.session_id.clone(),
+            thread_id: self.thread_id.clone(),
+            path: self.path.clone(),
+            append_lock: Arc::clone(&self.append_lock),
+            execution_state: Arc::clone(&self.execution_state),
+            writer_state: Arc::new(Mutex::new(ExecutionJournalWriterState {
+                turn_id: state.as_ref().map(|state| state.checkpoint.turn_id.clone()),
+                messages: state
+                    .as_ref()
+                    .map(|state| state.checkpoint.messages.clone())
+                    .unwrap_or_else(|| base_messages.to_vec()),
+                checkpoint_seq: state.map_or(0, |state| state.checkpoint_seq),
+            })),
+        }
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -957,6 +1091,18 @@ impl SessionStore {
         latest_operation(&self.path, operation_id)
     }
 
+    pub fn operation_for_turn(&self, turn_id: &str) -> Result<Option<SessionOperation>, String> {
+        Ok(session_values(&self.path)?
+            .into_iter()
+            .rev()
+            .find_map(|record| {
+                (record.get("kind").and_then(Value::as_str) == Some("operation")
+                    && record.get("turn_id").and_then(Value::as_str) == Some(turn_id))
+                .then(|| serde_json::from_value(record).ok())
+                .flatten()
+            }))
+    }
+
     pub fn child_task_context(&self) -> Result<Option<ChildTaskContext>, String> {
         let records = session_values(&self.path)?;
         if !records.iter().any(|record| {
@@ -1230,6 +1376,58 @@ impl SessionStore {
         let mut operation = validate_child_operation(self, context, Some(&["paused"]))?;
         operation.status = "queued".to_string();
         operation.turn_id = None;
+        operation.control_request_id = Some(request_id.to_string());
+        operation.control_action = Some("resume".to_string());
+        operation.control_source = Some(source);
+        self.record_control_operation(operation, false, None)
+    }
+
+    /// Reattaches a child operation to its original Turn before resuming a
+    /// durable execution checkpoint. This is deliberately distinct from
+    /// resuming a paused operation into the ordinary child queue.
+    pub fn resume_child_execution_from(
+        &mut self,
+        context: &ChildTaskContext,
+        request_id: &str,
+        turn_id: &str,
+        source: ChildTaskControlSource,
+    ) -> Result<ChildTaskMutationResult, String> {
+        validate_operation_text(request_id, 192, "control request id")?;
+        validate_operation_text(turn_id, MAX_OPERATION_ID_BYTES, "turn id")?;
+        if let Some(existing) = self.child_control_replay(context, "resume", request_id)? {
+            return Ok(existing);
+        }
+        let execution = self
+            .execution_state()
+            .ok_or_else(|| "no execution checkpoint is available".to_string())?;
+        if execution.checkpoint.turn_id.as_str() != turn_id
+            || execution.status != SessionExecutionStatus::WaitingForContinue
+        {
+            return Err("execution checkpoint changed; refresh before continuing".to_string());
+        }
+        let mut operation = validate_child_operation(
+            self,
+            context,
+            Some(&[
+                "paused",
+                "queued",
+                "running",
+                "in_progress",
+                "awaiting_approval",
+                "failed",
+            ]),
+        )?;
+        if operation
+            .turn_id
+            .as_deref()
+            .is_some_and(|current| current != turn_id)
+        {
+            return Err("child task Turn identity mismatch".to_string());
+        }
+        operation.status = "running".to_string();
+        operation.turn_id = Some(turn_id.to_string());
+        operation.result = None;
+        operation.error = None;
         operation.control_request_id = Some(request_id.to_string());
         operation.control_action = Some("resume".to_string());
         operation.control_source = Some(source);
@@ -1725,12 +1923,30 @@ impl SessionStore {
         turn_id: &str,
         turn: TurnCommit<'_>,
     ) -> Result<(), String> {
+        self.record_turn_with_id_and_resume(turn_id, turn, false)
+    }
+
+    pub fn record_resumed_turn_with_id(
+        &mut self,
+        turn_id: &str,
+        turn: TurnCommit<'_>,
+    ) -> Result<(), String> {
+        self.record_turn_with_id_and_resume(turn_id, turn, true)
+    }
+
+    fn record_turn_with_id_and_resume(
+        &mut self,
+        turn_id: &str,
+        turn: TurnCommit<'_>,
+        execution_resume: bool,
+    ) -> Result<(), String> {
         let mut turn_started = json!({
             "kind": "turn_started",
             "thread_id": self.thread_id,
             "turn_id": turn_id,
             "timestamp_ms": turn.started_at_ms,
             "prompt": turn.prompt,
+            "execution_resume": execution_resume,
         });
         if let Some(presentation) = turn.presentation
             && let Some(record) = turn_started.as_object_mut()
@@ -1741,7 +1957,7 @@ impl SessionStore {
         let items = turn
             .messages
             .iter()
-            .map(|message| {
+            .filter_map(|message| {
                 let item_id = item_id_for_message(message);
                 let arguments = match message {
                     Message::Tool { call_id, .. } => turn
@@ -1751,18 +1967,26 @@ impl SessionStore {
                         .map(|(_, arguments)| arguments.clone()),
                     _ => None,
                 };
-                records.push(self.item_record_with_id(
-                    Some(turn_id),
-                    message,
-                    &item_id,
-                    arguments.as_ref(),
-                ));
-                SessionItem {
-                    item_id,
-                    thread_id: self.thread_id.clone(),
-                    turn_id: Some(turn_id.to_string()),
-                    message: message.clone(),
-                    arguments,
+                let already_persisted = execution_resume
+                    && self.items.iter().any(|item| {
+                        item.turn_id.as_deref() == Some(turn_id) && item.message == *message
+                    });
+                if !already_persisted {
+                    records.push(self.item_record_with_id(
+                        Some(turn_id),
+                        message,
+                        &item_id,
+                        arguments.as_ref(),
+                    ));
+                    Some(SessionItem {
+                        item_id,
+                        thread_id: self.thread_id.clone(),
+                        turn_id: Some(turn_id.to_string()),
+                        message: message.clone(),
+                        arguments,
+                    })
+                } else {
+                    None
                 }
             })
             .collect::<Vec<_>>();
@@ -1786,8 +2010,10 @@ impl SessionStore {
         }
         self.items.extend(items);
         self.checkpoint_seq = self.next_seq.saturating_sub(1);
-        self.turn_count = self.turn_count.saturating_add(1);
-        self.thread_turn_count = self.thread_turn_count.saturating_add(1);
+        if !execution_resume {
+            self.turn_count = self.turn_count.saturating_add(1);
+            self.thread_turn_count = self.thread_turn_count.saturating_add(1);
+        }
         self.update_summary_and_signals(turn.prompt, turn.steps, turn.status, turn.error);
         Ok(())
     }
@@ -1981,8 +2207,32 @@ impl SessionStore {
             model_selection,
             reasoning_selection,
             append_lock: Arc::new(Mutex::new(())),
+            execution_state: Arc::new(Mutex::new(loaded.execution_state)),
             _lock: lock,
         };
+        if let Some(state) = store.execution_state()
+            && state.status == SessionExecutionStatus::Running
+        {
+            let unresolved_started_call = state.pending_batch.as_ref().is_some_and(|batch| {
+                batch
+                    .calls
+                    .iter()
+                    .any(|call| call.started && call.outcome.is_none())
+            });
+            let mut journal = store.execution_journal(&loaded.messages);
+            let entry = if unresolved_started_call {
+                ExecutionJournalEntry::NeedsReconciliation {
+                    turn_id: state.checkpoint.turn_id,
+                    reason: "process_restart_during_tool_call".to_string(),
+                }
+            } else {
+                ExecutionJournalEntry::WaitingForContinue {
+                    turn_id: state.checkpoint.turn_id,
+                    reason: "process_restart".to_string(),
+                }
+            };
+            journal.append(entry)?;
+        }
         let _ = store.update_thread_index(None);
         Ok(OpenedSession {
             store,
@@ -2434,6 +2684,7 @@ impl SessionStore {
             model_selection: None,
             reasoning_selection: None,
             append_lock: Arc::new(Mutex::new(())),
+            execution_state: Arc::new(Mutex::new(None)),
             _lock: lock,
         };
         let mut header = json!({
@@ -3084,9 +3335,170 @@ pub(crate) fn timestamp_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+impl ExecutionJournalSink for SessionExecutionJournal {
+    fn append(&mut self, entry: ExecutionJournalEntry) -> Result<u64, String> {
+        let mut writer = self.writer_state.lock().unwrap();
+        let timestamp = match &entry {
+            ExecutionJournalEntry::Heartbeat { at_ms, .. } => *at_ms,
+            _ => timestamp_ms(),
+        };
+        let mut record = match &entry {
+            ExecutionJournalEntry::Checkpoint { checkpoint } => {
+                if checkpoint.turn_id.as_str().is_empty() {
+                    return Err("execution checkpoint turn id must not be empty".to_string());
+                }
+                let can_append = writer.messages.len() <= checkpoint.messages.len()
+                    && writer
+                        .messages
+                        .iter()
+                        .zip(&checkpoint.messages)
+                        .all(|(old, new)| old == new);
+                let (message_mode, messages) = if can_append {
+                    ("append", &checkpoint.messages[writer.messages.len()..])
+                } else {
+                    ("replace", checkpoint.messages.as_slice())
+                };
+                json!({
+                    "kind": "execution_checkpoint",
+                    "turn_id": checkpoint.turn_id.as_str(),
+                    "thread_id": self.thread_id,
+                    "timestamp_ms": timestamp,
+                    "input": checkpoint.input,
+                    "next_model_step": checkpoint.next_model_step,
+                    "final_text": checkpoint.final_text,
+                    "phase": checkpoint.phase,
+                    "message_mode": message_mode,
+                    "messages": messages,
+                })
+            }
+            _ => {
+                let mut value = serde_json::to_value(&entry)
+                    .map_err(|error| format!("cannot encode execution journal: {error}"))?;
+                let kind = value
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "execution journal record is missing kind".to_string())?;
+                value["kind"] = json!(format!("execution_{kind}"));
+                value["thread_id"] = json!(self.thread_id);
+                value["timestamp_ms"] = json!(timestamp);
+                value
+            }
+        };
+        let turn_id = execution_entry_turn_id(&entry);
+        if let Some(current_turn) = writer.turn_id.as_ref()
+            && current_turn != &turn_id
+            && !matches!(entry, ExecutionJournalEntry::Checkpoint { .. })
+        {
+            return Err("execution journal entry belongs to another Turn".to_string());
+        }
+        if turn_id.as_str().is_empty() {
+            return Err("execution journal turn id must not be empty".to_string());
+        }
+        record["session_id"] = json!(self.session_id);
+        let seq = append_execution_record(&self.path, &self.append_lock, &mut record)?;
+        if let ExecutionJournalEntry::Checkpoint { checkpoint } = &entry {
+            writer.turn_id = Some(checkpoint.turn_id.clone());
+            writer.messages.clone_from(&checkpoint.messages);
+            writer.checkpoint_seq = seq;
+        }
+        storage::apply_execution_journal_entry(
+            &mut self.execution_state.lock().unwrap(),
+            seq,
+            timestamp,
+            entry,
+        );
+        Ok(seq)
+    }
+}
+
+fn execution_entry_turn_id(entry: &ExecutionJournalEntry) -> TurnId {
+    match entry {
+        ExecutionJournalEntry::Checkpoint { checkpoint } => checkpoint.turn_id.clone(),
+        ExecutionJournalEntry::ToolBatchStarted { batch } => batch.turn_id.clone(),
+        ExecutionJournalEntry::ToolCallStarted { turn_id, .. }
+        | ExecutionJournalEntry::ToolCallFinished { turn_id, .. }
+        | ExecutionJournalEntry::ToolBatchSettled { turn_id, .. }
+        | ExecutionJournalEntry::WaitingForContinue { turn_id, .. }
+        | ExecutionJournalEntry::Resumed { turn_id, .. }
+        | ExecutionJournalEntry::Heartbeat { turn_id, .. }
+        | ExecutionJournalEntry::NeedsReconciliation { turn_id, .. }
+        | ExecutionJournalEntry::Settled { turn_id } => turn_id.clone(),
+    }
+}
+
+fn append_execution_record(
+    path: &Path,
+    append_lock: &Arc<Mutex<()>>,
+    record: &mut Value,
+) -> Result<u64, String> {
+    let _guard = append_lock.lock().unwrap();
+    let bytes = fs::read(path).map_err(|error| format!("cannot read Session journal: {error}"))?;
+    let valid_bytes = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index + 1);
+    let mut next_seq = 1u64;
+    for line in bytes[..valid_bytes]
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+    {
+        let existing: Value = serde_json::from_slice(line)
+            .map_err(|error| format!("invalid Session journal record: {error}"))?;
+        let seq = existing
+            .get("seq")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "Session journal record is missing seq".to_string())?;
+        next_seq = seq.saturating_add(1);
+    }
+    let seq = next_seq;
+    record["seq"] = json!(seq);
+    let encoded = serde_json::to_vec(record)
+        .map_err(|error| format!("cannot encode execution journal: {error}"))?;
+    if encoded.len() > MAX_RECORD_BYTES {
+        return Err(format!(
+            "execution checkpoint exceeds {MAX_RECORD_BYTES} byte limit"
+        ));
+    }
+    let total_bytes = (valid_bytes as u64)
+        .saturating_add(encoded.len() as u64)
+        .saturating_add(1);
+    if total_bytes > MAX_SESSION_BYTES {
+        return Err(format!("Session exceeds {MAX_SESSION_BYTES} byte limit"));
+    }
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|error| format!("cannot open Session journal: {error}"))?;
+    if valid_bytes < bytes.len() {
+        file.set_len(valid_bytes as u64)
+            .map_err(|error| format!("cannot discard incomplete Session tail: {error}"))?;
+    }
+    file.seek(SeekFrom::End(0))
+        .map_err(|error| format!("cannot seek Session journal: {error}"))?;
+    if let Err(error) = file
+        .write_all(&encoded)
+        .and_then(|()| file.write_all(b"\n"))
+        .and_then(|()| file.flush())
+        .and_then(|()| file.sync_data())
+    {
+        let rollback = file
+            .set_len(valid_bytes as u64)
+            .and_then(|()| file.sync_data());
+        return match rollback {
+            Ok(()) => Err(format!("cannot persist execution journal: {error}")),
+            Err(rollback) => Err(format!(
+                "cannot persist execution journal: {error}; rollback failed: {rollback}"
+            )),
+        };
+    }
+    Ok(seq)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mini_agent_protocol::{TurnInput, TurnInputMode};
 
     fn exact_fork_metadata() -> SessionForkMetadata {
         SessionForkMetadata {
@@ -3466,6 +3878,91 @@ mod tests {
             Some("apply the remaining review feedback")
         );
         assert_eq!(child.store.session_id(), child_session_id);
+        drop(child);
+        drop(parent);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn checkpoint_resume_keeps_child_operation_attached_to_original_turn() {
+        let root = crate::test_support::test_root();
+        let parent = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let mut queued = SessionOperation::new("child:one", "child_task", "queued");
+        queued.parent_thread_id = Some(parent.store.thread_id().to_string());
+        queued.prompt = Some("original task".to_string());
+        let mut child = fork_child(&root, &parent, "child-thread", queued);
+        let mut failed = SessionOperation::new("child:one", "child_task", "failed");
+        failed.turn_id = Some("turn-resume".to_string());
+        failed.error = Some("temporary model outage".to_string());
+        child.store.record_operation(failed).unwrap();
+
+        let turn_id = TurnId("turn-resume".to_string());
+        let messages = vec![Message::User {
+            text: "original task".to_string(),
+        }];
+        let mut journal = child.store.execution_journal(&messages);
+        journal
+            .append(ExecutionJournalEntry::Checkpoint {
+                checkpoint: ExecutionCheckpoint {
+                    turn_id: turn_id.clone(),
+                    input: TurnInput {
+                        mode: TurnInputMode::Start,
+                        text: "original task".to_string(),
+                        selected_skills: Vec::new(),
+                        workflow: None,
+                        model_selection: None,
+                        reasoning_selection: None,
+                        reasoning_effort: None,
+                    },
+                    messages: messages.clone(),
+                    next_model_step: 1,
+                    final_text: String::new(),
+                    phase: ExecutionPhase::ModelRequest,
+                },
+            })
+            .unwrap();
+        journal
+            .append(ExecutionJournalEntry::WaitingForContinue {
+                turn_id: turn_id.clone(),
+                reason: "temporary_model_error".to_string(),
+            })
+            .unwrap();
+
+        let context = child.store.child_task_context().unwrap().unwrap();
+        let resumed = child
+            .store
+            .resume_child_execution_from(
+                &context,
+                "resume-checkpoint-1",
+                turn_id.as_str(),
+                ChildTaskControlSource::UserPanel,
+            )
+            .unwrap();
+        assert_eq!(resumed.status, "running");
+        assert_eq!(resumed.attempt, 1);
+        assert_eq!(resumed.turn_id.as_deref(), Some(turn_id.as_str()));
+
+        let attached_operation = child
+            .store
+            .operation_for_turn(turn_id.as_str())
+            .unwrap()
+            .unwrap();
+        assert_eq!(attached_operation.operation_id, "child:one");
+        assert_eq!(attached_operation.status, "running");
+        assert_eq!(attached_operation.attempt, 1);
+
+        let duplicate = child
+            .store
+            .resume_child_execution_from(
+                &context,
+                "resume-checkpoint-1",
+                turn_id.as_str(),
+                ChildTaskControlSource::UserPanel,
+            )
+            .unwrap();
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.turn_id.as_deref(), Some(turn_id.as_str()));
+
         drop(child);
         drop(parent);
         crate::test_support::remove_test_root(&root);

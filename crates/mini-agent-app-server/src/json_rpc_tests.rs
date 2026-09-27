@@ -11,7 +11,7 @@ use mini_agent_capabilities::{
     workspace_tools_with_read_roots_and_results,
     workspace_tools_with_read_roots_results_and_background_shells,
 };
-use mini_agent_core::{Harness, HarnessConfig, Thread, ToolRouter};
+use mini_agent_core::{ExecutionJournalSink, Harness, HarnessConfig, Thread, ToolRouter};
 use mini_agent_protocol::{
     Message, Model, ModelEventSink, ModelRequest, ModelResponse, ModelUsage, ThreadId, ThreadStart,
     ToolApprovalRequest, ToolCall, ToolExecutionStatus, TurnInput,
@@ -1799,6 +1799,92 @@ async fn frozen_session_rejects_turns_until_explicit_resume_turn() {
     wait_for_turn_finished(&mut connection).await;
     let running = rpc_result(&mut connection, control(8, "read", None)).await;
     assert_eq!(running["value"]["status"], "running");
+
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn turn_resume_continues_the_same_turn_from_a_persisted_execution_checkpoint() {
+    let root = rpc_root("execution-checkpoint-resume");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let session_id = opened.store.session_id().to_string();
+    let thread_id = opened.store.thread_id().to_string();
+    let input = TurnInput::new(TurnInputMode::Start, "continue persisted work");
+    let turn_id = mini_agent_protocol::TurnId::new("turn-resume-checkpoint");
+    let messages = vec![Message::User {
+        text: input.text.clone(),
+    }];
+    let mut journal = opened.store.execution_journal(&messages);
+    let checkpoint_seq = journal
+        .append(mini_agent_core::ExecutionJournalEntry::Checkpoint {
+            checkpoint: mini_agent_core::ExecutionCheckpoint {
+                turn_id: turn_id.clone(),
+                input,
+                messages,
+                next_model_step: 1,
+                final_text: String::new(),
+                phase: mini_agent_core::ExecutionPhase::ModelRequest,
+            },
+        })
+        .unwrap();
+    journal
+        .append(mini_agent_core::ExecutionJournalEntry::WaitingForContinue {
+            turn_id: turn_id.clone(),
+            reason: "provider_temporarily_unavailable".to_string(),
+        })
+        .unwrap();
+    drop(journal);
+    drop(opened);
+
+    let resumed = SessionStore::open(&root, SessionStoreRequest::Resume(session_id)).unwrap();
+    let mut connection = managed_connection_with_session(DoneModel, root.clone(), resumed);
+    initialize_connection(&mut connection, "execution-checkpoint-resume-test").await;
+
+    let blocked_start = rpc_call(
+        &mut connection,
+        2,
+        METHOD_TURN_START,
+        serde_json::json!({
+            "threadId": thread_id,
+            "input": {"mode": "start", "text": "do not replace the saved Turn"}
+        }),
+    )
+    .await;
+    assert_eq!(blocked_start["value"]["status"], "not_submitted");
+    assert!(
+        blocked_start["value"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("execution checkpoint")
+    );
+
+    let submission = rpc_call(
+        &mut connection,
+        3,
+        METHOD_TURN_RESUME,
+        serde_json::json!({
+            "threadId": thread_id,
+            "turnId": turn_id,
+            "checkpointSeq": checkpoint_seq,
+            "requestId": "resume-checkpoint-1"
+        }),
+    )
+    .await;
+    assert_eq!(submission["value"]["status"], "started");
+    assert_eq!(submission["value"]["turn_id"], turn_id.as_str());
+
+    wait_for_turn_finished(&mut connection).await;
+    let result = rpc_call(
+        &mut connection,
+        4,
+        METHOD_TURN_READ,
+        serde_json::json!({"turnId": turn_id}),
+    )
+    .await;
+    assert_eq!(result["value"]["status"], "completed");
+    assert_eq!(result["value"]["finalText"], "done");
+    assert_eq!(result["value"]["recovery"]["status"], "settled");
 
     connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();

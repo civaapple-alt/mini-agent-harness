@@ -19,7 +19,7 @@ use std::fmt;
 use std::future::Future;
 use std::time::Duration;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+pub(super) const PROVIDER_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
 const CONNECT_RETRY_DELAYS: [Duration; 2] =
@@ -53,7 +53,6 @@ impl OpenAiModel {
         }
         let client = Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|error| OpenAiError::Transport(transport_error_message(&error)))?;
         Ok(Self {
@@ -132,16 +131,19 @@ async fn post_json(
     api_key: &str,
     body: &Value,
 ) -> Result<reqwest::Response, OpenAiError> {
-    let response =
-        send_with_connect_retries(|| client.post(url).bearer_auth(api_key).json(body).send())
-            .await
-            .map_err(|(error, attempts)| {
-                let mut message = transport_error_message(&error);
-                if attempts > 1 {
-                    message.push_str(&format!(" (after {attempts} connection attempts)"));
-                }
-                OpenAiError::Transport(message)
-            })?;
+    let response = tokio::time::timeout(
+        PROVIDER_IDLE_TIMEOUT,
+        send_with_connect_retries(|| client.post(url).bearer_auth(api_key).json(body).send()),
+    )
+    .await
+    .map_err(|_| OpenAiError::IdleTimeout)?
+    .map_err(|(error, attempts)| {
+        let mut message = transport_error_message(&error);
+        if attempts > 1 {
+            message.push_str(&format!(" (after {attempts} connection attempts)"));
+        }
+        OpenAiError::Transport(message)
+    })?;
     if !response.status().is_success() {
         let status = response.status();
         let body = bounded_error_body(response).await;
@@ -208,7 +210,13 @@ async fn drain_sse(
 ) -> Result<bool, OpenAiError> {
     let mut stream = response.bytes_stream().eventsource();
     let mut completed_on_done = false;
-    while let Some(event) = stream.next().await {
+    loop {
+        let next = tokio::time::timeout(PROVIDER_IDLE_TIMEOUT, stream.next())
+            .await
+            .map_err(|_| OpenAiError::IdleTimeout)?;
+        let Some(event) = next else {
+            break;
+        };
         let event =
             event.map_err(|error| OpenAiError::Transport(transport_error_message(&error)))?;
         if event.data == "[DONE]" {
@@ -238,7 +246,11 @@ fn max_event_bytes(max_response_bytes: usize) -> usize {
 async fn bounded_error_body(response: reqwest::Response) -> String {
     let mut stream = response.bytes_stream();
     let mut bytes = Vec::new();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let next = tokio::time::timeout(PROVIDER_IDLE_TIMEOUT, stream.next()).await;
+        let Ok(Some(chunk)) = next else {
+            break;
+        };
         let Ok(chunk) = chunk else {
             break;
         };
@@ -305,6 +317,8 @@ pub enum OpenAiError {
     Transport(String),
     Api { status: u16, message: String },
     Stream(String),
+    IdleTimeout,
+    IncompleteStream,
     Protocol(String),
 }
 
@@ -314,6 +328,8 @@ impl fmt::Display for OpenAiError {
             Self::Transport(message) => write!(formatter, "transport error: {message}"),
             Self::Api { status, message } => write!(formatter, "API error ({status}): {message}"),
             Self::Stream(message) => write!(formatter, "stream error: {message}"),
+            Self::IdleTimeout => write!(formatter, "provider produced no data for 120 seconds"),
+            Self::IncompleteStream => write!(formatter, "provider stream ended before completion"),
             Self::Protocol(message) => write!(formatter, "protocol error: {message}"),
         }
     }
