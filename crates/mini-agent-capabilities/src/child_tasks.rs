@@ -28,7 +28,7 @@ impl ToolHandler for DelegateTaskTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "delegate_task".to_string(),
-            description: "Queue one bounded task for an independent child Session. child_key is a short key unique only within this parent Session; the runtime returns the canonical child_thread_id for task_read and task_control. Titles are display labels and may repeat. Choose parallel for independent work or sequential with a group_id and zero-based sequence for dependent work.".to_string(),
+            description: "Queue one bounded task for an independent child Session. Write the prompt in natural language with the goal, expected deliverable, and relevant constraints; no fixed template is required. child_key is a short key unique only within this parent Session; the runtime returns the canonical child_thread_id for task_read and task_control. Titles are display labels and may repeat. Choose parallel for independent work or sequential with a group_id and zero-based sequence for dependent work.".to_string(),
             parameters: json!({
                 "type": "object",
                 "required": ["child_key", "prompt", "execution_mode"],
@@ -291,7 +291,7 @@ impl ToolHandler for TaskReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task_read".to_string(),
-            description: "Read bounded operation status, the matching Turn outcome, the latest Session Turn, and reports for a child Session. Use operation.status to decide whether that task attempt succeeded; operation.turn_outcome describes its exact Turn, while operation.latest_session_turn may belong to a later Turn. Use the child_thread_id returned by delegate_task and read each task once after dispatch to distinguish running from queued. Poll running children for progress; queued tasks start automatically when a slot frees, so do not repeatedly read them. Reports contain only explicit task_report progress updates, not the child's final answer; an empty reports list does not mean a completed result is missing. Reading a report marks it as received by the parent. If a child Session is not materialized yet, skip it and report the missing child ID instead of retrying in a loop.".to_string(),
+            description: "Read bounded operation status, the matching Turn outcome, the latest Session Turn, and reports for a child Session. Use operation.status to determine execution outcome, not whether the answer meets the request. While an attempt is active, use its latest report and do not treat the missing final answer as a gap. Once settled, compare the current attempt's final answer with the delegated goal and follow up only for a concrete gap. operation.turn_outcome describes its exact Turn, while operation.latest_session_turn may belong to a later Turn. Use the child_thread_id returned by delegate_task and read each task once after dispatch to distinguish running from queued. Prefer reports and wake-ups over repeated polling; queued tasks start automatically when a slot frees. Reports contain only explicit task_report progress updates, not the child's final answer; an empty reports list does not mean a completed result is missing. Reading a report marks it as received by the parent. If a child Session is not materialized yet, skip it and report the missing child ID instead of retrying in a loop.".to_string(),
             parameters: json!({
                 "type": "object",
                 "required": ["child_thread_id"],
@@ -435,7 +435,7 @@ impl ToolHandler for TaskReportTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task_report".to_string(),
-            description: "Send a bounded progress update to the parent agent. Reports are persisted with the child task and can be read by the parent.".to_string(),
+            description: "Send a brief, bounded progress update to the parent when you reach a meaningful milestone or hit a blocker; skip routine chatter. Reports are persisted with the child task and can be read by the parent. Put the final deliverable in your normal final answer, including its basis and any unfinished or uncertain parts; no fixed format is required.".to_string(),
             parameters: json!({"type":"object","required":["report"],"properties":{"report":{"type":"string","maxLength":4096}},"additionalProperties":false}),
         }
     }
@@ -473,7 +473,7 @@ impl ToolHandler for TaskControlTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "task_control".to_string(),
-            description: "Request Gateway-mediated control of a delegated child task. For every per-child action, use the current child_thread_id, operation_id, and positive attempt from task_list or task_read. This tool returns an intent, not completion; the Gateway performs it and sends a bounded outcome to the parent at a safe Turn boundary or idle continuation. Re-read task state before deciding what to do next.".to_string(),
+            description: "Request Gateway-mediated control of a delegated child task. Use assign with one specific correction for a running or completed child when a concrete gap remains; Gateway routes it to the active Turn or a follow-up Turn in the same child Session. For every per-child action, use the current child_thread_id, operation_id, and positive attempt from task_list or task_read. This tool returns an intent, not completion; the Gateway performs it and sends a bounded outcome to the parent at a safe Turn boundary or idle continuation. Re-read task state before deciding what to do next.".to_string(),
             parameters: json!({
                 "type":"object", "required":["action"],
                 "properties":{
@@ -934,6 +934,40 @@ fn reconcile_with_settled_turn(operation: &mut Value, turn: &SettledTurn) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn child_task_tool_descriptions_define_the_handoff_loop() {
+        let parent_tools = child_task_tools(PathBuf::from("parent-session"), None);
+        let parent_specs = parent_tools
+            .iter()
+            .map(|tool| tool.spec())
+            .map(|spec| (spec.name.clone(), spec))
+            .collect::<BTreeMap<_, _>>();
+        let delegate = &parent_specs["delegate_task"].description;
+        let read = &parent_specs["task_read"].description;
+        let control = &parent_specs["task_control"].description;
+
+        assert!(delegate.contains("natural language"));
+        assert!(delegate.contains("expected deliverable"));
+        assert!(read.contains("not whether the answer meets the request"));
+        assert!(read.contains("do not treat the missing final answer as a gap"));
+        assert!(read.contains("concrete gap"));
+        assert!(read.contains("Prefer reports and wake-ups"));
+        assert!(control.contains("same child Session"));
+
+        let report = TaskReportTool {
+            session_dir: PathBuf::from("child-session"),
+            context: crate::ChildTaskContext {
+                parent_thread_id: "parent".to_string(),
+                operation_id: "child:one".to_string(),
+                attempt: 1,
+            },
+        }
+        .spec()
+        .description;
+        assert!(report.contains("meaningful milestone or hit a blocker"));
+        assert!(report.contains("normal final answer"));
+    }
 
     #[test]
     fn delegate_task_returns_a_bounded_queue_request() {
