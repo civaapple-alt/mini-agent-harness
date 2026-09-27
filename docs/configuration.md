@@ -45,9 +45,13 @@ providers. Each provider stores a name, an enabled flag, a Responses API Base
 URL, an optional provider-side search choice, and its model list. Web Studio
 offers offline Base URL suggestions for built-in providers; custom providers
 are entered manually. The Host appends `/responses` to the configured URL root.
-Provider search can follow endpoint detection or be explicitly enabled or
-disabled. The provider and model must also advertise `web_search`, and CLI
-`--no-web-search` can temporarily disable it.
+Host identifies search support by the exact API hostname. The official OpenAI
+Responses endpoint defaults to enabled; the official DeepSeek Responses
+endpoint is unsupported and cannot be enabled. Other endpoints default to off
+with unknown support; users may explicitly enable a compatible custom endpoint.
+Web Studio only lets users edit a model's `web_search` capability while provider
+search is effective. The provider and model must both allow `web_search`, and
+CLI `--no-web-search` can temporarily disable it.
 
 Each model stores its provider model ID, display name, enabled state, context
 window, output limit, input modalities, capabilities, its supported reasoning

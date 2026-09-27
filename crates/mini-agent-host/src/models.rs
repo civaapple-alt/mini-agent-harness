@@ -67,11 +67,21 @@ pub struct ProviderProfile {
     pub base_url: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// `None` preserves endpoint-based behavior; `Some` is an explicit user setting.
+    /// `None` follows Host endpoint detection. Explicit enablement is ignored
+    /// for endpoints the Host knows do not support search.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_search: Option<bool>,
     #[serde(default)]
     pub models: Vec<ModelProfile>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWebSearchSupport {
+    Supported,
+    Unsupported,
+    #[default]
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -108,6 +118,10 @@ pub struct ProviderView {
     #[serde(flatten)]
     pub profile: ProviderProfile,
     pub api_key_configured: bool,
+    #[serde(default)]
+    pub web_search_support: ProviderWebSearchSupport,
+    #[serde(default)]
+    pub web_search_enabled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -243,8 +257,13 @@ impl ModelCatalogStore {
             .providers
             .into_iter()
             .map(|profile| {
+                let web_search_support = provider_web_search_support(&profile.base_url);
+                let web_search_enabled =
+                    provider_web_search_enabled(&profile.base_url, profile.web_search);
                 Ok(ProviderView {
                     api_key_configured: self.credentials.configured(&profile.id)?,
+                    web_search_support,
+                    web_search_enabled,
                     profile,
                 })
             })
@@ -477,9 +496,8 @@ impl ModelCatalogStore {
             .credentials
             .get(&provider.id)?
             .ok_or_else(|| format!("API Key is not configured for provider {}", provider.name))?;
-        let provider_web_search = provider
-            .web_search
-            .unwrap_or_else(|| is_official_search_endpoint(&provider.base_url));
+        let provider_web_search =
+            provider_web_search_enabled(&provider.base_url, provider.web_search);
         let model_web_search = web_search
             && provider_web_search
             && model.capabilities.iter().any(|value| value == "web_search");
@@ -527,17 +545,15 @@ impl ModelCatalogStore {
                 format!("API Key is not configured for provider {}", provider.name)
             })?,
         };
+        let base_url = base_url_override
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(&provider.base_url);
         Ok(ModelProviderSettings {
             api_key,
             model: model.id.clone(),
-            base_url: base_url_override
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or(&provider.base_url)
-                .to_string(),
+            base_url: base_url.to_string(),
             web_search: web_search
-                && provider
-                    .web_search
-                    .unwrap_or_else(|| is_official_search_endpoint(&provider.base_url))
+                && provider_web_search_enabled(base_url, provider.web_search)
                 && model.capabilities.iter().any(|value| value == "web_search"),
         })
     }
@@ -791,9 +807,27 @@ impl ModelEventSink for DiscardModelEvents {
     fn emit(&mut self, _event: ModelEvent) {}
 }
 
-fn is_official_search_endpoint(base_url: &str) -> bool {
-    let val = base_url.to_ascii_lowercase();
-    val.contains("api.openai.com") || val.contains("api.deepseek.com")
+fn provider_web_search_support(base_url: &str) -> ProviderWebSearchSupport {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return ProviderWebSearchSupport::Unknown;
+    };
+    match url.host_str() {
+        Some(host) if host.eq_ignore_ascii_case("api.openai.com") => {
+            ProviderWebSearchSupport::Supported
+        }
+        Some(host) if host.eq_ignore_ascii_case("api.deepseek.com") => {
+            ProviderWebSearchSupport::Unsupported
+        }
+        _ => ProviderWebSearchSupport::Unknown,
+    }
+}
+
+fn provider_web_search_enabled(base_url: &str, configured: Option<bool>) -> bool {
+    match provider_web_search_support(base_url) {
+        ProviderWebSearchSupport::Supported => configured.unwrap_or(true),
+        ProviderWebSearchSupport::Unsupported => false,
+        ProviderWebSearchSupport::Unknown => configured.unwrap_or(false),
+    }
 }
 
 fn classify_connection_error(error: OpenAiError) -> ModelConnectionTestStatus {

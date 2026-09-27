@@ -45,6 +45,7 @@ pub use harness_builder::prepare_harness_with_model_factory;
 pub use models::{
     HostResponsesModel, ModelCatalog, ModelCatalogStore, ModelCatalogView,
     ModelConnectionTestStatus, ModelProfile, ProviderKind, ProviderProfile, ProviderView,
+    ProviderWebSearchSupport,
 };
 pub use runtime_composition::AgentKind;
 pub use runtime_composition::BuiltinSkillGroup;

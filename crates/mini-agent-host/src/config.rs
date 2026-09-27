@@ -329,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_search_defaults_to_endpoint_detection_and_can_be_disabled() {
+    fn official_deepseek_endpoint_does_not_enable_builtin_search() {
         let workspace = unique_dir("search-setting");
         let store = ModelCatalogStore::at(workspace.join(".mini-agent/model_catalog.json"));
         let provider = ProviderProfile {
@@ -365,7 +365,7 @@ mod tests {
         let selection = ModelSelection::new("deepseek", "search-model");
         let config = RuntimeConfig::load_from(workspace, None).unwrap();
         assert!(
-            store
+            !store
                 .provider_settings(&selection, config.web_search())
                 .unwrap()
                 .web_search

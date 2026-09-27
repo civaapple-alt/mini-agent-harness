@@ -131,11 +131,14 @@ writing. The removed `write_file` and `edit_file` names are not accepted.
 
 ## Real-time web search and network data
 
-Provider-side Responses API `web_search` defaults to endpoint detection and can
-be enabled, disabled, or left on auto in that provider's Model settings. The
-selected model must advertise the capability. The CLI `--no-web-search` (or
-`--no-search`) option can temporarily disable it. Use host `web_fetch` for a
-known URL when the provider does not expose built-in search.
+Provider-side Responses API `web_search` is enabled by default only for the
+official OpenAI endpoint. The official DeepSeek Responses endpoint ignores
+built-in `web_search`, so Host reports it as unsupported and will not send the
+tool even if an older catalog enabled it. Other endpoints are off by default
+until explicitly enabled. Web Studio locks the model capability while provider
+search is unavailable. The CLI `--no-web-search` (or `--no-search`) option can
+temporarily disable it. Use host `web_fetch` for a known URL when the provider
+does not expose built-in search.
 
 `web_search` is for discovery. To read a known public URL, or a local Vite/Next/Vue/React
 dev server, use `web_fetch` instead of `curl` or PowerShell download cmdlets. `web_fetch` admits
