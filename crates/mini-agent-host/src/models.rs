@@ -737,12 +737,13 @@ impl Model for HostResponsesModel {
         events: &'a mut (dyn ModelEventSink + Send),
     ) -> Result<ModelResponse, Self::Error> {
         let thread_reasoning = request.reasoning_selection.cloned();
+        let legacy_reasoning = request.reasoning_effort.map(ReasoningSelection::level);
         let (selection, reasoning_selection) = match request.model_selection {
             Some(selection) => (
                 Some(selection.clone()),
                 Some(
                     thread_reasoning
-                        .or_else(|| request.reasoning_effort.map(ReasoningSelection::level))
+                        .or(legacy_reasoning)
                         .unwrap_or(ReasoningSelection::ApiDefault),
                 ),
             ),
@@ -753,14 +754,18 @@ impl Model for HostResponsesModel {
             {
                 Some(selection) => (
                     Some(selection),
-                    Some(thread_reasoning.unwrap_or(ReasoningSelection::ApiDefault)),
+                    Some(
+                        thread_reasoning
+                            .or(legacy_reasoning)
+                            .unwrap_or(ReasoningSelection::ApiDefault),
+                    ),
                 ),
                 None => (
                     self.catalog
                         .global_default()
                         .map_err(OpenAiError::Protocol)?,
                     Some(
-                        thread_reasoning.unwrap_or(
+                        thread_reasoning.or(legacy_reasoning).unwrap_or(
                             self.catalog
                                 .global_default_reasoning_selection()
                                 .map_err(OpenAiError::Protocol)?,
@@ -1514,5 +1519,57 @@ mod tests {
             events.0,
             vec![ModelEvent::TextDelta("mock answer".to_string())]
         );
+    }
+
+    #[tokio::test]
+    async fn host_model_uses_legacy_reasoning_effort_with_default_model() {
+        let (base_url, server) = start_test_provider(
+            200,
+            concat!(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+            ),
+            Duration::ZERO,
+        );
+        let store = test_store(base_url);
+        let selection = ModelSelection {
+            provider_id: "deepseek".to_string(),
+            model_id: "deepseek-test".to_string(),
+        };
+        store
+            .set_defaults_with_reasoning(Some(selection), ReasoningSelection::ApiDefault, None)
+            .unwrap();
+        let mut model = HostResponsesModel::new(
+            store,
+            "project-a".to_string(),
+            ImageStore::memory_only(),
+            false,
+        );
+        let messages = [Message::User {
+            text: "inspect".to_string(),
+        }];
+        let mut events = EventCollector(Vec::new());
+
+        model
+            .respond(
+                ModelRequest {
+                    system_prompt: "test",
+                    messages: &messages,
+                    tools: &[],
+                    max_response_bytes: 64 * 1024,
+                    model_selection: None,
+                    reasoning_selection: None,
+                    reasoning_effort: Some("high"),
+                },
+                &mut events,
+            )
+            .await
+            .unwrap();
+
+        let request = server.join().unwrap();
+        let request_body = request.split_once("\r\n\r\n").unwrap().1;
+        let payload: serde_json::Value = serde_json::from_str(request_body).unwrap();
+        assert_eq!(payload["model"], "deepseek-test");
+        assert_eq!(payload["reasoning"]["effort"], "high");
     }
 }
