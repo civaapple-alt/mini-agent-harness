@@ -354,6 +354,10 @@ attachment references and explicit external paths remain dynamic input.
 
 #### Turn execution
 
+New Turn IDs are opaque and unique across Threads in one App Server; clients
+must pass the returned ID back unchanged. Existing checkpoint IDs remain
+unchanged during recovery.
+
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
 | `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?}`, optional `operationId`, `operationAttempt`, `operationAttemptKind`, `turnSource` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. `turnSource` is bounded metadata; the currently defined value `child_wakeup` marks an automatic parent continuation and does not change the input text. `operationAttemptKind` is child lifecycle metadata (`initial`, `retry`, `follow_up`); it does not change Core execution. |

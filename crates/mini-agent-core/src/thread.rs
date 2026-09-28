@@ -121,7 +121,11 @@ impl<M: Model> Thread<M> {
     /// This is a read-only preview; the counter advances only when a turn is
     /// accepted by `run_turn` or `run_turn_with_events`.
     pub fn next_turn_id(&self) -> TurnId {
-        TurnId::new(format!("turn-{}", self.next_turn_number))
+        TurnId::new(format!(
+            "turn-{}-{}",
+            self.id.as_str(),
+            self.next_turn_number
+        ))
     }
 
     pub fn last_turn_id(&self) -> Option<&TurnId> {

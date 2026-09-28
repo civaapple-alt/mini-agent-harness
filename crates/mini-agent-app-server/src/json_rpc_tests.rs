@@ -260,7 +260,7 @@ async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
         "Start a local process that must outlive this Turn.",
     )
     .await;
-    assert_eq!(started["value"]["turn_id"], "turn-1");
+    assert_eq!(started["value"]["turn_id"], "turn-thread-1-1");
     wait_for_turn_finished(&mut connection).await;
 
     let listed = rpc_call(
@@ -1416,7 +1416,10 @@ async fn completed_child_follow_up_starts_a_new_turn_on_the_same_session() {
         operation.attempt_kind,
         Some(mini_agent_protocol::ChildTaskAttemptKind::FollowUp)
     );
-    assert_eq!(operation.turn_id.as_deref(), Some("turn-1"));
+    assert_eq!(
+        operation.turn_id.as_deref(),
+        Some("turn-child-follow-up-rpc-thread-1")
+    );
     assert_eq!(resumed.store.thread_id(), "child-follow-up-rpc-thread");
     drop(resumed);
     std::fs::remove_dir_all(root).unwrap();
@@ -2023,7 +2026,7 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
                 .unwrap();
         if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
             let params = notification.params.unwrap();
-            if params["goal"]["status"] == "active" && params["turnId"] == "turn-1" {
+            if params["goal"]["status"] == "active" && params["turnId"] == "turn-thread-1-1" {
                 active_turn_seen = true;
             }
             if params["goal"]["status"] == "blocked" {
@@ -2049,7 +2052,7 @@ async fn exposes_codex_shaped_thread_goal_lifecycle() {
     assert_eq!(runtime_status["phase"], "failed");
     assert!(runtime_status["error"].is_string());
     assert_eq!(notification["goal"]["objective"], "ship the next iteration");
-    assert_eq!(notification["turnId"], "turn-1");
+    assert_eq!(notification["turnId"], "turn-thread-1-1");
 
     let result = set_goal(
         &mut connection,
@@ -2167,7 +2170,7 @@ async fn exposes_goal_pause_and_resume_through_thread_protocol() {
                 .unwrap();
         if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED {
             let params = notification.params.unwrap();
-            if params["goal"]["status"] == "active" && params["turnId"] == "turn-1" {
+            if params["goal"]["status"] == "active" && params["turnId"] == "turn-thread-1-1" {
                 break;
             }
         }
@@ -2280,7 +2283,7 @@ async fn enforces_goal_timeout_with_cooperative_cancellation() {
                 .unwrap();
         if notification.method == mini_agent_app_server_protocol::METHOD_THREAD_GOAL_UPDATED
             && notification.params.as_ref().is_some_and(|params| {
-                params["turnId"] == "turn-1" && params["goal"]["status"] == "active"
+                params["turnId"] == "turn-thread-1-1" && params["goal"]["status"] == "active"
             })
         {
             break;
@@ -2461,7 +2464,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
     );
 
     let turn_response = start_turn(&mut connection, 2, "run shell").await;
-    assert_eq!(turn_response["value"]["turn_id"], "turn-1");
+    assert_eq!(turn_response["value"]["turn_id"], "turn-thread-1-1");
 
     let pending = tokio::time::timeout(Duration::from_secs(3), broker.next_request())
         .await
@@ -2475,7 +2478,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
     assert_eq!(pending.thread_id, Some(ThreadId::new("thread-1")));
     assert_eq!(
         pending.turn_id,
-        Some(mini_agent_protocol::TurnId::new("turn-1"))
+        Some(mini_agent_protocol::TurnId::new("turn-thread-1-1"))
     );
 
     let approval_response = rpc_call(
@@ -2505,7 +2508,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
     assert_eq!(resolution.thread_id, Some(ThreadId::new("thread-1")));
     assert_eq!(
         resolution.turn_id,
-        Some(mini_agent_protocol::TurnId::new("turn-1"))
+        Some(mini_agent_protocol::TurnId::new("turn-thread-1-1"))
     );
     assert_eq!(
         resolution.outcome,
@@ -2517,7 +2520,7 @@ async fn serves_builtin_shell_approval_with_request_turn_and_call_identity() {
         let notification = next_turn_event(&mut connection).await;
         assert_eq!(
             notification.turn_id,
-            Some(mini_agent_protocol::TurnId::new("turn-1"))
+            Some(mini_agent_protocol::TurnId::new("turn-thread-1-1"))
         );
         match notification.event {
             mini_agent_protocol::Event::ToolFinished {

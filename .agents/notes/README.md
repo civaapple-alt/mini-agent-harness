@@ -113,6 +113,7 @@ graph LR
 
 ### Implemented
 
+- [跨 Thread 的 Turn ID 唯一性场景证据](implemented/testing/2026-09-28-thread-qualified-turn-identity.md)
 - [Web Studio 页面配置与首次使用](implemented/architecture/2026-09-27-page-owned-model-configuration-and-first-run.zh.md)
 - [SDK 恢复类型与跨层契约证据](implemented/architecture/2026-09-27-sdk-cross-layer-recovery-contract.zh.md)
 - [主子 Agent 自然交接与轻量复核](implemented/feature/2026-09-27-natural-parent-child-agent-handoff.zh.md)

@@ -627,7 +627,7 @@ async fn run_turn_to_finished<M: Model + Send + 'static>(
             .await
             .unwrap(),
         TurnSubmission::Started {
-            turn_id: mini_agent_protocol::TurnId::new("turn-1")
+            turn_id: mini_agent_protocol::TurnId::new("turn-thread-1-1")
         }
     );
     let mut received = Vec::new();
@@ -913,7 +913,7 @@ async fn starts_turn_and_broadcasts_core_lifecycle_events() {
     assert_eq!(
         second,
         TurnSubmission::Started {
-            turn_id: mini_agent_protocol::TurnId::new("turn-2")
+            turn_id: mini_agent_protocol::TurnId::new("turn-thread-1-2")
         }
     );
 }
@@ -1641,7 +1641,7 @@ async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
             .await
             .unwrap(),
         TurnSubmission::Started {
-            turn_id: mini_agent_protocol::TurnId::new("turn-2")
+            turn_id: mini_agent_protocol::TurnId::new("turn-thread-1-2")
         }
     );
 
@@ -1652,7 +1652,10 @@ async fn exposes_a_restored_core_checkpoint_without_replaying_the_first_turn() {
             turn_ids.push(event.turn_id);
         }
     }
-    assert_eq!(turn_ids, [Some(mini_agent_protocol::TurnId::new("turn-2"))]);
+    assert_eq!(
+        turn_ids,
+        [Some(mini_agent_protocol::TurnId::new("turn-thread-1-2"))]
+    );
 }
 
 #[tokio::test]
@@ -1671,25 +1674,54 @@ async fn routes_multiple_preconfigured_threads_by_identity() {
         vec![ThreadId::new("thread-1"), ThreadId::new("thread-2")]
     );
     let mut events = server.subscribe();
-    let submission = server
+    let first_turn = match server
+        .turn_start_for(
+            ThreadId::new("thread-1"),
+            TurnStart::new(TurnInput::new(TurnInputMode::Start, "first")),
+        )
+        .await
+        .unwrap()
+    {
+        TurnSubmission::Started { turn_id } => turn_id,
+        other => panic!("expected first turn to start, got {other:?}"),
+    };
+    assert_eq!(first_turn.as_str(), "turn-thread-1-1");
+    loop {
+        let event = events.recv().await.unwrap();
+        assert_eq!(event.thread_id, ThreadId::new("thread-1"));
+        if matches!(event.event, Event::TurnFinished { .. }) {
+            break;
+        }
+    }
+
+    let second_turn = match server
         .turn_start_for(
             ThreadId::new("thread-2"),
             TurnStart::new(TurnInput::new(TurnInputMode::Start, "second")),
         )
         .await
-        .unwrap();
-    assert_eq!(
-        submission,
-        TurnSubmission::Started {
-            turn_id: mini_agent_protocol::TurnId::new("turn-1")
+        .unwrap()
+    {
+        TurnSubmission::Started { turn_id } => turn_id,
+        other => panic!("expected second turn to start, got {other:?}"),
+    };
+    assert_eq!(second_turn.as_str(), "turn-thread-2-1");
+    assert_ne!(first_turn, second_turn);
+    loop {
+        let event = events.recv().await.unwrap();
+        assert_eq!(event.thread_id, ThreadId::new("thread-2"));
+        if matches!(event.event, Event::TurnFinished { .. }) {
+            break;
         }
-    );
-    for _ in 0..6 {
-        assert_eq!(
-            events.recv().await.unwrap().thread_id,
-            ThreadId::new("thread-2")
-        );
     }
+    assert_eq!(
+        server.turn_read(first_turn.clone()).await.unwrap().id,
+        first_turn
+    );
+    assert_eq!(
+        server.turn_read(second_turn.clone()).await.unwrap().id,
+        second_turn
+    );
     assert_eq!(
         server
             .thread_read_for(ThreadId::new("thread-2"))
