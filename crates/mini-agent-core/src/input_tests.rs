@@ -1,5 +1,5 @@
-use super::InputQueueError;
 use super::PendingInputQueue;
+use super::{InputQueueError, MAX_PENDING_INPUT_BYTES, MAX_PENDING_INPUT_ITEM_BYTES};
 use mini_agent_protocol::TurnInput;
 use mini_agent_protocol::TurnInputMode;
 
@@ -32,4 +32,49 @@ fn queue_rejects_start_modes_and_enforces_capacity() {
         queue.submit(TurnInput::new(TurnInputMode::FollowUp, "second")),
         Err(InputQueueError::Full { capacity: 1 })
     );
+}
+
+#[test]
+fn queue_rejects_oversized_items_without_retaining_them() {
+    let queue = PendingInputQueue::default();
+    assert_eq!(
+        queue.submit(TurnInput::new(
+            TurnInputMode::FollowUp,
+            "x".repeat(MAX_PENDING_INPUT_ITEM_BYTES + 1),
+        )),
+        Err(InputQueueError::ByteLimit {
+            limit: MAX_PENDING_INPUT_ITEM_BYTES,
+            actual: MAX_PENDING_INPUT_ITEM_BYTES + 1,
+        })
+    );
+    let mut metadata = TurnInput::new(TurnInputMode::FollowUp, "");
+    metadata
+        .selected_skills
+        .push("x".repeat(MAX_PENDING_INPUT_ITEM_BYTES));
+    assert!(matches!(
+        queue.submit(metadata),
+        Err(InputQueueError::ByteLimit { .. })
+    ));
+    assert!(queue.is_empty());
+}
+
+#[test]
+fn queue_bounds_total_retained_text_bytes() {
+    let queue = PendingInputQueue::new(20);
+    for _ in 0..16 {
+        queue
+            .submit(TurnInput::new(
+                TurnInputMode::FollowUp,
+                "x".repeat(MAX_PENDING_INPUT_ITEM_BYTES / 2),
+            ))
+            .unwrap();
+    }
+    assert_eq!(
+        queue.submit(TurnInput::new(TurnInputMode::FollowUp, "x")),
+        Err(InputQueueError::ByteLimit {
+            limit: MAX_PENDING_INPUT_BYTES,
+            actual: MAX_PENDING_INPUT_BYTES + 1,
+        })
+    );
+    assert_eq!(queue.len(), 16);
 }

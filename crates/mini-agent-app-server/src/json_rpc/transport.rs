@@ -2,10 +2,30 @@ use super::*;
 use mini_agent_protocol::{ThreadId, TurnId};
 use tokio::io::AsyncBufRead;
 use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinSet;
+
+const MAX_JSON_RPC_LINE_BYTES: usize = 2 * 1024 * 1024;
+
+async fn read_bounded_line<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    line: &mut String,
+) -> Result<usize, std::io::Error> {
+    let read = reader
+        .take(MAX_JSON_RPC_LINE_BYTES as u64 + 1)
+        .read_line(line)
+        .await?;
+    if read > MAX_JSON_RPC_LINE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "JSON-RPC line exceeds the byte limit",
+        ));
+    }
+    Ok(read)
+}
 
 /// Serves stdio with a host-resolved capability manifest.
 pub async fn serve_stdio_with_approval_and_manifest<M, R, W>(
@@ -45,7 +65,7 @@ where
     ) -> Result<(AppServer<M>, CapabilityManifest, StartupServices<M>), String>,
 {
     let mut line = String::new();
-    let read = reader.read_line(&mut line).await?;
+    let read = read_bounded_line(&mut reader, &mut line).await?;
     if read == 0 {
         return Ok(());
     }
@@ -239,7 +259,7 @@ where
                     .send(OutgoingMessage::Notification(notification))
                     .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
             }
-            read = reader.read_line(&mut line) => {
+            read = read_bounded_line(&mut reader, &mut line) => {
                 let read = read?;
                 if read == 0 {
                     // A peer may close stdin immediately after initialize.
@@ -404,4 +424,19 @@ async fn write_json_line<W: AsyncWrite + Unpin, T: serde::Serialize>(
     writer.write_all(&encoded).await?;
     writer.write_all(b"\n").await?;
     writer.flush().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_JSON_RPC_LINE_BYTES, read_bounded_line};
+
+    #[tokio::test]
+    async fn rejects_json_rpc_lines_over_the_byte_limit() {
+        let bytes = vec![b'x'; MAX_JSON_RPC_LINE_BYTES + 1024];
+        let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(bytes));
+        let mut line = String::new();
+        let error = read_bounded_line(&mut reader, &mut line).await.unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(line.len(), MAX_JSON_RPC_LINE_BYTES + 1);
+    }
 }

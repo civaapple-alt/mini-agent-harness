@@ -25,8 +25,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
 
-const EVENT_REPLAY_BUFFER: usize = 512;
-
 #[derive(Clone)]
 struct ExecutionProgressMonitor {
     phase: Arc<AtomicU8>,
@@ -192,7 +190,7 @@ pub(super) enum Command {
 struct ThreadListener {
     events: broadcast::Sender<EventEnvelope>,
     notifications: broadcast::Sender<RuntimeNotification>,
-    event_replay: Arc<Mutex<VecDeque<EventEnvelope>>>,
+    event_replay: Arc<Mutex<EventReplayBuffer>>,
     runtime_status: RuntimeStatusHandle,
     runtime_revision: Arc<AtomicU64>,
     stopping: Arc<AtomicBool>,
@@ -273,13 +271,7 @@ impl ThreadListener {
 
     fn send_event(&self, mut event: EventEnvelope) {
         event.turn_source = self.turn_source;
-        {
-            let mut replay = self.event_replay.lock().unwrap();
-            if replay.len() == EVENT_REPLAY_BUFFER {
-                replay.pop_front();
-            }
-            replay.push_back(event.clone());
-        }
+        self.event_replay.lock().unwrap().push(event.clone());
         let turn_id = event.turn_id.clone();
         if let Some(turn_id) = turn_id.clone() {
             for item in ThreadItem::started_from_event(&event) {
@@ -607,7 +599,7 @@ pub(super) async fn worker_loop<M>(
     mut commands: mpsc::Receiver<Command>,
     events: broadcast::Sender<EventEnvelope>,
     notifications: broadcast::Sender<RuntimeNotification>,
-    event_replay: Arc<Mutex<VecDeque<EventEnvelope>>>,
+    event_replay: Arc<Mutex<EventReplayBuffer>>,
     runtime_status: RuntimeStatusHandle,
     thread_ids: Arc<Mutex<Vec<ThreadId>>>,
     runtime_revision: Arc<AtomicU64>,
@@ -1012,6 +1004,19 @@ pub(super) async fn worker_loop<M>(
                             continue;
                         }
                     }
+                }
+
+                let user_input_limit = thread.harness().config().max_user_input_bytes;
+                if request.input.text.len() > user_input_limit {
+                    respond(
+                        reply,
+                        receipt,
+                        Ok(TurnSubmission::NotSubmitted {
+                            reason: format!("user input exceeds the {user_input_limit} byte limit"),
+                        }),
+                    );
+                    threads.insert(thread);
+                    continue;
                 }
 
                 let mut next_input = Some(request.input);

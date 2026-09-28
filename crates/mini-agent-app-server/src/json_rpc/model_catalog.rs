@@ -191,3 +191,39 @@ fn project_catalog(
     let value = serde_json::to_value(catalog).map_err(|error| error.to_string())?;
     serde_json::from_value(value).map_err(|error| error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::project_catalog;
+
+    #[test]
+    fn provider_search_support_survives_protocol_projection() {
+        let catalog = mini_agent_host::ModelCatalogView {
+            providers: vec![mini_agent_host::ProviderView {
+                profile: mini_agent_host::ProviderProfile {
+                    id: "provider".to_string(),
+                    name: "Provider".to_string(),
+                    kind: mini_agent_host::ProviderKind::Custom,
+                    base_url: "https://example.test/v1".to_string(),
+                    enabled: true,
+                    web_search: Some(true),
+                    models: Vec::new(),
+                },
+                api_key_configured: true,
+                web_search_support: mini_agent_host::ProviderWebSearchSupport::Supported,
+                web_search_enabled: true,
+            }],
+            default_model: None,
+            default_reasoning_selection: Default::default(),
+            verifier_default_model: None,
+            project_defaults: Default::default(),
+        };
+        let projected = project_catalog(catalog).unwrap();
+        let provider = &projected.providers[0];
+        assert_eq!(
+            provider.web_search_support,
+            mini_agent_app_server_protocol::ModelProviderWebSearchSupport::Supported
+        );
+        assert!(provider.web_search_enabled);
+    }
+}

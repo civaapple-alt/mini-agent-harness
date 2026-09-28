@@ -1733,6 +1733,77 @@ async fn routes_multiple_preconfigured_threads_by_identity() {
 }
 
 #[tokio::test]
+async fn reports_gap_after_the_global_replay_window_evicts_a_thread() {
+    let server = AppServer::with_threads(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        vec![
+            Thread::new(ThreadId::new("placeholder"), harness(DoneModel)),
+            Thread::new(ThreadId::new("thread-2"), harness(DoneModel)),
+        ],
+    );
+    {
+        let mut replay = server.event_replay.lock().unwrap();
+        replay.push(mini_agent_protocol::EventEnvelope::new(
+            ThreadId::new("thread-1"),
+            None,
+            1,
+            Event::RunStarted {
+                prompt: "first".to_string(),
+            },
+        ));
+        for sequence in 1..=512 {
+            replay.push(mini_agent_protocol::EventEnvelope::new(
+                ThreadId::new("thread-2"),
+                None,
+                sequence,
+                Event::RunStarted {
+                    prompt: "other".to_string(),
+                },
+            ));
+        }
+    }
+
+    let replay = server
+        .replay_events(&ThreadId::new("thread-1"), Some(0), 64)
+        .unwrap();
+    assert!(replay.events.is_empty());
+    assert_eq!(replay.oldest_sequence, None);
+    assert!(replay.has_gap);
+}
+
+#[tokio::test]
+async fn rejects_oversized_input_before_broadcasting_or_caching_it() {
+    let server = server_with_config(
+        DoneModel,
+        HarnessConfig {
+            max_user_input_bytes: 4,
+            ..HarnessConfig::default()
+        },
+    );
+    let mut events = server.subscribe();
+    let submission = server
+        .turn_start_for(
+            ThreadId::new("thread-1"),
+            TurnStart::new(TurnInput::new(TurnInputMode::Start, "12345")),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(submission, TurnSubmission::NotSubmitted { .. }));
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+    assert!(
+        server
+            .replay_events(&ThreadId::new("thread-1"), None, 64)
+            .unwrap()
+            .events
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn factory_supports_dynamic_start_fork_and_resume() {
     let initial = harness(DoneModel);
     let server = AppServer::with_thread_factory(

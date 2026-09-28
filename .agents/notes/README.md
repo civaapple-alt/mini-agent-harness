@@ -113,6 +113,9 @@ graph LR
 
 ### Implemented
 
+- [模型目录搜索能力投影证据](implemented/testing/2026-09-28-model-catalog-search-projection.md)
+- [输入留存与传输入口限制证据](implemented/testing/2026-09-28-input-retention-bounds.md)
+- [Thread 事件回放缺口证据](implemented/testing/2026-09-28-thread-event-replay-gap.md)
 - [跨 Thread 的 Turn ID 唯一性场景证据](implemented/testing/2026-09-28-thread-qualified-turn-identity.md)
 - [Web Studio 页面配置与首次使用](implemented/architecture/2026-09-27-page-owned-model-configuration-and-first-run.zh.md)
 - [SDK 恢复类型与跨层契约证据](implemented/architecture/2026-09-27-sdk-cross-layer-recovery-contract.zh.md)

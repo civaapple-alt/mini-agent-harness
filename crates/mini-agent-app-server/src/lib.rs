@@ -415,6 +415,29 @@ pub(crate) struct EventReplaySnapshot {
     pub(crate) has_gap: bool,
 }
 
+struct EventReplayBuffer {
+    events: VecDeque<EventEnvelope>,
+    latest_sequence_by_thread: HashMap<String, u64>,
+}
+
+impl EventReplayBuffer {
+    fn new() -> Self {
+        Self {
+            events: VecDeque::with_capacity(EVENT_REPLAY_BUFFER),
+            latest_sequence_by_thread: HashMap::new(),
+        }
+    }
+
+    fn push(&mut self, event: EventEnvelope) {
+        self.latest_sequence_by_thread
+            .insert(event.thread_id.as_str().to_string(), event.sequence);
+        if self.events.len() == EVENT_REPLAY_BUFFER {
+            self.events.pop_front();
+        }
+        self.events.push_back(event);
+    }
+}
+
 #[cfg(test)]
 #[path = "tests.rs"]
 pub(crate) mod tests;
@@ -471,7 +494,7 @@ pub struct AppServer<M> {
     commands: mpsc::Sender<Command>,
     events: broadcast::Sender<EventEnvelope>,
     notifications: broadcast::Sender<RuntimeNotification>,
-    event_replay: Arc<Mutex<VecDeque<EventEnvelope>>>,
+    event_replay: Arc<Mutex<EventReplayBuffer>>,
     runtime_status: Arc<Mutex<mini_agent_app_server_protocol::RuntimeStatus>>,
     control: Arc<RunControl>,
     action_sequencer: ActionSequencer,
@@ -578,7 +601,7 @@ where
         let (commands, command_receiver) = mpsc::channel(COMMAND_BUFFER);
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let (notifications, _) = broadcast::channel(EVENT_BUFFER);
-        let event_replay = Arc::new(Mutex::new(VecDeque::with_capacity(EVENT_REPLAY_BUFFER)));
+        let event_replay = Arc::new(Mutex::new(EventReplayBuffer::new()));
         let runtime_status = Arc::new(Mutex::new(mini_agent_app_server_protocol::RuntimeStatus {
             phase: mini_agent_app_server_protocol::RuntimePhase::Idle,
             thread_id: start.thread_id.clone(),
@@ -928,13 +951,22 @@ where
         let after_sequence = after_sequence.unwrap_or_default();
         let replay = self.event_replay.lock().unwrap();
         let oldest_sequence = replay
+            .events
             .iter()
             .filter(|event| event.thread_id == *thread_id)
             .map(|event| event.sequence)
             .min();
-        let has_gap =
-            oldest_sequence.is_some_and(|oldest| after_sequence.saturating_add(1) < oldest);
+        let has_gap = oldest_sequence.map_or_else(
+            || {
+                replay
+                    .latest_sequence_by_thread
+                    .get(thread_id.as_str())
+                    .is_some_and(|latest| after_sequence < *latest)
+            },
+            |oldest| after_sequence.saturating_add(1) < oldest,
+        );
         let events = replay
+            .events
             .iter()
             .filter(|event| event.thread_id == *thread_id && event.sequence > after_sequence)
             .take(limit)

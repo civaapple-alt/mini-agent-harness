@@ -344,6 +344,9 @@ impl<M: Model> Thread<M> {
             if checkpoint.input != input {
                 return Err(ThreadError::InvalidInputMode(input.mode));
             }
+            self.harness
+                .validate_user_input(&input.text)
+                .map_err(|limit| ThreadError::Harness(HarnessError::Limit(limit)))?;
             self.status = ThreadStatus::Running;
             self.last_turn_id = Some(checkpoint.turn_id.clone());
             checkpoint.turn_id.clone()
@@ -426,6 +429,9 @@ impl<M: Model> Thread<M> {
         ) {
             return Err(ThreadError::InvalidInputMode(input.mode));
         }
+        self.harness
+            .validate_user_input(&input.text)
+            .map_err(|limit| ThreadError::Harness(HarnessError::Limit(limit)))?;
 
         let id = self.next_turn_id();
         self.next_turn_number = self.next_turn_number.saturating_add(1);

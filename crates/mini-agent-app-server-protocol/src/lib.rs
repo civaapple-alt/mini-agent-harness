@@ -696,12 +696,25 @@ pub struct ModelProviderConfig {
     pub models: Vec<ModelProfileConfig>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderWebSearchSupport {
+    Supported,
+    Unsupported,
+    #[default]
+    Unknown,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelProviderView {
     #[serde(flatten)]
     pub profile: ModelProviderConfig,
     pub api_key_configured: bool,
+    #[serde(default)]
+    pub web_search_support: ModelProviderWebSearchSupport,
+    #[serde(default)]
+    pub web_search_enabled: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

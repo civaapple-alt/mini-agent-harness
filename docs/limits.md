@@ -45,6 +45,8 @@ Control Plane 责任塞进 Thin Loop 的方式“通过”预算。
 | --- | ---: | --- |
 | one host context item | 8 KiB | reject before retaining the item |
 | user input | 32 KiB | reject before retaining or emitting the text |
+| queued steering/follow-up input | 16 items, 64 KiB per item, 512 KiB total | reject before retaining the item |
+| JSON-RPC input line | 2 MiB including the line ending | close the stream before deserialization |
 | model response | 64 KiB | reject before retaining text or tool calls |
 | tool calls in one model step | 8 | reject the whole proposal before effects |
 | one tool result | 16 KiB | retain UTF-8-safe head and tail |

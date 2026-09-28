@@ -367,6 +367,11 @@ unchanged during recovery.
 | `turn/steer` | `threadId`, `turnId`, `text`, optional bounded `requestId` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. Child control supplies a stable request ID so a replayed accepted steer is idempotent. |
 | `turn/interrupt` | `threadId`, `turnId` | Requests cooperative cancellation and returns `{accepted: true}` when admitted; settlement remains pending until `turn_finished`. |
 
+An oversized `turn/start` input returns `not_submitted` before the server emits or
+caches the prompt. In `turn/events`, `hasGap` is also true when the shared cache
+has evicted every event for the requested Thread and its latest sequence is
+newer than the supplied cursor; `oldestSequence` is then `null`.
+
 `turn/start` is asynchronous. Clients should render `turn/event` and Item
 notifications while the turn is running, then use `turn/read` for the settled
 result. Steering and interruption are requests to the runtime; they do not
@@ -635,6 +640,9 @@ they may read a validated parent snapshot but cannot write or forget it.
 | `thread/goal/set` | `threadId`; optional `objective`, `status`, `tokenBudget` | Sets or replaces a Goal subject to lifecycle checks; returns the public Goal projection and emits `thread/goal/updated`. A running Goal must be cleared before replacement. |
 | `thread/goal/get` | `threadId` | Returns `{goal}` where `goal` may be `null`. |
 | `thread/goal/clear` | `threadId` | Clears the Goal and returns `{cleared: true|false}`; emits `thread/goal/cleared` when applicable. |
+
+Provider catalog views also report Host-computed `webSearchSupport` and
+effective `webSearchEnabled` separately from the editable `webSearch` value.
 
 Goal status values are `active`, `paused`, `blocked`, `usageLimited`,
 `budgetLimited`, and `complete`. Goal continuation, verification, pause,

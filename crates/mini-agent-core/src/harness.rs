@@ -183,6 +183,17 @@ impl<M: Model> Harness<M> {
         &self.config
     }
 
+    pub(crate) fn validate_user_input(&self, text: &str) -> Result<(), LimitExceeded> {
+        if text.len() > self.config.max_user_input_bytes {
+            return Err(LimitExceeded {
+                kind: LimitKind::UserInputBytes,
+                limit: self.config.max_user_input_bytes,
+                actual: text.len(),
+            });
+        }
+        Ok(())
+    }
+
     /// Sets model metadata for the next complete turn. The concrete provider
     /// still resolves IDs and credentials outside Core.
     pub fn set_model_selection(
@@ -450,15 +461,8 @@ impl<M: Model> Harness<M> {
         let prompt = resume_checkpoint
             .as_ref()
             .map_or(prompt, |checkpoint| checkpoint.input.text.clone());
-        if prompt.len() > self.config.max_user_input_bytes {
-            return Err(fail_limit(
-                LimitExceeded {
-                    kind: LimitKind::UserInputBytes,
-                    limit: self.config.max_user_input_bytes,
-                    actual: prompt.len(),
-                },
-                observer,
-            ));
+        if let Err(limit) = self.validate_user_input(&prompt) {
+            return Err(fail_limit(limit, observer));
         }
         observer.observe(&Event::RunStarted {
             prompt: prompt.clone(),
