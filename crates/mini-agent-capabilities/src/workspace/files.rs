@@ -1,5 +1,25 @@
 use super::*;
 
+fn verify_admitted_path(
+    path: &Path,
+    requires_approval: bool,
+    admission: &ToolAdmission,
+) -> Result<(), ToolError> {
+    let target_paths = admission
+        .target_paths()
+        .ok_or_else(|| ToolError("file operation has no path admission".to_string()))?;
+    let approved = matches!(admission, ToolAdmission::ApprovalRequired { .. });
+    if target_paths.len() != 1
+        || target_paths[0] != path.to_string_lossy()
+        || approved != requires_approval
+    {
+        return Err(ToolError(
+            "file target changed after admission; retry the tool call".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub(super) struct ReadImage {
     pub(super) workspace: Arc<Workspace>,
     pub(super) store: crate::image::ImageStore,
@@ -71,12 +91,13 @@ impl ToolHandler for ReadImage {
         let (path, requires_approval) = self
             .workspace
             .local_file_path_with_admission(&request.arguments)?;
+        let target_paths = vec![path.display().to_string()];
         if !requires_approval {
-            return Ok(ToolAdmission::Allowed);
+            return Ok(ToolAdmission::Allowed { target_paths });
         }
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("read_image {}", path.display()),
-            target_paths: vec![path.display().to_string()],
+            target_paths,
             action_summary: None,
         })
     }
@@ -88,12 +109,19 @@ impl ToolRuntime for ReadImage {
         self.read(path)
     }
 
-    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+    fn execute_after_admission(
+        &self,
+        request: &ToolExecutionRequest,
+        admission: &ToolAdmission,
+    ) -> ToolExecutionOutcome {
         match self
             .workspace
             .local_file_path_with_admission(&request.arguments)
         {
-            Ok((path, _)) => crate::into_tool_outcome(self.read(path)),
+            Ok((path, requires_approval)) => crate::into_tool_outcome(
+                verify_admitted_path(&path, requires_approval, admission)
+                    .and_then(|()| self.read(path)),
+            ),
             Err(error) => crate::into_tool_outcome(Err(error)),
         }
     }
@@ -122,12 +150,13 @@ impl ToolHandler for ReadFile {
     fn admission(&self, request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
         let (path, requires_approval) =
             self.0.local_file_path_with_admission(&request.arguments)?;
+        let target_paths = vec![path.display().to_string()];
         if !requires_approval {
-            return Ok(ToolAdmission::Allowed);
+            return Ok(ToolAdmission::Allowed { target_paths });
         }
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("read_file {}", path.display()),
-            target_paths: vec![path.display().to_string()],
+            target_paths,
             action_summary: None,
         })
     }
@@ -139,18 +168,26 @@ impl ToolRuntime for ReadFile {
         self.read_page(path, arguments, None)
     }
 
-    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+    fn execute_after_admission(
+        &self,
+        request: &ToolExecutionRequest,
+        admission: &ToolAdmission,
+    ) -> ToolExecutionOutcome {
         match self.0.local_file_path_with_admission(&request.arguments) {
-            Ok((path, _)) => crate::into_tool_outcome(
-                self.read_page(
-                    path,
-                    &request.arguments,
-                    request
-                        .context
-                        .as_ref()
-                        .map(|context| context.turn_id.as_str()),
-                ),
-            ),
+            Ok((path, requires_approval)) => {
+                let result =
+                    verify_admitted_path(&path, requires_approval, admission).and_then(|()| {
+                        self.read_page(
+                            path,
+                            &request.arguments,
+                            request
+                                .context
+                                .as_ref()
+                                .map(|context| context.turn_id.as_str()),
+                        )
+                    });
+                crate::into_tool_outcome(result)
+            }
             Err(error) => crate::into_tool_outcome(Err(error)),
         }
     }

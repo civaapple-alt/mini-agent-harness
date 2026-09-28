@@ -76,7 +76,9 @@ impl ToolHandler for Shell {
                 }
             };
             self.0.approval.ensure_not_denied(&action)?;
-            return Ok(ToolAdmission::Allowed);
+            return Ok(ToolAdmission::Allowed {
+                target_paths: Vec::new(),
+            });
         }
         let action = match &invocation {
             ShellInvocation::Foreground(command) => format!("shell command `{command}`"),
@@ -108,7 +110,11 @@ impl ToolRuntime for Shell {
         self.run_command(command)
     }
 
-    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+    fn execute_after_admission(
+        &self,
+        request: &ToolExecutionRequest,
+        _admission: &ToolAdmission,
+    ) -> ToolExecutionOutcome {
         let invocation = match self.validated_invocation(&request.arguments) {
             Ok(invocation) => invocation,
             Err(error) => return ToolExecutionOutcome::failed(error.to_string()),

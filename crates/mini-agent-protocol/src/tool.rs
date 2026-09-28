@@ -280,7 +280,9 @@ impl ToolExecutionOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToolAdmission {
     Legacy,
-    Allowed,
+    Allowed {
+        target_paths: Vec<String>,
+    },
     Deferred {
         reason: String,
     },
@@ -289,6 +291,19 @@ pub enum ToolAdmission {
         target_paths: Vec<String>,
         action_summary: Option<String>,
     },
+}
+
+impl ToolAdmission {
+    /// Paths resolved during admission and used to bind execution to the same
+    /// filesystem targets. Implementations return canonical paths here.
+    pub fn target_paths(&self) -> Option<&[String]> {
+        match self {
+            Self::Allowed { target_paths } | Self::ApprovalRequired { target_paths, .. } => {
+                Some(target_paths)
+            }
+            Self::Legacy | Self::Deferred { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -338,7 +353,11 @@ pub trait ToolRuntime: Send + Sync {
     /// Executes a call after the host has completed its typed admission.
     /// Implementations returning `ApprovalRequired` must override this method
     /// so the legacy approval path is not invoked a second time.
-    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+    fn execute_after_admission(
+        &self,
+        request: &ToolExecutionRequest,
+        _admission: &ToolAdmission,
+    ) -> ToolExecutionOutcome {
         classify_execution(self.execute(&request.arguments))
     }
 

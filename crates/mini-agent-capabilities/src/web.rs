@@ -95,7 +95,9 @@ impl ToolHandler for WebFetch {
         let raw_url = string_arg(&request.arguments, "url")?;
         let (url, class) = classify_url(raw_url)?;
         if class == TargetClass::Loopback {
-            return Ok(ToolAdmission::Allowed);
+            return Ok(ToolAdmission::Allowed {
+                target_paths: Vec::new(),
+            });
         }
         Ok(ToolAdmission::ApprovalRequired {
             action: format!("fetch URL {url}"),
@@ -110,7 +112,11 @@ impl ToolRuntime for WebFetch {
         self.fetch(arguments).map_err(FetchError::into_tool_error)
     }
 
-    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+    fn execute_after_admission(
+        &self,
+        request: &ToolExecutionRequest,
+        _admission: &ToolAdmission,
+    ) -> ToolExecutionOutcome {
         match self.fetch(&request.arguments) {
             Ok(content) => ToolExecutionOutcome::completed(content),
             Err(FetchError::Retryable(error)) => ToolExecutionOutcome::retryable(error),
@@ -712,9 +718,11 @@ mod tests {
             "web_fetch",
             json!({"url": "http://localhost:3000/"}),
         );
-        assert_eq!(tool.admission(&loopback).unwrap(), ToolAdmission::Allowed);
+        let loopback_admission = tool.admission(&loopback).unwrap();
+        assert!(matches!(&loopback_admission, ToolAdmission::Allowed { .. }));
         assert_eq!(
-            tool.execute_after_admission(&loopback).status,
+            tool.execute_after_admission(&loopback, &loopback_admission)
+                .status,
             mini_agent_protocol::ToolExecutionStatus::Completed
         );
 
@@ -723,7 +731,9 @@ mod tests {
             results: ResultStore::default(),
         };
         assert_eq!(
-            transient.execute_after_admission(&loopback).status,
+            transient
+                .execute_after_admission(&loopback, &loopback_admission)
+                .status,
             mini_agent_protocol::ToolExecutionStatus::Retryable
         );
     }

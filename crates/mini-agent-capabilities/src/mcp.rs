@@ -196,7 +196,11 @@ impl ToolRuntime for McpTool {
             .map_err(|error| ToolError(error.to_string()))
     }
 
-    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+    fn execute_after_admission(
+        &self,
+        request: &ToolExecutionRequest,
+        _admission: &ToolAdmission,
+    ) -> ToolExecutionOutcome {
         match self.call(&request.arguments) {
             Ok(content) => ToolExecutionOutcome::completed(content),
             Err(error) if error.is_retryable() => {

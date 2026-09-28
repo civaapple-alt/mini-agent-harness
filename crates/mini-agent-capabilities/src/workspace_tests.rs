@@ -2,7 +2,8 @@ use super::*;
 use crate::BackgroundShellManager;
 use crate::test_support::{approval_controller, remove_test_root, test_root};
 use mini_agent_protocol::{
-    ApprovalOutcome, ApprovalPolicy, ThreadId, ToolExecutionContext, ToolExecutionStatus, TurnId,
+    ApprovalOutcome, ApprovalPolicy, ThreadId, ToolApprovalRequest, ToolExecutionContext,
+    ToolExecutionStatus, TurnId,
 };
 
 struct StubFiles(&'static str);
@@ -89,9 +90,10 @@ fn reads_and_patches_inside_workspace() {
 
     let request =
         ToolExecutionRequest::new("read-inside", "read_file", json!({"path": "note.txt"}));
-    assert_eq!(read.admission(&request).unwrap(), ToolAdmission::Allowed);
+    let admission = read.admission(&request).unwrap();
+    assert!(matches!(&admission, ToolAdmission::Allowed { .. }));
     assert_eq!(
-        read.execute_after_admission(&request).status,
+        read.execute_after_admission(&request, &admission).status,
         ToolExecutionStatus::Completed
     );
 
@@ -254,7 +256,13 @@ fn apply_patch_denial_is_explicit_and_has_no_effect() {
         patch.admission(&request).unwrap(),
         ToolAdmission::ApprovalRequired {
             action: "apply_patch".to_string(),
-            target_paths: vec!["note.txt".to_string()],
+            target_paths: vec![
+                root.join("note.txt")
+                    .canonicalize()
+                    .unwrap()
+                    .display()
+                    .to_string()
+            ],
             action_summary: Some("apply_patch · 修改 1 个文件".to_string()),
         }
     );
@@ -281,7 +289,10 @@ fn trusted_policy_directly_admits_non_destructive_patches_but_not_deletes() {
             "patch": "*** Begin Patch\n*** Update File: note.txt\n@@\n-keep\n+changed\n*** End Patch"
         }),
     );
-    assert_eq!(patch.admission(&update).unwrap(), ToolAdmission::Allowed);
+    assert!(matches!(
+        patch.admission(&update).unwrap(),
+        ToolAdmission::Allowed { .. }
+    ));
 
     let delete = ToolExecutionRequest::new(
         "trusted-delete",
@@ -298,7 +309,16 @@ fn trusted_policy_directly_admits_non_destructive_patches_but_not_deletes() {
                 action_summary.as_deref(),
                 Some("apply_patch · 删除 1 个文件")
             );
-            assert_eq!(target_paths, vec!["note.txt"]);
+            assert_eq!(
+                target_paths,
+                vec![
+                    root.join("note.txt")
+                        .canonicalize()
+                        .unwrap()
+                        .display()
+                        .to_string()
+                ]
+            );
         }
         other => panic!("expected delete approval, got {other:?}"),
     }
@@ -434,16 +454,80 @@ fn read_file_outside_workspace_requires_typed_admission() {
         json!({"path": other.join("secret.txt").to_string_lossy().to_string()}),
     );
 
-    assert!(matches!(
-        read.admission(&request).unwrap(),
-        ToolAdmission::ApprovalRequired { .. }
-    ));
+    let admission = read.admission(&request).unwrap();
+    assert!(matches!(&admission, ToolAdmission::ApprovalRequired { .. }));
     assert_eq!(
-        read.execute_after_admission(&request).status,
+        read.execute_after_admission(&request, &admission).status,
         ToolExecutionStatus::Completed
     );
 
     remove_test_root(&other);
+    remove_test_root(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn read_file_rejects_symlink_retarget_after_admission() {
+    use std::os::unix::fs::symlink;
+
+    let root = test_root();
+    let outside = test_root();
+    let inside = root.join("inside.txt");
+    let secret = outside.join("secret.txt");
+    let alias = root.join("alias.txt");
+    fs::write(&inside, "inside").unwrap();
+    fs::write(&secret, "outside secret").unwrap();
+    symlink(&inside, &alias).unwrap();
+    let read = ReadFile(automatic_workspace(root.clone()));
+    let request = ToolExecutionRequest::new(
+        "read-symlink-race",
+        "read_file",
+        json!({"path": "alias.txt"}),
+    );
+    let admission = read.admission(&request).unwrap();
+    assert!(matches!(&admission, ToolAdmission::Allowed { .. }));
+
+    fs::remove_file(&alias).unwrap();
+    symlink(&secret, &alias).unwrap();
+    let outcome = read.execute_after_admission(&request, &admission);
+    assert_eq!(outcome.status, ToolExecutionStatus::Failed);
+    assert!(!outcome.content.contains("outside secret"));
+
+    remove_test_root(&outside);
+    remove_test_root(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn read_image_rejects_symlink_retarget_after_admission() {
+    use std::os::unix::fs::symlink;
+
+    let root = test_root();
+    let outside = test_root();
+    let inside = root.join("inside.png");
+    let secret = outside.join("secret.png");
+    let alias = root.join("alias.png");
+    fs::write(&inside, crate::image::TINY_PNG).unwrap();
+    fs::write(&secret, crate::image::TINY_PNG).unwrap();
+    symlink(&inside, &alias).unwrap();
+    let tool = ReadImage {
+        workspace: automatic_workspace(root.clone()),
+        store: crate::image::ImageStore::memory_only(),
+    };
+    let request = ToolExecutionRequest::new(
+        "read-image-symlink-race",
+        "read_image",
+        json!({"path": "alias.png"}),
+    );
+    let admission = tool.admission(&request).unwrap();
+    assert!(matches!(&admission, ToolAdmission::Allowed { .. }));
+
+    fs::remove_file(&alias).unwrap();
+    symlink(&secret, &alias).unwrap();
+    let outcome = tool.execute_after_admission(&request, &admission);
+    assert_eq!(outcome.status, ToolExecutionStatus::Failed);
+
+    remove_test_root(&outside);
     remove_test_root(&root);
 }
 
@@ -561,9 +645,10 @@ fn enabled_skill_roots_are_readable_without_approval_but_not_writable() {
     )
     .with_context(turn_context("turn-read"));
 
-    assert_eq!(read.admission(&request).unwrap(), ToolAdmission::Allowed);
+    let admission = read.admission(&request).unwrap();
+    assert!(matches!(&admission, ToolAdmission::Allowed { .. }));
     assert!(
-        read.execute_after_admission(&request)
+        read.execute_after_admission(&request, &admission)
             .content
             .contains("1: reference pattern")
     );
@@ -573,12 +658,10 @@ fn enabled_skill_roots_are_readable_without_approval_but_not_writable() {
         json!({"path": skill_root.join("scripts/check.py").to_string_lossy().to_string()}),
     )
     .with_context(turn_context("turn-read"));
-    assert_eq!(
-        read.admission(&script_request).unwrap(),
-        ToolAdmission::Allowed
-    );
+    let script_admission = read.admission(&script_request).unwrap();
+    assert!(matches!(&script_admission, ToolAdmission::Allowed { .. }));
     assert!(
-        read.execute_after_admission(&script_request)
+        read.execute_after_admission(&script_request, &script_admission)
             .content
             .contains("1: print('check')")
     );
@@ -625,9 +708,10 @@ fn session_attachment_roots_are_read_only_and_do_not_open_session_log() {
         json!({"path": attachment.to_string_lossy().to_string()}),
     )
     .with_context(turn_context("turn-session"));
-    assert_eq!(read.admission(&request).unwrap(), ToolAdmission::Allowed);
+    let admission = read.admission(&request).unwrap();
+    assert!(matches!(&admission, ToolAdmission::Allowed { .. }));
     assert!(
-        read.execute_after_admission(&request)
+        read.execute_after_admission(&request, &admission)
             .content
             .contains("attachment")
     );
@@ -687,6 +771,71 @@ fn external_patch_requires_approval_and_can_use_an_explicit_grant() {
     remove_test_root(&root);
 }
 
+#[cfg(unix)]
+#[test]
+fn apply_patch_binds_approval_to_canonical_symlink_target() {
+    use std::os::unix::fs::symlink;
+
+    let root = test_root();
+    let outside = test_root();
+    let inside = root.join("inside.txt");
+    let secret = outside.join("secret.txt");
+    let alias = root.join("alias.txt");
+    fs::write(&inside, "before\n").unwrap();
+    fs::write(&secret, "before\n").unwrap();
+    symlink(&inside, &alias).unwrap();
+    let workspace = workspace(
+        root.clone(),
+        approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Approved),
+        Vec::new(),
+        SandboxKind::Native,
+    );
+    let patch = ApplyPatch(workspace);
+    let request = ToolExecutionRequest::new(
+        "patch-symlink-race",
+        "apply_patch",
+        json!({
+            "patch": "*** Begin Patch\n*** Update File: alias.txt\n@@\n-before\n+after\n*** End Patch"
+        }),
+    );
+    let admission = patch.admission(&request).unwrap();
+    let expected_target = inside.canonicalize().unwrap().display().to_string();
+    assert!(matches!(
+        &admission,
+        ToolAdmission::ApprovalRequired { target_paths, .. }
+            if target_paths.len() == 1 && target_paths[0] == expected_target
+    ));
+
+    let grant_key = |target: String| {
+        let request = ToolApprovalRequest {
+            action: "apply_patch".to_string(),
+            tool_name: Some("apply_patch".to_string()),
+            workspace_id: Some(root.display().to_string()),
+            workspace_revision: Some(1),
+            target_paths: vec![target],
+            ..ToolApprovalRequest::default()
+        };
+        crate::security::action_grant_key(&request, "project").unwrap()
+    };
+    let old_key = grant_key(expected_target);
+
+    fs::remove_file(&alias).unwrap();
+    symlink(&secret, &alias).unwrap();
+    let new_admission = patch.admission(&request).unwrap();
+    let ToolAdmission::ApprovalRequired { target_paths, .. } = new_admission else {
+        panic!("retargeted patch should require approval")
+    };
+    let new_key = grant_key(target_paths[0].clone());
+    assert_ne!(old_key, new_key);
+
+    let outcome = patch.execute_after_admission(&request, &admission);
+    assert_eq!(outcome.status, ToolExecutionStatus::Failed);
+    assert_eq!(fs::read_to_string(&secret).unwrap(), "before\n");
+
+    remove_test_root(&outside);
+    remove_test_root(&root);
+}
+
 #[test]
 fn skill_read_budget_is_scoped_to_a_turn() {
     let root = test_root();
@@ -708,7 +857,8 @@ fn skill_read_budget_is_scoped_to_a_turn() {
             json!({"path": path.to_string_lossy().to_string()}),
         )
         .with_context(turn_context("turn-budget"));
-        let outcome = read.execute_after_admission(&request);
+        let admission = read.admission(&request).unwrap();
+        let outcome = read.execute_after_admission(&request, &admission);
         if outcome.status == ToolExecutionStatus::Failed {
             assert!(outcome.content.contains("skill file reads exceed"));
             failed = true;
@@ -726,8 +876,10 @@ fn skill_read_budget_is_scoped_to_a_turn() {
         json!({"path": path.to_string_lossy().to_string()}),
     )
     .with_context(turn_context("turn-next"));
+    let next_turn_admission = read.admission(&next_turn).unwrap();
     assert_eq!(
-        read.execute_after_admission(&next_turn).status,
+        read.execute_after_admission(&next_turn, &next_turn_admission)
+            .status,
         ToolExecutionStatus::Completed
     );
 
@@ -873,7 +1025,10 @@ fn plan_mode_allows_read_only_shell_inspection() {
     let request =
         ToolExecutionRequest::new("call-shell-read-only", "shell", json!({"command": command}));
 
-    assert_eq!(shell.admission(&request).unwrap(), ToolAdmission::Allowed);
+    assert!(matches!(
+        shell.admission(&request).unwrap(),
+        ToolAdmission::Allowed { .. }
+    ));
     let output = shell.execute(&request.arguments).unwrap();
     assert!(output.contains("note.txt") || output.contains(root.to_string_lossy().as_ref()));
 
@@ -948,10 +1103,10 @@ fn automatic_shell_admission_requires_workspace_bounded_paths() {
     };
     let inside_request =
         ToolExecutionRequest::new("bounded-shell-read", "shell", json!({"command": inside}));
-    assert_eq!(
+    assert!(matches!(
         shell.admission(&inside_request).unwrap(),
-        ToolAdmission::Allowed
-    );
+        ToolAdmission::Allowed { .. }
+    ));
 
     let outside = if cfg!(windows) {
         "Get-Content ..\\secret.txt"

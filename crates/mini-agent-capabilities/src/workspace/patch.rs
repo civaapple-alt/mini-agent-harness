@@ -12,6 +12,19 @@ struct PatchPlan {
     paths: Vec<String>,
 }
 
+impl PatchPlan {
+    fn canonical_target_paths(&self) -> Vec<String> {
+        let mut paths = self
+            .effects
+            .iter()
+            .map(|effect| effect.path.display().to_string())
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+}
+
 struct FileEffect {
     path: PathBuf,
     before: Option<Vec<u8>>,
@@ -72,11 +85,13 @@ impl ToolHandler for ApplyPatch {
                     .approval
                     .ensure_not_denied(&format!("edit {}", effect.path.display()))?;
             }
-            return Ok(ToolAdmission::Allowed);
+            return Ok(ToolAdmission::Allowed {
+                target_paths: plan.canonical_target_paths(),
+            });
         }
         Ok(ToolAdmission::ApprovalRequired {
             action: "apply_patch".to_string(),
-            target_paths: plan.paths,
+            target_paths: plan.canonical_target_paths(),
             action_summary: Some(patch_action_summary(&plan.effects)),
         })
     }
@@ -120,8 +135,23 @@ impl ToolRuntime for ApplyPatch {
         apply_plan(plan)
     }
 
-    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
-        crate::into_tool_outcome(self.prepare(&request.arguments).and_then(apply_plan))
+    fn execute_after_admission(
+        &self,
+        request: &ToolExecutionRequest,
+        admission: &ToolAdmission,
+    ) -> ToolExecutionOutcome {
+        let result = self.prepare(&request.arguments).and_then(|plan| {
+            let admitted_paths = admission
+                .target_paths()
+                .ok_or_else(|| ToolError("patch has no target admission".to_string()))?;
+            if admitted_paths != plan.canonical_target_paths() {
+                return Err(ToolError(
+                    "patch targets changed after admission; retry the tool call".to_string(),
+                ));
+            }
+            apply_plan(plan)
+        });
+        crate::into_tool_outcome(result)
     }
 }
 

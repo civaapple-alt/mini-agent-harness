@@ -22,24 +22,30 @@ impl ToolExecutionDelegate for ToolOrchestrator {
     fn execute(&self, tool: &dyn Tool, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
         match tool.admission(request) {
             Ok(ToolAdmission::Legacy) => tool.execute_outcome(&request.arguments),
-            Ok(ToolAdmission::Allowed) => tool.execute_after_admission(request),
+            Ok(admission @ ToolAdmission::Allowed { .. }) => {
+                tool.execute_after_admission(request, &admission)
+            }
             Ok(ToolAdmission::Deferred { reason }) => ToolExecutionOutcome::deferred(reason),
-            Ok(ToolAdmission::ApprovalRequired {
-                action,
-                target_paths,
-                action_summary,
-            }) => {
-                let approval_request = ToolApprovalRequest::from_execution_with_summary(
+            Ok(admission @ ToolAdmission::ApprovalRequired { .. }) => {
+                let ToolAdmission::ApprovalRequired {
                     action,
-                    action_summary,
                     target_paths,
+                    action_summary,
+                } = &admission
+                else {
+                    unreachable!("matched ApprovalRequired")
+                };
+                let approval_request = ToolApprovalRequest::from_execution_with_summary(
+                    action.clone(),
+                    action_summary.clone(),
+                    target_paths.clone(),
                     request,
                 );
                 match self
                     .approval
                     .approve_request_with_classification(&approval_request)
                 {
-                    Ok(()) => tool.execute_after_admission(request),
+                    Ok(()) => tool.execute_after_admission(request, &admission),
                     Err(ApprovalFailure::UserDenied(error)) => {
                         ToolExecutionOutcome::needs_approval(error)
                     }

@@ -217,7 +217,9 @@ impl ToolHandler for ScheduledTaskTool {
     }
 
     fn admission(&self, _request: &ToolExecutionRequest) -> Result<ToolAdmission, ToolError> {
-        Ok(ToolAdmission::Allowed)
+        Ok(ToolAdmission::Allowed {
+            target_paths: Vec::new(),
+        })
     }
 }
 
@@ -226,7 +228,11 @@ impl ToolRuntime for ScheduledTaskTool {
         self.execute_for_owner(arguments, "default")
     }
 
-    fn execute_after_admission(&self, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
+    fn execute_after_admission(
+        &self,
+        request: &ToolExecutionRequest,
+        _admission: &ToolAdmission,
+    ) -> ToolExecutionOutcome {
         let owner = request
             .context
             .as_ref()
