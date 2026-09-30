@@ -286,8 +286,8 @@ pub struct TurnPresentation {
     context_usage: Option<TurnContextUsage>,
 }
 
-/// The last model request observed during a Turn, with byte data suitable for
-/// clearly-labeled proportional token estimates in the client.
+/// The last model request observed during a Turn plus bounded aggregate usage
+/// for the Provider cache-hit ratio.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnContextUsage {
@@ -295,6 +295,41 @@ pub struct TurnContextUsage {
     pub usage: Option<ModelUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_bytes: Option<ContextByteBreakdown>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_totals: Option<TurnUsageTotals>,
+}
+
+/// Provider usage totals accumulated across every model response in a Turn.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnUsageTotals {
+    /// Number of model responses that included Provider usage data.
+    pub request_count: u64,
+    /// Input tokens across all usage reports.
+    pub input_tokens: u64,
+    /// Number of usage reports that included a cached-input count.
+    pub cache_report_count: u64,
+    /// Input tokens in reports with a known cached-input count.
+    pub cache_reported_input_tokens: u64,
+    /// Cached input tokens across reports that included this count.
+    pub cached_input_tokens: u64,
+}
+
+impl TurnUsageTotals {
+    fn record(&mut self, usage: Option<ModelUsage>) {
+        let Some(usage) = usage else {
+            return;
+        };
+        self.request_count = self.request_count.saturating_add(1);
+        self.input_tokens = self.input_tokens.saturating_add(usage.input_tokens);
+        if let Some(cached_input_tokens) = usage.cached_input_tokens {
+            self.cache_report_count = self.cache_report_count.saturating_add(1);
+            self.cache_reported_input_tokens = self
+                .cache_reported_input_tokens
+                .saturating_add(usage.input_tokens);
+            self.cached_input_tokens = self.cached_input_tokens.saturating_add(cached_input_tokens);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -353,9 +388,15 @@ impl TurnPresentation {
         usage: Option<ModelUsage>,
         context_bytes: Option<ContextByteBreakdown>,
     ) {
+        let mut usage_totals = self
+            .context_usage
+            .and_then(|context_usage| context_usage.usage_totals)
+            .unwrap_or_default();
+        usage_totals.record(usage);
         self.context_usage = Some(TurnContextUsage {
             usage,
             context_bytes,
+            usage_totals: Some(usage_totals),
         });
     }
 }
@@ -3583,6 +3624,56 @@ mod tests {
             compacted: false,
             method: "exact".to_string(),
         }
+    }
+
+    #[test]
+    fn turn_presentation_accumulates_only_provider_reported_cache_usage() {
+        let mut presentation = TurnPresentation::default();
+        presentation.set_context_usage(
+            Some(ModelUsage {
+                input_tokens: 100,
+                cached_input_tokens: Some(80),
+                output_tokens: 10,
+            }),
+            None,
+        );
+        presentation.set_context_usage(
+            Some(ModelUsage {
+                input_tokens: 200,
+                cached_input_tokens: None,
+                output_tokens: 20,
+            }),
+            Some(ContextByteBreakdown {
+                conversation: 64,
+                ..ContextByteBreakdown::default()
+            }),
+        );
+
+        let context_usage = presentation.context_usage.unwrap();
+        assert_eq!(
+            context_usage.usage_totals,
+            Some(TurnUsageTotals {
+                request_count: 2,
+                input_tokens: 300,
+                cache_report_count: 1,
+                cache_reported_input_tokens: 100,
+                cached_input_tokens: 80,
+            })
+        );
+        assert_eq!(
+            context_usage.usage,
+            Some(ModelUsage {
+                input_tokens: 200,
+                cached_input_tokens: None,
+                output_tokens: 20,
+            })
+        );
+
+        let serialized = serde_json::to_value(presentation).unwrap();
+        assert_eq!(serialized["contextUsage"]["usageTotals"]["requestCount"], 2);
+        let legacy: TurnContextUsage =
+            serde_json::from_value(serde_json::json!({"usage": null})).unwrap();
+        assert_eq!(legacy.usage_totals, None);
     }
 
     fn fork_child(
