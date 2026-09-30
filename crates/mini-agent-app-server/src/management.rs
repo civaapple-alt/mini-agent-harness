@@ -40,6 +40,7 @@ pub(crate) struct RuntimeActorState {
     pub(crate) status: RuntimeStatusHandle,
     pub(crate) background_shells: BackgroundShellManager,
     pub(crate) scheduled_tasks: ScheduledTaskManager,
+    pub(crate) user_questions: Option<crate::UserQuestionBroker>,
     revision: crate::action::RuntimeRevision,
 }
 
@@ -113,6 +114,7 @@ pub struct RuntimeManagementService<M> {
     settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
     notifications: broadcast::Sender<RuntimeNotification>,
     status: RuntimeStatusHandle,
+    user_questions: Option<crate::UserQuestionBroker>,
 }
 
 impl<M> Clone for RuntimeManagementService<M> {
@@ -128,6 +130,7 @@ impl<M> Clone for RuntimeManagementService<M> {
             settings_notifications: self.settings_notifications.clone(),
             notifications: self.notifications.clone(),
             status: self.status.clone(),
+            user_questions: self.user_questions.clone(),
         }
     }
 }
@@ -281,6 +284,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             settings_notifications,
             notifications,
             status,
+            user_questions: None,
         }
     }
 
@@ -304,6 +308,11 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         self
     }
 
+    pub fn with_user_questions(mut self, broker: crate::UserQuestionBroker) -> Self {
+        self.user_questions = Some(broker);
+        self
+    }
+
     pub(crate) fn bind_thread_services(
         self,
         settings: ThreadSettingsService,
@@ -319,6 +328,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             settings_notifications,
             notifications,
             status,
+            user_questions,
         } = self;
         let management = state.ok_or_else(|| "runtime state is already bound".to_string())?;
         let stable_system_prompt = settings.stable_system_prompt().map(str::to_string);
@@ -377,6 +387,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 status: status.clone(),
                 background_shells,
                 scheduled_tasks,
+                user_questions,
                 revision: crate::action::RuntimeRevision::default(),
             })
             .map_err(|error| error.to_string())?;
@@ -394,6 +405,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 settings_notifications,
                 notifications,
                 status,
+                user_questions: None,
             },
             settings,
             goals,

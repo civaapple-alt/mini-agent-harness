@@ -18,6 +18,7 @@ use mini_agent_capabilities::ImageStore;
 use mini_agent_capabilities::ModelProviderSettings;
 use mini_agent_capabilities::ResultStore;
 use mini_agent_core::HarnessConfig;
+use std::sync::Arc;
 
 /// Builds a concrete host runtime for an App Server service boundary.
 ///
@@ -30,6 +31,7 @@ pub struct HostRuntimeFactory<'a> {
     approval: ApprovalController,
     config: HarnessConfig,
     registry: CapabilityRegistry,
+    user_questions: Option<Arc<dyn crate::UserQuestionHandler>>,
 }
 
 impl<'a> HostRuntimeFactory<'a> {
@@ -43,12 +45,18 @@ impl<'a> HostRuntimeFactory<'a> {
             approval,
             config,
             registry: CapabilityRegistry::builtin(),
+            user_questions: None,
         }
     }
 
     /// Uses providers registered by the embedding application for new runs.
     pub fn with_registry(mut self, registry: CapabilityRegistry) -> Self {
         self.registry = registry;
+        self
+    }
+
+    pub fn with_user_questions(mut self, handler: Arc<dyn crate::UserQuestionHandler>) -> Self {
+        self.user_questions = Some(handler);
         self
     }
 
@@ -72,6 +80,8 @@ impl<'a> HostRuntimeFactory<'a> {
             || self.registry.clone(),
             |config| self.registry.clone().with_web_search(config),
         );
+        let user_questions_enabled =
+            self.user_questions.is_some() && composition.tools == ToolScope::All;
         let mut runtime = prepare_harness_with_model_factory(
             self.runtime_config,
             self.approval.clone(),
@@ -87,7 +97,16 @@ impl<'a> HostRuntimeFactory<'a> {
                 ))
             },
         )?;
-        runtime.builtin_tools = builtin_tools_for_search(search_enabled);
+        if user_questions_enabled {
+            let tool: Box<dyn mini_agent_protocol::Tool> = Box::new(crate::AskUserTool::new(
+                self.user_questions
+                    .as_ref()
+                    .expect("enabled questions have an interactive handler")
+                    .clone(),
+            ));
+            runtime.harness.extend_tools(vec![tool]);
+        }
+        runtime.builtin_tools = builtin_tools_for_features(search_enabled, user_questions_enabled);
         runtime
             .harness
             .set_hidden_tools(runtime.builtin_tools.hidden_names());
@@ -95,12 +114,18 @@ impl<'a> HostRuntimeFactory<'a> {
     }
 }
 
-fn builtin_tools_for_search(search_enabled: bool) -> BuiltinToolSelection {
+fn builtin_tools_for_features(
+    search_enabled: bool,
+    user_questions_enabled: bool,
+) -> BuiltinToolSelection {
+    let mut names = BuiltinToolSelection::default().names().to_vec();
     if search_enabled {
-        BuiltinToolSelection::all()
-    } else {
-        BuiltinToolSelection::default()
+        names.push("web_fetch".to_string());
     }
+    if user_questions_enabled {
+        names.push("ask_user".to_string());
+    }
+    BuiltinToolSelection::from_names(names).expect("feature tools are in the builtin catalog")
 }
 
 #[cfg(test)]
@@ -109,17 +134,31 @@ mod tests {
 
     #[test]
     fn configured_search_includes_fetch_in_the_initial_builtin_selection() {
-        let with_search = builtin_tools_for_search(true);
+        let with_search = builtin_tools_for_features(true, false);
         assert!(with_search.names().iter().any(|name| name == "web_fetch"));
-        assert!(with_search.hidden_names().is_empty());
+        assert_eq!(with_search.hidden_names(), ["ask_user"]);
 
-        let without_search = builtin_tools_for_search(false);
+        let without_search = builtin_tools_for_features(false, false);
         assert!(
             !without_search
                 .names()
                 .iter()
                 .any(|name| name == "web_fetch")
         );
-        assert_eq!(without_search.hidden_names(), ["web_fetch"]);
+        assert_eq!(without_search.hidden_names(), ["web_fetch", "ask_user"]);
+    }
+
+    #[test]
+    fn user_question_tool_is_selected_only_for_interactive_clients() {
+        assert!(
+            builtin_tools_for_features(false, true)
+                .names()
+                .contains(&"ask_user".to_string())
+        );
+        assert!(
+            !builtin_tools_for_features(false, false)
+                .names()
+                .contains(&"ask_user".to_string())
+        );
     }
 }

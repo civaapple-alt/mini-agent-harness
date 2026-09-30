@@ -3,8 +3,9 @@ use mini_agent_app_server::ApprovalBroker;
 use mini_agent_app_server::RuntimeManagementService;
 use mini_agent_app_server::RuntimeServices;
 use mini_agent_app_server::StartupServices;
+use mini_agent_app_server::UserQuestionBroker;
 use mini_agent_app_server::capability_manifest_to_protocol;
-use mini_agent_app_server::serve_stdio_with_startup_and_services;
+use mini_agent_app_server::serve_stdio_with_startup_and_user_questions;
 use mini_agent_app_server_protocol::{AccessScope, ApprovalPolicy, CapabilityProviderSelection};
 use mini_agent_capabilities::ApprovalController;
 use mini_agent_capabilities::ApprovalStore;
@@ -25,6 +26,7 @@ use std::env;
 use std::error::Error;
 use std::io;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::io::BufReader;
 
 #[tokio::main]
@@ -37,6 +39,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let runtime_config = RuntimeConfig::load().map_err(std::io::Error::other)?;
     let broker = ApprovalBroker::new();
+    let user_questions = UserQuestionBroker::new();
     let approval_store = ApprovalStore::new();
     let startup_approval = approval_for(
         broker.clone(),
@@ -52,7 +55,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let startup_config = runtime_config.clone();
     let stdin = BufReader::new(tokio::io::stdin());
     let stdout = tokio::io::stdout();
-    serve_stdio_with_startup_and_services(broker.clone(), stdin, stdout, move |params| {
+    let transport_broker = broker.clone();
+    let transport_questions = user_questions.clone();
+    let startup = move |params: mini_agent_app_server_protocol::InitializeParams| {
+        let user_questions_enabled = params.capabilities.user_questions;
         let mut composition = base_composition.clone();
         apply_provider_selection(&mut composition, params.providers.as_ref())?;
         let factory_composition = composition.clone();
@@ -76,12 +82,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .as_ref()
             .map(|opened| opened.store.result_store())
             .unwrap_or_default();
-        let runtime = HostRuntimeFactory::new(
+        let mut runtime_factory = HostRuntimeFactory::new(
             &startup_config,
             runtime_approval.clone(),
             HarnessConfig::default(),
-        )
-        .build(composition, results)?;
+        );
+        if user_questions_enabled {
+            runtime_factory = runtime_factory.with_user_questions(Arc::new(user_questions.clone()));
+        }
+        let runtime = runtime_factory.build(composition, results)?;
         let mini_agent_host::HarnessBuild {
             harness,
             builtin_tools,
@@ -177,6 +186,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             thread.set_next_turn_number(opened.store.thread_turn_count() as u64 + 1);
         }
         let factory_broker = broker.clone();
+        let factory_questions = user_questions.clone();
         let factory_store = approval_store.clone();
         let factory_config = startup_config.clone();
         let server = mini_agent_app_server::AppServer::with_thread_factory(
@@ -196,10 +206,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 );
                 let mut thread_composition = factory_composition.clone();
                 thread_composition.security = security;
-                let runtime =
-                    HostRuntimeFactory::new(&factory_config, approval, HarnessConfig::default())
-                        .build(thread_composition, Default::default())
-                        .map_err(AppServerError::Checkpoint)?;
+                let mut factory =
+                    HostRuntimeFactory::new(&factory_config, approval, HarnessConfig::default());
+                if user_questions_enabled {
+                    factory = factory.with_user_questions(Arc::new(factory_questions.clone()));
+                }
+                let runtime = factory
+                    .build(thread_composition, Default::default())
+                    .map_err(AppServerError::Checkpoint)?;
                 runtime.background_shells.disable();
                 runtime.scheduled_tasks.disable();
                 Ok(Thread::new(thread_id, runtime.harness))
@@ -221,6 +235,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             )
             .with_skill_discovery_refresh(skill_discovery_refresh, skill_read_roots)
             .with_initial_builtin_tools(builtin_tools);
+        let management = if user_questions_enabled {
+            management.with_user_questions(user_questions.clone())
+        } else {
+            management
+        };
         let thread_settings = mini_agent_app_server::ThreadSettingsService::new()
             .with_stable_system_prompt(stable_system_prompt);
         let goals = mini_agent_app_server::ThreadGoalRequestProcessor::new(
@@ -235,7 +254,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 runtime: Some(RuntimeServices::new(management, thread_settings, goals)?),
             },
         ))
-    })
+    };
+    serve_stdio_with_startup_and_user_questions(
+        transport_broker,
+        transport_questions,
+        stdin,
+        stdout,
+        startup,
+    )
     .await?;
     Ok(())
 }

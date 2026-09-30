@@ -5,7 +5,7 @@ use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio::task::JoinSet;
 
 const MAX_JSON_RPC_LINE_BYTES: usize = 2 * 1024 * 1024;
@@ -40,18 +40,46 @@ where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    let user_questions = UserQuestionBroker::new();
     let connection = AppServerConnection::with_approval_broker_and_capability_manifest(
         server.clone(),
         approval.clone(),
         capability_manifest,
-    );
-    serve_connection(connection, approval, reader, writer).await
+    )
+    .with_user_questions(user_questions.clone(), false);
+    serve_connection(connection, approval, user_questions, false, reader, writer).await
 }
 
 /// Serves stdio after startup while attaching optional runtime services to the
 /// JSON-RPC connection.
 pub async fn serve_stdio_with_startup_and_services<M, R, W, F>(
     approval: ApprovalBroker,
+    reader: R,
+    writer: W,
+    startup: F,
+) -> Result<(), std::io::Error>
+where
+    M: Model + Send + 'static,
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+    F: FnOnce(
+        InitializeParams,
+    ) -> Result<(AppServer<M>, CapabilityManifest, StartupServices<M>), String>,
+{
+    serve_stdio_with_startup_and_user_questions(
+        approval,
+        UserQuestionBroker::new(),
+        reader,
+        writer,
+        startup,
+    )
+    .await
+}
+
+/// Serves stdio with a shared interactive user-question broker.
+pub async fn serve_stdio_with_startup_and_user_questions<M, R, W, F>(
+    approval: ApprovalBroker,
+    user_questions: UserQuestionBroker,
     mut reader: R,
     mut writer: W,
     startup: F,
@@ -112,6 +140,7 @@ where
         .await?;
         return Ok(());
     }
+    let user_questions_enabled = params.capabilities.user_questions;
     let (server, capability_manifest, services) = match startup(params) {
         Ok(started) => started,
         Err(error) => {
@@ -127,19 +156,30 @@ where
         server,
         approval.clone(),
         capability_manifest,
-    );
+    )
+    .with_user_questions(user_questions.clone(), user_questions_enabled);
     if let Some(runtime) = services.runtime {
         connection = connection.with_runtime_services(runtime);
     }
     if let Some(response) = connection.handle_request(request).await {
         write_json_line(&mut writer, &response).await?;
     }
-    serve_connection(connection, approval, reader, writer).await
+    serve_connection(
+        connection,
+        approval,
+        user_questions,
+        user_questions_enabled,
+        reader,
+        writer,
+    )
+    .await
 }
 
 async fn serve_connection<M, R, W>(
     connection: AppServerConnection<M>,
     approval: ApprovalBroker,
+    user_questions: UserQuestionBroker,
+    user_questions_enabled: bool,
     mut reader: R,
     mut writer: W,
 ) -> Result<(), std::io::Error>
@@ -152,6 +192,7 @@ where
     let mut runtime_events = connection.subscribe_notifications();
     let mut events = (runtime_events.is_none()).then(|| server.subscribe());
     let initialized = connection.initialized_flag();
+    let mut question_events = user_questions.subscribe();
     let connection = std::sync::Arc::new(Mutex::new(connection));
     let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel();
     let mut request_tasks = JoinSet::new();
@@ -259,6 +300,28 @@ where
                     .send(OutgoingMessage::Notification(notification))
                     .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
             }
+            event = user_questions.next_event(&mut question_events), if user_questions_enabled => {
+                let event = match event {
+                    Ok(event) => event,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => continue,
+                };
+                publish_user_question_status(&server, &event.interaction, event.phase);
+                let method = if event.phase == mini_agent_app_server_protocol::UserQuestionPhase::Requested {
+                    mini_agent_app_server_protocol::METHOD_USER_QUESTION_REQUEST
+                } else {
+                    mini_agent_app_server_protocol::METHOD_USER_QUESTION_UPDATED
+                };
+                let notification = JsonRpcRequest::notification(
+                    method,
+                    Some(serde_json::to_value(mini_agent_app_server_protocol::UserQuestionNotification {
+                        phase: event.phase,
+                        interaction: event.interaction,
+                    }).expect("user question notification is serializable")),
+                );
+                outgoing_tx.send(OutgoingMessage::Notification(notification))
+                    .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+            }
             read = read_bounded_line(&mut reader, &mut line) => {
                 let read = read?;
                 if read == 0 {
@@ -326,6 +389,20 @@ where
                     continue;
                 }
 
+                if request.method == mini_agent_app_server_protocol::METHOD_USER_QUESTION_RESPOND
+                    && initialized.load(std::sync::atomic::Ordering::Acquire)
+                    && user_questions_enabled
+                {
+                    let notification = request.id.is_none();
+                    if let Some(response) = AppServerConnection::<M>::user_question_response_fast_path(&user_questions, request)
+                        .filter(|_| !notification)
+                    {
+                        outgoing_tx.send(OutgoingMessage::Response(response))
+                            .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                    }
+                    continue;
+                }
+
                 let connection = connection.clone();
                 let outgoing_tx = outgoing_tx.clone();
                 request_tasks.spawn(async move {
@@ -339,6 +416,40 @@ where
     }
     request_tasks.abort_all();
     Ok(())
+}
+
+fn publish_user_question_status<M>(
+    server: &AppServer<M>,
+    interaction: &mini_agent_protocol::UserQuestionInteraction,
+    phase: mini_agent_app_server_protocol::UserQuestionPhase,
+) where
+    M: Model + Send + 'static,
+{
+    let status = server.runtime_status();
+    let next_phase = match phase {
+        mini_agent_app_server_protocol::UserQuestionPhase::Requested
+        | mini_agent_app_server_protocol::UserQuestionPhase::Updated => {
+            mini_agent_app_server_protocol::RuntimePhase::WaitingForUserInput
+        }
+        mini_agent_app_server_protocol::UserQuestionPhase::Resolved
+        | mini_agent_app_server_protocol::UserQuestionPhase::Cancelled => {
+            mini_agent_app_server_protocol::RuntimePhase::Tool
+        }
+    };
+    crate::status::publish(
+        &server.runtime_status_handle(),
+        &server.notifications(),
+        interaction.thread_id.clone(),
+        next_phase,
+        Some(interaction.turn_id.clone()),
+        Some(crate::status::operation(
+            "user-question",
+            &interaction.interaction_id,
+        )),
+        status.checkpoint_seq,
+        &server.runtime_revision_handle(),
+        None,
+    );
 }
 
 fn publish_approval_status<M>(

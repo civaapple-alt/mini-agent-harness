@@ -340,7 +340,11 @@ where
         }
         match self.server.thread_read_action(params.thread_id).await {
             Ok(response) => {
-                let result = response.value.clone();
+                let mut result = response.value.clone();
+                if self.user_questions_enabled {
+                    result.pending_user_question =
+                        self.user_questions.pending_for_thread(&result.thread_id);
+                }
                 response_action_with(request.id, response, result)
             }
             Err(error) => response_error(request.id, map_action_error(error)),

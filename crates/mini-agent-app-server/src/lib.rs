@@ -328,6 +328,7 @@ mod runtime_command;
 mod thread_manager;
 mod thread_settings;
 pub mod trace;
+mod user_questions;
 pub mod verifier;
 
 pub use client::LocalAppServerClient;
@@ -337,6 +338,7 @@ pub use json_rpc::RuntimeServices;
 pub use json_rpc::StartupServices;
 pub use json_rpc::serve_stdio_with_approval_and_manifest;
 pub use json_rpc::serve_stdio_with_startup_and_services;
+pub use json_rpc::serve_stdio_with_startup_and_user_questions;
 pub use management::RuntimeManagementService;
 pub use mini_agent_app_server_protocol::{
     ForkCompactionMethod, ForkContextPolicy, McpRetryResult as ProtocolMcpRetryResult,
@@ -351,6 +353,7 @@ pub use runtime::{
 };
 pub use thread_settings::ThreadSettingsService;
 pub use trace::{JsonlTrace, TraceRecord};
+pub use user_questions::{UserQuestionBroker, UserQuestionEvent};
 
 mod status;
 mod worker;

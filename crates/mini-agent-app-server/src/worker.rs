@@ -644,6 +644,15 @@ pub(super) async fn worker_loop<M>(
         }
         if let Command::InstallRuntime { state } = command {
             runtime = Some(*state);
+            if let Some(runtime_state) = runtime.as_ref()
+                && let (Some(questions), Some(execution)) = (
+                    runtime_state.user_questions.as_ref(),
+                    runtime_state.management.execution_state(),
+                )
+                && let Some(interaction) = execution.pending_user_question
+            {
+                questions.restore_pending(interaction);
+            }
             if runtime
                 .as_ref()
                 .is_some_and(|state| state.goal_runtime_handle.plan_active())
@@ -1396,6 +1405,14 @@ pub(super) async fn worker_loop<M>(
                             .management
                             .execution_journal(thread.harness().messages())
                     });
+                    if let (Some(questions), Some(journal)) = (
+                        runtime
+                            .as_ref()
+                            .and_then(|state| state.user_questions.as_ref()),
+                        execution_journal.as_mut(),
+                    ) {
+                        questions.bind_journal(thread.id(), &turn_id, journal.clone());
+                    }
                     let heartbeat_task = execution_journal.clone().map(|mut journal| {
                         let turn_id = turn_id.clone();
                         let progress = execution_progress.clone();
@@ -2014,6 +2031,7 @@ pub(super) async fn worker_loop<M>(
                                             != mini_agent_capabilities::SessionExecutionStatus::Settled
                                     })
                                     .map(execution_recovery_info),
+                                pending_user_question: None,
                             })
                             .map_err(|error| AppServerError::Checkpoint(error.to_string()))
                     });

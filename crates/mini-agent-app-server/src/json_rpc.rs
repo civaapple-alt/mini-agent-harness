@@ -8,6 +8,7 @@ use super::ApprovalRequest;
 use super::RuntimeManagementService;
 use super::ThreadGoalRequestProcessor;
 use super::ThreadSettingsService;
+use super::UserQuestionBroker;
 use crate::action::ActionFailure;
 use crate::action::ActionResponse;
 use crate::goal_runtime::GoalRuntimeEvent;
@@ -75,6 +76,7 @@ mod world;
 
 pub use transport::{
     serve_stdio_with_approval_and_manifest, serve_stdio_with_startup_and_services,
+    serve_stdio_with_startup_and_user_questions,
 };
 
 /// Per-connection protocol state over one app-server backend.
@@ -88,6 +90,8 @@ pub struct AppServerConnection<M> {
     initialized: Arc<AtomicBool>,
     approval: ApprovalBroker,
     approval_enabled: bool,
+    user_questions: UserQuestionBroker,
+    user_questions_enabled: bool,
     capability_manifest: CapabilityManifest,
     runtime: Option<RuntimeServices<M>>,
 }
@@ -189,6 +193,8 @@ where
             initialized: Arc::new(AtomicBool::new(false)),
             approval,
             approval_enabled,
+            user_questions: UserQuestionBroker::new(),
+            user_questions_enabled: false,
             capability_manifest,
             runtime: None,
         }
@@ -198,6 +204,12 @@ where
     pub fn with_runtime_services(mut self, runtime: RuntimeServices<M>) -> Self {
         self.notifications = Some(runtime.notifications().subscribe());
         self.runtime = Some(runtime);
+        self
+    }
+
+    pub fn with_user_questions(mut self, broker: UserQuestionBroker, enabled: bool) -> Self {
+        self.user_questions = broker;
+        self.user_questions_enabled = enabled;
         self
     }
 
@@ -253,6 +265,9 @@ where
         }
         if request.method == METHOD_APPROVAL_RESPOND {
             return self.handle_approval_response(request).await;
+        }
+        if request.method == mini_agent_app_server_protocol::METHOD_USER_QUESTION_RESPOND {
+            return self.handle_user_question_response(request);
         }
 
         match request.method.as_str() {
@@ -396,6 +411,7 @@ where
                 session_fork: self.runtime.is_some() && self.server.supports_thread_factory(),
                 thread_read: true,
                 thread_close: true,
+                user_questions: self.user_questions_enabled,
                 thread_settings_update: self.runtime.is_some(),
                 turn_read: true,
                 thread_list: true,
@@ -430,6 +446,39 @@ where
 
     pub(super) fn initialized_flag(&self) -> Arc<AtomicBool> {
         self.initialized.clone()
+    }
+
+    pub(super) fn user_question_response_fast_path(
+        broker: &UserQuestionBroker,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        Self::handle_user_question_response_with_broker(broker, request)
+    }
+
+    fn handle_user_question_response(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        if !self.user_questions_enabled {
+            return response_error(request.id, JsonRpcError::method_not_found(request.method));
+        }
+        Self::handle_user_question_response_with_broker(&self.user_questions, request)
+    }
+
+    fn handle_user_question_response_with_broker(
+        broker: &UserQuestionBroker,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request
+            .decode_params::<mini_agent_app_server_protocol::UserQuestionRespondParams>()
+        {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        match broker.respond(params) {
+            Ok(interaction) => response_value(
+                request.id,
+                serde_json::json!({ "accepted": true, "interaction": interaction }),
+            ),
+            Err(error) => response_error(request.id, JsonRpcError::invalid_params(error)),
+        }
     }
 
     fn handle_approval_response_with_broker(

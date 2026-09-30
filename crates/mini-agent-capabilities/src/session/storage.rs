@@ -374,6 +374,37 @@ pub(super) fn load_records(
                     entry,
                 );
             }
+            Some("execution_user_question") if header_seen => {
+                let interaction: UserQuestionInteraction =
+                    serde_json::from_value(record.get("interaction").cloned().ok_or_else(
+                        || "user question record is missing interaction".to_string(),
+                    )?)
+                    .map_err(|error| format!("invalid user question interaction: {error}"))?;
+                if interaction.thread_id.as_str()
+                    != record
+                        .get("thread_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                    || interaction.turn_id.as_str()
+                        != record
+                            .get("turn_id")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                {
+                    return Err(SessionLoadError::invalid_record(
+                        "user question record identity does not match its interaction",
+                        Some(offset),
+                    ));
+                }
+                if execution_state
+                    .as_ref()
+                    .is_some_and(|state| state.checkpoint.turn_id == interaction.turn_id)
+                    && let Some(state) = execution_state.as_mut()
+                {
+                    state.pending_user_question = Some(interaction);
+                    state.last_progress_ms = Some(record_timestamp_ms);
+                }
+            }
             Some("recovery_gap") if header_seen => {
                 if recovery_gap.is_none() {
                     recovery_gap = Some(record.get("missing_seq").and_then(Value::as_u64));
@@ -454,6 +485,7 @@ pub(super) fn apply_execution_journal_entry(
                 last_progress_ms: Some(record_timestamp_ms),
                 reason: None,
                 pending_batch: None,
+                pending_user_question: None,
                 resume_requests: HashMap::new(),
             });
         }
@@ -509,6 +541,13 @@ pub(super) fn apply_execution_journal_entry(
             {
                 call.outcome = Some(outcome);
                 state.last_progress_ms = Some(record_timestamp_ms);
+                if state
+                    .pending_user_question
+                    .as_ref()
+                    .is_some_and(|interaction| interaction.call_id == call_id)
+                {
+                    state.pending_user_question = None;
+                }
             }
         }
         ExecutionJournalEntry::ToolBatchSettled { turn_id, step } => {

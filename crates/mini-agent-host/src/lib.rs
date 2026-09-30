@@ -16,6 +16,7 @@ mod runtime_composition;
 pub mod runtime_factory;
 mod tool_catalog;
 mod tool_orchestrator;
+mod user_questions;
 mod web_search;
 pub mod world;
 
@@ -68,5 +69,7 @@ pub use runtime_composition::WorkflowScope;
 pub use runtime_factory::HostRuntimeFactory;
 pub use tool_catalog::BuiltinToolSelection;
 pub use tool_orchestrator::ToolOrchestrator;
+pub use user_questions::AskUserTool;
+pub use user_questions::UserQuestionHandler;
 pub use web_search::{WebSearchSettingsStore, WebSearchSettingsView};
 pub use world::WorldState;

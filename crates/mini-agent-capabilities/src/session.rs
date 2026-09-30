@@ -8,7 +8,7 @@ use mini_agent_core::ExecutionToolCall;
 use mini_agent_core::SessionState;
 use mini_agent_protocol::{
     ChildTaskAttemptKind, ContextByteBreakdown, ContextInjectionRecord, Message, ModelSelection,
-    ModelUsage, ReasoningSelection, TurnId, TurnSource, TurnWorkflow,
+    ModelUsage, ReasoningSelection, TurnId, TurnSource, TurnWorkflow, UserQuestionInteraction,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -220,6 +220,8 @@ pub struct SessionExecutionState {
     pub last_progress_ms: Option<u64>,
     pub reason: Option<String>,
     pub pending_batch: Option<ExecutionToolBatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_user_question: Option<UserQuestionInteraction>,
     #[serde(default)]
     pub resume_requests: HashMap<String, u64>,
 }
@@ -3527,6 +3529,43 @@ impl ExecutionJournalSink for SessionExecutionJournal {
     }
 }
 
+impl SessionExecutionJournal {
+    pub fn execution_state(&self) -> Option<SessionExecutionState> {
+        self.execution_state.lock().unwrap().clone()
+    }
+
+    /// Durably records one ask_user interaction before the answer is acked.
+    pub fn persist_user_question(
+        &mut self,
+        interaction: &UserQuestionInteraction,
+    ) -> Result<u64, String> {
+        let writer = self.writer_state.lock().unwrap();
+        if interaction.thread_id.as_str() != self.thread_id {
+            return Err("user question belongs to another Thread".to_string());
+        }
+        if writer.turn_id.as_ref() != Some(&interaction.turn_id) {
+            return Err("user question belongs to another Turn".to_string());
+        }
+        let timestamp = timestamp_ms();
+        let mut record = json!({
+            "kind": "execution_user_question",
+            "thread_id": self.thread_id,
+            "session_id": self.session_id,
+            "timestamp_ms": timestamp,
+            "turn_id": interaction.turn_id.as_str(),
+            "interaction": interaction,
+        });
+        let seq = append_execution_record(&self.path, &self.append_lock, &mut record)?;
+        if let Some(state) = self.execution_state.lock().unwrap().as_mut()
+            && state.checkpoint.turn_id == interaction.turn_id
+        {
+            state.pending_user_question = Some(interaction.clone());
+            state.last_progress_ms = Some(timestamp);
+        }
+        Ok(seq)
+    }
+}
+
 fn execution_entry_turn_id(entry: &ExecutionJournalEntry) -> TurnId {
     match entry {
         ExecutionJournalEntry::Checkpoint { checkpoint } => checkpoint.turn_id.clone(),
@@ -3624,6 +3663,83 @@ mod tests {
             compacted: false,
             method: "exact".to_string(),
         }
+    }
+
+    #[test]
+    fn ask_user_answers_survive_session_reload() {
+        let root = crate::test_support::test_root();
+        let opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let thread_id = mini_agent_protocol::ThreadId::new(opened.store.thread_id());
+        let turn_id = TurnId::new("turn-questions");
+        let messages = vec![Message::User {
+            text: "Choose a plan".to_string(),
+        }];
+        let mut journal = opened.store.execution_journal(&messages);
+        journal
+            .append(ExecutionJournalEntry::Checkpoint {
+                checkpoint: ExecutionCheckpoint {
+                    turn_id: turn_id.clone(),
+                    input: TurnInput {
+                        mode: TurnInputMode::Start,
+                        text: "Choose a plan".to_string(),
+                        selected_skills: Vec::new(),
+                        workflow: None,
+                        model_selection: None,
+                        reasoning_selection: None,
+                        reasoning_effort: None,
+                    },
+                    messages,
+                    next_model_step: 1,
+                    final_text: String::new(),
+                    phase: ExecutionPhase::ModelRequest,
+                },
+            })
+            .unwrap();
+        let interaction = UserQuestionInteraction {
+            interaction_id: "uq-restored".to_string(),
+            thread_id,
+            turn_id,
+            call_id: "call-questions".to_string(),
+            questions: vec![
+                mini_agent_protocol::UserQuestion {
+                    id: "q1".to_string(),
+                    prompt: "Which plan?".to_string(),
+                    options: Vec::new(),
+                    allow_free_text: true,
+                    allow_skip: true,
+                },
+                mini_agent_protocol::UserQuestion {
+                    id: "q2".to_string(),
+                    prompt: "Any constraints?".to_string(),
+                    options: Vec::new(),
+                    allow_free_text: true,
+                    allow_skip: true,
+                },
+            ],
+            answers: vec![
+                Some(mini_agent_protocol::UserQuestionAnswer::Text {
+                    text: "simple".to_string(),
+                }),
+                None,
+            ],
+            current_index: 1,
+        };
+        journal.persist_user_question(&interaction).unwrap();
+        drop(journal);
+        drop(opened);
+
+        let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        assert_eq!(
+            resumed
+                .store
+                .execution_state()
+                .unwrap()
+                .pending_user_question,
+            Some(interaction),
+        );
+        drop(resumed);
+        crate::test_support::remove_test_root(&root);
     }
 
     #[test]

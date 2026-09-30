@@ -2,6 +2,7 @@ mod event;
 mod model;
 mod tool;
 mod turn;
+mod user_question;
 
 pub use event::Event;
 pub use event::EventEnvelope;
@@ -56,6 +57,11 @@ pub use turn::TurnSubmission;
 pub use turn::TurnWorkflow;
 pub use turn::TurnWorkflowKind;
 pub use turn::TurnWorkflowMode;
+pub use user_question::UserQuestion;
+pub use user_question::UserQuestionAnswer;
+pub use user_question::UserQuestionInteraction;
+pub use user_question::UserQuestionOption;
+pub use user_question::UserQuestionRequest;
 
 /// Returns a deterministic non-cryptographic digest for bounded diagnostics.
 ///

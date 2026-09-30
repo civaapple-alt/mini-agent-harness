@@ -2,7 +2,7 @@ use super::*;
 use crate::tests::{DoneModel, harness};
 use mini_agent_app_server_protocol::{
     ActionGrantScope, ApprovalDecision, CapabilityProviderSelection, ClientCapabilities,
-    SESSION_FORK_CONFLICT_CODE, TurnSource,
+    METHOD_USER_QUESTION_RESPOND, SESSION_FORK_CONFLICT_CODE, TurnSource,
 };
 use mini_agent_capabilities::{
     ApprovalController, ApprovalPolicy, BackgroundShellManager, ImageStore, ResultStore,
@@ -177,6 +177,99 @@ async fn exposes_empty_scheduled_task_list_and_capability() {
     assert_eq!(result["value"]["data"], serde_json::json!([]));
     connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn negotiates_user_questions_and_routes_scoped_answer_responses() {
+    use mini_agent_protocol::{UserQuestion, UserQuestionInteraction};
+
+    let broker = UserQuestionBroker::new();
+    broker.restore_pending(UserQuestionInteraction {
+        interaction_id: "uq-protocol".to_string(),
+        thread_id: ThreadId::new("thread-1"),
+        turn_id: mini_agent_protocol::TurnId::new("turn-1"),
+        call_id: "call-1".to_string(),
+        questions: vec![UserQuestion {
+            id: "q1".to_string(),
+            prompt: "Choose".to_string(),
+            options: vec![mini_agent_protocol::UserQuestionOption {
+                id: "q1-o1".to_string(),
+                label: "Recommended".to_string(),
+                description: None,
+                recommended: true,
+                recommendation_reason: Some("Fits the goal".to_string()),
+            }],
+            allow_free_text: true,
+            allow_skip: true,
+        }],
+        answers: vec![None],
+        current_index: 0,
+    });
+    let mut connection =
+        AppServerConnection::new(crate::tests::server(DoneModel)).with_user_questions(broker, true);
+    let mut initialize = initialize_request(1, "user-question-client");
+    initialize.params.as_mut().expect("initialize has params")["capabilities"]["userQuestions"] =
+        serde_json::json!(true);
+    let initialized = connection
+        .handle_request(initialize)
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(initialized["capabilities"]["userQuestions"], true);
+
+    let checkpoint = connection
+        .handle_request(JsonRpcRequest::request(
+            2,
+            METHOD_THREAD_READ,
+            serde_json::json!({ "threadId": "thread-1" }),
+        ))
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(
+        checkpoint["value"]["pendingUserQuestion"]["interactionId"],
+        "uq-protocol"
+    );
+
+    let answered = connection
+        .handle_request(JsonRpcRequest::request(
+            3,
+            METHOD_USER_QUESTION_RESPOND,
+            serde_json::json!({
+                "interactionId": "uq-protocol",
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "callId": "call-1",
+                "questionId": "q1",
+                "answer": { "type": "option", "optionId": "q1-o1" }
+            }),
+        ))
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(answered["accepted"], true);
+    assert_eq!(answered["interaction"]["currentIndex"], 1);
+
+    let stale = connection
+        .handle_request(JsonRpcRequest::request(
+            4,
+            METHOD_USER_QUESTION_RESPOND,
+            serde_json::json!({
+                "interactionId": "uq-protocol",
+                "threadId": "another-thread",
+                "turnId": "turn-1",
+                "callId": "call-1",
+                "questionId": "q1",
+                "answer": { "type": "option", "optionId": "q1-o1" }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(stale.error.is_some());
+    connection.shutdown().await.unwrap();
 }
 
 #[tokio::test]

@@ -58,6 +58,9 @@ pub const METHOD_THREAD_ITEMS_LIST: &str = "thread/items/list";
 pub const METHOD_APPROVAL_REQUEST: &str = "approval/request";
 pub const METHOD_APPROVAL_RESOLVED: &str = "approval/resolved";
 pub const METHOD_APPROVAL_RESPOND: &str = "approval/respond";
+pub const METHOD_USER_QUESTION_REQUEST: &str = "user-question/request";
+pub const METHOD_USER_QUESTION_UPDATED: &str = "user-question/updated";
+pub const METHOD_USER_QUESTION_RESPOND: &str = "user-question/respond";
 pub const METHOD_THREAD_GOAL_SET: &str = "thread/goal/set";
 pub const METHOD_THREAD_GOAL_GET: &str = "thread/goal/get";
 pub const METHOD_THREAD_GOAL_CLEAR: &str = "thread/goal/clear";
@@ -230,6 +233,7 @@ pub enum RuntimePhase {
     Model,
     Tool,
     WaitingApproval,
+    WaitingForUserInput,
     Stopping,
     Compaction,
     Persisting,
@@ -439,6 +443,8 @@ pub struct ClientCapabilities {
     pub approvals: bool,
     #[serde(default)]
     pub notifications: bool,
+    #[serde(default)]
+    pub user_questions: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -488,6 +494,8 @@ pub struct ServerCapabilities {
     pub thread_read: bool,
     #[serde(default)]
     pub thread_close: bool,
+    #[serde(default)]
+    pub user_questions: bool,
     #[serde(default)]
     pub thread_settings_update: bool,
     #[serde(default)]
@@ -1423,6 +1431,8 @@ pub struct ThreadReadResult {
     pub next_event_sequence: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_recovery: Option<ExecutionRecoveryInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_user_question: Option<UserQuestionInteraction>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -1689,6 +1699,38 @@ pub struct ApprovalRespondParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserQuestionRespondParams {
+    pub interaction_id: String,
+    pub thread_id: ThreadId,
+    pub turn_id: TurnId,
+    pub call_id: String,
+    pub question_id: String,
+    pub answer: mini_agent_protocol::UserQuestionAnswer,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserQuestionPhase {
+    Requested,
+    Updated,
+    Resolved,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserQuestionNotification {
+    pub phase: UserQuestionPhase,
+    pub interaction: mini_agent_protocol::UserQuestionInteraction,
+}
+
+pub use mini_agent_protocol::{
+    UserQuestion, UserQuestionAnswer, UserQuestionInteraction, UserQuestionOption,
+    UserQuestionRequest,
+};
 
 /// A server-to-client notification carrying an ordered core event.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

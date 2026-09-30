@@ -45,6 +45,7 @@ use mini_agent_protocol::TurnSubmission;
 use mini_agent_protocol::TurnWorkflow;
 use mini_agent_protocol::TurnWorkflowKind;
 use mini_agent_protocol::TurnWorkflowMode;
+use mini_agent_protocol::UserQuestionAnswer;
 use serde_json::Value;
 use serde_json::from_str;
 use serde_json::json;
@@ -58,6 +59,57 @@ use tokio::sync::Notify;
 use tokio::sync::oneshot;
 
 pub(crate) struct DoneModel;
+
+struct AskUserScenarioModel {
+    observed_answers: Arc<Mutex<Vec<String>>>,
+}
+
+impl Model for AskUserScenarioModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        let answer = request
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::Tool {
+                    name,
+                    content,
+                    is_error: false,
+                    ..
+                } if name == "ask_user" => Some(content.clone()),
+                _ => None,
+            });
+        if let Some(answer) = answer {
+            self.observed_answers.lock().unwrap().push(answer);
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "answer received".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "call-user-question".to_string(),
+                name: "ask_user".to_string(),
+                arguments: json!({"questions":[
+                    {"question":"Choose one","options":[{"label":"Recommended","recommended":true,"recommendationReason":"Matches the goal"}]},
+                    {"question":"Add context","options":[{"label":"Brief"}]},
+                    {"question":"Any final note?","allowFreeText":true,"allowSkip":true}
+                ]}),
+            }],
+            usage: None,
+        })
+    }
+}
 
 impl Model for DoneModel {
     type Error = Infallible;
@@ -640,6 +692,96 @@ async fn run_turn_to_finished<M: Model + Send + 'static>(
         received.push(events.recv().await.unwrap().event);
     }
     received
+}
+
+#[tokio::test]
+async fn bounded_harness_ask_user_scenario_returns_answer_to_next_model_request() {
+    let thread_id = ThreadId::new("ask-user-thread");
+    let broker = super::UserQuestionBroker::new();
+    let observed_answers = Arc::new(Mutex::new(Vec::new()));
+    let model = AskUserScenarioModel {
+        observed_answers: observed_answers.clone(),
+    };
+    let tool = mini_agent_host::AskUserTool::new(Arc::new(broker.clone()));
+    let executor = Arc::new(mini_agent_host::ToolOrchestrator::new(
+        mini_agent_capabilities::ApprovalController::new(
+            mini_agent_capabilities::ApprovalPolicy::Automatic,
+        ),
+    ));
+    let harness = Harness::new(
+        model,
+        ToolRouter::with_executor(vec![Box::new(tool)], executor),
+        HarnessConfig::default(),
+    );
+    let server = AppServer::new(
+        ThreadStart::new(thread_id.clone()),
+        Thread::new(ThreadId::new("initial"), harness),
+    );
+    let mut events = server.subscribe();
+    server
+        .turn_start_for(
+            thread_id.clone(),
+            TurnStart::new(TurnInput::new(TurnInputMode::Start, "Choose an approach")),
+        )
+        .await
+        .unwrap();
+
+    let interaction_result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if let Some(interaction) = broker.pending_for_thread(&thread_id) {
+                break interaction;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+    if interaction_result.is_err() {
+        let trace = std::iter::from_fn(|| events.try_recv().ok())
+            .map(|envelope| envelope.event)
+            .collect::<Vec<_>>();
+        panic!("ask_user did not request input; observed events: {trace:?}");
+    }
+    let mut interaction = interaction_result.unwrap();
+    let responses = [
+        UserQuestionAnswer::Option {
+            option_id: "q1-o1".to_string(),
+        },
+        UserQuestionAnswer::Text {
+            text: "Keep it concise".to_string(),
+        },
+        UserQuestionAnswer::Skipped,
+    ];
+    while !interaction.is_complete() {
+        let question = interaction.current_question().unwrap();
+        interaction = broker
+            .respond(mini_agent_app_server_protocol::UserQuestionRespondParams {
+                interaction_id: interaction.interaction_id.clone(),
+                thread_id: thread_id.clone(),
+                turn_id: interaction.turn_id.clone(),
+                call_id: interaction.call_id.clone(),
+                question_id: question.id.clone(),
+                answer: responses[interaction.current_index].clone(),
+            })
+            .unwrap();
+    }
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !matches!(
+            events.recv().await.unwrap().event,
+            Event::TurnFinished { .. }
+        ) {}
+    })
+    .await
+    .expect("turn should finish after the answer is submitted");
+    {
+        let answers = observed_answers.lock().unwrap();
+        assert_eq!(answers.len(), 1);
+        assert!(answers[0].contains("\"optionId\":\"q1-o1\""));
+        assert!(answers[0].contains("\"answerLabel\":\"Recommended\""));
+        assert!(answers[0].contains("\"answerLabel\":\"Keep it concise\""));
+        assert!(answers[0].contains("\"answerLabel\":\"已跳过\""));
+    }
+    server.shutdown().await.unwrap();
 }
 
 #[tokio::test]

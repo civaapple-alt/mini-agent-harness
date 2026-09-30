@@ -79,6 +79,35 @@ input, cached-input, and output token count for that request. Clients preserve
 missing usage as unknown; category token counts derived from bytes are
 estimates, and cached tokens are not attributed to individual sources.
 
+## Interactive user questions
+
+Clients that can collect answers set `capabilities.userQuestions` during
+`initialize`. The server advertises the negotiated capability in its response;
+the Host exposes the bounded `ask_user` tool only for that client. Other
+clients continue to receive the normal tool catalog without it. One call may
+ask up to three sequential questions, each with up to six single-choice
+options, optional free text, and optional skip. At most one option per question
+can be marked `recommended`; its short reason is displayed alongside the
+option, but the client never selects or submits it on the user's behalf.
+
+`user-question/request` starts a question interaction, and
+`user-question/updated` carries each accepted answer, the next question, the
+completed batch, or cancellation. Both notifications are scoped by
+`interactionId`, `threadId`, `turnId`, and `callId`. The client submits one
+answer at a time through `user-question/respond`, including the same identity
+and current `questionId`. The App Server validates the active interaction and
+answer shape. Repeating an already accepted answer is idempotent; a different
+answer, an out-of-order question, or an expired interaction is rejected.
+
+While the Host tool waits, `runtime/status` reports
+`phase=waiting_for_user_input`. `thread/read` includes the current pending
+interaction for clients that negotiated the feature, so a refreshed client can
+restore the active question. Session execution records persist each question
+batch and accepted answer before acknowledging it. Recovery reuses saved answers
+and re-presents only unanswered questions. The completed `ask_user` tool result
+then enters the next model request through the ordinary Core tool-result path;
+the Core loop has no question-specific control flow.
+
 The main execution path is `Core → Host → App Server`: Core owns the turn loop
 and records the tool outcome, Host owns admission, approval, concrete execution,
 and typed outcome propagation, and App Server serializes the settled event and
