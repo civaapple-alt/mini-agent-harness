@@ -5,6 +5,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+- Let explicit `turn/resume` continue a StepLimit checkpoint in one additional
+  bounded step slice, and allow idempotent Session resume settlement while the
+  resumed Turn is active.
 - Add one bounded `web_search` tool backed by DeepSeek native search, Exa, or
   Kimi Basic. Store search keys separately from model credentials, expose
   write-only Host settings over App Server RPC, and reuse `web_fetch` with

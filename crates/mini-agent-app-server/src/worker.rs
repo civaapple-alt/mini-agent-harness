@@ -1166,7 +1166,17 @@ pub(super) async fn worker_loop<M>(
                             turn_config.max_steps = goal.milestone_step_budget;
                         }
                     }
-                    if is_child_task || goal_state.is_some() {
+                    if let Some((checkpoint, _)) = execution_resume.as_ref()
+                        && turn_config.max_steps != 0
+                        && checkpoint.next_model_step > turn_config.max_steps
+                    {
+                        // An explicit continuation after StepLimit starts one new
+                        // bounded slice at the checkpoint's next model step.
+                        turn_config.max_steps = checkpoint
+                            .next_model_step
+                            .saturating_add(turn_config.max_steps.saturating_sub(1));
+                    }
+                    if is_child_task || goal_state.is_some() || execution_resume.is_some() {
                         thread.harness_mut().replace_config(turn_config);
                     }
                     let workflow = input.workflow.clone();

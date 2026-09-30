@@ -589,6 +589,7 @@ enum ScenarioModel {
     ShellApproval,
     BackgroundShell,
     StepLimit,
+    ResumeAfterStepLimit(Arc<AtomicUsize>),
     Budget,
     Counting(Arc<AtomicUsize>),
     Timeout(Arc<tokio::sync::Notify>),
@@ -701,6 +702,28 @@ impl Model for ScenarioModel {
                 }],
                 usage: None,
             }),
+            Self::ResumeAfterStepLimit(calls) => {
+                let step = calls.fetch_add(1, Ordering::SeqCst);
+                if step < 8 {
+                    Ok(ModelResponse {
+                        reasoning: String::new(),
+                        text: String::new(),
+                        tool_calls: vec![ToolCall {
+                            id: format!("step-limit-call-{step}"),
+                            name: "missing_tool".to_string(),
+                            arguments: serde_json::json!({}),
+                        }],
+                        usage: None,
+                    })
+                } else {
+                    Ok(ModelResponse {
+                        reasoning: String::new(),
+                        text: "continued after the manual step limit".to_string(),
+                        tool_calls: Vec::new(),
+                        usage: None,
+                    })
+                }
+            }
             Self::Budget => Ok(ModelResponse {
                 reasoning: String::new(),
                 text: "budget reached".to_string(),
@@ -2132,6 +2155,151 @@ async fn turn_resume_continues_the_same_turn_from_a_persisted_execution_checkpoi
     assert_eq!(result["value"]["finalText"], "done");
     assert_eq!(result["value"]["recovery"]["status"], "settled");
 
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn turn_resume_after_step_limit_gets_another_bounded_step_slice() {
+    let root = rpc_root("step-limit-resume-slice");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let thread_id = opened.store.thread_id().to_string();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut connection = managed_connection_with_session(
+        ScenarioModel::ResumeAfterStepLimit(calls.clone()),
+        root.clone(),
+        opened,
+    );
+    initialize_connection(&mut connection, "step-limit-resume-slice-test").await;
+
+    let start = rpc_result(
+        &mut connection,
+        session_turn_start_request(2, &thread_id, "continue within bounded slices", None),
+    )
+    .await;
+    assert_eq!(start["value"]["status"], "started");
+    let turn_id = start["value"]["turn_id"].as_str().unwrap().to_string();
+    wait_for_turn_finished(&mut connection).await;
+    assert_eq!(calls.load(Ordering::SeqCst), 8);
+
+    let checkpoint = rpc_call(
+        &mut connection,
+        3,
+        METHOD_THREAD_READ,
+        serde_json::json!({"threadId": thread_id}),
+    )
+    .await;
+    let recovery = &checkpoint["value"]["executionRecovery"];
+    assert_eq!(recovery["status"], "waiting_for_continue");
+    let checkpoint_seq = recovery["checkpointSeq"].as_u64().unwrap();
+    let resumed = rpc_call(
+        &mut connection,
+        4,
+        METHOD_TURN_RESUME,
+        serde_json::json!({
+            "threadId": thread_id,
+            "turnId": turn_id,
+            "checkpointSeq": checkpoint_seq,
+            "requestId": "step-limit-resume-slice-1",
+        }),
+    )
+    .await;
+    assert_eq!(resumed["value"]["status"], "started");
+    wait_for_turn_finished(&mut connection).await;
+
+    let result = rpc_call(
+        &mut connection,
+        5,
+        METHOD_TURN_READ,
+        serde_json::json!({"turnId": turn_id}),
+    )
+    .await;
+    assert_eq!(result["value"]["status"], "completed");
+    assert_eq!(
+        result["value"]["finalText"],
+        "continued after the manual step limit"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 9);
+
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn resume_settlement_is_idempotent_while_the_resumed_turn_is_active() {
+    let root = rpc_root("session-resume-settled-active");
+    let mut opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let thread_id = opened.store.thread_id().to_string();
+    opened
+        .store
+        .transition_session_control(
+            mini_agent_capabilities::SessionControlAction::Freeze,
+            "freeze-before-resume",
+        )
+        .unwrap();
+    opened
+        .store
+        .transition_session_control(
+            mini_agent_capabilities::SessionControlAction::FreezeSettled,
+            "freeze-before-resume",
+        )
+        .unwrap();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let mut connection = managed_connection_with_session(
+        ScenarioModel::Timeout(release.clone()),
+        root.clone(),
+        opened,
+    );
+    initialize_connection(&mut connection, "session-resume-settled-active-test").await;
+
+    let resuming = rpc_call(
+        &mut connection,
+        2,
+        METHOD_SESSION_CONTROL,
+        serde_json::json!({
+            "threadId": thread_id,
+            "action": "resume",
+            "requestId": "active-resume-1",
+        }),
+    )
+    .await;
+    assert_eq!(resuming["value"]["status"], "resuming");
+
+    let started = rpc_result(
+        &mut connection,
+        session_turn_start_request(
+            3,
+            &thread_id,
+            "hold the resumed turn active",
+            Some(TurnSource::SessionResume),
+        ),
+    )
+    .await;
+    assert_eq!(started["value"]["status"], "started");
+    loop {
+        if matches!(
+            next_turn_event(&mut connection).await.event,
+            mini_agent_protocol::Event::TurnStarted { .. }
+        ) {
+            break;
+        }
+    }
+
+    let settled = rpc_call(
+        &mut connection,
+        4,
+        METHOD_SESSION_CONTROL,
+        serde_json::json!({
+            "threadId": thread_id,
+            "action": "resume_settled",
+            "requestId": "active-resume-1",
+        }),
+    )
+    .await;
+    assert_eq!(settled["value"]["status"], "running");
+
+    release.notify_one();
+    wait_for_turn_finished(&mut connection).await;
     connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }

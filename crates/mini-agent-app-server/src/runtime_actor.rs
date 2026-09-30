@@ -1074,7 +1074,11 @@ fn is_safe_mutation_while_running(command: &RuntimeCommand) -> bool {
     ) || matches!(
         command,
         RuntimeCommand::SessionControl { params, .. }
-            if params.action == mini_agent_app_server_protocol::SessionControlAction::Freeze
+            if matches!(
+                params.action,
+                mini_agent_app_server_protocol::SessionControlAction::Freeze
+                    | mini_agent_app_server_protocol::SessionControlAction::ResumeSettled
+            )
     )
 }
 

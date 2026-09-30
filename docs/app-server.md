@@ -291,7 +291,7 @@ Thread returned by `thread/start`.
 | `thread/items/list` | `threadId`; optional `turnId`, `cursor`, `limit`, `sortDirection` | Returns cursor-bounded `data` entries, `nextCursor`, and `backwardsCursor`. |
 | `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
 | `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`), `operationId`, `operationAttempt`, `operationPrompt`, `operationGroupId`, `executionMode`, `groupSequence` | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. Fork metadata is a bounded operation projection only; it does not make Core a scheduler. |
-| `session/control` | `threadId`, `action` (`read`, `freeze`, `freeze_settled`, `resume`, `resume_settled`); state changes require a bounded `requestId` | Reads or transitions the durable Session-control state (`running`, `freezing`, `frozen`, `resuming`). Freeze intent is persisted before the Gateway interrupts the parent and active children. Only the matching request may settle a freeze or resume. |
+| `session/control` | `threadId`, `action` (`read`, `freeze`, `freeze_settled`, `resume`, `resume_settled`); state changes require a bounded `requestId` | Reads or transitions the durable Session-control state (`running`, `freezing`, `frozen`, `resuming`). Freeze intent is persisted before the Gateway interrupts the parent and active children. Only the matching request may settle a freeze or resume; repeating `resume_settled` is idempotent and remains safe while its resumed Turn is active. |
 | `child/task` | `threadId`, `parentThreadId`, `operationId`, `attempt`, `action`; action-specific bounded report, prompt, report/request identity, and for pause/active cancellation the `turnId` | Persists a validated child report or operation control. Queued updates and cancellation, follow-up, pause/resume, active cancellation, retry, and start-failure actions validate parent lineage and operation attempt. `queue_follow_up` is idempotent by `requestId`, allows one pending instruction, and allocates the next attempt on success. |
 | `session/notebook/read` | `threadId`, optional `scope` (`self` or `parent`) | Reads the current Session notebook or a Host-validated parent snapshot. Parent scope is read-only and cannot select an arbitrary Session or path. |
 | `session/notebook/write` | `threadId`, `key`, `content`, optional `append`, `importance` (`critical`, `high`, `normal`, `temporary`), `keywords`, and bounded `evidence` | Upserts the current Session's bounded Notebook entry and returns the new snapshot. Evidence is bounded caller-supplied provenance metadata; subject normalization and truncation are applied, but Git/file-system verification is not claimed. |
@@ -410,7 +410,9 @@ recorded outcomes can continue without rerunning those calls. `turn/read`
 returns bounded status, phase, heartbeat and progress timestamps, checkpoint
 sequence, and recovery reason. `turn/resume` requires the current Turn ID and
 checkpoint sequence, then continues that same Turn without creating a new Turn
-or child operation attempt. While an execution checkpoint is waiting or needs
+or child operation attempt. Resuming an exhausted `max_steps` checkpoint grants
+one additional bounded `max_steps` slice; it does not remove the per-slice
+limit. While an execution checkpoint is waiting or needs
 reconciliation, `turn/start` returns `not_submitted` and preserves that
 checkpoint. The caller must resume or reconcile it before starting another Turn.
 The App Server records an executor heartbeat every 10 seconds. The Responses
