@@ -388,10 +388,22 @@ async fn fetch_admitted(url: Url, class: TargetClass) -> Result<FetchedPage, Fet
         .host_str()
         .ok_or_else(|| ToolError("url is missing a host".to_string()))?
         .to_string();
-    let endpoint = resolve_checked_endpoint(&origin_host, url.port_or_known_default(), class)
-        .map_err(FetchError::from)?;
-    let client = reqwest::Client::builder()
-        .resolve(&origin_host, endpoint)
+    let proxy_environment = ProxyEnvironment::from_process();
+    let endpoint = resolve_checked_endpoint(
+        &origin_host,
+        url.port_or_known_default(),
+        class,
+        proxy_environment.configured_for(&url),
+    )
+    .map_err(FetchError::from)?;
+    let mut client_builder = reqwest::Client::builder();
+    if class == TargetClass::Loopback {
+        client_builder = client_builder.no_proxy();
+    }
+    if let EndpointResolution::Pinned(address) = endpoint {
+        client_builder = client_builder.resolve(&origin_host, address);
+    }
+    let client = client_builder
         .redirect(reqwest::redirect::Policy::custom({
             let origin_host = origin_host.clone();
             move |attempt| {
@@ -466,13 +478,114 @@ fn resolve_checked_endpoint(
     host: &str,
     port: Option<u16>,
     expected_class: TargetClass,
-) -> Result<SocketAddr, ToolError> {
+    proxy_configured: bool,
+) -> Result<EndpointResolution, ToolError> {
     let port = port.ok_or_else(|| ToolError("url is missing a port".to_string()))?;
     let addresses = (host, port)
         .to_socket_addrs()
         .map_err(|error| ToolError(format!("cannot resolve host {host}: {error}")))?
         .collect::<Vec<_>>();
-    validate_resolved_addresses(host, expected_class, &addresses)
+    checked_endpoint(host, expected_class, &addresses, proxy_configured)
+}
+
+fn checked_endpoint(
+    host: &str,
+    expected_class: TargetClass,
+    addresses: &[SocketAddr],
+    proxy_configured: bool,
+) -> Result<EndpointResolution, ToolError> {
+    if expected_class == TargetClass::Public
+        && proxy_configured
+        && !addresses.is_empty()
+        && addresses
+            .iter()
+            .all(|address| is_clash_fake_ip(address.ip()))
+    {
+        return Ok(EndpointResolution::ProxyResolvesOrigin);
+    }
+    validate_resolved_addresses(host, expected_class, addresses).map(EndpointResolution::Pinned)
+}
+
+enum EndpointResolution {
+    Pinned(SocketAddr),
+    ProxyResolvesOrigin,
+}
+
+fn is_clash_fake_ip(ip: IpAddr) -> bool {
+    matches!(ip, IpAddr::V4(address) if address.octets()[0] == 198 && matches!(address.octets()[1], 18 | 19))
+}
+
+struct ProxyEnvironment {
+    all: Option<String>,
+    http: Option<String>,
+    https: Option<String>,
+    no_proxy: Option<String>,
+    cgi: bool,
+}
+
+impl ProxyEnvironment {
+    fn from_process() -> Self {
+        let env_value = |upper, lower| std::env::var(upper).or_else(|_| std::env::var(lower)).ok();
+        Self {
+            all: env_value("ALL_PROXY", "all_proxy"),
+            http: env_value("HTTP_PROXY", "http_proxy"),
+            https: env_value("HTTPS_PROXY", "https_proxy"),
+            no_proxy: env_value("NO_PROXY", "no_proxy"),
+            cgi: std::env::var_os("REQUEST_METHOD").is_some(),
+        }
+    }
+
+    fn configured_for(&self, url: &Url) -> bool {
+        let Some(host) = url.host_str() else {
+            return false;
+        };
+        if self.cgi
+            || self
+                .no_proxy
+                .as_deref()
+                .is_some_and(|list| no_proxy_contains(list, host))
+        {
+            return false;
+        }
+        let specific = match url.scheme() {
+            "http" => self.http.as_deref(),
+            "https" => self.https.as_deref(),
+            _ => None,
+        };
+        specific
+            .filter(|proxy| valid_proxy_url(proxy))
+            .or_else(|| self.all.as_deref().filter(|proxy| valid_proxy_url(proxy)))
+            .is_some()
+    }
+}
+
+fn no_proxy_contains(list: &str, host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    list.split(',').map(str::trim).any(|entry| {
+        if entry == "*" {
+            return true;
+        }
+        let domain = entry.trim_start_matches('.').trim_end_matches('.');
+        host.eq_ignore_ascii_case(domain)
+            || host
+                .strip_suffix(domain)
+                .is_some_and(|prefix| prefix.ends_with('.'))
+    })
+}
+
+fn valid_proxy_url(proxy: &str) -> bool {
+    let proxy = if proxy.contains("://") {
+        proxy.to_string()
+    } else {
+        format!("http://{proxy}")
+    };
+    Url::parse(&proxy).is_ok_and(|url| {
+        url.host_str().is_some()
+            && matches!(
+                url.scheme(),
+                "http" | "https" | "socks4" | "socks4a" | "socks5" | "socks5h"
+            )
+    })
 }
 
 fn validate_resolved_addresses(
@@ -875,6 +988,7 @@ mod tests {
         let private = SocketAddr::from(([192, 168, 1, 5], 443));
         let loopback = SocketAddr::from(([127, 0, 0, 1], 3000));
         let metadata = SocketAddr::from(([169, 254, 169, 254], 80));
+        let clash_fake = SocketAddr::from(([198, 18, 1, 196], 443));
 
         assert_eq!(
             validate_resolved_addresses("example.com", TargetClass::Public, &[public]).unwrap(),
@@ -894,6 +1008,69 @@ mod tests {
             validate_resolved_addresses("app.example.com", TargetClass::Loopback, &[loopback])
                 .is_ok()
         );
+        assert!(matches!(
+            checked_endpoint("example.com", TargetClass::Public, &[clash_fake], true).unwrap(),
+            EndpointResolution::ProxyResolvesOrigin
+        ));
+        assert!(
+            checked_endpoint("example.com", TargetClass::Public, &[clash_fake], false).is_err()
+        );
+        assert!(checked_endpoint("example.com", TargetClass::Public, &[private], true).is_err());
+        assert!(
+            checked_endpoint(
+                "example.com",
+                TargetClass::Public,
+                &[clash_fake, public],
+                true
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn proxy_detection_respects_scheme_precedence_and_no_proxy() {
+        let url = Url::parse("https://typesafe.ai/article").unwrap();
+        let configured = ProxyEnvironment {
+            all: Some("socks5://127.0.0.1:7890".to_string()),
+            http: Some("http://127.0.0.1:7890".to_string()),
+            https: Some("http://127.0.0.1:7890".to_string()),
+            no_proxy: None,
+            cgi: false,
+        };
+        assert!(configured.configured_for(&url));
+
+        let all_proxy_only = ProxyEnvironment {
+            all: Some("socks5://127.0.0.1:7890".to_string()),
+            http: None,
+            https: None,
+            no_proxy: None,
+            cgi: false,
+        };
+        assert!(all_proxy_only.configured_for(&url));
+
+        let excluded = ProxyEnvironment {
+            no_proxy: Some("typesafe.ai,.private.example".to_string()),
+            ..configured
+        };
+        assert!(!excluded.configured_for(&url));
+        assert!(no_proxy_contains(".example.com", "docs.example.com"));
+        assert!(!no_proxy_contains("example.com", "notexample.com"));
+        assert!(no_proxy_contains("*", "typesafe.ai"));
+
+        let invalid = ProxyEnvironment {
+            all: Some("file:///tmp/proxy".to_string()),
+            http: None,
+            https: None,
+            no_proxy: None,
+            cgi: false,
+        };
+        assert!(!invalid.configured_for(&url));
+
+        let cgi = ProxyEnvironment {
+            cgi: true,
+            ..all_proxy_only
+        };
+        assert!(!cgi.configured_for(&url));
     }
 
     #[test]

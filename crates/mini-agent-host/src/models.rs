@@ -1419,7 +1419,12 @@ mod tests {
         let request_body = request.split_once("\r\n\r\n").unwrap().1;
 
         assert!(request.starts_with("POST /v1/responses HTTP/1.1"));
-        assert!(request.contains("authorization: Bearer test-secret-key"));
+        assert!(request.lines().any(|line| {
+            line.split_once(':').is_some_and(|(name, value)| {
+                name.eq_ignore_ascii_case("authorization")
+                    && value.trim() == "Bearer test-secret-key"
+            })
+        }));
         assert!(!request_body.contains("test-secret-key"));
         let payload: serde_json::Value = serde_json::from_str(request_body).unwrap();
         assert_eq!(payload["model"], "deepseek-test");

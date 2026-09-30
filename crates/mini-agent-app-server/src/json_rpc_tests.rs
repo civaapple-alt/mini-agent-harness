@@ -14,11 +14,13 @@ use mini_agent_capabilities::{
 use mini_agent_core::{ExecutionJournalSink, Harness, HarnessConfig, Thread, ToolRouter};
 use mini_agent_protocol::{
     Message, Model, ModelEventSink, ModelRequest, ModelResponse, ModelUsage, ThreadId, ThreadStart,
-    ToolApprovalRequest, ToolCall, ToolExecutionStatus, TurnInput,
+    ToolApprovalRequest, ToolCall, ToolError, ToolExecutionStatus, ToolHandler, ToolRuntime,
+    ToolSpec, TurnInput,
 };
+use serde_json::Value;
 use std::convert::Infallible;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
@@ -513,6 +515,76 @@ fn rpc_root(name: &str) -> std::path::PathBuf {
     root
 }
 
+struct WebFetchFixtureTool {
+    executed: Arc<AtomicBool>,
+}
+
+impl ToolHandler for WebFetchFixtureTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "web_fetch".to_string(),
+            description: "Fetch the scenario fixture page.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+                "additionalProperties": false
+            }),
+        }
+    }
+}
+
+impl ToolRuntime for WebFetchFixtureTool {
+    fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
+        self.executed.store(true, Ordering::SeqCst);
+        Ok("fixture page body".to_string())
+    }
+}
+
+struct WebFetchVisibilityModel {
+    tool_executed: Arc<AtomicBool>,
+}
+
+impl Model for WebFetchVisibilityModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        assert!(request.tools.iter().any(|tool| tool.name == "web_fetch"));
+        if self.tool_executed.load(Ordering::SeqCst) {
+            assert!(request.messages.iter().any(|message| {
+                matches!(
+                    message,
+                    Message::Tool {
+                        name,
+                        outcome: Some(ToolExecutionStatus::Completed),
+                        ..
+                    } if name == "web_fetch"
+                )
+            }));
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "fixture page was read".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "web-fetch-visibility-call".to_string(),
+                name: "web_fetch".to_string(),
+                arguments: serde_json::json!({"url": "https://example.com/article"}),
+            }],
+            usage: None,
+        })
+    }
+}
+
 enum ScenarioModel {
     ShellApproval,
     BackgroundShell,
@@ -701,9 +773,24 @@ fn managed_connection_at<M: Model + Send + 'static>(
     root: std::path::PathBuf,
     goal_limits: crate::goal_service::GoalLimits,
 ) -> (AppServerConnection<M>, std::path::PathBuf) {
+    let server = crate::tests::server(model);
+    let connection = managed_connection_at_with_server(
+        server,
+        root.clone(),
+        goal_limits,
+        mini_agent_host::BuiltinToolSelection::default(),
+    );
+    (connection, root)
+}
+
+fn managed_connection_at_with_server<M: Model + Send + 'static>(
+    server: AppServer<M>,
+    root: std::path::PathBuf,
+    goal_limits: crate::goal_service::GoalLimits,
+    initial_builtin_tools: mini_agent_host::BuiltinToolSelection,
+) -> AppServerConnection<M> {
     let thread_settings = ThreadSettingsService::new();
     let goals = ThreadGoalRequestProcessor::new(root.clone(), goal_limits);
-    let server = crate::tests::server(model);
     let management = RuntimeManagementService::new(
         server.clone(),
         None,
@@ -718,13 +805,10 @@ fn managed_connection_at<M: Model + Send + 'static>(
         0,
         Vec::new(),
         ApprovalController::with_preset(ApprovalPolicy::Automatic, Default::default()),
-    );
-    (
-        AppServerConnection::new(server).with_runtime_services(
-            RuntimeServices::new(management, thread_settings, goals).unwrap(),
-        ),
-        root,
     )
+    .with_initial_builtin_tools(initial_builtin_tools);
+    AppServerConnection::new(server)
+        .with_runtime_services(RuntimeServices::new(management, thread_settings, goals).unwrap())
 }
 
 fn managed_connection_with_session<M: Model + Send + 'static>(
@@ -1037,6 +1121,56 @@ async fn broadcasts_thread_settings_updates_with_action_revision() {
         observer_notification.params.unwrap()["stateRevision"],
         response_revision
     );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn search_enabled_fetch_selection_is_reported_and_model_visible() {
+    let root = rpc_root("search-enabled-fetch-selection");
+    let executed = Arc::new(AtomicBool::new(false));
+    let selection = mini_agent_host::BuiltinToolSelection::all();
+    let mut harness = crate::tests::harness(WebFetchVisibilityModel {
+        tool_executed: executed.clone(),
+    });
+    harness.extend_tools(vec![Box::new(WebFetchFixtureTool {
+        executed: executed.clone(),
+    })]);
+    harness.set_hidden_tools(selection.hidden_names());
+    let thread_id = ThreadId::new("thread-1");
+    let server = AppServer::new(
+        ThreadStart::new(thread_id.clone()),
+        Thread::new(thread_id, harness),
+    );
+    let mut connection = managed_connection_at_with_server(
+        server,
+        root.clone(),
+        crate::goal_service::GoalLimits::default(),
+        selection,
+    );
+    initialize_connection(&mut connection, "search-enabled-fetch-test").await;
+
+    let settings = rpc_call(
+        &mut connection,
+        2,
+        METHOD_THREAD_SETTINGS_UPDATE,
+        serde_json::json!({
+            "threadId": "thread-1",
+            "collaborationMode": {"mode": "default"}
+        }),
+    )
+    .await;
+    assert!(
+        settings["value"]["builtinTools"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::String("web_fetch".to_string()))
+    );
+
+    let _ = start_turn(&mut connection, 3, "Read the page").await;
+    wait_for_turn_finished(&mut connection).await;
+    assert!(executed.load(Ordering::SeqCst));
+
+    connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 

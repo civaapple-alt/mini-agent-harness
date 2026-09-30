@@ -84,6 +84,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .build(composition, results)?;
         let mini_agent_host::HarnessBuild {
             harness,
+            builtin_tools,
             images,
             world,
             enabled_mcp_servers,
@@ -218,7 +219,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 background_shells,
                 scheduled_tasks,
             )
-            .with_skill_discovery_refresh(skill_discovery_refresh, skill_read_roots);
+            .with_skill_discovery_refresh(skill_discovery_refresh, skill_read_roots)
+            .with_initial_builtin_tools(builtin_tools);
         let thread_settings = mini_agent_app_server::ThreadSettingsService::new()
             .with_stable_system_prompt(stable_system_prompt);
         let goals = mini_agent_app_server::ThreadGoalRequestProcessor::new(

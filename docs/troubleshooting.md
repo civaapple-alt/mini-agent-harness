@@ -152,6 +152,13 @@ while an existing file outside those roots requires Host admission. Pass its `ne
 is the preferred multi-file mutation path and validates all affected files before writing. There is no screenshot, vision,
 or headless-browser tool.
 
+`web_fetch` uses the App Server process environment for `HTTP_PROXY`, `HTTPS_PROXY`, or
+`ALL_PROXY`, including lowercase names and SOCKS proxy URLs. It honors `NO_PROXY` and always sends
+loopback URLs directly. If Clash resolves a public hostname to a `198.18.0.0/15` fake-IP, Host uses
+the configured proxy to resolve that hostname. It still rejects private, loopback, mixed-class, or
+metadata DNS results. Start or restart Gateway from a shell that has the proxy variables set so
+its App Server process inherits them.
+
 ## Image understanding
 
 `read_image` is for existing PNG/JPEG/GIF/WebP files (screenshots, diagrams, UI captures). Pass a

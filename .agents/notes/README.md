@@ -11,6 +11,7 @@
 当前相关决策：
 
 - [Core + Protocol 预算与 Release 增量参考值](implemented/process/2026-09-30-core-protocol-budget-and-delta-guidance.zh.md)
+- [Web Fetch 本地代理与搜索工具可见状态](implemented/process/2026-09-30-web-fetch-proxy-and-tool-selection.zh.md)
 - [Web Studio 上下文占比与缓存命中率呈现](implemented/process/2026-09-30-context-usage-visualization.zh.md)
 - [Web Studio 会话上下文可视化与缓存友好注入](implemented/process/2026-09-30-web-studio-session-context-visibility.zh.md)
 - [Web Studio 恢复请求断开后的会话接管](implemented/process/2026-09-30-web-studio-session-resume-recovery.zh.md)

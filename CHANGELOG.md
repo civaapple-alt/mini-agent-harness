@@ -9,6 +9,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   Kimi Basic. Store search keys separately from model credentials, expose
   write-only Host settings over App Server RPC, and reuse `web_fetch` with
   Session-backed continuation for long pages.
+- Honor environment HTTP, HTTPS, and SOCKS proxies for `web_fetch`. Preserve
+  DNS pinning for direct requests and pass Clash fake-IP hostnames to the
+  configured proxy. Report Host's initial tool selection to clients so Studio
+  reflects the actual model-visible `web_fetch` capability.
 - Replace model-level Responses search flags with the selected Host search
   provider; keep `web_fetch` URL validation and public-URL approval in Host.
 

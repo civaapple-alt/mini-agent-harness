@@ -107,6 +107,7 @@ pub struct RuntimeManagementService<M> {
     pub(crate) server: AppServer<M>,
     client: RuntimeCommandClient,
     state: Option<RuntimeManagementState>,
+    initial_builtin_tools: mini_agent_host::BuiltinToolSelection,
     approval: ApprovalController,
     goal_notifications: broadcast::Sender<GoalRuntimeEvent>,
     settings_notifications: broadcast::Sender<SettingsRuntimeEvent>,
@@ -121,6 +122,7 @@ impl<M> Clone for RuntimeManagementService<M> {
             server: self.server.clone(),
             client: self.client.clone(),
             state: None,
+            initial_builtin_tools: self.initial_builtin_tools.clone(),
             approval: self.approval.clone(),
             goal_notifications: self.goal_notifications.clone(),
             settings_notifications: self.settings_notifications.clone(),
@@ -273,6 +275,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 background_shells,
                 scheduled_tasks,
             }),
+            initial_builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
             approval,
             goal_notifications,
             settings_notifications,
@@ -293,6 +296,14 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
         self
     }
 
+    pub fn with_initial_builtin_tools(
+        mut self,
+        builtin_tools: mini_agent_host::BuiltinToolSelection,
+    ) -> Self {
+        self.initial_builtin_tools = builtin_tools;
+        self
+    }
+
     pub(crate) fn bind_thread_services(
         self,
         settings: ThreadSettingsService,
@@ -302,6 +313,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             server,
             client,
             state,
+            initial_builtin_tools,
             approval,
             goal_notifications,
             settings_notifications,
@@ -355,7 +367,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 goal_runtime_handle: goal_service,
                 commands,
                 approval: approval.clone(),
-                builtin_tools: mini_agent_host::BuiltinToolSelection::default(),
+                builtin_tools: initial_builtin_tools.clone(),
                 continuation_mode,
                 model_selection: persisted_model_settings.selection,
                 reasoning_selection: persisted_model_settings.reasoning_selection,
@@ -376,6 +388,7 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 server,
                 client,
                 state: None,
+                initial_builtin_tools,
                 approval,
                 goal_notifications,
                 settings_notifications,

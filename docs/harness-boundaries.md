@@ -183,11 +183,12 @@ creates an independent Session and owns its approval, path, and operation
 state. A future general-purpose scheduler still requires a separate ownership
 and evidence decision.
 
-`web_fetch` 在 DNS 解析后固定 origin endpoint，并要求所有解析地址与已准入的
-public/loopback class 一致；redirect 只能留在同一 host 和同一 class。Interactive
-策略会为公共 URL 请求 Host approval；Automatic 和 Trusted 在 URL 校验通过后自动准入。
-Loopback 是显式本地允许目标；resolver 不能把公共域名转成 loopback、私网或 cloud
-metadata 地址。
+`web_fetch` 对直连请求在 DNS 解析后固定 origin endpoint，并要求所有解析地址与已准入的
+public/loopback class 一致；redirect 只能留在同一 host 和同一 class。若公网域名只解析到
+Clash `198.18.0.0/15` fake-IP，且当前 scheme 的环境代理会代理该域名，Host 会把域名交给
+代理解析，不会固定 fake-IP。无代理、`NO_PROXY` 排除域名、混合解析结果或其他非公网解析
+仍会被拒绝。Loopback 始终直连。Interactive 策略会为公共 URL 请求 Host approval；Automatic
+和 Trusted 在 URL 校验通过后自动准入。
 
 ### Docker
 

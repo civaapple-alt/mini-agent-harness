@@ -87,11 +87,39 @@ impl<'a> HostRuntimeFactory<'a> {
                 ))
             },
         )?;
-        runtime.harness.set_hidden_tools(if search_enabled {
-            BuiltinToolSelection::all().hidden_names()
-        } else {
-            BuiltinToolSelection::default().hidden_names()
-        });
+        runtime.builtin_tools = builtin_tools_for_search(search_enabled);
+        runtime
+            .harness
+            .set_hidden_tools(runtime.builtin_tools.hidden_names());
         Ok(runtime)
+    }
+}
+
+fn builtin_tools_for_search(search_enabled: bool) -> BuiltinToolSelection {
+    if search_enabled {
+        BuiltinToolSelection::all()
+    } else {
+        BuiltinToolSelection::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_search_includes_fetch_in_the_initial_builtin_selection() {
+        let with_search = builtin_tools_for_search(true);
+        assert!(with_search.names().iter().any(|name| name == "web_fetch"));
+        assert!(with_search.hidden_names().is_empty());
+
+        let without_search = builtin_tools_for_search(false);
+        assert!(
+            !without_search
+                .names()
+                .iter()
+                .any(|name| name == "web_fetch")
+        );
+        assert_eq!(without_search.hidden_names(), ["web_fetch"]);
     }
 }

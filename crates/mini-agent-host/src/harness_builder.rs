@@ -20,6 +20,8 @@ use crate::{
 };
 pub struct HarnessBuild<M: Model> {
     pub harness: Harness<M>,
+    /// Builtin selection already applied to the model-visible tool catalog.
+    pub builtin_tools: BuiltinToolSelection,
     pub images: ImageStore,
     pub stable_system_prompt: String,
     pub world: WorldState,
@@ -396,6 +398,7 @@ where
     }
     Ok(HarnessBuild {
         harness,
+        builtin_tools: BuiltinToolSelection::default(),
         images,
         stable_system_prompt,
         world,

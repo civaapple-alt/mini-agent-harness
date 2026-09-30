@@ -6,6 +6,10 @@ titles, snippets, and publication dates. Providers do not add their own
 model-visible tools or prose answers. With provider `none`, or without the
 selected provider's key, `web_search` is not exposed.
 
+When Host loads a selected provider and key, a new Thread enables the paired
+`web_fetch` tool by default. You can disable `web_fetch` in that Thread's
+Workspace tools. An already running Thread keeps its current tool catalog.
+
 ## Provider settings
 
 Web Studio's **Settings → Web search** page selects one provider or disables

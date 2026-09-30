@@ -164,6 +164,7 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             .unwrap_or_default();
         let mini_agent_host::HarnessBuild {
             harness,
+            builtin_tools,
             images,
             stable_system_prompt,
             world,
@@ -292,7 +293,8 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
                 background_shells,
                 scheduled_tasks,
             )
-            .with_skill_discovery_refresh(skill_discovery_refresh, skill_read_roots);
+            .with_skill_discovery_refresh(skill_discovery_refresh, skill_read_roots)
+            .with_initial_builtin_tools(builtin_tools);
         let services = RuntimeServices::new(management, thread_settings, goals)
             .map_err(|error| format!("cannot bind runtime services: {error}"))?;
         let connection = AppServerConnection::with_capability_manifest(
