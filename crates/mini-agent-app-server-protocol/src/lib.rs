@@ -42,6 +42,8 @@ pub const METHOD_THREAD_MODEL_SETTINGS_GET: &str = "thread/model-settings/get";
 pub const METHOD_THREAD_SETTINGS_UPDATED: &str = "thread/settings/updated";
 pub const METHOD_SKILLS_LIST: &str = "skills/list";
 pub const METHOD_MODEL_CATALOG_MANAGE: &str = "model/catalog/manage";
+pub const METHOD_WEB_SEARCH_SETTINGS_READ: &str = "web/search/settings/read";
+pub const METHOD_WEB_SEARCH_SETTINGS_UPDATE: &str = "web/search/settings/update";
 pub const METHOD_TURN_START: &str = "turn/start";
 pub const METHOD_TURN_RESUME: &str = "turn/resume";
 pub const METHOD_TURN_READ: &str = "turn/read";
@@ -705,19 +707,8 @@ pub struct ModelProviderConfig {
     pub base_url: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web_search: Option<bool>,
     #[serde(default)]
     pub models: Vec<ModelProfileConfig>,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelProviderWebSearchSupport {
-    Supported,
-    Unsupported,
-    #[default]
-    Unknown,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -726,10 +717,6 @@ pub struct ModelProviderView {
     #[serde(flatten)]
     pub profile: ModelProviderConfig,
     pub api_key_configured: bool,
-    #[serde(default)]
-    pub web_search_support: ModelProviderWebSearchSupport,
-    #[serde(default)]
-    pub web_search_enabled: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -791,6 +778,36 @@ pub struct ModelCatalogManageResult {
     pub catalog: ModelCatalogView,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_test: Option<ModelConnectionTestResult>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct WebSearchSettingsReadParams {}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchSettingsUpdateParams {
+    pub provider: String,
+    #[serde(default)]
+    pub deepseek_api_key: Option<String>,
+    #[serde(default)]
+    pub exa_api_key: Option<String>,
+    #[serde(default)]
+    pub kimi_api_key: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchSettingsView {
+    pub provider: String,
+    pub deepseek_api_key_configured: bool,
+    pub exa_api_key_configured: bool,
+    pub kimi_api_key_configured: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchSettingsResult {
+    pub settings: WebSearchSettingsView,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1714,11 +1731,10 @@ mod tests {
             kind: ModelProviderKind::DeepSeek,
             base_url: "https://api.deepseek.com".to_string(),
             enabled: true,
-            web_search: Some(false),
             models: Vec::new(),
         })
         .unwrap();
-        assert_eq!(provider["webSearch"], false);
+        assert!(provider.get("webSearch").is_none());
         assert!(provider.get("apiKey").is_none());
 
         let result = serde_json::to_value(ModelCatalogManageResult {
@@ -1733,6 +1749,30 @@ mod tests {
         assert!(result.get("request").is_none());
         assert!(result.get("response").is_none());
         assert!(result["connectionTest"].get("apiKey").is_none());
+    }
+
+    #[test]
+    fn web_search_settings_contract_never_serializes_key_values() {
+        let update: WebSearchSettingsUpdateParams = serde_json::from_value(serde_json::json!({
+            "provider": "kimi",
+            "kimiApiKey": "secret-search-key"
+        }))
+        .unwrap();
+        assert_eq!(update.provider, "kimi");
+        assert_eq!(update.kimi_api_key.as_deref(), Some("secret-search-key"));
+
+        let result = WebSearchSettingsResult {
+            settings: WebSearchSettingsView {
+                provider: update.provider,
+                deepseek_api_key_configured: false,
+                exa_api_key_configured: false,
+                kimi_api_key_configured: true,
+            },
+        };
+        let encoded = serde_json::to_value(result).unwrap();
+        assert_eq!(encoded["settings"]["kimiApiKeyConfigured"], true);
+        assert!(encoded["settings"].get("kimiApiKey").is_none());
+        assert!(!encoded.to_string().contains("secret-search-key"));
     }
 
     #[test]

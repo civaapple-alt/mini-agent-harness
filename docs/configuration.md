@@ -42,21 +42,11 @@ if they are no longer needed.
 
 The catalog accepts `deepseek`, `kimi`, `glm`, `volcengine`, and `custom`
 providers. Each provider stores a name, an enabled flag, a Responses API Base
-URL, an optional provider-side search choice, and its model list. Web Studio
+URL, and its model list. Web Studio
 offers offline Base URL suggestions for built-in providers; custom providers
 are entered manually. The Host appends `/responses` to the configured URL root.
-Host identifies search support by the exact API hostname. The official OpenAI
-Responses endpoint defaults to enabled; the official DeepSeek Responses
-endpoint is unsupported and cannot be enabled. Other endpoints default to off
-with unknown support; users may explicitly enable a compatible custom endpoint.
-Web Studio only lets users edit a model's `web_search` capability while provider
-search is effective. The provider and model must both allow `web_search`, and
-CLI `--no-web-search` can temporarily disable it.
-
-The App Server catalog view reports the detected `webSearchSupport` and
-effective `webSearchEnabled` values alongside the editable `webSearch`
-preference. Clients should use these reported values instead of inferring
-endpoint support from the preference.
+Search service selection is a separate machine-wide Host setting; see
+[web search](web-search.md).
 
 Each model stores its provider model ID, display name, enabled state, context
 window, output limit, input modalities, capabilities, its supported reasoning

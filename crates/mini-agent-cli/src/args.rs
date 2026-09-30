@@ -51,8 +51,8 @@ OPTIONS:
     --session-id SESSION_ID     Resume this durable session instead of opening a new one
     --security-preset PRESET    Security policy preset: default, full-machine [default: default]
     --sandbox KIND              Execution sandbox: native (JobObject/process groups), docker [default: native]
-    --web-search, --search      Enable built-in Responses web_search [default: enabled]
-    --no-web-search, --no-search Disable built-in Responses web_search
+    --web-search, --search      Expose the selected Host web search service [default: enabled]
+    --no-web-search, --no-search Hide web_search and its web_fetch companion
     --no-tools                  Disable all Builtin and extension tools
 ";
 
@@ -73,8 +73,8 @@ OPTIONS:
     --auto-approve, -y           Permit sensitive tools non-interactively (alias: --yes)
     --security-preset PRESET     Security policy preset: default, full-machine [default: default]
     --sandbox KIND               Execution sandbox: native (JobObject/process groups), docker [default: native]
-    --web-search, --search       Enable built-in Responses web_search [default: enabled]
-    --no-web-search, --no-search Disable built-in Responses web_search
+    --web-search, --search       Expose the selected Host web search service [default: enabled]
+    --no-web-search, --no-search Hide web_search and its web_fetch companion
     --no-tools                   Disable all host tools and extension loading
     --json                       Emit a machine-readable final result
     --trace-jsonl PATH           Write a bounded redacted trace; PATH must not exist

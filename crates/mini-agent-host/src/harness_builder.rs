@@ -156,7 +156,6 @@ where
             api_key: provider.api_key,
             model: provider.model,
             base_url: provider.base_url,
-            web_search: provider.web_search,
         },
         images.clone(),
     )?;

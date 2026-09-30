@@ -197,7 +197,7 @@ mod tests {
     use super::project_catalog;
 
     #[test]
-    fn provider_search_support_survives_protocol_projection() {
+    fn provider_credentials_project_without_exposing_secret_values() {
         let catalog = mini_agent_host::ModelCatalogView {
             providers: vec![mini_agent_host::ProviderView {
                 profile: mini_agent_host::ProviderProfile {
@@ -206,12 +206,9 @@ mod tests {
                     kind: mini_agent_host::ProviderKind::Custom,
                     base_url: "https://example.test/v1".to_string(),
                     enabled: true,
-                    web_search: Some(true),
                     models: Vec::new(),
                 },
                 api_key_configured: true,
-                web_search_support: mini_agent_host::ProviderWebSearchSupport::Supported,
-                web_search_enabled: true,
             }],
             default_model: None,
             default_reasoning_selection: Default::default(),
@@ -220,10 +217,8 @@ mod tests {
         };
         let projected = project_catalog(catalog).unwrap();
         let provider = &projected.providers[0];
-        assert_eq!(
-            provider.web_search_support,
-            mini_agent_app_server_protocol::ModelProviderWebSearchSupport::Supported
-        );
-        assert!(provider.web_search_enabled);
+        assert!(provider.api_key_configured);
+        let encoded = serde_json::to_string(provider).unwrap();
+        assert!(!encoded.contains("secret"));
     }
 }

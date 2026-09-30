@@ -46,7 +46,11 @@ struct StoreState {
 }
 
 struct StoredEntry {
+    handle: String,
     content: String,
+    source_bytes: usize,
+    source_truncated: bool,
+    metadata: Option<Value>,
 }
 
 pub struct StoredResult {
@@ -55,6 +59,14 @@ pub struct StoredResult {
     pub stored_bytes: usize,
     pub source_bytes: usize,
     pub source_truncated: bool,
+}
+
+pub struct StoredPage {
+    pub content: String,
+    pub next_cursor: Option<usize>,
+    pub source_bytes: usize,
+    pub source_truncated: bool,
+    pub metadata: Option<Value>,
 }
 
 impl ResultStore {
@@ -72,6 +84,16 @@ impl ResultStore {
         content: String,
         source_bytes: usize,
         source_truncated: bool,
+    ) -> Result<StoredResult, ToolError> {
+        self.store_with_metadata(content, source_bytes, source_truncated, None)
+    }
+
+    pub fn store_with_metadata(
+        &self,
+        content: String,
+        source_bytes: usize,
+        source_truncated: bool,
+        metadata: Option<Value>,
     ) -> Result<StoredResult, ToolError> {
         let source_truncated = source_truncated || content.len() > MAX_RESULT_BYTES;
         let max_bytes = if self.session.is_some() {
@@ -94,17 +116,64 @@ impl ResultStore {
             state.total_bytes = state.total_bytes.saturating_sub(removed.content.len());
         }
         if let Some(session) = &self.session {
-            append_session_result(session, &handle, &content, source_bytes, source_truncated)?;
+            append_session_result(
+                session,
+                &handle,
+                &content,
+                source_bytes,
+                source_truncated,
+                metadata.as_ref(),
+            )?;
         }
         state.total_bytes = state.total_bytes.saturating_add(content.len());
         let stored_bytes = content.len();
-        state.entries.push_back(StoredEntry { content });
+        state.entries.push_back(StoredEntry {
+            handle: handle.clone(),
+            content,
+            source_bytes,
+            source_truncated,
+            metadata,
+        });
         Ok(StoredResult {
             handle,
             preview,
             stored_bytes,
             source_bytes,
             source_truncated,
+        })
+    }
+
+    /// Reads a bounded UTF-8 page from a result in this Session's cache.
+    pub fn read_page(
+        &self,
+        handle: &str,
+        cursor: usize,
+        max_bytes: usize,
+    ) -> Result<StoredPage, ToolError> {
+        if max_bytes == 0 || max_bytes > 16 * 1024 {
+            return Err(ToolError(
+                "result page limit must be between 1 and 16384 bytes".into(),
+            ));
+        }
+        let state = self.inner.lock().unwrap();
+        let entry = state
+            .entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+            .ok_or_else(|| ToolError("result handle is missing or expired".into()))?;
+        if cursor > entry.content.len() || !entry.content.is_char_boundary(cursor) {
+            return Err(ToolError("result cursor is invalid".into()));
+        }
+        let mut end = cursor.saturating_add(max_bytes).min(entry.content.len());
+        while end > cursor && !entry.content.is_char_boundary(end) {
+            end -= 1;
+        }
+        Ok(StoredPage {
+            content: entry.content[cursor..end].to_string(),
+            next_cursor: (end < entry.content.len()).then_some(end),
+            source_bytes: entry.source_bytes,
+            source_truncated: entry.source_truncated,
+            metadata: entry.metadata.clone(),
         })
     }
 
@@ -140,6 +209,18 @@ fn load_session_results(path: &PathBuf) -> StoreState {
         let Some(content) = record.get("content").and_then(Value::as_str) else {
             continue;
         };
+        let source_bytes = record
+            .get("source_bytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(content.len() as u64) as usize;
+        let source_truncated = record
+            .get("source_truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let metadata = record
+            .get("metadata")
+            .filter(|value| !value.is_null())
+            .cloned();
         let numeric_id = handle
             .strip_prefix("result-")
             .and_then(|value| value.parse::<u64>().ok())
@@ -147,7 +228,11 @@ fn load_session_results(path: &PathBuf) -> StoreState {
         state.next_id = state.next_id.max(numeric_id);
         state.total_bytes = state.total_bytes.saturating_add(content.len());
         state.entries.push_back(StoredEntry {
+            handle: handle.to_string(),
             content: content.to_string(),
+            source_bytes,
+            source_truncated,
+            metadata,
         });
     }
     state
@@ -159,6 +244,7 @@ fn append_session_result(
     content: &str,
     source_bytes: usize,
     source_truncated: bool,
+    metadata: Option<&Value>,
 ) -> Result<(), ToolError> {
     let _guard = session.append_lock.lock().unwrap();
     let bytes = fs::read(&session.path).map_err(|error| {
@@ -180,6 +266,7 @@ fn append_session_result(
         "content": content,
         "source_bytes": source_bytes,
         "source_truncated": source_truncated,
+        "metadata": metadata,
         "timestamp_ms": crate::session::timestamp_ms(),
     });
     record
@@ -254,6 +341,50 @@ mod tests {
             .unwrap();
         assert!(result.source_truncated);
         assert_eq!(result.stored_bytes, MAX_RESULT_BYTES);
+    }
+
+    #[test]
+    fn result_pages_keep_utf8_boundaries_and_restore_metadata() {
+        let _home_lock = HOME_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let root = test_root();
+        let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let context = Message::Context {
+            text: "seed".into(),
+        };
+        opened
+            .store
+            .record_context(&context, std::slice::from_ref(&context))
+            .unwrap();
+        let store = opened.store.result_store();
+        let result = store
+            .store_with_metadata(
+                "一二三四".into(),
+                12,
+                false,
+                Some(json!({
+                    "kind": "web_fetch",
+                    "url": "https://example.com",
+                    "title": "Example"
+                })),
+            )
+            .unwrap();
+        let first = store.read_page(&result.handle, 0, 4).unwrap();
+        assert_eq!(first.content, "一");
+        let cursor = first.next_cursor.unwrap();
+        drop(store);
+        drop(opened);
+
+        let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        let restored = resumed.store.result_store();
+        let next = restored.read_page(&result.handle, cursor, 4).unwrap();
+        assert_eq!(next.content, "二");
+        assert_eq!(next.metadata.as_ref().unwrap()["kind"], "web_fetch");
+        assert_eq!(next.metadata.unwrap()["url"], "https://example.com");
+        drop(resumed);
+        remove_test_root(&root);
     }
 
     #[test]

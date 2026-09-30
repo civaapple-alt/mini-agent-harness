@@ -19,6 +19,13 @@ catalog JSON contains provider and model metadata, but no API key values. The
 App Server and Web Gateway report only whether a provider key exists. Never
 commit provider credentials.
 
+Search-provider keys use a separate Host-owned plaintext credential directory
+at `~/.mini-agent/web-search-credentials/`; the selected provider is stored in
+`~/.mini-agent/web_search.json`. Unix restricts key files to `0600` and the
+credential directory to `0700`. Search settings RPCs report only whether each
+key is configured. Search queries and results are sent to the selected provider,
+and tool results may be retained in Session history.
+
 Interactive and one-shot conversation history is persisted in durable JSONL
 files under `~/.mini-agent/sessions/<workspace>/<session-id>/`. Web Studio's
 `~/.mini-agent/web/state.json` contains only Project/UI metadata; it is not a

@@ -4,10 +4,12 @@
 //! factory remains the only place that turns the selection into concrete
 //! provider, tool, extension, policy, and session-bound artifacts.
 
+use crate::BuiltinToolSelection;
 use crate::HostRuntime;
 use crate::RuntimeComposition;
 use crate::RuntimeConfig;
 use crate::ToolScope;
+use crate::WebSearchSettingsStore;
 use crate::harness_builder::prepare_harness_with_model_factory;
 use crate::models::{HostResponsesModel, ModelCatalogStore};
 use mini_agent_capabilities::ApprovalController;
@@ -59,23 +61,37 @@ impl<'a> HostRuntimeFactory<'a> {
             .set_read_only_agent(composition.agent.is_read_only());
         let catalog = ModelCatalogStore::machine_default()?;
         let project_id = self.runtime_config.project_id();
-        let web_search_allowed =
-            self.runtime_config.web_search() && composition.tools == ToolScope::All;
-        prepare_harness_with_model_factory(
+        let selected_search =
+            if composition.tools == ToolScope::All && self.runtime_config.web_search() {
+                WebSearchSettingsStore::machine_default()?.runtime_config()?
+            } else {
+                None
+            };
+        let search_enabled = selected_search.is_some();
+        let registry = selected_search.map_or_else(
+            || self.registry.clone(),
+            |config| self.registry.clone().with_web_search(config),
+        );
+        let mut runtime = prepare_harness_with_model_factory(
             self.runtime_config,
             self.approval.clone(),
             self.config.clone(),
             composition,
             results,
-            self.registry.clone(),
+            registry,
             move |_provider_id: &str, _settings: ModelProviderSettings, images: ImageStore| {
                 Ok(HostResponsesModel::new(
                     catalog.clone(),
                     project_id.clone(),
                     images,
-                    web_search_allowed,
                 ))
             },
-        )
+        )?;
+        runtime.harness.set_hidden_tools(if search_enabled {
+            BuiltinToolSelection::all().hidden_names()
+        } else {
+            BuiltinToolSelection::default().hidden_names()
+        });
+        Ok(runtime)
     }
 }

@@ -70,6 +70,7 @@ mod scheduled_task;
 mod thread;
 mod transport;
 mod turn;
+mod web_search;
 mod world;
 
 pub use transport::{
@@ -271,6 +272,12 @@ where
             }
             mini_agent_app_server_protocol::METHOD_MODEL_CATALOG_MANAGE => {
                 self.handle_model_catalog_manage(request).await
+            }
+            mini_agent_app_server_protocol::METHOD_WEB_SEARCH_SETTINGS_READ => {
+                self.handle_web_search_settings_read(request).await
+            }
+            mini_agent_app_server_protocol::METHOD_WEB_SEARCH_SETTINGS_UPDATE => {
+                self.handle_web_search_settings_update(request).await
             }
             METHOD_THREAD_GOAL_SET => self.handle_thread_goal_set(request).await,
             METHOD_THREAD_GOAL_GET => self.handle_thread_goal_get(request).await,

@@ -22,6 +22,7 @@ mod security;
 mod session;
 mod skills;
 mod web;
+mod web_search;
 mod workspace;
 
 #[cfg(test)]
@@ -40,6 +41,7 @@ pub use registry::CapabilityRegistry;
 pub use registry::ToolBuildRequest;
 pub use registry::ToolProvider;
 pub use result_store::ResultStore;
+pub use result_store::StoredPage;
 pub use result_store::StoredResult;
 pub use sandbox::SandboxKind;
 pub use scheduled_task::{ScheduledTask, ScheduledTaskManager, scheduled_task_tools};
@@ -87,6 +89,7 @@ pub use session::TurnPresentation;
 pub use session::TurnPresentationActivity;
 pub use session::TurnStatus;
 pub use session::resolve_session_file;
+pub use web_search::{WebSearchBackend, WebSearchConfig};
 
 // Host/App Server composition and embedding seams. These exports assemble
 // concrete providers without exposing their internal wire or process logic.

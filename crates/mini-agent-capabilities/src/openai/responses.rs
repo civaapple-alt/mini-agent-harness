@@ -37,7 +37,6 @@ pub async fn complete(
     let body = request_body_with_limit(
         &model.model,
         request,
-        model.web_search,
         &model.images,
         model.max_output_tokens,
         &model.reasoning_parameter_map,
@@ -107,16 +106,10 @@ fn is_transient(error: &OpenAiError) -> bool {
 }
 
 #[cfg(test)]
-fn request_body(
-    model: &str,
-    request: &ModelRequest<'_>,
-    web_search: bool,
-    images: &ImageStore,
-) -> Value {
+fn request_body(model: &str, request: &ModelRequest<'_>, images: &ImageStore) -> Value {
     request_body_with_limit(
         model,
         request,
-        web_search,
         images,
         None,
         &std::collections::BTreeMap::new(),
@@ -126,7 +119,6 @@ fn request_body(
 fn request_body_with_limit(
     model: &str,
     request: &ModelRequest<'_>,
-    web_search: bool,
     images: &ImageStore,
     max_output_tokens: Option<usize>,
     reasoning_parameter_map: &std::collections::BTreeMap<String, Value>,
@@ -148,7 +140,7 @@ fn request_body_with_limit(
             message_items(message, image)
         })
         .collect::<Vec<_>>();
-    let mut tools = request
+    let tools = request
         .tools
         .iter()
         .map(|tool| {
@@ -161,15 +153,6 @@ fn request_body_with_limit(
             })
         })
         .collect::<Vec<_>>();
-
-    // Provider-managed search is independent from Host function tools. Keep it
-    // available even when a model-only composition intentionally has no Host
-    // tools; the provider executes this tool server-side.
-    if web_search {
-        tools.push(json!({
-            "type": "web_search"
-        }));
-    }
 
     let mut body = json!({
         "model": model,
@@ -466,10 +449,9 @@ mod tests {
         config: &HarnessConfig,
         messages: &[Message],
         tools: &[ToolSpec],
-        web_search: bool,
         images: &ImageStore,
     ) -> Value {
-        request_body(model, &request(config, messages, tools), web_search, images)
+        request_body(model, &request(config, messages, tools), images)
     }
 
     #[test]
@@ -477,7 +459,7 @@ mod tests {
         let (messages, tools) = lookup_messages();
         let config = HarnessConfig::default();
         let images = crate::image::ImageStore::memory_only();
-        let body = render_body("test-model", &config, &messages, &tools, true, &images);
+        let body = render_body("test-model", &config, &messages, &tools, &images);
 
         assert_eq!(body["model"], "test-model");
         assert_eq!(body["input"][0]["role"], "developer");
@@ -486,32 +468,12 @@ mod tests {
         assert_eq!(body["input"][3]["type"], "function_call");
         assert_eq!(body["input"][4]["type"], "function_call_output");
         assert_eq!(body["tools"][0]["name"], "lookup");
-        assert_eq!(body["tools"][1]["type"], "web_search");
+        assert_eq!(body["tools"].as_array().unwrap().len(), 1);
         assert_eq!(body["parallel_tool_calls"], false);
 
-        let body_no_search = render_body("test-model", &config, &messages, &tools, false, &images);
-        assert_eq!(body_no_search["tools"].as_array().unwrap().len(), 1);
-
         let empty_tools: [ToolSpec; 0] = [];
-        let body_empty_tools = render_body(
-            "test-model",
-            &config,
-            &messages,
-            &empty_tools,
-            true,
-            &images,
-        );
-        assert_eq!(body_empty_tools["tools"], json!([{ "type": "web_search" }]));
-
-        let body_without_search = render_body(
-            "test-model",
-            &config,
-            &messages,
-            &empty_tools,
-            false,
-            &images,
-        );
-        assert_eq!(body_without_search["tools"], json!([]));
+        let body_empty_tools = render_body("test-model", &config, &messages, &empty_tools, &images);
+        assert_eq!(body_empty_tools["tools"], json!([]));
     }
 
     #[test]
@@ -528,7 +490,6 @@ mod tests {
         let api_body = request_body_with_limit(
             "test-model",
             &request,
-            false,
             &images,
             None,
             &std::collections::BTreeMap::new(),
@@ -546,7 +507,7 @@ mod tests {
             ..request
         };
         let disabled_body =
-            request_body_with_limit("test-model", &request, false, &images, None, &mapping);
+            request_body_with_limit("test-model", &request, &images, None, &mapping);
         assert_eq!(disabled_body["reasoning"]["effort"], "none");
     }
 
@@ -690,7 +651,6 @@ mod tests {
         let body = request_body_with_limit(
             "test-model",
             &request(&config, &[], &[]),
-            false,
             &images,
             Some(64),
             &std::collections::BTreeMap::new(),
@@ -729,14 +689,7 @@ mod tests {
             parameters: json!({"type": "object"}),
         }];
         let config = HarnessConfig::default();
-        let body = render_body(
-            "deepseek-v4-flash",
-            &config,
-            &messages,
-            &tools,
-            false,
-            &images,
-        );
+        let body = render_body("deepseek-v4-flash", &config, &messages, &tools, &images);
         assert_eq!(body["model"], "deepseek-v4-flash-vision-exp");
         let output = &body["input"][2]["output"];
         assert_eq!(output[1]["type"], "input_image");
@@ -744,7 +697,7 @@ mod tests {
         assert!(output[1].get("image_url").is_none());
         assert!(!body.to_string().contains("data:image"));
 
-        let compacted = render_body("deepseek-v4-flash", &config, &messages, &[], true, &images);
+        let compacted = render_body("deepseek-v4-flash", &config, &messages, &[], &images);
         assert_eq!(compacted["model"], "deepseek-v4-flash");
         assert_eq!(compacted["input"][2]["output"], envelope);
     }

@@ -21,7 +21,6 @@ const MODEL_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1
 const MODEL_TEST_MAX_OUTPUT_TOKENS: usize = 32;
 const MODEL_TEST_MAX_RESPONSE_BYTES: usize = 4 * 1024;
 const MODEL_TEST_PROMPT: &str = "Reply with OK.";
-const PROVIDER_WEB_SEARCH_PROMPT: &str = "## Provider web search\nThe selected provider may expose its server-side `web_search` tool. Use it for current or broad web research when it is available. It is separate from the Host `web_fetch` tool, which is only for reading an exact URL. If the provider does not support it or returns a tool error, report that limitation.";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,21 +66,8 @@ pub struct ProviderProfile {
     pub base_url: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// `None` follows Host endpoint detection. Explicit enablement is ignored
-    /// for endpoints the Host knows do not support search.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web_search: Option<bool>,
     #[serde(default)]
     pub models: Vec<ModelProfile>,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderWebSearchSupport {
-    Supported,
-    Unsupported,
-    #[default]
-    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -118,10 +104,6 @@ pub struct ProviderView {
     #[serde(flatten)]
     pub profile: ProviderProfile,
     pub api_key_configured: bool,
-    #[serde(default)]
-    pub web_search_support: ProviderWebSearchSupport,
-    #[serde(default)]
-    pub web_search_enabled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -257,13 +239,8 @@ impl ModelCatalogStore {
             .providers
             .into_iter()
             .map(|profile| {
-                let web_search_support = provider_web_search_support(&profile.base_url);
-                let web_search_enabled =
-                    provider_web_search_enabled(&profile.base_url, profile.web_search);
                 Ok(ProviderView {
                     api_key_configured: self.credentials.configured(&profile.id)?,
-                    web_search_support,
-                    web_search_enabled,
                     profile,
                 })
             })
@@ -475,8 +452,7 @@ impl ModelCatalogStore {
     pub fn resolve(
         &self,
         selection: &ModelSelection,
-        web_search: bool,
-    ) -> Result<(OpenAiModel, ModelProfile, bool), String> {
+    ) -> Result<(OpenAiModel, ModelProfile), String> {
         let catalog = self.read()?;
         let (provider, model) = find_model(&catalog, selection)?;
         validate_model(model)?;
@@ -496,16 +472,10 @@ impl ModelCatalogStore {
             .credentials
             .get(&provider.id)?
             .ok_or_else(|| format!("API Key is not configured for provider {}", provider.name))?;
-        let provider_web_search =
-            provider_web_search_enabled(&provider.base_url, provider.web_search);
-        let model_web_search = web_search
-            && provider_web_search
-            && model.capabilities.iter().any(|value| value == "web_search");
         let model_instance = OpenAiModel::new(
             api_key,
             model.id.clone(),
             provider.base_url.clone(),
-            model_web_search,
             ImageStore::memory_only(),
         )
         .map_err(|error| error.to_string())?
@@ -513,21 +483,19 @@ impl ModelCatalogStore {
             model.max_output_tokens.map(|value| value as usize),
             model.reasoning_parameter_map.clone(),
         );
-        Ok((model_instance, model.clone(), model_web_search))
+        Ok((model_instance, model.clone()))
     }
 
     pub fn provider_settings(
         &self,
         selection: &ModelSelection,
-        web_search: bool,
     ) -> Result<ModelProviderSettings, String> {
-        self.provider_settings_with_overrides(selection, web_search, None, None)
+        self.provider_settings_with_overrides(selection, None, None)
     }
 
     pub fn provider_settings_with_overrides(
         &self,
         selection: &ModelSelection,
-        web_search: bool,
         api_key_override: Option<&str>,
         base_url_override: Option<&str>,
     ) -> Result<ModelProviderSettings, String> {
@@ -552,9 +520,6 @@ impl ModelCatalogStore {
             api_key,
             model: model.id.clone(),
             base_url: base_url.to_string(),
-            web_search: web_search
-                && provider_web_search_enabled(base_url, provider.web_search)
-                && model.capabilities.iter().any(|value| value == "web_search"),
         })
     }
 
@@ -573,7 +538,7 @@ impl ModelCatalogStore {
         selection: &ModelSelection,
         timeout: std::time::Duration,
     ) -> Result<ModelConnectionTestStatus, String> {
-        let (mut model, _, _) = self.resolve(selection, false)?;
+        let (mut model, _) = self.resolve(selection)?;
         model = model.with_model_options(Some(MODEL_TEST_MAX_OUTPUT_TOKENS), BTreeMap::new());
         let messages = [Message::User {
             text: MODEL_TEST_PROMPT.to_string(),
@@ -709,21 +674,14 @@ pub struct HostResponsesModel {
     catalog: ModelCatalogStore,
     project_id: String,
     images: ImageStore,
-    web_search: bool,
 }
 
 impl HostResponsesModel {
-    pub fn new(
-        catalog: ModelCatalogStore,
-        project_id: String,
-        images: ImageStore,
-        web_search: bool,
-    ) -> Self {
+    pub fn new(catalog: ModelCatalogStore, project_id: String, images: ImageStore) -> Self {
         Self {
             catalog,
             project_id,
             images,
-            web_search,
         }
     }
 }
@@ -776,23 +734,14 @@ impl Model for HostResponsesModel {
         };
         if let Some(selection) = selection {
             let reasoning_selection = reasoning_selection.unwrap_or(ReasoningSelection::ApiDefault);
-            let (mut model, profile, provider_web_search) = self
+            let (mut model, profile) = self
                 .catalog
-                .resolve(&selection, self.web_search)
+                .resolve(&selection)
                 .map_err(OpenAiError::Protocol)?;
             validate_reasoning_for_profile(&profile, &reasoning_selection)
                 .map_err(OpenAiError::Protocol)?;
             model.set_images(self.images.clone());
-            let system_prompt = if provider_web_search {
-                format!(
-                    "{}\n\n{}",
-                    request.system_prompt, PROVIDER_WEB_SEARCH_PROMPT
-                )
-            } else {
-                request.system_prompt.to_string()
-            };
             let resolved_request = ModelRequest {
-                system_prompt: &system_prompt,
                 reasoning_selection: Some(&reasoning_selection),
                 reasoning_effort: None,
                 ..request
@@ -810,29 +759,6 @@ struct DiscardModelEvents;
 
 impl ModelEventSink for DiscardModelEvents {
     fn emit(&mut self, _event: ModelEvent) {}
-}
-
-fn provider_web_search_support(base_url: &str) -> ProviderWebSearchSupport {
-    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
-        return ProviderWebSearchSupport::Unknown;
-    };
-    match url.host_str() {
-        Some(host) if host.eq_ignore_ascii_case("api.openai.com") => {
-            ProviderWebSearchSupport::Supported
-        }
-        Some(host) if host.eq_ignore_ascii_case("api.deepseek.com") => {
-            ProviderWebSearchSupport::Unsupported
-        }
-        _ => ProviderWebSearchSupport::Unknown,
-    }
-}
-
-fn provider_web_search_enabled(base_url: &str, configured: Option<bool>) -> bool {
-    match provider_web_search_support(base_url) {
-        ProviderWebSearchSupport::Supported => configured.unwrap_or(true),
-        ProviderWebSearchSupport::Unsupported => false,
-        ProviderWebSearchSupport::Unknown => configured.unwrap_or(false),
-    }
 }
 
 fn classify_connection_error(error: OpenAiError) -> ModelConnectionTestStatus {
@@ -1122,7 +1048,6 @@ mod tests {
                     kind: ProviderKind::DeepSeek,
                     base_url,
                     enabled: true,
-                    web_search: None,
                     models: Vec::new(),
                 },
                 Some("test-secret-key".to_string()),
@@ -1460,12 +1385,8 @@ mod tests {
         });
 
         let store = test_store(format!("http://{address}/v1"));
-        let mut model = HostResponsesModel::new(
-            store,
-            "project-a".to_string(),
-            ImageStore::memory_only(),
-            false,
-        );
+        let mut model =
+            HostResponsesModel::new(store, "project-a".to_string(), ImageStore::memory_only());
         let selection = ModelSelection {
             provider_id: "deepseek".to_string(),
             model_id: "deepseek-test".to_string(),
@@ -1539,12 +1460,8 @@ mod tests {
         store
             .set_defaults_with_reasoning(Some(selection), ReasoningSelection::ApiDefault, None)
             .unwrap();
-        let mut model = HostResponsesModel::new(
-            store,
-            "project-a".to_string(),
-            ImageStore::memory_only(),
-            false,
-        );
+        let mut model =
+            HostResponsesModel::new(store, "project-a".to_string(), ImageStore::memory_only());
         let messages = [Message::User {
             text: "inspect".to_string(),
         }];

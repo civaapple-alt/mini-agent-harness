@@ -127,6 +127,7 @@ impl ToolProvider for BuiltinToolProvider {
 pub struct CapabilityRegistry {
     tool_providers: Arc<Vec<Arc<dyn ToolProvider>>>,
     model_providers: Arc<Vec<CapabilityDescriptor>>,
+    web_search: Option<crate::WebSearchConfig>,
 }
 
 impl Default for CapabilityRegistry {
@@ -140,6 +141,7 @@ impl CapabilityRegistry {
         Self {
             tool_providers: Arc::new(vec![Arc::new(BuiltinToolProvider)]),
             model_providers: Arc::new(Vec::new()),
+            web_search: None,
         }
     }
 
@@ -153,7 +155,14 @@ impl CapabilityRegistry {
         Self {
             tool_providers: Arc::new(providers),
             model_providers: self.model_providers,
+            web_search: self.web_search,
         }
+    }
+
+    /// Adds the selected provider behind the shared model-visible `web_search` tool.
+    pub fn with_web_search(mut self, config: crate::WebSearchConfig) -> Self {
+        self.web_search = Some(config);
+        self
     }
 
     /// Returns a registry with an embedding application's model descriptor.
@@ -216,14 +225,19 @@ impl CapabilityRegistry {
         if let Err(error) = self.validate(CapabilityKind::Tool, &request.provider_id) {
             return Err(ToolError(error));
         }
-        self.tool_providers
+        let mut tools = self
+            .tool_providers
             .iter()
             .find(|provider| {
                 let descriptor = provider.descriptor();
                 descriptor.kind == CapabilityKind::Tool && descriptor.id == request.provider_id
             })
             .expect("validated tool provider must be registered")
-            .build_tools(request)
+            .build_tools(request)?;
+        if let Some(config) = self.web_search.clone() {
+            tools.extend(crate::web_search::web_search_tools(config));
+        }
+        Ok(tools)
     }
 
     /// Builds the selected policy provider without owning the frontend's

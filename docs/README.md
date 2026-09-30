@@ -24,6 +24,7 @@ other Markdown files.
 | --- | --- |
 | [CLI](cli.md) | Installation, provider setup, commands, arguments, sessions, trace, and CLI safety boundaries. |
 | [Configuration](configuration.md) | Provider settings, runtime composition, prompt/rule sources, extensions, and environment variables. |
+| [Web search](web-search.md) | Search provider setup, the shared `web_search` contract, `web_fetch` continuation, and result display. |
 | [Harness limits](limits.md) | Byte, count, runtime-guard, timeout, context, and Goal budget limits. |
 | [Troubleshooting](troubleshooting.md) | Common setup, provider, shell, tool, session, and runtime issues. |
 | [Privacy](privacy.md) | Provider requests, local session data, credentials, MCP, and Goal verification data. |

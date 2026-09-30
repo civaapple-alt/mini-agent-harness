@@ -28,7 +28,6 @@ pub struct ProviderSettings {
     pub api_key: String,
     pub model: String,
     pub base_url: String,
-    pub web_search: bool,
 }
 
 impl RuntimeConfig {
@@ -95,26 +94,19 @@ impl RuntimeConfig {
     ) -> Result<ProviderSettings, String> {
         let selected = catalog
             .primary_default(&self.project_id())?
-            .and_then(|selection| catalog.provider_settings(&selection, true).ok());
+            .and_then(|selection| catalog.provider_settings(&selection).ok());
         Ok(match selected {
-            Some(mut settings) => {
-                // The CLI switch can disable provider search, while provider
-                // configuration and endpoint detection decide whether it is available.
-                settings.web_search &= self.web_search;
-                ProviderSettings {
-                    api_key: settings.api_key,
-                    model: settings.model,
-                    base_url: settings.base_url,
-                    web_search: settings.web_search,
-                }
-            }
+            Some(settings) => ProviderSettings {
+                api_key: settings.api_key,
+                model: settings.model,
+                base_url: settings.base_url,
+            },
             None => ProviderSettings {
                 // Lets management APIs and first-run Studio start without a model.
                 // HostResponsesModel rejects turns until a usable catalog default exists.
                 api_key: String::new(),
                 model: "unconfigured".to_string(),
                 base_url: DEFAULT_BASE_URL.to_string(),
-                web_search: self.web_search,
             },
         })
     }
@@ -175,12 +167,11 @@ impl RuntimeConfig {
             "configure a Goal Verifier default model in Web Studio model settings".to_string()
         })?;
         catalog
-            .provider_settings(&selection, false)
+            .provider_settings(&selection)
             .map(|settings| ProviderSettings {
                 api_key: settings.api_key,
                 model: settings.model,
                 base_url: settings.base_url,
-                web_search: false,
             })
     }
 
@@ -203,13 +194,12 @@ impl RuntimeConfig {
                 "configure a Goal Verifier default model in Web Studio model settings".to_string()
             })?,
         };
-        let provider = catalog.provider_settings(&selection, false)?;
+        let provider = catalog.provider_settings(&selection)?;
         let profile = catalog.model_profile(&selection)?;
         OpenAiModel::new(
             provider.api_key,
             provider.model,
             provider.base_url,
-            false,
             ImageStore::memory_only(),
         )
         .map(|model| {
@@ -329,112 +319,11 @@ mod tests {
     }
 
     #[test]
-    fn official_deepseek_endpoint_does_not_enable_builtin_search() {
-        let workspace = unique_dir("search-setting");
-        let store = ModelCatalogStore::at(workspace.join(".mini-agent/model_catalog.json"));
-        let provider = ProviderProfile {
-            id: "deepseek".to_string(),
-            name: "DeepSeek".to_string(),
-            kind: ProviderKind::DeepSeek,
-            base_url: "https://api.deepseek.com".to_string(),
-            enabled: true,
-            web_search: None,
-            models: Vec::new(),
-        };
-        store
-            .upsert_provider(provider, Some("key".to_string()))
-            .unwrap();
-        store
-            .upsert_model(
-                "deepseek",
-                ModelProfile {
-                    id: "search-model".to_string(),
-                    name: "Search Model".to_string(),
-                    enabled: true,
-                    context_window: None,
-                    max_output_tokens: None,
-                    input_modalities: vec!["text".to_string()],
-                    capabilities: vec!["web_search".to_string()],
-                    reasoning_levels: Vec::new(),
-                    reasoning_parameter_map: Default::default(),
-                    smart_managed: false,
-                },
-                None,
-            )
-            .unwrap();
-        let selection = ModelSelection::new("deepseek", "search-model");
+    fn web_search_switch_only_controls_tool_exposure() {
+        let workspace = unique_dir("search-exposure");
         let config = RuntimeConfig::load_from(workspace, None).unwrap();
-        assert!(
-            !store
-                .provider_settings(&selection, config.web_search())
-                .unwrap()
-                .web_search
-        );
-        assert!(
-            !store
-                .provider_settings(&selection, config.with_web_search(false).web_search())
-                .unwrap()
-                .web_search
-        );
-    }
-
-    #[test]
-    fn runtime_provider_settings_preserve_explicit_search_choice() {
-        let workspace = unique_dir("explicit-search-setting");
-        let store = ModelCatalogStore::at(workspace.join(".mini-agent/model_catalog.json"));
-        let selection = ModelSelection::new("custom", "search-model");
-        store
-            .upsert_provider(
-                ProviderProfile {
-                    id: "custom".to_string(),
-                    name: "Custom".to_string(),
-                    kind: ProviderKind::Custom,
-                    base_url: "https://example.test/v1".to_string(),
-                    enabled: true,
-                    web_search: Some(false),
-                    models: Vec::new(),
-                },
-                Some("key".to_string()),
-            )
-            .unwrap();
-        store
-            .upsert_model(
-                "custom",
-                ModelProfile {
-                    id: "search-model".to_string(),
-                    name: "Search Model".to_string(),
-                    enabled: true,
-                    context_window: None,
-                    max_output_tokens: None,
-                    input_modalities: vec!["text".to_string()],
-                    capabilities: vec!["web_search".to_string()],
-                    reasoning_levels: Vec::new(),
-                    reasoning_parameter_map: Default::default(),
-                    smart_managed: false,
-                },
-                None,
-            )
-            .unwrap();
-        store.set_defaults(Some(selection), None).unwrap();
-        let config = RuntimeConfig::load_from(workspace.clone(), None).unwrap();
-
-        assert!(!config.provider_settings_from(&store).unwrap().web_search);
-
-        store
-            .upsert_provider(
-                ProviderProfile {
-                    id: "custom".to_string(),
-                    name: "Custom".to_string(),
-                    kind: ProviderKind::Custom,
-                    base_url: "https://example.test/v1".to_string(),
-                    enabled: true,
-                    web_search: Some(true),
-                    models: Vec::new(),
-                },
-                None,
-            )
-            .unwrap();
-        assert!(config.provider_settings_from(&store).unwrap().web_search);
+        assert!(config.web_search());
+        assert!(!config.with_web_search(false).web_search());
     }
 
     #[test]
@@ -447,7 +336,6 @@ mod tests {
             kind: ProviderKind::Custom,
             base_url: "https://example.test/v1".to_string(),
             enabled: true,
-            web_search: None,
             models: Vec::new(),
         };
         store

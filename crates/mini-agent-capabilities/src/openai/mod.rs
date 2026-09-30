@@ -31,7 +31,6 @@ pub struct OpenAiModel {
     api_key: String,
     model: String,
     endpoint: String,
-    web_search: bool,
     images: ImageStore,
     max_output_tokens: Option<usize>,
     reasoning_parameter_map: BTreeMap<String, serde_json::Value>,
@@ -42,7 +41,6 @@ impl OpenAiModel {
         api_key: String,
         model: String,
         base_url: String,
-        web_search: bool,
         images: ImageStore,
     ) -> Result<Self, OpenAiError> {
         let base_url = trim_base(&base_url);
@@ -60,7 +58,6 @@ impl OpenAiModel {
             api_key,
             model,
             endpoint: format!("{base_url}/responses"),
-            web_search,
             images,
             max_output_tokens: None,
             reasoning_parameter_map: BTreeMap::new(),

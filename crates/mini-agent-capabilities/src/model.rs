@@ -11,7 +11,6 @@ pub struct ModelProviderSettings {
     pub api_key: String,
     pub model: String,
     pub base_url: String,
-    pub web_search: bool,
 }
 
 /// Builds the selected concrete model provider.
@@ -25,13 +24,9 @@ pub fn build_model(
     images: ImageStore,
 ) -> Result<OpenAiModel, OpenAiError> {
     match provider_id {
-        crate::OPENAI_MODEL_PROVIDER => OpenAiModel::new(
-            settings.api_key,
-            settings.model,
-            settings.base_url,
-            settings.web_search,
-            images,
-        ),
+        crate::OPENAI_MODEL_PROVIDER => {
+            OpenAiModel::new(settings.api_key, settings.model, settings.base_url, images)
+        }
         other => Err(OpenAiError::Protocol(format!(
             "unknown model provider: {other}"
         ))),

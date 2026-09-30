@@ -5,6 +5,13 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+- Add one bounded `web_search` tool backed by DeepSeek native search, Exa, or
+  Kimi Basic. Store search keys separately from model credentials, expose
+  write-only Host settings over App Server RPC, and reuse `web_fetch` with
+  Session-backed continuation for long pages.
+- Replace model-level Responses search flags with the selected Host search
+  provider; keep `web_fetch` URL validation and public-URL approval in Host.
+
 - Add project-level Session diagnostics to Web Studio. A bounded App Server
   maintenance command checks Session JSONL records without opening the Agent
   runtime; users can back up and repair only an incomplete final record.

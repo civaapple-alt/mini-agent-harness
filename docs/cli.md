@@ -70,8 +70,8 @@ FastAPI Gateway → Web Studio`；Plan、Goal、项目会话和 Web 控制应通
 | `--no-tools` | REPL、`run` | 禁用 Builtin 和扩展工具 |
 | `--security-preset PRESET` | REPL、`run` | `default` 或 `full-machine` |
 | `--sandbox KIND` | REPL、`run` | `native` 或 `docker` |
-| `--web-search` / `--search` | REPL、`run` | 启用内置 Responses `web_search` |
-| `--no-web-search` / `--no-search` | REPL、`run` | 禁用内置 Responses `web_search` |
+| `--web-search` / `--search` | REPL、`run` | 允许已配置的 Host 联网搜索服务加入本次运行；没有已配置服务时不添加搜索工具 |
+| `--no-web-search` / `--no-search` | REPL、`run` | 隐藏本次运行的 `web_search` 和关联的 `web_fetch` 工具 |
 | `--json` | `run` | 输出机器可读结果 |
 | `--trace-jsonl PATH` | `run` | 写入一次性有界脱敏事件记录 |
 
@@ -96,5 +96,7 @@ turn、context item 和结果句柄；恢复只使用最新完整 checkpoint。S
   [`limits.md`](limits.md)；
 - Docker 模式提供受控容器执行，但不自动等同于完整网络、Capability 或资源
   隔离，详见 [`harness-boundaries.md`](harness-boundaries.md)；
+- 联网搜索服务和 API Key 在 Web Studio 的“联网搜索”设置中配置；搜索配置与
+  Responses 模型目录分离，详见 [`web-search.md`](web-search.md)；
 - CLI 不提供独立的 Plan/Goal 工作流控制面；这些操作属于 App Server 的
   Thread/Goal 客户端边界。

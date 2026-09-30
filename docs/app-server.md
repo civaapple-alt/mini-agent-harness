@@ -660,12 +660,11 @@ they may read a validated parent snapshot but cannot write or forget it.
 | `thread/settings/update` | `threadId`; optional `collaborationMode: {mode}`, `builtinTools: [name]`, `continuationMode`, `modelSelection: {providerId, modelId}`, and `reasoningSelection` | Updates Thread settings. `reasoningSelection` is `{kind: "api_default"}` or `{kind: "level", value: "<model-supported-level>"}`. An explicit `null` for `modelSelection` or `reasoningSelection` clears that Thread override and returns to defaults. The older `reasoningEffort` string is accepted for compatibility. Model changes apply to the next Turn. Emits `thread/settings/updated`; Goal Runtime owns its own loop while a Goal is active, so continuation updates are rejected until that Goal is paused or settled. |
 | `thread/model-settings/get` | `threadId` | Returns the persisted `modelSelection` and typed `reasoningSelection` for the Thread. |
 | `model/catalog/manage` | `operation`; operation-specific provider, model, default, or Project fields | Reads or updates the Host-owned machine model catalog. `set_defaults` accepts `defaultModel`, `defaultReasoningSelection` (`{kind: "api_default"}` or a supported `{kind: "level", value}`), and a separate `verifierDefaultModel`. `test_connection` sends one bounded request without tools and returns a bounded status/message. Provider API keys are accepted only on provider updates. Responses include `apiKeyConfigured` and never include key values. |
+| `web/search/settings/read` | `{}` | Returns the selected machine-wide search provider and boolean `*ApiKeyConfigured` fields. It never returns key values. |
+| `web/search/settings/update` | `provider` (`none`, `deepseek`, `exa`, or `kimi`); optional `deepseekApiKey`, `exaApiKey`, `kimiApiKey` | Selects one search provider and optionally replaces its key. Passing an empty key clears it. The response contains only provider selection and credential-presence flags. |
 | `thread/goal/set` | `threadId`; optional `objective`, `status`, `tokenBudget` | Sets or replaces a Goal subject to lifecycle checks; returns the public Goal projection and emits `thread/goal/updated`. A running Goal must be cleared before replacement. |
 | `thread/goal/get` | `threadId` | Returns `{goal}` where `goal` may be `null`. |
 | `thread/goal/clear` | `threadId` | Clears the Goal and returns `{cleared: true|false}`; emits `thread/goal/cleared` when applicable. |
-
-Provider catalog views also report Host-computed `webSearchSupport` and
-effective `webSearchEnabled` separately from the editable `webSearch` value.
 
 Goal status values are `active`, `paused`, `blocked`, `usageLimited`,
 `budgetLimited`, and `complete`. Goal continuation, verification, pause,

@@ -138,7 +138,10 @@ Host tools add their own effect-side bounds before results reach core:
 | file source read | 8 MiB; UTF-8 text only |
 | `read_file` page | 200 lines by default, 2,000 maximum, 15 KiB rendered page |
 | `read_image` file | 4 MiB; JPEG/PNG/GIF/WebP by magic; 4 images / request; Files API 60s, 7-day expiry; session `attachments/` reloaded on resume and copied on fork |
-| `web_fetch` body / extracted text | 128 KiB / 50k characters; 15s; 5 same-class redirects |
+| `web_fetch` response / extracted text | 8 MiB; 15s; at most 5 same-host, same-class redirects |
+| `web_fetch` inline result page | 8 KiB; longer results continue from the Session cache by handle and cursor |
+| Session-backed result cache | 64 KiB per result; at most 8 entries; 16 MiB total Session result data |
+| `web_search` request and results | query 2,000 bytes; up to 10 results; URL 2,000 bytes; title 256 chars; snippet 640 chars; provider response 1 MiB / 35s |
 | new file or edited file | 1 MiB |
 | shell command text | 16 KiB |
 | shell runtime | 120 seconds |
