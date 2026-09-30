@@ -11,6 +11,7 @@
 当前相关决策：
 
 - [Core + Protocol 预算与 Release 增量参考值](implemented/process/2026-09-30-core-protocol-budget-and-delta-guidance.zh.md)
+- [Web Studio 上下文占比与缓存命中率呈现](implemented/process/2026-09-30-context-usage-visualization.zh.md)
 - [Web Studio 会话上下文可视化与缓存友好注入](implemented/process/2026-09-30-web-studio-session-context-visibility.zh.md)
 - [运行中 Skill 发现刷新与稳定 Prompt 前缀](implemented/process/2026-09-30-live-skill-discovery-and-context-cache.zh.md)
 - [Web Studio 页面配置与首次使用](implemented/architecture/2026-09-27-page-owned-model-configuration-and-first-run.zh.md)
