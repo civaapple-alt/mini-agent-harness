@@ -65,7 +65,7 @@ const MAX_TOOL_DETAIL_BYTES: usize = 512;
 struct RunStats {
     requests: u64,
     input_tokens: u64,
-    cached_input_tokens: u64,
+    cached_input_tokens: Option<u64>,
     output_tokens: u64,
     tool_calls: Vec<Value>,
 }
@@ -158,10 +158,14 @@ impl EventSink for RunObserver {
                 if let Some(usage) = usage {
                     self.stats.input_tokens =
                         self.stats.input_tokens.saturating_add(usage.input_tokens);
-                    self.stats.cached_input_tokens = self
-                        .stats
-                        .cached_input_tokens
-                        .saturating_add(usage.cached_input_tokens);
+                    if let Some(cached_input_tokens) = usage.cached_input_tokens {
+                        self.stats.cached_input_tokens = Some(
+                            self.stats
+                                .cached_input_tokens
+                                .unwrap_or_default()
+                                .saturating_add(cached_input_tokens),
+                        );
+                    }
                     self.stats.output_tokens =
                         self.stats.output_tokens.saturating_add(usage.output_tokens);
                 }
@@ -176,6 +180,7 @@ impl EventSink for RunObserver {
             | Event::SkillsLoaded { .. }
             | Event::SkillsLoadFailed { .. }
             | Event::SkillGroupActivated { .. }
+            | Event::ContextInjected { .. }
             | Event::TurnFinished { .. }
             | Event::RunStarted { .. }
             | Event::ModelStarted { .. }
@@ -289,6 +294,7 @@ impl TerminalObserver {
             | Event::SkillsLoaded { .. }
             | Event::SkillsLoadFailed { .. }
             | Event::SkillGroupActivated { .. }
+            | Event::ContextInjected { .. }
             | Event::TurnFinished { .. }
             | Event::RunStarted { .. }
             | Event::ModelResponded { .. }

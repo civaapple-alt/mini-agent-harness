@@ -1272,7 +1272,8 @@ where
     let context = updated
         .model_context()
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-    replace_context_and_persist(threads, state, "world_state", context)?;
+    let (message, record) = world_context_injection(&context);
+    append_context_injection_and_persist(threads, state, message, record)?;
     state.management.set_world(updated);
     Ok(true)
 }
@@ -1703,11 +1704,11 @@ where
     Ok(())
 }
 
-fn replace_context_and_persist<M>(
+fn append_context_injection_and_persist<M>(
     threads: &mut ThreadManager<M>,
     state: &mut RuntimeActorState,
-    slot: &str,
     context: String,
+    record: mini_agent_protocol::ContextInjectionRecord,
 ) -> Result<(), AppServerError>
 where
     M: Model + 'static,
@@ -1719,13 +1720,13 @@ where
     let previous = thread
         .checkpoint()
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
-    crate::worker::apply_thread_update(
-        thread,
-        crate::ThreadUpdate::ReplaceContext {
-            slot: slot.to_string(),
-            text: context,
-        },
-    )?;
+    let Some(record) = thread
+        .harness_mut()
+        .append_context_injection(context, record)
+        .map_err(|error| AppServerError::Checkpoint(error.to_string()))?
+    else {
+        return Ok(());
+    };
     let checkpoint = thread
         .checkpoint()
         .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
@@ -1734,10 +1735,17 @@ where
         .messages()
         .iter()
         .rev()
-        .find(|message| {
-            matches!(message, Message::Context { text } if text.starts_with(&format!("<{slot}")))
+        .find(|message| match message {
+            Message::Context { text } => {
+                mini_agent_protocol::ContextInjectionRecord::from_context_message(text).is_some_and(
+                    |stored| stored.id == record.id && stored.fingerprint == record.fingerprint,
+                )
+            }
+            _ => false,
         })
-        .ok_or_else(|| AppServerError::Checkpoint(format!("context slot {slot} was not stored")))?;
+        .ok_or_else(|| {
+            AppServerError::Checkpoint(format!("context injection {} was not stored", record.id))
+        })?;
     if let Err(error) = state
         .management
         .record_context_message(context, &checkpoint)
@@ -1750,6 +1758,26 @@ where
         return Err(error);
     }
     Ok(())
+}
+
+fn world_context_injection(context: &str) -> (String, mini_agent_protocol::ContextInjectionRecord) {
+    let body = context
+        .strip_prefix("<world_state>")
+        .and_then(|value| value.strip_suffix("</world_state>"))
+        .unwrap_or(context);
+    let record = mini_agent_protocol::ContextInjectionRecord {
+        id: "world_state".to_string(),
+        kind: mini_agent_protocol::ContextInjectionKind::WorkspaceState,
+        source: "工作区状态".to_string(),
+        workspace: Some("主工作区".to_string()),
+        path: None,
+        scope: "当前运行环境和工作区状态".to_string(),
+        bytes: context.len() as u64,
+        fingerprint: mini_agent_protocol::stable_digest(context.as_bytes()),
+        supersedes: None,
+        reused: false,
+    };
+    (record.context_message(body), record)
 }
 
 fn update_thread<M>(

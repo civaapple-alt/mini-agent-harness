@@ -635,7 +635,7 @@ impl Model for ScenarioModel {
                 tool_calls: Vec::new(),
                 usage: Some(ModelUsage {
                     input_tokens: 3,
-                    cached_input_tokens: 0,
+                    cached_input_tokens: Some(0),
                     output_tokens: 2,
                 }),
             }),

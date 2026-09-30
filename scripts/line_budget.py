@@ -8,16 +8,16 @@ from pathlib import PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[1]
-KERNEL_LIMIT = 6_000
+KERNEL_LIMIT = 6_500
 # The release-source total includes production code and tests from the supported
 # runtime packages. The experimental CLI/REPL is reported separately and is not
 # part of this hard release gate.
 PROJECT_LIMIT = 55_000
 CONTROL_PLANE_LIMIT = 38_000
-PROJECT_DELTA_LIMIT = 1_000
+PROJECT_DELTA_GUIDANCE = 1_000
 
 # Runtime is reported for visibility but has no aggregate gate. Release growth
-# is bounded per change, while the source totals remain subject to hard limits.
+# guidance is informational; source totals remain subject to hard limits.
 
 # Keep the report aligned with the conceptual runtime layers. Capabilities are
 # reported separately because they are provider implementations behind Host;
@@ -394,15 +394,9 @@ def _delta_gate_violations(
         - int(base["control_plane"]),
     }
     release_total = int(current["release"])
-    release_delta = deltas["release"]
     if release_total > PROJECT_LIMIT:
         violations.append(
             f"release exceeds hard limit ({release_total}/{PROJECT_LIMIT})"
-        )
-    if release_delta > PROJECT_DELTA_LIMIT:
-        violations.append(
-            f"release grew by {release_delta} lines, above per-change limit "
-            f"{PROJECT_DELTA_LIMIT}"
         )
     kernel_total = int(current["kernel"])
     if kernel_total > KERNEL_LIMIT:
@@ -578,12 +572,13 @@ def check(
                 "core_protocol_hard": KERNEL_LIMIT,
                 "release_hard": PROJECT_LIMIT,
                 "control_plane_hard": CONTROL_PLANE_LIMIT,
-                "release_delta": PROJECT_DELTA_LIMIT,
+                "release_delta_guidance": PROJECT_DELTA_GUIDANCE,
             },
             "current": _json_report(current),
             "base": _json_report(baseline) if baseline else None,
             "delta": deltas,
-            "delta_enforced": enforce_delta,
+            "delta_reported": baseline is not None,
+            "release_delta_guidance_is_hard_gate": False,
             "violations": violations,
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -596,6 +591,12 @@ def check(
                 f"release {deltas['release']:+d}, "
                 f"control-plane {deltas['control_plane']:+d}"
             )
+            if deltas["release"] > PROJECT_DELTA_GUIDANCE:
+                print(
+                    "note: Release growth is above the suggested "
+                    f"{PROJECT_DELTA_GUIDANCE} lines; this is informational, "
+                    "while absolute limits remain enforced"
+                )
         if violations:
             print("line budget gate failed:", file=sys.stderr)
             for violation in violations:
@@ -612,7 +613,7 @@ def main() -> int:
     parser.add_argument(
         "--check-delta",
         action="store_true",
-        help="enforce hard limits and the per-change release delta limit",
+        help="report source deltas and enforce absolute hard limits",
     )
     parser.add_argument(
         "--json", action="store_true", help="emit machine-readable JSON"

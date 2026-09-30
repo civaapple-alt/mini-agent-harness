@@ -331,8 +331,7 @@ fn parse_usage(event: &Value) -> Result<Option<ModelUsage>, OpenAiError> {
     let cached_input_tokens = usage
         .get("input_tokens_details")
         .and_then(|details| details.get("cached_tokens"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+        .and_then(Value::as_u64);
     Ok(Some(ModelUsage {
         input_tokens: token_count("input_tokens")?,
         cached_input_tokens,
@@ -805,7 +804,7 @@ mod tests {
             state.usage,
             Some(ModelUsage {
                 input_tokens: 37,
-                cached_input_tokens: 11,
+                cached_input_tokens: Some(11),
                 output_tokens: 8,
             })
         );
@@ -818,6 +817,53 @@ mod tests {
             }]
         );
         assert!(state.completed);
+    }
+
+    #[test]
+    fn keeps_missing_cached_token_usage_unknown_and_preserves_reported_zero() {
+        let mut state = Accumulator::new(1024);
+        let mut deltas = Deltas::default();
+
+        apply(
+            &mut state,
+            json!({
+                "type": "response.completed",
+                "response": {
+                    "usage": {"input_tokens": 37, "output_tokens": 8}
+                }
+            }),
+            &mut deltas,
+        )
+        .unwrap();
+        assert_eq!(
+            state.usage,
+            Some(ModelUsage {
+                input_tokens: 37,
+                cached_input_tokens: None,
+                output_tokens: 8,
+            })
+        );
+
+        state.usage = None;
+        apply(
+            &mut state,
+            json!({
+                "type": "response.completed",
+                "response": {
+                    "usage": {
+                        "input_tokens": 37,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 8
+                    }
+                }
+            }),
+            &mut deltas,
+        )
+        .unwrap();
+        assert_eq!(
+            state.usage.and_then(|usage| usage.cached_input_tokens),
+            Some(0)
+        );
     }
 
     #[test]

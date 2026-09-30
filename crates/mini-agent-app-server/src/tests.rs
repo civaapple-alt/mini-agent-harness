@@ -447,6 +447,8 @@ impl ToolRuntime for SensitiveFixtureTool {
         ToolExecutionOutcome {
             status: ToolExecutionStatus::NeedsApproval,
             content: "user denied: sensitive fixture".to_string(),
+            context_messages: Vec::new(),
+            context_injections: Vec::new(),
         }
     }
 }
@@ -1041,6 +1043,16 @@ async fn knowledge_work_mock_provider_covers_structured_read_only_scenarios() {
             } if skills.iter().any(|record| record.qualified_name.as_deref()
                 == Some(qualified_name.as_str()))
         )));
+        let injected_skill_records = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::ContextInjected { records } => Some(records),
+                _ => None,
+            })
+            .flatten()
+            .filter(|record| record.source.starts_with("Skill "))
+            .count();
+        assert_eq!(injected_skill_records, 1);
         {
             let observations = observations.lock().unwrap();
             let observation = observations.last().expect("mock provider was not called");
@@ -1053,7 +1065,7 @@ async fn knowledge_work_mock_provider_covers_structured_read_only_scenarios() {
             assert!(observation.messages.iter().any(|message| matches!(
                 message,
                 Message::Context { text }
-                    if text.starts_with("Explicitly activated Skills") && text.contains(marker)
+                    if text.contains(marker)
             )));
             assert!(observation.messages.iter().any(|message| matches!(
                 message,
@@ -1124,8 +1136,7 @@ async fn knowledge_work_group_workflow_uses_requested_group_in_prompt() {
         assert!(observation.messages.iter().any(|message| matches!(
             message,
             Message::Context { text }
-                if text.starts_with("Explicitly activated Skills")
-                    && text.contains("Active Skill group: knowledge-work")
+                if text.contains("Active Skill group: knowledge-work")
         )));
         assert!(!observation.messages.iter().any(|message| matches!(
             message,

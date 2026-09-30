@@ -22,6 +22,7 @@ use crate::execution::ExecutionPhase;
 use crate::execution::ToolBatchIntent;
 use crate::run_control::RunControl;
 use crate::run_control::SteeringMode;
+use crate::session::context_byte_breakdown_for;
 use crate::session::context_bytes_for;
 use crate::session::model_input_digest;
 use crate::session::tool_manifest_digest;
@@ -29,6 +30,8 @@ use crate::tool_batch_executor::execute_tool_batch;
 use crate::turn_engine::ModelEventForwarder;
 use crate::turn_engine::SilentModelEvents;
 use crate::turn_engine::model_response_bytes;
+
+const MAX_CONTEXT_INJECTION_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContextLimitBehavior {
@@ -151,6 +154,7 @@ pub struct Harness<M> {
     tools: ToolRouter,
     config: HarnessConfig,
     session: SessionState,
+    pending_context_injections: Vec<(String, mini_agent_protocol::ContextInjectionRecord)>,
     model_selection: Option<mini_agent_protocol::ModelSelection>,
     reasoning_selection: Option<mini_agent_protocol::ReasoningSelection>,
     reasoning_effort: Option<String>,
@@ -169,6 +173,7 @@ impl<M: Model> Harness<M> {
             tools,
             config,
             session: SessionState::new(),
+            pending_context_injections: Vec::new(),
             model_selection: None,
             reasoning_selection: None,
             reasoning_effort: None,
@@ -254,7 +259,29 @@ impl<M: Model> Harness<M> {
         Ok(())
     }
 
-    pub fn replace_context_slot(
+    /// Appends a metadata-backed Host context source without mutating any
+    /// prior model message. Repeated active fingerprints are ignored.
+    pub fn append_context_injection(
+        &mut self,
+        text: impl Into<String>,
+        record: mini_agent_protocol::ContextInjectionRecord,
+    ) -> Result<Option<mini_agent_protocol::ContextInjectionRecord>, LimitExceeded> {
+        let text = text.into();
+        if text.len() > MAX_CONTEXT_INJECTION_BYTES {
+            return Err(LimitExceeded {
+                kind: LimitKind::ContextItemBytes,
+                limit: MAX_CONTEXT_INJECTION_BYTES,
+                actual: text.len(),
+            });
+        }
+        let appended = self.session.append_context_injection(text.clone(), record);
+        if let Some(record) = &appended {
+            self.pending_context_injections.push((text, record.clone()));
+        }
+        Ok(appended)
+    }
+
+    pub fn append_context_slot_if_changed(
         &mut self,
         slot: &str,
         text: impl Into<String>,
@@ -267,7 +294,7 @@ impl<M: Model> Harness<M> {
                 actual: text.len(),
             });
         }
-        Ok(self.session.replace_context_slot(slot, text))
+        Ok(self.session.append_context_slot_if_changed(slot, text))
     }
 
     pub fn restore_history(&mut self, messages: Vec<Message>) -> Result<(), LimitExceeded> {
@@ -275,15 +302,31 @@ impl<M: Model> Harness<M> {
     }
 
     pub fn restore_session(&mut self, mut session: SessionState) -> Result<(), LimitExceeded> {
+        let mut pending_context_injections = Vec::new();
+        for (text, record) in &self.pending_context_injections {
+            if let Some(record) = session.append_context_injection(text.clone(), record.clone()) {
+                pending_context_injections.push((text.clone(), record));
+            }
+        }
         let messages = session.messages();
         for message in messages {
             match message {
-                Message::Context { text } if text.len() > self.config.max_context_item_bytes => {
-                    return Err(LimitExceeded {
-                        kind: LimitKind::ContextItemBytes,
-                        limit: self.config.max_context_item_bytes,
-                        actual: text.len(),
-                    });
+                Message::Context { text } => {
+                    let limit =
+                        if mini_agent_protocol::ContextInjectionRecord::from_context_message(text)
+                            .is_some()
+                        {
+                            MAX_CONTEXT_INJECTION_BYTES
+                        } else {
+                            self.config.max_context_item_bytes
+                        };
+                    if text.len() > limit {
+                        return Err(LimitExceeded {
+                            kind: LimitKind::ContextItemBytes,
+                            limit,
+                            actual: text.len(),
+                        });
+                    }
                 }
                 Message::User { text } if text.len() > self.config.max_user_input_bytes => {
                     return Err(LimitExceeded {
@@ -339,6 +382,7 @@ impl<M: Model> Harness<M> {
             });
         }
         self.session = session;
+        self.pending_context_injections = pending_context_injections;
         Ok(())
     }
 
@@ -605,6 +649,14 @@ impl<M: Model> Harness<M> {
                     observer,
                 ));
             }
+            if !self.pending_context_injections.is_empty() {
+                observer.observe(&Event::ContextInjected {
+                    records: std::mem::take(&mut self.pending_context_injections)
+                        .into_iter()
+                        .map(|(_, record)| record)
+                        .collect(),
+                });
+            }
             self.prepare_context(&tool_specs, observer).await?;
             if let Some(execution) = execution_context.as_ref() {
                 crate::execution::append_if_present(
@@ -689,6 +741,11 @@ impl<M: Model> Harness<M> {
                 text: response.text.clone(),
                 tool_calls: response.tool_calls.clone(),
                 usage: response.usage,
+                context_bytes: Some(context_byte_breakdown_for(
+                    &self.config.system_prompt,
+                    self.session.messages(),
+                    &tool_specs,
+                )),
             });
             final_text = response.text.clone();
             self.session.push(Message::Assistant {
@@ -897,7 +954,7 @@ impl<M: Model> Harness<M> {
     ) -> Result<ForkCompactionMethod, HarnessError<M::Error>> {
         let before_bytes = self.context_bytes(&self.config.system_prompt, tool_specs);
         let compact_at = self.config.max_context_bytes / 2;
-        let (mut prefix, context, tail) = split_compaction_parts(self.session.messages());
+        let (mut prefix, contexts, tail) = split_compaction_parts(self.session.messages());
         if prefix.is_empty() {
             return Ok(ForkCompactionMethod::Exact);
         }
@@ -912,7 +969,7 @@ impl<M: Model> Harness<M> {
         );
         if prefix.is_empty() {
             let compacted =
-                assemble_compacted(None, context, tail, self.config.max_user_input_bytes);
+                assemble_compacted(None, contexts, tail, self.config.max_user_input_bytes);
             self.finish_compacted(compacted, before_bytes, None, tool_specs, observer)?;
             return Ok(ForkCompactionMethod::Mechanical);
         }
@@ -960,7 +1017,7 @@ impl<M: Model> Harness<M> {
         if response.tool_calls.is_empty() && !summary.is_empty() {
             let candidate = assemble_compacted(
                 Some(summary),
-                context.clone(),
+                contexts.clone(),
                 tail.clone(),
                 self.config.max_user_input_bytes,
             );
@@ -977,7 +1034,7 @@ impl<M: Model> Harness<M> {
         let compacted = compacted.unwrap_or_else(|| {
             mechanical_compact(
                 prefix,
-                context,
+                contexts,
                 tail,
                 compact_at,
                 &self.config.system_prompt,

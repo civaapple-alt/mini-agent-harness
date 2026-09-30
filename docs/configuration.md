@@ -96,10 +96,12 @@ with Chat Completions.
 The Host assembles a bounded runtime composition before the App Server starts.
 The composition chooses the model/tool scope, extension load depth, foundational
 agent, persona, and workflow policy, plus sandbox and security selections. These
-are internal composition inputs, not a user-facing Profile or Session axis. The regular `general` agent still has explicit prompt and
-rule configuration. Its stable context is assembled from the built-in prompt,
-project `AGENTS.md`, selected extension instructions, and workflow riders in
-that order; safety and host policy rules retain higher precedence.
+are internal composition inputs, not a user-facing Profile or Session axis.
+The regular `general` agent still has explicit prompt and rule configuration.
+Its stable context is assembled from the built-in prompt and host safety
+contract. Project instructions, Skills, workspace state, and workflow riders
+are appended as bounded Session context messages; safety and host policy rules
+retain higher precedence.
 
 For `general`, the built-in prompt is the regular-agent base contract, while
 `promptSources` and `ruleSources` independently control the project,
@@ -202,12 +204,27 @@ duplicate the App Server runtime status dashboard. Neither output contains
 credentials. Provider configuration is validated when a provider-backed turn
 starts.
 
-If the startup workspace contains `AGENTS.md`, mini-agent appends its UTF-8
-contents once to the stable system prompt. The file has a 16 KiB hard limit.
-Oversized files are not dropped: the host keeps a UTF-8-safe head and tail,
-inserts an explicit `[truncated]` marker, and prints a warning. Invalid UTF-8
-still fails startup. Nested instruction discovery is not part of the v0.1
-contract.
+At startup the Host reads `AGENTS.md` from the primary workspace and each
+configured read-only workspace root. Each source is a bounded Session context
+message, with a stable content fingerprint and metadata for its workspace,
+relative path, scope, and byte size. The Web Studio projects that metadata but
+does not return the source body in history.
+
+Before the first admitted structured file operation, the Host checks the
+target's ancestor directories for applicable `AGENTS.md` files in configured
+read roots. It appends any new instructions and defers the operation so the
+model can reassess and retry. Shell commands are not scanned for paths; the
+agent must use `read_file` to inspect applicable instructions before running a
+Shell command. Every operation still passes through the existing admission,
+approval, and sandbox boundaries.
+
+Each file has a 16 KiB input bound; oversized files use a UTF-8-safe head and
+tail with an explicit `[truncated]` marker and a warning. At most 16 workspace
+roots and 16 applicable files are considered, with a 256 KiB combined source
+limit. Invalid UTF-8 fails the context load. Unchanged fingerprints are not
+re-injected. A changed source is appended with a `supersedes` fingerprint;
+older model messages are left intact. The stable system prompt and tool
+definitions do not change when these dynamic sources update.
 
 World state is not configured through environment variables. Mini-agent
 detects a fixed command catalog, root project markers, host shell, OS,

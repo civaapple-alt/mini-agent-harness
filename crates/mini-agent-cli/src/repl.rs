@@ -129,6 +129,11 @@ pub async fn run(
                                 Err(InputQueueError::Full { capacity }) => {
                                     eprintln!("steer queue limit reached: {capacity}");
                                 }
+                                Err(InputQueueError::ByteLimit { limit, actual }) => {
+                                    eprintln!(
+                                        "steer queue byte limit exceeded: {actual} > {limit}"
+                                    );
+                                }
                                 Err(InputQueueError::UnsupportedMode(_)) => {
                                     eprintln!("cannot queue steer input")
                                 }
@@ -160,6 +165,9 @@ pub async fn run(
                             Err(InputQueueError::Full { capacity }) => {
                                 eprintln!("input queue limit reached: {capacity}");
                             }
+                            Err(InputQueueError::ByteLimit { limit, actual }) => {
+                                eprintln!("input queue byte limit exceeded: {actual} > {limit}");
+                            }
                             Err(InputQueueError::UnsupportedMode(_)) => {
                                 eprintln!("cannot queue follow-up input");
                             }
@@ -179,7 +187,7 @@ pub async fn run(
                 eprintln!("error: cannot read input: {error}");
                 request_shutdown(&worker_tx, &mut exiting);
             }
-            ReplEvent::Observed(event) => observer.emit(event),
+            ReplEvent::Observed(event) => observer.emit(*event),
             ReplEvent::Ready => {
                 ready = true;
                 print_prompt_if_idle(ready, pending_work, exiting);

@@ -168,17 +168,41 @@ where
     if !composition_overlay.is_empty() {
         config.system_prompt = format!("{composition_overlay}\n\n{}", config.system_prompt);
     }
+    let project_instruction_loader = if composition.regular_agent.prompts.project {
+        project_context::ProjectInstructionLoader::from_configured_roots(
+            &workspace,
+            &runtime_config.extra_read_roots(),
+        )
+    } else {
+        project_context::ProjectInstructionLoader::default()
+    };
+    let startup_injections = project_instruction_loader.startup_injections()?;
+    for injection in &startup_injections {
+        if let Some(warning) = &injection.warning {
+            eprintln!("warning: {warning}");
+        }
+    }
+    if composition.regular_agent.prompts.project {
+        config.max_context_item_bytes = config
+            .max_context_item_bytes
+            .max(project_context::MAX_PROJECT_INSTRUCTIONS_BYTES + 1024);
+    }
     let project_fingerprint =
         if composition.regular_agent.prompts.project || composition.regular_agent.rules.project {
-            let project_instructions = project_context::load_agents_md(&workspace)?;
-            if let Some(warning) = project_instructions.truncation_warning() {
-                eprintln!("warning: {warning}");
-            }
-            let fingerprint = project_instructions.fingerprint();
-            if composition.regular_agent.prompts.project {
-                config.system_prompt = project_instructions.augment(&config.system_prompt);
-            }
-            fingerprint
+            let fingerprints = startup_injections
+                .iter()
+                .map(|injection| {
+                    format!(
+                        "{}:{}:{}",
+                        injection.record.workspace.as_deref().unwrap_or(""),
+                        injection.record.path.as_deref().unwrap_or(""),
+                        injection.record.fingerprint
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!fingerprints.is_empty())
+                .then(|| crate::runtime_composition::stable_fingerprint(fingerprints.as_bytes()))
         } else {
             None
         };
@@ -334,16 +358,41 @@ where
         composition.sandbox,
     );
     let world_context = world.model_context()?;
-    let tool_executor = Arc::new(ToolOrchestrator::new(approval.clone()));
+    let tool_executor = Arc::new(
+        ToolOrchestrator::new(approval.clone())
+            .with_project_instructions(project_instruction_loader),
+    );
     let tool_registry = ToolRouter::with_executor(tools, tool_executor);
     let mut harness = Harness::new(model, tool_registry, config);
     harness.set_hidden_tools(BuiltinToolSelection::default().hidden_names());
-    harness
-        .append_context(world_context)
+    for injection in startup_injections {
+        let _ = harness
+            .append_context_injection(injection.message, injection.record)
+            .map_err(|error| error.to_string())?;
+    }
+    let (world_message, world_record) = host_context_message(
+        "world_state",
+        mini_agent_protocol::ContextInjectionKind::WorkspaceState,
+        "工作区状态",
+        "主工作区",
+        "当前运行环境和工作区状态",
+        &world_context,
+    );
+    let _ = harness
+        .append_context_injection(world_message, world_record)
         .map_err(|error| error.to_string())?;
     if approval.session_dir().is_some() {
-        harness
-            .append_context(crate::world::session_capabilities_context().to_string())
+        let capabilities = crate::world::session_capabilities_context();
+        let (message, record) = host_context_message(
+            "session_capabilities",
+            mini_agent_protocol::ContextInjectionKind::Other,
+            "会话能力",
+            "会话",
+            "当前会话允许使用的附加能力",
+            capabilities,
+        );
+        let _ = harness
+            .append_context_injection(message, record)
             .map_err(|error| error.to_string())?;
     }
     Ok(HarnessBuild {
@@ -361,4 +410,34 @@ where
         background_shells,
         scheduled_tasks,
     })
+}
+
+fn host_context_message(
+    id: &str,
+    kind: mini_agent_protocol::ContextInjectionKind,
+    source: &str,
+    workspace: &str,
+    scope: &str,
+    context: &str,
+) -> (String, mini_agent_protocol::ContextInjectionRecord) {
+    let opening = format!("<{id}>");
+    let closing = format!("</{id}>");
+    let body = context
+        .strip_prefix(&opening)
+        .and_then(|value| value.strip_suffix(&closing))
+        .unwrap_or(context);
+    let fingerprint = mini_agent_protocol::stable_digest(context.as_bytes());
+    let record = mini_agent_protocol::ContextInjectionRecord {
+        id: id.to_string(),
+        kind,
+        source: source.to_string(),
+        workspace: Some(workspace.to_string()),
+        path: None,
+        scope: scope.to_string(),
+        bytes: context.len() as u64,
+        fingerprint,
+        supersedes: None,
+        reused: false,
+    };
+    (record.context_message(body), record)
 }

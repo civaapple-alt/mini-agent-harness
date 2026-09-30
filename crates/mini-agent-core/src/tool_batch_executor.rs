@@ -60,6 +60,9 @@ pub(super) fn execute_tool_batch<O: Observer>(
         journal,
     } = options;
     let mut executed = Vec::with_capacity(calls.len());
+    let mut context_messages = Vec::new();
+    let mut context_injections = Vec::new();
+    let mut replan_after_injection = false;
     for call in calls {
         if let Some(turn_id) = turn_id {
             crate::execution::append_if_present(
@@ -78,8 +81,18 @@ pub(super) fn execute_tool_batch<O: Observer>(
         } else {
             request
         }
+        .with_known_context_injections(session.context_injections())
         .with_cancellation(control.cancellation_token());
-        let outcome = tools.execute_outcome(&request);
+        let outcome = if replan_after_injection {
+            ToolExecutionOutcome::deferred(
+                "Host added workspace instructions. Review them, then retry the remaining operation.",
+            )
+        } else {
+            tools.execute_outcome(&request)
+        };
+        replan_after_injection |= !outcome.context_messages.is_empty();
+        context_messages.extend(outcome.context_messages.iter().cloned());
+        context_injections.extend(outcome.context_injections.iter().cloned());
         let is_error = outcome.status.is_error();
         let content = outcome.content.clone();
         let truncated = content.len() > max_output_bytes;
@@ -114,6 +127,21 @@ pub(super) fn execute_tool_batch<O: Observer>(
         });
         executed.push((call.name, call.arguments, content));
     }
+    let candidate_injections = std::mem::take(&mut context_injections);
+    for (index, text) in context_messages.into_iter().enumerate() {
+        if let Some(record) = candidate_injections.get(index).cloned() {
+            if let Some(record) = session.append_context_injection(text, record) {
+                context_injections.push(record);
+            }
+        } else {
+            session.push(mini_agent_protocol::Message::Context { text });
+        }
+    }
+    if !context_injections.is_empty() {
+        observer.observe(&Event::ContextInjected {
+            records: context_injections,
+        });
+    }
     Ok(executed)
 }
 
@@ -138,6 +166,8 @@ pub(super) fn recover_tool_batch<O: Observer>(
 
     let intent = batch.intent;
     let mut executed = Vec::with_capacity(batch.calls.len());
+    let mut context_messages = Vec::new();
+    let mut context_injections = Vec::new();
     for call in batch.calls {
         let outcome = if let Some(outcome) = call.outcome {
             outcome
@@ -151,7 +181,8 @@ pub(super) fn recover_tool_batch<O: Observer>(
                 },
             )
             .map_err(ToolBatchRecoveryError::Journal)?;
-            let request = recovery_request(&call.call, context, control);
+            let request = recovery_request(&call.call, context, control)
+                .with_known_context_injections(session.context_injections());
             tools.execute_outcome(&request)
         };
         append_recovered_call(
@@ -162,8 +193,25 @@ pub(super) fn recover_tool_batch<O: Observer>(
             session,
             observer,
             journal,
+            &mut context_messages,
+            &mut context_injections,
             &mut executed,
         )?;
+    }
+    let candidate_injections = std::mem::take(&mut context_injections);
+    for (index, text) in context_messages.into_iter().enumerate() {
+        if let Some(record) = candidate_injections.get(index).cloned() {
+            if let Some(record) = session.append_context_injection(text, record) {
+                context_injections.push(record);
+            }
+        } else {
+            session.push(mini_agent_protocol::Message::Context { text });
+        }
+    }
+    if !context_injections.is_empty() {
+        observer.observe(&Event::ContextInjected {
+            records: context_injections,
+        });
     }
     Ok(executed)
 }
@@ -191,9 +239,13 @@ fn append_recovered_call<O: Observer>(
     session: &mut SessionState,
     observer: &mut O,
     journal: &mut Option<&mut dyn crate::ExecutionJournalSink>,
+    context_messages: &mut Vec<String>,
+    context_injections: &mut Vec<mini_agent_protocol::ContextInjectionRecord>,
     executed: &mut Vec<(String, serde_json::Value, String)>,
 ) -> Result<(), ToolBatchRecoveryError> {
     let durable_outcome = outcome.clone();
+    context_messages.extend(outcome.context_messages.iter().cloned());
+    context_injections.extend(outcome.context_injections.iter().cloned());
     let content = outcome.content;
     let is_error = outcome.status.is_error();
     let truncated = content.len() > max_output_bytes;

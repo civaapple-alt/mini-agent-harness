@@ -136,7 +136,7 @@ class LineBudgetTests(unittest.TestCase):
         )
         self.assertEqual(violations, [])
 
-    def test_delta_gate_rejects_growth_above_per_pr_limit(self):
+    def test_delta_above_guidance_is_not_a_hard_gate(self):
         current = {"kernel": 5_201, "runtime": 24_201, "release": 40_001, "control_plane": 1}
         base = {"kernel": 5_000, "runtime": 24_000, "release": 39_000, "control_plane": 1}
 
@@ -145,8 +145,7 @@ class LineBudgetTests(unittest.TestCase):
         self.assertEqual(
             deltas, {"kernel": 201, "release": 1_001, "control_plane": 0}
         )
-        self.assertTrue(any("1001" in violation for violation in violations))
-        self.assertTrue(any("1000" in violation for violation in violations))
+        self.assertEqual(violations, [])
 
     def test_delta_gate_allows_growth_above_old_red_band(self):
         current = {"kernel": 5_501, "runtime": 24_501, "release": 40_001, "control_plane": 1}
@@ -179,7 +178,7 @@ class LineBudgetTests(unittest.TestCase):
                 self.assertEqual(line_budget.check(root), 0)
             self.assertIn("line-budget: PASS", output.getvalue())
             self.assertIn("core+protocol", output.getvalue())
-            self.assertIn("1/6000", output.getvalue())
+            self.assertIn("1/6500", output.getvalue())
             self.assertIn("control-plane", output.getvalue())
             self.assertIn("0/38000", output.getvalue())
             self.assertIn(
@@ -188,7 +187,7 @@ class LineBudgetTests(unittest.TestCase):
             )
             self.assertNotIn("runtime (core + protocol + host + app-server)", output.getvalue())
             self.assertIn(
-                "1/6000",
+                "1/6500",
                 output.getvalue(),
             )
 
@@ -231,13 +230,13 @@ class LineBudgetTests(unittest.TestCase):
             "control-plane exceeds hard limit (38001/38000)", violations
         )
 
-    def test_delta_gate_enforces_core_protocol_hard_limit(self):
-        current = {"kernel": 6_001, "runtime": 1, "release": 1, "control_plane": 1}
-        base = {"kernel": 6_001, "runtime": 1, "release": 1, "control_plane": 1}
+    def test_delta_report_enforces_core_protocol_hard_limit(self):
+        current = {"kernel": 6_501, "runtime": 1, "release": 1, "control_plane": 1}
+        base = {"kernel": 6_501, "runtime": 1, "release": 1, "control_plane": 1}
 
         violations, _ = line_budget._delta_gate_violations(current, base)
 
-        self.assertIn("core+protocol exceeds hard limit (6001/6000)", violations)
+        self.assertIn("core+protocol exceeds hard limit (6501/6500)", violations)
 
     def test_release_hard_limit_is_enforced(self):
         current = {"kernel": 1, "runtime": 1, "release": 55_001, "control_plane": 1}

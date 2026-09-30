@@ -1,3 +1,5 @@
+use crate::ContextByteBreakdown;
+use crate::ContextInjectionRecord;
 use crate::LimitExceeded;
 use crate::ModelUsage;
 use crate::StopReason;
@@ -36,6 +38,9 @@ pub enum Event {
         group: String,
         source: String,
     },
+    ContextInjected {
+        records: Vec<ContextInjectionRecord>,
+    },
     RunStarted {
         prompt: String,
     },
@@ -62,6 +67,8 @@ pub enum Event {
         text: String,
         tool_calls: Vec<ToolCall>,
         usage: Option<ModelUsage>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_bytes: Option<ContextByteBreakdown>,
     },
     ToolStarted {
         call: ToolCall,

@@ -110,11 +110,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 matches!(
                     message,
                     mini_agent_protocol::Message::Context { text }
-                        if text.starts_with("<session_capabilities>")
+                        if text.starts_with("<session_capabilities")
                 )
             }) {
                 harness
-                    .replace_context_slot(
+                    .append_context_slot_if_changed(
                         "session_capabilities",
                         mini_agent_host::world::session_capabilities_context().to_string(),
                     )
@@ -135,16 +135,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     if !summary.is_empty()
                         && !harness.messages().iter().any(|message| {
                             matches!(
-                                message,
-                                mini_agent_protocol::Message::Context { text }
-                                    if text.starts_with("<session_notebook_summary>")
-                            )
+                                    message,
+                                    mini_agent_protocol::Message::Context { text }
+                            if text.starts_with("<session_notebook_summary")
+                                )
                         })
                     {
-                        harness
-                            .append_context(format!(
-                                "<session_notebook_summary>\n{summary}\n</session_notebook_summary>"
-                            ))
+                        let record = mini_agent_protocol::ContextInjectionRecord {
+                            id: "session_notebook_summary".to_string(),
+                            kind: mini_agent_protocol::ContextInjectionKind::Other,
+                            source: "会话笔记摘要".to_string(),
+                            workspace: Some("会话".to_string()),
+                            path: Some(mini_agent_capabilities::NOTEBOOK_FILE_NAME.to_string()),
+                            scope: "当前会话的笔记摘要".to_string(),
+                            bytes: summary.len() as u64,
+                            fingerprint: mini_agent_protocol::stable_digest(summary.as_bytes()),
+                            supersedes: None,
+                            reused: false,
+                        };
+                        let message = record.context_message(&summary);
+                        let _ = harness
+                            .append_context_injection(message, record)
                             .map_err(|error| error.to_string())?;
                     }
                 }

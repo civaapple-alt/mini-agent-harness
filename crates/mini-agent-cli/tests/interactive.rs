@@ -90,22 +90,15 @@ fn run_reads_stdin_and_keeps_machine_output_clean() {
             .contains("summarize this repository")
     );
     assert_eq!(request["input"][0]["role"], "developer");
-    assert!(
-        request["input"][0]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("<world_state>")
-    );
-    assert!(
-        request["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("Use the release contract.")
-    );
+    let context_input = request["input"].to_string();
+    assert!(context_input.contains("<world_state"));
+    assert!(context_input.contains("Use the release contract."));
+    assert!(context_input.contains("release-review"));
+    assert!(context_input.contains(".agents/skills/release-review/SKILL.md"));
+    assert!(!context_input.contains("FULL SKILL BODY LOADS ON DEMAND"));
     let instructions = request["instructions"].as_str().unwrap();
-    assert!(instructions.contains("release-review"));
-    assert!(instructions.contains(".agents/skills/release-review/SKILL.md"));
-    assert!(!instructions.contains("FULL SKILL BODY LOADS ON DEMAND"));
+    assert!(!instructions.contains("Use the release contract."));
+    assert!(!instructions.contains("release-review"));
 }
 
 #[test]
@@ -281,7 +274,7 @@ fn durable_session_resumes_settled_history_after_restart() {
     let _ = run(&[], b"first question\n/exit\n");
     let session_id = find_only_session_id(&root);
     let first_session_records = fs::read_to_string(find_session_file(&root, &session_id)).unwrap();
-    assert!(first_session_records.contains("\"turn_id\":\"turn-1\""));
+    assert!(session_has_turn_number(&first_session_records, 1));
     let second_stdout = run(&["--session-id", &session_id], b"second question\n/exit\n");
 
     server.join().unwrap();
@@ -294,7 +287,7 @@ fn durable_session_resumes_settled_history_after_restart() {
     assert!(second["input"].to_string().contains("second question"));
     let resumed_session_records =
         fs::read_to_string(find_session_file(&root, &session_id)).unwrap();
-    assert!(resumed_session_records.contains("\"turn_id\":\"turn-2\""));
+    assert!(session_has_turn_number(&resumed_session_records, 2));
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -881,6 +874,19 @@ fn find_session_file(root: &Path, session_id: &str) -> PathBuf {
         "session {session_id} was not stored under {}",
         sessions.display()
     );
+}
+
+fn session_has_turn_number(records: &str, expected: u64) -> bool {
+    records
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|record| record["turn_id"].as_str().map(str::to_string))
+        .any(|turn_id| {
+            turn_id
+                .rsplit_once('-')
+                .and_then(|(_, number)| number.parse::<u64>().ok())
+                == Some(expected)
+        })
 }
 
 fn find_only_session_id(root: &Path) -> String {

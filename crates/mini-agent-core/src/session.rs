@@ -1,3 +1,5 @@
+use mini_agent_protocol::ContextByteBreakdown;
+use mini_agent_protocol::ContextInjectionRecord;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::ToolSpec;
 use serde::Deserialize;
@@ -56,43 +58,62 @@ impl SessionState {
         self.context_revision = self.context_revision.saturating_add(1);
     }
 
-    /// Replaces a bounded, host-owned context slot without accumulating stale
-    /// snapshots in the conversation history. Slots are identified by the
-    /// XML root element at the start of a Context message (for example,
-    /// `world_state`).
-    pub fn replace_context_slot(&mut self, slot: &str, text: String) -> bool {
+    /// Appends a context snapshot only when the latest snapshot for its slot
+    /// differs. Earlier messages remain byte-for-byte stable for API caches.
+    pub fn append_context_slot_if_changed(&mut self, slot: &str, text: String) -> bool {
         let prefix = format!("<{slot}");
-        let mut replacement = None;
-        let mut changed = false;
-        let mut messages = Vec::with_capacity(self.messages.len());
-        for message in self.messages.drain(..) {
-            if let Message::Context { text: current } = &message
-                && context_slot_matches(current, &prefix)
-            {
-                if replacement.is_none() {
-                    changed |= current != &text;
-                    replacement = Some(message.clone());
-                    messages.push(Message::Context { text: text.clone() });
-                } else {
-                    changed = true;
+        if self
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::Context { text: current } if context_slot_matches(current, &prefix) => {
+                    Some(current == &text)
                 }
-            } else {
-                messages.push(message);
+                _ => None,
+            })
+            == Some(true)
+        {
+            return false;
+        }
+        self.push(Message::Context { text });
+        true
+    }
+
+    /// Appends a host-injected source without rewriting earlier model input.
+    /// The returned record contains the supersedes relationship derived from
+    /// the active source inventory, and identical fingerprints are omitted.
+    pub fn append_context_injection(
+        &mut self,
+        text: String,
+        mut record: ContextInjectionRecord,
+    ) -> Option<ContextInjectionRecord> {
+        let slot_prefix = format!("<{}", record.id);
+        let fingerprint_marker = format!("fingerprint=\"{}\"", record.fingerprint);
+        if !text.strip_prefix(&slot_prefix).is_some_and(|tail| {
+            (tail.starts_with('>') || tail.starts_with(char::is_whitespace))
+                && tail.contains(&fingerprint_marker)
+        }) {
+            return None;
+        }
+        if let Some(previous) = context_injections_from_messages(&self.messages)
+            .iter()
+            .find(|previous| previous.id == record.id)
+            .cloned()
+        {
+            if previous.fingerprint == record.fingerprint {
+                return None;
             }
+            record.supersedes = Some(previous.fingerprint.clone());
         }
-        if replacement.is_none() {
-            let insert_at = messages
-                .iter()
-                .position(|message| !matches!(message, Message::Context { .. }))
-                .unwrap_or(messages.len());
-            messages.insert(insert_at, Message::Context { text });
-            changed = true;
-        }
-        self.messages = messages;
-        if changed {
-            self.context_revision = self.context_revision.saturating_add(1);
-        }
-        changed
+        let text = record.replace_context_message_metadata(&text)?;
+        self.messages.push(Message::Context { text });
+        self.context_revision = self.context_revision.saturating_add(1);
+        Some(record)
+    }
+
+    pub fn context_injections(&self) -> Vec<ContextInjectionRecord> {
+        context_injections_from_messages(&self.messages)
     }
 
     pub(crate) fn context_bytes(&self, system_prompt: &str, tool_specs: &[ToolSpec]) -> usize {
@@ -132,6 +153,21 @@ fn context_slot_matches(text: &str, prefix: &str) -> bool {
     text.strip_prefix(prefix).is_some_and(|rest| {
         rest.starts_with('>') || rest.chars().next().is_some_and(char::is_whitespace)
     })
+}
+
+fn context_injections_from_messages(messages: &[Message]) -> Vec<ContextInjectionRecord> {
+    let mut injections = Vec::new();
+    for message in messages {
+        let Message::Context { text } = message else {
+            continue;
+        };
+        let Some(record) = ContextInjectionRecord::from_context_message(text) else {
+            continue;
+        };
+        injections.retain(|current: &ContextInjectionRecord| current.id != record.id);
+        injections.push(record);
+    }
+    injections
 }
 
 fn repair_tool_groups(messages: &[Message]) -> Vec<Message> {
@@ -191,6 +227,49 @@ pub(crate) fn context_bytes_for(
         + serde_json::to_vec(tool_specs)
             .expect("tool specs must serialize")
             .len()
+}
+
+pub(crate) fn context_byte_breakdown_for(
+    system_prompt: &str,
+    messages: &[Message],
+    tool_specs: &[ToolSpec],
+) -> ContextByteBreakdown {
+    let mut breakdown = ContextByteBreakdown {
+        system_prompt: system_prompt.len() as u64,
+        tools: serde_json::to_vec(tool_specs)
+            .expect("tool specs must serialize")
+            .len() as u64,
+        ..ContextByteBreakdown::default()
+    };
+    for message in messages {
+        let bytes = serde_json::to_vec(message)
+            .expect("messages must serialize")
+            .len() as u64;
+        match message {
+            Message::Context { text }
+                if context_slot_matches(text, "<activated_skills")
+                    || context_slot_matches(text, "<available_extensions")
+                    || text.starts_with("<skill_definition_") =>
+            {
+                breakdown.skills = breakdown.skills.saturating_add(bytes);
+            }
+            Message::Context { text }
+                if context_slot_matches(text, "<world_state")
+                    || context_slot_matches(text, "<session_capabilities") =>
+            {
+                breakdown.workspace_state = breakdown.workspace_state.saturating_add(bytes);
+            }
+            Message::Context { text } if text.starts_with("<workspace_instruction_") => {
+                breakdown.project_instructions =
+                    breakdown.project_instructions.saturating_add(bytes);
+            }
+            Message::Context { .. } => {
+                breakdown.other = breakdown.other.saturating_add(bytes);
+            }
+            _ => breakdown.conversation = breakdown.conversation.saturating_add(bytes),
+        }
+    }
+    breakdown
 }
 
 pub(crate) fn model_input_digest(

@@ -394,7 +394,7 @@ pub enum AppServerError {
 pub enum ThreadUpdate {
     ClearHistory,
     AppendContext(String),
-    ReplaceContext { slot: String, text: String },
+    AppendContextIfChanged { slot: String, text: String },
     ReplaceConfig(mini_agent_core::HarnessConfig),
     ExtendTools(Vec<Box<dyn mini_agent_protocol::Tool>>),
 }

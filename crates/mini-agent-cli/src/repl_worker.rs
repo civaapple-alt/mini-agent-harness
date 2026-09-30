@@ -10,7 +10,7 @@ mod prompt;
 
 pub(super) enum ReplEvent {
     Input(Result<Option<String>, String>),
-    Observed(EventEnvelope),
+    Observed(Box<EventEnvelope>),
     Ready,
     WorkStarted,
     WorkFinished,
@@ -32,7 +32,7 @@ struct ChannelObserver(mpsc::SyncSender<ReplEvent>);
 
 impl EventSink for ChannelObserver {
     fn emit(&mut self, event: EventEnvelope) {
-        send_event(&self.0, ReplEvent::Observed(event));
+        send_event(&self.0, ReplEvent::Observed(Box::new(event)));
     }
 }
 

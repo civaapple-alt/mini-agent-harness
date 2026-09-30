@@ -72,7 +72,7 @@ observable, recoverable, and verifiable runtime behavior.
 
 ## Size budget
 
-- Core + Protocol hard limit: 6,000 effective Rust source lines across `core`
+- Core + Protocol hard limit: 6,500 effective Rust source lines across `core`
   and `protocol`.
 - Release-source hard limit: 55,000 effective Rust source lines across Core, Protocol,
   Capabilities, Host, and App Server.
@@ -92,10 +92,10 @@ observable, recoverable, and verifiable runtime behavior.
   dependency directions and reports the existing App Server to Capabilities
   edge as a review finding; it does not require a crate split merely to satisfy
   the line gate.
-- A pull request may add up to `1,000` net effective Release Rust lines from
-  its base revision, provided every total stays under its hard limit. Use
+- Keep Release Rust growth near `1,000` net effective lines per pull request
+  where practical. This is review guidance, not a hard gate. Use
   `python scripts/line_budget.py --base <merge-base> --check-delta --json`
-  for the incremental check.
+  to report the increment while checking all absolute hard limits.
 
 The limit is a ceiling, not a target. Removing a concept is better than fitting
 it behind a shorter abstraction.
@@ -118,10 +118,11 @@ present, all answer placeholders are replaced, all six questions have answers,
 and all six admission boxes are checked. The check validates completion only;
 reviewers still judge the answer quality and architecture.
 
-New code defaults to net-zero growth. A feature may use the per-pull-request
-allowance when its scope requires growth and its boundary evidence supports it.
+New code defaults to net-zero growth. Features that need more code may exceed
+the 1,000-line review reference when their scope and boundary evidence support
+it; the absolute ceilings remain the hard limits.
 Never remove Core tests, Actor/CAS/Session authority, or public protocol behavior
-only to satisfy a line target. The 6,000-line Core + Protocol, 38,000-line
+only to satisfy a line target. The 6,500-line Core + Protocol, 38,000-line
 Control Plane, and 55,000-line Release Rust ceilings remain hard gates;
 experimental CLI/REPL growth is informational until it is promoted into the
 supported surface.

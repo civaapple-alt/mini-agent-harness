@@ -157,6 +157,7 @@ fn lifecycle_projection_does_not_duplicate_model_tool_calls() {
                 arguments: serde_json::json!({"command": "pwd"}),
             }],
             usage: None,
+            context_bytes: None,
         },
     );
 

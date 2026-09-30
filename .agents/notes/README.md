@@ -10,7 +10,8 @@
 
 当前相关决策：
 
-- [Rust 行数预算上限校准：Control Plane 38,000 / Release 55,000](implemented/process/2026-09-30-line-budget-ceiling-adjustment.zh.md)
+- [Core + Protocol 预算与 Release 增量参考值](implemented/process/2026-09-30-core-protocol-budget-and-delta-guidance.zh.md)
+- [Web Studio 会话上下文可视化与缓存友好注入](implemented/process/2026-09-30-web-studio-session-context-visibility.zh.md)
 - [运行中 Skill 发现刷新与稳定 Prompt 前缀](implemented/process/2026-09-30-live-skill-discovery-and-context-cache.zh.md)
 - [Web Studio 页面配置与首次使用](implemented/architecture/2026-09-27-page-owned-model-configuration-and-first-run.zh.md)
 - [SDK 恢复类型与跨层契约证据](implemented/architecture/2026-09-27-sdk-cross-layer-recovery-contract.zh.md)
@@ -115,7 +116,9 @@ graph LR
 
 ### Implemented
 
-- [Rust 行数预算上限校准：Control Plane 38,000 / Release 55,000](implemented/process/2026-09-30-line-budget-ceiling-adjustment.zh.md)
+- [Rust 行数预算上限校准（此前门槛）](implemented/process/2026-09-30-line-budget-ceiling-adjustment.zh.md)
+- [Core + Protocol 预算与 Release 增量参考值](implemented/process/2026-09-30-core-protocol-budget-and-delta-guidance.zh.md)
+- [Web Studio 会话上下文可视化与缓存友好注入](implemented/process/2026-09-30-web-studio-session-context-visibility.zh.md)
 - [模型目录搜索能力投影证据](implemented/testing/2026-09-28-model-catalog-search-projection.md)
 - [输入留存与传输入口限制证据](implemented/testing/2026-09-28-input-retention-bounds.md)
 - [Thread 事件回放缺口证据](implemented/testing/2026-09-28-thread-event-replay-gap.md)

@@ -225,8 +225,20 @@ impl ThreadListener {
         use mini_agent_capabilities::TurnPresentationActivity;
 
         match event {
-            Event::ModelResponded { .. } => {
+            Event::ModelResponded {
+                usage,
+                context_bytes,
+                ..
+            } => {
                 self.assistant_segments = self.assistant_segments.saturating_add(1);
+                self.presentation.set_context_usage(*usage, *context_bytes);
+            }
+            Event::ContextInjected { records } => {
+                self.presentation
+                    .push(TurnPresentationActivity::context_injected(
+                        self.assistant_segments,
+                        records.iter().cloned(),
+                    ));
             }
             Event::SkillGroupActivated { group, source } => {
                 self.presentation
@@ -389,6 +401,7 @@ impl ThreadListener {
             ),
             Event::AssistantReasoningDelta { .. }
             | Event::AssistantTextDelta { .. }
+            | Event::ContextInjected { .. }
             | Event::ModelResponded { .. }
             | Event::ToolFinished { .. }
             | Event::ContextCompactionFinished { .. } => return,
@@ -1110,11 +1123,31 @@ pub(super) async fn worker_loop<M>(
                     let skill_refresh_error = runtime.as_mut().and_then(|state| {
                         match state.management.refresh_skill_catalog() {
                             Ok(_) => match state.management.prepare_skill_context() {
-                                Ok(Some(context)) => thread
-                                    .harness_mut()
-                                    .replace_context_slot("available_extensions", context)
-                                    .err()
-                                    .map(|error| error.to_string()),
+                                Ok(Some(context)) => {
+                                    let fingerprint =
+                                        mini_agent_protocol::stable_digest(context.as_bytes());
+                                    let record = mini_agent_protocol::ContextInjectionRecord {
+                                        id: "available_extensions".to_string(),
+                                        kind: mini_agent_protocol::ContextInjectionKind::Skill,
+                                        source: "技能目录".to_string(),
+                                        workspace: None,
+                                        path: None,
+                                        scope: "当前项目中可用的技能目录".to_string(),
+                                        bytes: context.len() as u64,
+                                        fingerprint,
+                                        supersedes: None,
+                                        reused: false,
+                                    };
+                                    let message = record.context_message(&context);
+                                    match thread
+                                        .harness_mut()
+                                        .append_context_injection(message, record)
+                                    {
+                                        Ok(Some(_)) => None,
+                                        Ok(None) => None,
+                                        Err(error) => Some(error.to_string()),
+                                    }
+                                }
                                 Ok(None) => None,
                                 Err(error) => Some(error.to_string()),
                             },
@@ -1191,11 +1224,48 @@ pub(super) async fn worker_loop<M>(
                             Err(error) => (Vec::new(), Some(error)),
                         }
                     };
-                    let activated_context =
-                        skill_activation_context(&loaded_skills, workflow.as_ref());
+                    for skill in &loaded_skills {
+                        let identity = format!("skill\n{}", skill.qualified_name);
+                        let suffix = mini_agent_protocol::stable_digest(identity.as_bytes())
+                            .replace('-', "_");
+                        let id = format!("skill_definition_{suffix}");
+                        let fingerprint = mini_agent_protocol::stable_digest(skill.body.as_bytes());
+                        let record = mini_agent_protocol::ContextInjectionRecord {
+                            id: id.clone(),
+                            kind: mini_agent_protocol::ContextInjectionKind::Skill,
+                            source: format!("Skill {}", skill.name),
+                            workspace: Some(skill.source.clone()),
+                            path: None,
+                            scope: "已激活 Skill 的正文定义".to_string(),
+                            bytes: skill.body.len() as u64,
+                            fingerprint: fingerprint.clone(),
+                            supersedes: None,
+                            reused: false,
+                        };
+                        let message = record.context_message(&format!(
+                            "[Skill: {} · {}]\n{}",
+                            skill.qualified_name, skill.source, skill.body
+                        ));
+                        match thread
+                            .harness_mut()
+                            .append_context_injection(message, record)
+                        {
+                            Ok(Some(_)) => {}
+                            Ok(None) => {}
+                            Err(error) if skill_error.is_none() => {
+                                skill_error = Some(error.to_string());
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    let activated_context = skill_activation_context(
+                        &loaded_skills,
+                        workflow.as_ref(),
+                        turn_id.as_str(),
+                    );
                     if let Err(error) = thread
                         .harness_mut()
-                        .replace_context_slot("activated_skills", activated_context)
+                        .append_context_slot_if_changed("activated_skills", activated_context)
                         && skill_error.is_none()
                     {
                         skill_error = Some(error.to_string());
@@ -2143,10 +2213,10 @@ where
             .harness_mut()
             .append_context(text)
             .map_err(|error| AppServerError::Checkpoint(error.to_string()))?,
-        ThreadUpdate::ReplaceContext { slot, text } => {
+        ThreadUpdate::AppendContextIfChanged { slot, text } => {
             thread
                 .harness_mut()
-                .replace_context_slot(&slot, text)
+                .append_context_slot_if_changed(&slot, text)
                 .map_err(|error| AppServerError::Checkpoint(error.to_string()))?;
         }
         ThreadUpdate::ReplaceConfig(config) => thread.harness_mut().replace_config(config),
@@ -2158,6 +2228,7 @@ where
 fn skill_activation_context(
     loaded_skills: &[mini_agent_capabilities::LoadedSkill],
     workflow: Option<&mini_agent_protocol::TurnWorkflow>,
+    turn_id: &str,
 ) -> String {
     let mut sections = Vec::new();
     if let Some(workflow) = workflow {
@@ -2170,7 +2241,16 @@ fn skill_activation_context(
         sections.push(
             loaded_skills
                 .iter()
-                .map(|skill| format!("### {}\n{}", skill.qualified_name, skill.body))
+                .map(|skill| {
+                    let identity = format!("skill\n{}", skill.qualified_name);
+                    let suffix =
+                        mini_agent_protocol::stable_digest(identity.as_bytes()).replace('-', "_");
+                    let fingerprint = mini_agent_protocol::stable_digest(skill.body.as_bytes());
+                    format!(
+                        "- {} · {} · context=<skill_definition_{}> · fingerprint={fingerprint}",
+                        skill.qualified_name, skill.source, suffix
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n\n"),
         );
@@ -2178,10 +2258,12 @@ fn skill_activation_context(
     if sections.is_empty() {
         sections.push("No Skills are explicitly active for this turn.".to_string());
     }
-    format!(
-        "Explicitly activated Skills apply to this turn only. This snapshot supersedes earlier activation snapshots.\n<activated_skills>\n{}\n</activated_skills>",
+    let body = format!(
+        "Explicitly activated Skills apply to turn {turn_id} only. This snapshot supersedes earlier activation snapshots.\n{}",
         sections.join("\n\n")
-    )
+    );
+    let fingerprint = mini_agent_protocol::stable_digest(body.as_bytes());
+    format!("<activated_skills fingerprint=\"{fingerprint}\">\n{body}\n</activated_skills>")
 }
 
 fn respond_after_revision<T>(

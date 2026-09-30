@@ -128,6 +128,7 @@ impl ThreadItem {
             | Event::SkillsLoaded { .. }
             | Event::SkillsLoadFailed { .. }
             | Event::SkillGroupActivated { .. }
+            | Event::ContextInjected { .. }
             | Event::ModelStarted { .. }
             | Event::AssistantReasoningDelta { .. }
             | Event::AssistantTextDelta { .. }

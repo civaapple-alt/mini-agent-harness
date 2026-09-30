@@ -172,6 +172,8 @@ impl ToolRuntime for ApprovalTool {
         ToolExecutionOutcome {
             status: ToolExecutionStatus::NeedsApproval,
             content: "approval required".to_string(),
+            context_messages: Vec::new(),
+            context_injections: Vec::new(),
         }
     }
 }
@@ -190,7 +192,7 @@ async fn runs_model_tool_model_path() {
                 }],
                 usage: Some(ModelUsage {
                     input_tokens: 10,
-                    cached_input_tokens: 2,
+                    cached_input_tokens: Some(2),
                     output_tokens: 3,
                 }),
             },
@@ -243,7 +245,7 @@ async fn runs_model_tool_model_path() {
         Event::ModelResponded {
             usage: Some(ModelUsage {
                 input_tokens: 10,
-                cached_input_tokens: 2,
+                cached_input_tokens: Some(2),
                 output_tokens: 3,
             }),
             ..
@@ -791,6 +793,69 @@ fn context_items_have_an_independent_hard_limit() {
 }
 
 #[test]
+fn host_context_injections_have_a_separate_bounded_item_limit() {
+    let config = HarnessConfig {
+        max_context_item_bytes: 4,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(
+        ScriptedModel {
+            responses: VecDeque::new(),
+        },
+        ToolRouter::default(),
+        config,
+    );
+    let body = "x".repeat(32 * 1024);
+    let record = mini_agent_protocol::ContextInjectionRecord {
+        id: "skill_definition_fixture".to_string(),
+        kind: mini_agent_protocol::ContextInjectionKind::Skill,
+        source: "Skill fixture".to_string(),
+        workspace: Some("builtin".to_string()),
+        path: None,
+        scope: "selected Skill instructions".to_string(),
+        bytes: body.len() as u64,
+        fingerprint: mini_agent_protocol::stable_digest(body.as_bytes()),
+        supersedes: None,
+        reused: false,
+    };
+    let message = record.context_message(&body);
+
+    assert!(
+        harness
+            .append_context_injection(message.clone(), record)
+            .unwrap()
+            .is_some()
+    );
+    harness
+        .restore_session(SessionState::from_messages(vec![Message::Context {
+            text: message,
+        }]))
+        .unwrap();
+
+    let body = "x".repeat(MAX_CONTEXT_INJECTION_BYTES);
+    let oversized = mini_agent_protocol::ContextInjectionRecord {
+        id: "workspace_instruction_oversized".to_string(),
+        kind: mini_agent_protocol::ContextInjectionKind::ProjectInstructions,
+        source: "AGENTS.md".to_string(),
+        workspace: Some("main".to_string()),
+        path: Some("AGENTS.md".to_string()),
+        scope: "workspace".to_string(),
+        bytes: body.len() as u64,
+        fingerprint: mini_agent_protocol::stable_digest(body.as_bytes()),
+        supersedes: None,
+        reused: false,
+    }
+    .context_message(&body);
+    let error = harness.append_context_injection(
+        oversized.clone(),
+        mini_agent_protocol::ContextInjectionRecord::from_context_message(&oversized).unwrap(),
+    );
+    let error = error.unwrap_err();
+    assert_eq!(error.limit, MAX_CONTEXT_INJECTION_BYTES);
+    assert_eq!(error.actual, oversized.len());
+}
+
+#[test]
 fn restores_only_history_that_fits_the_current_harness() {
     let mut harness = Harness::new(
         ScriptedModel {
@@ -914,7 +979,7 @@ async fn compacts_context_and_continues_the_tool_loop() {
                 tool_calls: Vec::new(),
                 usage: Some(ModelUsage {
                     input_tokens: 100,
-                    cached_input_tokens: 0,
+                    cached_input_tokens: Some(0),
                     output_tokens: 20,
                 }),
             },
@@ -1366,7 +1431,7 @@ async fn rejects_oversized_user_input_without_retaining_it() {
 fn compaction_summary_includes_prefix_within_user_limit() {
     let compacted = assemble_compacted(
         Some("这是一个足够长的压缩摘要，用于验证 UTF-8 截断"),
-        None,
+        Vec::new(),
         Vec::new(),
         32,
     );

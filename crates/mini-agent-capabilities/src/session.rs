@@ -7,8 +7,8 @@ use mini_agent_core::ExecutionToolBatch;
 use mini_agent_core::ExecutionToolCall;
 use mini_agent_core::SessionState;
 use mini_agent_protocol::{
-    ChildTaskAttemptKind, Message, ModelSelection, ReasoningSelection, TurnId, TurnSource,
-    TurnWorkflow,
+    ChildTaskAttemptKind, ContextByteBreakdown, ContextInjectionRecord, Message, ModelSelection,
+    ModelUsage, ReasoningSelection, TurnId, TurnSource, TurnWorkflow,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -282,6 +282,19 @@ pub struct TurnPresentation {
     workflow: Option<TurnWorkflow>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     activities: Vec<TurnPresentationActivity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    context_usage: Option<TurnContextUsage>,
+}
+
+/// The last model request observed during a Turn, with byte data suitable for
+/// clearly-labeled proportional token estimates in the client.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnContextUsage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<ModelUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_bytes: Option<ContextByteBreakdown>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -290,6 +303,7 @@ pub enum TurnPresentationActivityKind {
     SkillGroupActivated,
     SkillsLoaded,
     SkillsLoadFailed,
+    ContextInjected,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -309,6 +323,8 @@ pub struct TurnPresentationActivity {
     skills: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reason_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    context_injections: Vec<ContextInjectionRecord>,
 }
 
 impl TurnPresentation {
@@ -317,6 +333,7 @@ impl TurnPresentation {
             turn_source: None,
             workflow: workflow.map(bounded_workflow),
             activities: Vec::new(),
+            context_usage: None,
         }
     }
 
@@ -329,6 +346,17 @@ impl TurnPresentation {
         if self.activities.len() < MAX_TURN_PRESENTATION_ACTIVITIES {
             self.activities.push(activity);
         }
+    }
+
+    pub fn set_context_usage(
+        &mut self,
+        usage: Option<ModelUsage>,
+        context_bytes: Option<ContextByteBreakdown>,
+    ) {
+        self.context_usage = Some(TurnContextUsage {
+            usage,
+            context_bytes,
+        });
     }
 }
 
@@ -343,6 +371,7 @@ impl TurnPresentationActivity {
             activation: None,
             skills: Vec::new(),
             reason_code: None,
+            context_injections: Vec::new(),
         }
     }
 
@@ -361,6 +390,7 @@ impl TurnPresentationActivity {
             activation: activation.map(bounded_presentation_value),
             skills: bounded_skill_names(skills),
             reason_code: None,
+            context_injections: Vec::new(),
         }
     }
 
@@ -379,8 +409,45 @@ impl TurnPresentationActivity {
             activation: activation.map(bounded_presentation_value),
             skills: bounded_skill_names(skills),
             reason_code: Some(bounded_presentation_value(reason_code)),
+            context_injections: Vec::new(),
         }
     }
+
+    pub fn context_injected(
+        after_assistant_segments: u32,
+        records: impl IntoIterator<Item = ContextInjectionRecord>,
+    ) -> Self {
+        Self {
+            after_assistant_segments,
+            kind: TurnPresentationActivityKind::ContextInjected,
+            group: None,
+            source: None,
+            phase: None,
+            activation: None,
+            skills: Vec::new(),
+            reason_code: None,
+            context_injections: records
+                .into_iter()
+                .take(32)
+                .map(bounded_context_injection)
+                .collect(),
+        }
+    }
+}
+
+fn bounded_context_injection(mut record: ContextInjectionRecord) -> ContextInjectionRecord {
+    record.id = bounded_presentation_value(&record.id);
+    record.source = bounded_presentation_value(&record.source);
+    record.workspace = record
+        .workspace
+        .map(|value| bounded_presentation_value(&value));
+    record.path = record.path.map(|value| bounded_presentation_value(&value));
+    record.scope = bounded_presentation_value(&record.scope);
+    record.fingerprint = bounded_presentation_value(&record.fingerprint);
+    record.supersedes = record
+        .supersedes
+        .map(|value| bounded_presentation_value(&value));
+    record
 }
 
 fn bounded_workflow(workflow: &TurnWorkflow) -> TurnWorkflow {

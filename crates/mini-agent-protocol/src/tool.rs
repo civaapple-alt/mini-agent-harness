@@ -6,6 +6,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::ContextInjectionRecord;
 use crate::ThreadId;
 use crate::TurnId;
 
@@ -24,6 +25,11 @@ pub struct ToolExecutionRequest {
     pub arguments: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<ToolExecutionContext>,
+    /// Active Host-injected sources already present in the Session history.
+    /// This lets an adapter avoid re-requesting an identical source after
+    /// resume without changing the model-visible input.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub known_context_injections: Vec<ContextInjectionRecord>,
     /// Host-local cancellation state. This is intentionally not part of the
     /// wire contract or model-visible request data.
     #[serde(skip)]
@@ -36,6 +42,7 @@ impl PartialEq for ToolExecutionRequest {
             && self.name == other.name
             && self.arguments == other.arguments
             && self.context == other.context
+            && self.known_context_injections == other.known_context_injections
     }
 }
 
@@ -46,12 +53,21 @@ impl ToolExecutionRequest {
             name: name.into(),
             arguments,
             context: None,
+            known_context_injections: Vec::new(),
             cancellation: None,
         }
     }
 
     pub fn with_context(mut self, context: ToolExecutionContext) -> Self {
         self.context = Some(context);
+        self
+    }
+
+    pub fn with_known_context_injections(
+        mut self,
+        injections: Vec<ContextInjectionRecord>,
+    ) -> Self {
+        self.known_context_injections = injections;
         self
     }
 
@@ -220,6 +236,12 @@ impl ToolExecutionStatus {
 pub struct ToolExecutionOutcome {
     pub status: ToolExecutionStatus,
     pub content: String,
+    /// Context messages appended after this tool result and before the next
+    /// model request. Durable execution recovery replays these unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_messages: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_injections: Vec<ContextInjectionRecord>,
 }
 
 /// Whether a Host can safely repeat a tool call whose result was not durably
@@ -238,6 +260,8 @@ impl ToolExecutionOutcome {
         Self {
             status: ToolExecutionStatus::Completed,
             content: content.into(),
+            context_messages: Vec::new(),
+            context_injections: Vec::new(),
         }
     }
 
@@ -245,6 +269,8 @@ impl ToolExecutionOutcome {
         Self {
             status: ToolExecutionStatus::Failed,
             content: content.into(),
+            context_messages: Vec::new(),
+            context_injections: Vec::new(),
         }
     }
 
@@ -252,6 +278,8 @@ impl ToolExecutionOutcome {
         Self {
             status: ToolExecutionStatus::NeedsApproval,
             content: content.into(),
+            context_messages: Vec::new(),
+            context_injections: Vec::new(),
         }
     }
 
@@ -259,6 +287,8 @@ impl ToolExecutionOutcome {
         Self {
             status: ToolExecutionStatus::Deferred,
             content: content.into(),
+            context_messages: Vec::new(),
+            context_injections: Vec::new(),
         }
     }
 
@@ -266,7 +296,19 @@ impl ToolExecutionOutcome {
         Self {
             status: ToolExecutionStatus::Retryable,
             content: content.into(),
+            context_messages: Vec::new(),
+            context_injections: Vec::new(),
         }
+    }
+
+    pub fn with_context_injection(
+        mut self,
+        messages: Vec<String>,
+        records: Vec<ContextInjectionRecord>,
+    ) -> Self {
+        self.context_messages = messages;
+        self.context_injections = records;
+        self
     }
 }
 

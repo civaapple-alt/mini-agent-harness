@@ -642,11 +642,12 @@ impl Discovery {
         } else {
             catalog
         };
+        let fingerprint = mini_agent_protocol::stable_digest(body.as_bytes());
         let context = format!(
             "Available project extensions (metadata only; this snapshot supersedes earlier catalogs).\n\
              When a task matches an entry, read its listed instruction file with read_file before proceeding. \
              Resolve relative references from that file's directory.\n\
-             <available_extensions>\n{body}</available_extensions>"
+             <available_extensions fingerprint=\"{fingerprint}\">\n{body}</available_extensions>"
         );
         if context.len() > MAX_SKILL_CONTEXT_BYTES {
             return Err(format!(

@@ -19,24 +19,44 @@ pub(super) const COMPACT_TAIL_MAX_BYTES: usize = 128 * 1024;
 
 pub(super) fn split_compaction_parts(
     messages: &[Message],
-) -> (Vec<Message>, Option<Message>, Vec<Message>) {
-    let (without_context, context) = take_latest_context(messages);
+) -> (Vec<Message>, Vec<Message>, Vec<Message>) {
+    let (without_context, contexts) = take_latest_contexts(messages);
     let (prefix, tail) = split_prefix_tail(&without_context);
-    (prefix, context, tail)
+    (prefix, contexts, tail)
 }
 
-pub(super) fn take_latest_context(messages: &[Message]) -> (Vec<Message>, Option<Message>) {
-    let Some(index) = messages.iter().rposition(|message| match message {
-        Message::Context { text } => !text.starts_with(LOOP_WARNING_PREFIX),
-        _ => false,
-    }) else {
-        return (messages.to_vec(), None);
-    };
-    let context = messages[index].clone();
-    let mut rest = Vec::with_capacity(messages.len().saturating_sub(1));
-    rest.extend_from_slice(&messages[..index]);
-    rest.extend_from_slice(&messages[index + 1..]);
-    (rest, Some(context))
+pub(super) fn take_latest_contexts(messages: &[Message]) -> (Vec<Message>, Vec<Message>) {
+    let mut seen = std::collections::HashSet::new();
+    let mut contexts = Vec::new();
+    for (index, message) in messages.iter().enumerate().rev() {
+        let Message::Context { text } = message else {
+            continue;
+        };
+        if text.starts_with(LOOP_WARNING_PREFIX) {
+            continue;
+        }
+        let slot = context_slot(text)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("<untagged:{index}>"));
+        if seen.insert(slot) {
+            contexts.push(message.clone());
+        }
+    }
+    contexts.reverse();
+    let without_context = messages
+        .iter()
+        .filter(|message| {
+            !matches!(message, Message::Context { text } if !text.starts_with(LOOP_WARNING_PREFIX))
+        })
+        .cloned()
+        .collect();
+    (without_context, contexts)
+}
+
+fn context_slot(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('<')?;
+    let end = rest.find(['>', '/', ' ', '\t', '\n'])?;
+    (end > 0).then_some(&rest[..end])
 }
 
 pub(super) fn split_prefix_tail(messages: &[Message]) -> (Vec<Message>, Vec<Message>) {
@@ -109,7 +129,7 @@ pub(super) fn trim_prefix_to_fit(
 
 pub(super) fn assemble_compacted(
     summary: Option<&str>,
-    context: Option<Message>,
+    contexts: Vec<Message>,
     tail: Vec<Message>,
     max_user_input_bytes: usize,
 ) -> Vec<Message> {
@@ -120,16 +140,14 @@ pub(super) fn assemble_compacted(
             text: truncate_utf8(full_summary, max_user_input_bytes),
         });
     }
-    if let Some(context) = context {
-        compacted.push(context);
-    }
+    compacted.extend(contexts);
     compacted.extend(tail);
     compacted
 }
 
 pub(super) fn mechanical_compact(
     mut prefix: Vec<Message>,
-    context: Option<Message>,
+    contexts: Vec<Message>,
     tail: Vec<Message>,
     compact_at: usize,
     system_prompt: &str,
@@ -138,7 +156,7 @@ pub(super) fn mechanical_compact(
 ) -> Vec<Message> {
     loop {
         let compacted =
-            assemble_compacted(None, context.clone(), tail.clone(), max_user_input_bytes);
+            assemble_compacted(None, contexts.clone(), tail.clone(), max_user_input_bytes);
         let mut candidate = prefix.clone();
         candidate.extend(compacted.iter().cloned());
         if prefix.is_empty()
@@ -147,5 +165,80 @@ pub(super) fn mechanical_compact(
             return candidate;
         }
         remove_first_message_group(&mut prefix);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_latest_contexts;
+    use mini_agent_protocol::{ContextInjectionKind, ContextInjectionRecord, Message};
+
+    #[test]
+    fn compaction_keeps_latest_active_injected_instruction() {
+        let older = ContextInjectionRecord {
+            id: "workspace_instruction_fixture".to_string(),
+            kind: ContextInjectionKind::ProjectInstructions,
+            source: "AGENTS.md".to_string(),
+            workspace: Some("主工作区".to_string()),
+            path: Some("AGENTS.md".to_string()),
+            scope: "整个工作区及其子目录".to_string(),
+            bytes: 5,
+            fingerprint: "old".to_string(),
+            supersedes: None,
+            reused: false,
+        };
+        let mut newer = older.clone();
+        newer.fingerprint = "new".to_string();
+        newer.supersedes = Some("old".to_string());
+        let messages = vec![
+            Message::Context {
+                text: older.context_message("old rule"),
+            },
+            Message::User {
+                text: "old task".to_string(),
+            },
+            Message::Context {
+                text: newer.context_message("new rule"),
+            },
+            Message::Assistant {
+                reasoning: String::new(),
+                text: "answer".to_string(),
+                tool_calls: Vec::new(),
+            },
+        ];
+
+        let (_, contexts) = take_latest_contexts(&messages);
+
+        assert_eq!(contexts.len(), 1);
+        assert!(matches!(&contexts[0], Message::Context { text } if text.contains("new rule")));
+    }
+
+    #[test]
+    fn compaction_preserves_each_unscoped_context_message() {
+        let messages = vec![
+            Message::Context {
+                text: "first unscoped context".to_string(),
+            },
+            Message::User {
+                text: "question".to_string(),
+            },
+            Message::Context {
+                text: "second unscoped context".to_string(),
+            },
+        ];
+
+        let (_, contexts) = take_latest_contexts(&messages);
+
+        assert_eq!(
+            contexts,
+            [
+                Message::Context {
+                    text: "first unscoped context".to_string()
+                },
+                Message::Context {
+                    text: "second unscoped context".to_string()
+                }
+            ]
+        );
     }
 }

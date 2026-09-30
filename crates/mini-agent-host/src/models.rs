@@ -1511,7 +1511,7 @@ mod tests {
             response.usage,
             Some(ModelUsage {
                 input_tokens: 3,
-                cached_input_tokens: 0,
+                cached_input_tokens: None,
                 output_tokens: 2,
             })
         );

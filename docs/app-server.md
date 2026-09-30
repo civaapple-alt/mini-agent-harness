@@ -63,6 +63,22 @@ and bounded ThreadItem identity. Each model response also carries an optional
 pair shares one unique `item_id`; local redacted trace records retain these
 identities without retaining model or tool payloads.
 
+`context_injected` reports bounded metadata for Host-added context sources,
+including source category, workspace label, relative path, scope, byte count,
+content fingerprint, and an optional superseded fingerprint. It never carries
+the source body. Startup workspace instructions and newly discovered nested
+`AGENTS.md` files use this event; a newly discovered file defers the current
+structured file operation so the model can reassess and retry. Shell commands
+do not trigger path scanning. Session checkpoints retain the metadata with the
+context messages, and `thread/read` projects the current source inventory
+alongside persisted turn presentations.
+
+`model_responded` may include `context_bytes`, a byte breakdown of the exact
+serialized request categories. Its optional `usage` is the provider-reported
+input, cached-input, and output token count for that request. Clients preserve
+missing usage as unknown; category token counts derived from bytes are
+estimates, and cached tokens are not attributed to individual sources.
+
 The main execution path is `Core → Host → App Server`: Core owns the turn loop
 and records the tool outcome, Host owns admission, approval, concrete execution,
 and typed outcome propagation, and App Server serializes the settled event and

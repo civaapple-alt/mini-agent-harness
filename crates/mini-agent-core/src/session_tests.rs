@@ -1,5 +1,6 @@
 use super::SessionState;
 use mini_agent_protocol::Message;
+use mini_agent_protocol::{ContextInjectionKind, ContextInjectionRecord};
 
 #[test]
 fn session_state_round_trips_messages_without_storage() {
@@ -44,7 +45,7 @@ fn replacing_messages_advances_context_revision() {
 }
 
 #[test]
-fn replacing_context_slot_removes_stale_duplicates() {
+fn appending_context_slot_preserves_prior_messages_and_deduplicates() {
     let mut state = SessionState::from_messages(vec![
         Message::User {
             text: "hello".to_string(),
@@ -57,7 +58,7 @@ fn replacing_context_slot_removes_stale_duplicates() {
         },
     ]);
 
-    assert!(state.replace_context_slot(
+    assert!(state.append_context_slot_if_changed(
         "world_state",
         "<world_state><new /></world_state>".to_string()
     ));
@@ -68,20 +69,71 @@ fn replacing_context_slot_removes_stale_duplicates() {
                 text: "hello".to_string()
             },
             Message::Context {
+                text: "<world_state><old /></world_state>".to_string()
+            },
+            Message::Context {
+                text: "<world_state><stale /></world_state>".to_string()
+            },
+            Message::Context {
                 text: "<world_state><new /></world_state>".to_string()
             },
         ]
     );
     let revision = state.context_revision();
-    assert!(!state.replace_context_slot(
+    assert!(!state.append_context_slot_if_changed(
         "world_state",
         "<world_state><new /></world_state>".to_string()
     ));
     assert_eq!(state.context_revision(), revision);
 }
 
+fn context_record(fingerprint: &str) -> ContextInjectionRecord {
+    ContextInjectionRecord {
+        id: "workspace_instruction_fixture".to_string(),
+        kind: ContextInjectionKind::ProjectInstructions,
+        source: "AGENTS.md".to_string(),
+        workspace: Some("主工作区".to_string()),
+        path: Some("AGENTS.md".to_string()),
+        scope: "整个工作区及其子目录".to_string(),
+        bytes: 12,
+        fingerprint: fingerprint.to_string(),
+        supersedes: None,
+        reused: false,
+    }
+}
+
 #[test]
-fn missing_context_slot_is_inserted_before_turn_history() {
+fn injected_context_is_append_only_deduplicated_and_recoverable() {
+    let mut state = SessionState::new();
+    let first = context_record("first");
+    let first_message = first.context_message("first instructions");
+    assert_eq!(
+        state.append_context_injection(first_message.clone(), first.clone()),
+        Some(first.clone())
+    );
+    assert_eq!(state.append_context_injection(first_message, first), None);
+
+    let updated = context_record("second");
+    let updated_message = updated.context_message("updated instructions");
+    let stored = state
+        .append_context_injection(updated_message, context_record("second"))
+        .unwrap();
+
+    assert_eq!(stored.supersedes.as_deref(), Some("first"));
+    assert_eq!(state.messages().len(), 2);
+    assert!(
+        matches!(&state.messages()[0], Message::Context { text } if text.contains("first instructions"))
+    );
+    assert!(
+        matches!(&state.messages()[1], Message::Context { text } if ContextInjectionRecord::from_context_message(text).is_some_and(|record| record.supersedes.as_deref() == Some("first")))
+    );
+
+    let restored = SessionState::from_messages(state.messages().to_vec());
+    assert_eq!(restored.context_injections(), vec![stored]);
+}
+
+#[test]
+fn missing_context_slot_is_appended_after_turn_history() {
     let mut state = SessionState::from_messages(vec![
         Message::User {
             text: "old turn".to_string(),
@@ -93,12 +145,12 @@ fn missing_context_slot_is_inserted_before_turn_history() {
         },
     ]);
 
-    state.replace_context_slot(
+    state.append_context_slot_if_changed(
         "session_capabilities",
         "<session_capabilities />".to_string(),
     );
     assert!(matches!(
-        state.messages().first(),
+        state.messages().last(),
         Some(Message::Context { text }) if text == "<session_capabilities />"
     ));
 }

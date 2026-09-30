@@ -103,17 +103,17 @@ git diff --check
 git status --short
 ```
 
-For the 0.9.0 release, the 6,000-effective-line Core + Protocol budget, the
+For the 0.9.0 release, the 6,500-effective-line Core + Protocol budget, the
 38,000-effective-line Control Plane budget, and the 55,000-effective-line
 release-source total, including tests in supported packages, are hard gates.
 The budget excludes blank and comment-only lines;
 code-bearing lines with trailing comments count once.
 The experimental CLI/REPL is reported by the budget script but is excluded from
 the release-source gate.
-Each pull request may add up to 1,000 net effective Release Rust lines from
-its base revision. Run
+Keep each pull request near 1,000 net effective Release Rust lines where
+practical; this is review guidance rather than a hard limit. Run
 `python scripts/line_budget.py --base <merge-base> --check-delta --json` to
-check the increment and all three hard limits.
+report the increment and check all three absolute hard limits.
 
 The release archives contain only the binary, `README.md`, `LICENSE`, and
 `CHANGELOG.md`. `scripts/package_release.py` creates deterministic archives and

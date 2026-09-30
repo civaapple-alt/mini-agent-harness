@@ -1,6 +1,24 @@
-use super::Message;
+use super::{Message, ModelUsage};
 use crate::ToolExecutionStatus;
 use serde_json::json;
+
+#[test]
+fn provider_cached_usage_distinguishes_missing_from_reported_zero() {
+    let missing: ModelUsage = serde_json::from_value(json!({
+        "input_tokens": 12,
+        "output_tokens": 3
+    }))
+    .unwrap();
+    assert_eq!(missing.cached_input_tokens, None);
+
+    let reported_zero: ModelUsage = serde_json::from_value(json!({
+        "input_tokens": 12,
+        "cached_input_tokens": 0,
+        "output_tokens": 3
+    }))
+    .unwrap();
+    assert_eq!(reported_zero.cached_input_tokens, Some(0));
+}
 
 #[test]
 fn legacy_tool_message_deserializes_without_a_status() {

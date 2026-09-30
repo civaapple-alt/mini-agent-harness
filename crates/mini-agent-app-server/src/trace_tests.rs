@@ -38,6 +38,7 @@ fn trace_redacts_payloads_and_carries_round_metadata() {
             text: "secret answer".to_string(),
             tool_calls: vec![],
             usage: None,
+            context_bytes: None,
         },
     ));
     let _ = trace.finish().unwrap();

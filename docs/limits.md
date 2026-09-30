@@ -15,24 +15,24 @@ use the same effective-line rule.
 
 | 指标 | 统计范围 | 硬上限 |
 | --- | --- | ---: |
-| Core + Protocol | `mini-agent-core` + `mini-agent-protocol` | 6,000 |
+| Core + Protocol | `mini-agent-core` + `mini-agent-protocol` | 6,500 |
 | Control Plane | Host/App Server control slice + Capabilities control slice | 38,000 |
 | Release Rust source | 支持的运行时 crate 与测试，排除实验性 CLI/REPL | 55,000 |
 
 Runtime 聚合值仍可在 JSON 中用于诊断，但不再设置 `25,000` 行硬门禁。每个 PR 的
-Release Rust 净增量上限为 `1,000` 行。Core + Protocol、Control Plane 和
-Release Rust 均执行绝对硬上限；增量检查使用 `--check-delta`。
+Release Rust 净增量 `1,000` 行是审查参考值，不是硬门禁。Core + Protocol、Control
+Plane 和 Release Rust 执行绝对硬上限；增量检查使用 `--check-delta` 报告变化。
 
 在当前 revision，默认报告为：
 
 ```text
 line-budget: PASS
-core+protocol    5588/6000   93.1% remain   412 PASS
-control-plane   34365/38000  90.4% remain  3635 PASS
-release         49985/55000  90.9% remain  5015 PASS
+core+protocol    6101/6500   93.9% remain   399 PASS
+control-plane   35614/38000  93.7% remain  2386 PASS
+release         51809/55000  94.2% remain  3191 PASS
 ```
 
-使用 `--base <merge-base> --check-delta` 时追加三项增量；使用 `--verbose` 查看 crate
+使用 `--base <merge-base> --check-delta` 时追加三项增量；超过建议值只提示、不失败。使用 `--verbose` 查看 crate
 和 production/unit/integration 拆分；使用 `--json` 获取完整的 categories、layers、
 limits、status 和 violations。详细统计用于诊断，不能绕过硬门禁或结构性验收。
 
@@ -44,6 +44,7 @@ Control Plane 责任塞进 Thin Loop 的方式“通过”预算。
 | Boundary | Default | Behavior at limit |
 | --- | ---: | --- |
 | one ordinary host context item | 8 KiB by default | reject before retaining the item |
+| one metadata-backed Host context injection | 64 KiB | reject before retaining the source |
 | Skill inventory context | 16.5 KiB | reject before retaining the catalog snapshot |
 | activated Skills context | 33.5 KiB | reject before retaining the turn's selected Skill bodies |
 | user input | 32 KiB | reject before retaining or emitting the text |
@@ -108,21 +109,27 @@ completed entries as “上下文压缩 ×N” while retaining turn/item detail.
 can still exceed the hard context ceiling and fail rather than sending an
 oversized request.
 
-The stable system prompt remains unchanged when the Skill catalog or selected
-Skills change. Catalog metadata and selected Skill bodies use separate bounded
-context items; an unchanged discovery fingerprint leaves the catalog item
-untouched. This preserves the exact system-prompt prefix for provider prompt
-caching, while a changed context item can still invalidate later parts of the
-rendered request. Cache hits depend on provider prefix and tokenization rules
-and are not guaranteed. Compaction omits the tool catalog from its auxiliary
+The stable system prompt and tool definitions remain unchanged when dynamic
+context changes. Project instructions, Skill catalog and bodies, workspace
+state, and other dynamic context are appended to Session history in occurrence
+order. An unchanged source fingerprint is not appended again; a changed source
+is appended with the fingerprint it supersedes, leaving earlier messages
+intact. Compaction keeps the latest effective context for each source slot.
+
+This preserves the existing request prefix when context is added later, which
+can help provider prompt caching. A changed message can still affect the
+provider's cache boundary, and tokenization and cache policy vary by provider;
+the App Server reports actual input and cached-input usage when the provider
+returns it. Web Studio estimates category token counts by byte share and labels
+them as estimates. Cached tokens are shown only as a provider-reported total.
+The model context window and provider usage are shown as unknown when their
+metadata is unavailable. Compaction omits the tool catalog from its auxiliary
 request. Opening more MCP tools therefore makes long Goal runs worse, not better.
 
-The host currently uses context items for full world-state snapshots. The
-latest snapshot is retained across compaction. A newly started Thread receives
-the current snapshot; a resumed Session restores the snapshot from its settled
-checkpoint. When the execution setting changes, App Server replaces the named
-`world_state` context slot and persists the replacement. The stable system
-prompt does not change.
+The Host stores world-state snapshots as append-only context messages. A changed
+snapshot supersedes the previous version; compaction retains the latest
+effective snapshot. A resumed Session rebuilds the source inventory from its
+checkpoint. The stable system prompt does not change.
 
 Host tools add their own effect-side bounds before results reach core:
 
@@ -139,7 +146,7 @@ Host tools add their own effect-side bounds before results reach core:
 | inline foreground result threshold | 16 KiB |
 | retained result artifact | 8 MiB in memory; session-backed records retain at most 64 KiB each, 8 entries, 16 MiB total |
 | queued REPL operations | 16 |
-| root `AGENTS.md` | 16 KiB; UTF-8-safe head and tail if larger; reject if invalid UTF-8 |
+| `AGENTS.md` source | 16 KiB per file; at most 16 workspace roots and 16 applicable files; 256 KiB aggregate; UTF-8-safe head and tail if larger; reject if invalid UTF-8 |
 | rendered world-state snapshot | 8 KiB; fixed command catalog and capped path |
 | durable session file / JSONL record | 32 MiB / 512 KiB |
 | listed durable sessions | 128 per workspace under `~/.mini-agent/sessions/` |

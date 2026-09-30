@@ -10,11 +10,74 @@ use mini_agent_protocol::{
 /// later migration slice.
 pub struct ToolOrchestrator {
     approval: ApprovalController,
+    project_instructions: Option<crate::project_context::ProjectInstructionLoader>,
 }
 
 impl ToolOrchestrator {
     pub fn new(approval: ApprovalController) -> Self {
-        Self { approval }
+        Self {
+            approval,
+            project_instructions: None,
+        }
+    }
+
+    pub(crate) fn with_project_instructions(
+        mut self,
+        loader: crate::project_context::ProjectInstructionLoader,
+    ) -> Self {
+        self.project_instructions = Some(loader);
+        self
+    }
+
+    fn instruction_outcome(
+        &self,
+        request: &ToolExecutionRequest,
+        admission: &ToolAdmission,
+    ) -> Option<ToolExecutionOutcome> {
+        if !matches!(
+            request.name.as_str(),
+            "read_file" | "read_image" | "apply_patch"
+        ) {
+            return None;
+        }
+        let target_paths = admission.target_paths()?;
+        let loader = self.project_instructions.as_ref()?;
+        match loader.applicable_injections(target_paths, &request.known_context_injections) {
+            Ok(injections) if injections.is_empty() => None,
+            Ok(injections) => {
+                let records = injections
+                    .iter()
+                    .map(|injection| injection.record.clone())
+                    .collect::<Vec<_>>();
+                let messages = injections
+                    .iter()
+                    .map(|injection| injection.message.clone())
+                    .collect::<Vec<_>>();
+                let sources = injections
+                    .iter()
+                    .map(|injection| {
+                        let path = injection.record.path.as_deref().unwrap_or("AGENTS.md");
+                        format!(
+                            "{}:{path}",
+                            injection.record.workspace.as_deref().unwrap_or("工作区")
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                for injection in &injections {
+                    if let Some(warning) = &injection.warning {
+                        eprintln!("warning: {warning}");
+                    }
+                }
+                Some(
+                    ToolExecutionOutcome::deferred(format!(
+                        "Host injected applicable workspace instructions from {}. Review them, then retry the operation.",
+                        sources.join("、")
+                    ))
+                    .with_context_injection(messages, records),
+                )
+            }
+            Err(error) => Some(ToolExecutionOutcome::failed(error)),
+        }
     }
 }
 
@@ -22,11 +85,14 @@ impl ToolExecutionDelegate for ToolOrchestrator {
     fn execute(&self, tool: &dyn Tool, request: &ToolExecutionRequest) -> ToolExecutionOutcome {
         match tool.admission(request) {
             Ok(ToolAdmission::Legacy) => tool.execute_outcome(&request.arguments),
-            Ok(admission @ ToolAdmission::Allowed { .. }) => {
-                tool.execute_after_admission(request, &admission)
-            }
+            Ok(admission @ ToolAdmission::Allowed { .. }) => self
+                .instruction_outcome(request, &admission)
+                .unwrap_or_else(|| tool.execute_after_admission(request, &admission)),
             Ok(ToolAdmission::Deferred { reason }) => ToolExecutionOutcome::deferred(reason),
             Ok(admission @ ToolAdmission::ApprovalRequired { .. }) => {
+                if let Some(outcome) = self.instruction_outcome(request, &admission) {
+                    return outcome;
+                }
                 let ToolAdmission::ApprovalRequired {
                     action,
                     target_paths,
@@ -60,11 +126,13 @@ impl ToolExecutionDelegate for ToolOrchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_root;
     use mini_agent_capabilities::ApprovalPolicy;
     use mini_agent_protocol::{ApprovalOutcome, ToolError, ToolHandler, ToolRuntime, ToolSpec};
     use serde_json::{Value, json};
 
     struct FixtureTool {
+        name: String,
         admission: ToolAdmission,
         outcome: ToolExecutionOutcome,
     }
@@ -72,7 +140,7 @@ mod tests {
     impl ToolHandler for FixtureTool {
         fn spec(&self) -> ToolSpec {
             ToolSpec {
-                name: "fixture".to_string(),
+                name: self.name.clone(),
                 description: "fixture".to_string(),
                 parameters: json!({"type": "object"}),
             }
@@ -93,8 +161,8 @@ mod tests {
         }
     }
 
-    fn request() -> ToolExecutionRequest {
-        ToolExecutionRequest::new("call-1", "fixture", json!({}))
+    fn request(name: &str) -> ToolExecutionRequest {
+        ToolExecutionRequest::new("call-1", name, json!({}))
     }
 
     #[test]
@@ -103,12 +171,13 @@ mod tests {
             ToolOrchestrator::new(ApprovalController::new(ApprovalPolicy::Automatic));
         let outcome = orchestrator.execute(
             &FixtureTool {
+                name: "fixture".to_string(),
                 admission: ToolAdmission::Deferred {
                     reason: "plan lock".to_string(),
                 },
                 outcome: ToolExecutionOutcome::completed("must not run"),
             },
-            &request(),
+            &request("fixture"),
         );
 
         assert_eq!(
@@ -128,6 +197,7 @@ mod tests {
         let orchestrator = ToolOrchestrator::new(approval);
         let outcome = orchestrator.execute(
             &FixtureTool {
+                name: "fixture".to_string(),
                 admission: ToolAdmission::ApprovalRequired {
                     action: "run fixture".to_string(),
                     target_paths: Vec::new(),
@@ -135,7 +205,7 @@ mod tests {
                 },
                 outcome: ToolExecutionOutcome::completed("must not run"),
             },
-            &request(),
+            &request("fixture"),
         );
 
         assert_eq!(
@@ -151,15 +221,45 @@ mod tests {
             ToolOrchestrator::new(ApprovalController::new(ApprovalPolicy::Automatic));
         let outcome = orchestrator.execute(
             &FixtureTool {
+                name: "fixture".to_string(),
                 admission: ToolAdmission::Legacy,
                 outcome: ToolExecutionOutcome::failed("MCP tool call timed out"),
             },
-            &request(),
+            &request("fixture"),
         );
 
         assert_eq!(
             outcome.status,
             mini_agent_protocol::ToolExecutionStatus::Failed
         );
+    }
+
+    #[test]
+    fn shell_does_not_scan_workspace_instruction_paths() {
+        let root = test_root();
+        std::fs::write(root.join("AGENTS.md"), "must not scan for shell").unwrap();
+        let loader =
+            crate::project_context::ProjectInstructionLoader::from_configured_roots(&root, &[]);
+        let orchestrator =
+            ToolOrchestrator::new(ApprovalController::new(ApprovalPolicy::Automatic))
+                .with_project_instructions(loader);
+
+        let outcome = orchestrator.execute(
+            &FixtureTool {
+                name: "shell".to_string(),
+                admission: ToolAdmission::Allowed {
+                    target_paths: vec![root.join("AGENTS.md").display().to_string()],
+                },
+                outcome: ToolExecutionOutcome::completed("shell ran"),
+            },
+            &request("shell"),
+        );
+
+        assert_eq!(
+            outcome.status,
+            mini_agent_protocol::ToolExecutionStatus::Completed
+        );
+        assert!(outcome.context_injections.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
