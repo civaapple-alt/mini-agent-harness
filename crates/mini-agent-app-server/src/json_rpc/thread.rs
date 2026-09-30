@@ -5,6 +5,25 @@ impl<M> AppServerConnection<M>
 where
     M: Model + Send + 'static,
 {
+    pub(super) async fn handle_skills_list(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params =
+            match request.decode_params::<mini_agent_app_server_protocol::SkillsListParams>() {
+                Ok(params) => params,
+                Err(error) => return response_error(request.id, error),
+            };
+        if let Err(error) = self.check_runtime_thread(&params.thread_id).await {
+            return response_error(request.id, error);
+        }
+        let management = match self.management_service() {
+            Ok(management) => management,
+            Err(error) => return response_error(request.id, error),
+        };
+        action_response(request.id, management.refresh_skills_action(), Clone::clone).await
+    }
+
     pub(super) async fn handle_thread_goal_set(
         &self,
         request: JsonRpcRequest,

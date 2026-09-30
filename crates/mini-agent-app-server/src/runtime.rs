@@ -172,6 +172,8 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
             retry_mcp_servers,
             capability_manifest,
             skill_discovery,
+            skill_discovery_refresh,
+            skill_read_roots,
             background_shells,
             scheduled_tasks,
         } = prepare_harness_with_model_factory(
@@ -278,7 +280,8 @@ impl<M: Model + Send + 'static> AppServerRuntime<M> {
                 skill_discovery,
                 background_shells,
                 scheduled_tasks,
-            );
+            )
+            .with_skill_discovery_refresh(skill_discovery_refresh, skill_read_roots);
         let services = RuntimeServices::new(management, thread_settings, goals)
             .map_err(|error| format!("cannot bind runtime services: {error}"))?;
         let connection = AppServerConnection::with_capability_manifest(

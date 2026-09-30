@@ -34,12 +34,14 @@ fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
     .unwrap();
 
     let discovery = discover_for_tests(&root, &[]);
-    let prompt = discovery.augment_system_prompt("base").unwrap();
+    let context = discovery.skill_context().unwrap();
 
     assert_eq!(discovery.mcp_server_labels(), ["deploy.tools/local"]);
-    assert!(prompt.contains(".agents/skills/review/SKILL.md"));
-    assert!(prompt.contains(".agents/plugins/deploy/skills/deploy/SKILL.md"));
-    assert!(!prompt.contains("MUST LOAD ON DEMAND"));
+    assert!(context.contains(".agents/skills/review/SKILL.md"));
+    assert!(context.contains(".agents/plugins/deploy/skills/deploy/SKILL.md"));
+    assert!(!context.contains("MUST LOAD ON DEMAND"));
+    assert!(context.contains("supersedes earlier catalogs"));
+    assert!(context.len() <= MAX_SKILL_CONTEXT_BYTES);
     assert_eq!(discovery.prompt_fingerprint().unwrap().unwrap().len(), 16);
     assert!(discovery.diagnostics().is_empty());
     remove_test_root(&root);
@@ -75,9 +77,9 @@ fn activates_typed_skill_dependencies_without_enabling_providers() {
             ],
         }
     );
-    let prompt = discovery.augment_system_prompt("base").unwrap();
-    assert!(prompt.contains("\"type\":\"builtin\""));
-    assert!(prompt.contains("\"value\":\"github\""));
+    let context = discovery.skill_context().unwrap();
+    assert!(context.contains("\"type\":\"builtin\""));
+    assert!(context.contains("\"value\":\"github\""));
     assert!(discovery.mcp_servers().is_empty());
     remove_test_root(&root);
 }
@@ -233,10 +235,10 @@ fn project_skill_overrides_invalid_or_plugin_duplicate() {
     );
 
     let discovery = discover_for_tests(&root, &[]);
-    let prompt = discovery.augment_system_prompt("base").unwrap();
+    let context = discovery.skill_context().unwrap();
 
-    assert!(prompt.contains("Project review"));
-    assert!(!prompt.contains("Plugin review"));
+    assert!(context.contains("Project review"));
+    assert!(!context.contains("Plugin review"));
     assert!(
         discovery
             .diagnostics()
@@ -455,7 +457,7 @@ fn discovers_builtin_and_global_skill_roots_with_fixed_precedence() {
     );
     assert!(
         discovery
-            .augment_system_prompt("base")
+            .skill_context()
             .unwrap()
             .contains(".mini-agent/skills/builtin/pstack/how/SKILL.md")
     );

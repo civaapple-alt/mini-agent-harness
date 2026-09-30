@@ -26,7 +26,7 @@ fn workspace(
             approval,
             extra_read_roots,
             Vec::new(),
-            Vec::new(),
+            SkillReadRoots::default(),
             Vec::new(),
             sandbox,
         )
@@ -50,7 +50,7 @@ fn skill_workspace(root: PathBuf, skill_root: PathBuf) -> Arc<Workspace> {
             approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Denied),
             Vec::new(),
             Vec::new(),
-            vec![skill_root],
+            SkillReadRoots::from_paths(vec![skill_root]),
             Vec::new(),
             SandboxKind::Native,
         )
@@ -681,6 +681,52 @@ fn enabled_skill_roots_are_readable_without_approval_but_not_writable() {
 }
 
 #[test]
+fn refreshed_skill_read_roots_change_read_admission_on_the_live_tool() {
+    let root = test_root();
+    let skill_root = test_root();
+    let reference = skill_root.join("reference.md");
+    fs::write(&reference, "current skill reference\n").unwrap();
+    let roots = SkillReadRoots::default();
+    let workspace = Arc::new(
+        Workspace::with_read_roots_and_skill_roots(
+            root.clone(),
+            approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Denied),
+            Vec::new(),
+            Vec::new(),
+            roots.clone(),
+            Vec::new(),
+            SandboxKind::Native,
+        )
+        .unwrap(),
+    );
+    let read = ReadFile(workspace);
+    let request = json!({"path": reference.to_string_lossy().to_string()});
+
+    assert!(
+        read.execute(&request)
+            .unwrap_err()
+            .0
+            .contains("escapes the workspace")
+    );
+    roots.replace(vec![skill_root.clone()]).unwrap();
+    assert!(
+        read.execute(&request)
+            .unwrap()
+            .contains("current skill reference")
+    );
+    roots.replace(Vec::new()).unwrap();
+    assert!(
+        read.execute(&request)
+            .unwrap_err()
+            .0
+            .contains("escapes the workspace")
+    );
+
+    remove_test_root(&skill_root);
+    remove_test_root(&root);
+}
+
+#[test]
 fn session_attachment_roots_are_read_only_and_do_not_open_session_log() {
     let root = test_root();
     let session = test_root();
@@ -694,7 +740,7 @@ fn session_attachment_roots_are_read_only_and_do_not_open_session_log() {
             approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Denied),
             Vec::new(),
             vec![attachments.clone()],
-            Vec::new(),
+            SkillReadRoots::default(),
             Vec::new(),
             SandboxKind::Native,
         )

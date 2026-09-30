@@ -258,6 +258,9 @@ where
             METHOD_THREAD_START => self.handle_thread_start(request).await,
             METHOD_THREAD_LIST => self.handle_thread_list(request).await,
             METHOD_THREAD_ITEMS_LIST => self.handle_thread_items_list(request).await,
+            mini_agent_app_server_protocol::METHOD_SKILLS_LIST => {
+                self.handle_skills_list(request).await
+            }
             METHOD_THREAD_FORK => self.handle_thread_fork(request).await,
             METHOD_THREAD_RESUME => self.handle_thread_resume(request).await,
             METHOD_THREAD_READ => self.handle_thread_read(request).await,
@@ -396,6 +399,7 @@ where
                 workflow_lifecycle_notifications: self.runtime.is_some(),
                 background_tasks: self.runtime.is_some(),
                 scheduled_tasks: self.runtime.is_some(),
+                skills_list: self.runtime.is_some(),
             },
             capability_manifest: self.capability_manifest.clone(),
         };

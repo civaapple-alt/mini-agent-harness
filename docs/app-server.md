@@ -247,7 +247,7 @@ spelling.
 
 | Method | Direction | Parameters / result |
 | --- | --- | --- |
-| `initialize` | client request | Required `protocolVersion`, `clientName`, `clientVersion`; optional `capabilities` (`approvals`, `notifications`) and `providers` (`model`, `tools`, `extensions`, `policy`). Returns `protocolVersion`, server identity, `capabilities`, and the secret-free `capabilityManifest`. |
+| `initialize` | client request | Required `protocolVersion`, `clientName`, `clientVersion`; optional `capabilities` (`approvals`, `notifications`) and `providers` (`model`, `tools`, `extensions`, `policy`). Returns `protocolVersion`, server identity, `capabilities` (including `skillsList`), and the secret-free `capabilityManifest`. |
 | `initialized` | client notification | No parameters and no response. Enables all methods after a successful `initialize`. |
 
 `initialize` must be the first request. Clients should send `initialized`
@@ -267,6 +267,7 @@ Thread returned by `thread/start`.
 | --- | --- | --- |
 | `thread/start` | Optional `threadId` | Starts or returns the selected Thread; result contains `threadId`. |
 | `thread/list` | Optional `cursor`, `limit` | Returns `{data: [threadId], nextCursor}`. This is a bounded index query. |
+| `skills/list` | `threadId` | Refreshes Host discovery and returns the bounded effective Skill metadata catalog. It does not return paths or Skill bodies. |
 | `thread/fork` | `sourceThreadId`, `newThreadId` | Creates a Thread from the source checkpoint; result contains the new `threadId`. |
 | `thread/resume` | `threadId`, `checkpoint` | Installs the supplied bounded `ThreadReadResult` checkpoint and resumes the Thread identity. |
 | `thread/read` | `threadId` | Returns status, messages, context revision, turn counters, last turn, and next event sequence. |
@@ -426,6 +427,12 @@ event is interpreted as `loaded`. Namespaced
 `how` is accepted when it is unambiguous. If validation or body loading fails,
 the worker emits `skills_load_failed` with the selected names and bounded
 `reason_code`, then finishes the turn as failed without calling the model.
+
+`skills/list` refreshes the current Thread runtime's effective catalog when a
+client opens or reloads the Skill panel. The worker also refreshes discovery at
+the start of each Turn, so files installed during the previous Turn can be
+selected immediately on the next one. Refresh updates the Host-owned read roots
+and catalog together; the Gateway does not scan Skill directories.
 
 When `workflow` activates a Skill Group, the worker emits
 `skill_group_activated` and adds a bounded metadata-first instruction for that

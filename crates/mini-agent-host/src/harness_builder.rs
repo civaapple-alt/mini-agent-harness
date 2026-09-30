@@ -6,6 +6,7 @@ use mini_agent_core::Harness;
 use mini_agent_core::HarnessConfig;
 use mini_agent_core::ToolRouter;
 use mini_agent_protocol::Model;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::config::RuntimeConfig;
@@ -27,8 +28,62 @@ pub struct HarnessBuild<M: Model> {
     pub retry_mcp_servers: Vec<McpServerConfig>,
     pub capability_manifest: CapabilityManifest,
     pub skill_discovery: Option<mini_agent_capabilities::Discovery>,
+    pub skill_discovery_refresh: Option<SkillDiscoveryRefresh>,
+    pub skill_read_roots: mini_agent_capabilities::SkillReadRoots,
     pub background_shells: mini_agent_capabilities::BackgroundShellManager,
     pub scheduled_tasks: mini_agent_capabilities::ScheduledTaskManager,
+}
+
+/// Host-owned inputs needed to refresh the effective Skills catalog without
+/// rebuilding the Thread runtime or its stable prompt and tool set.
+#[derive(Clone)]
+pub struct SkillDiscoveryRefresh {
+    registry: CapabilityRegistry,
+    provider_id: String,
+    workspace: PathBuf,
+    enabled_groups: Vec<String>,
+    selection: ExtensionSelection,
+    prompt_enabled: bool,
+}
+
+impl SkillDiscoveryRefresh {
+    pub fn new(
+        registry: CapabilityRegistry,
+        provider_id: impl Into<String>,
+        workspace: PathBuf,
+        enabled_groups: Vec<String>,
+        selection: ExtensionSelection,
+        prompt_enabled: bool,
+    ) -> Self {
+        Self {
+            registry,
+            provider_id: provider_id.into(),
+            workspace,
+            enabled_groups,
+            selection,
+            prompt_enabled,
+        }
+    }
+
+    fn discover(&self) -> Result<mini_agent_capabilities::Discovery, String> {
+        let mut discovery = self.registry.discover_extensions_with_builtin_groups(
+            &self.provider_id,
+            &self.workspace,
+            &self.enabled_groups,
+        )?;
+        if let ExtensionSelection::Named(names) = &self.selection {
+            discovery.retain_selected(names);
+        }
+        Ok(discovery)
+    }
+
+    pub fn refresh(&self) -> Result<mini_agent_capabilities::Discovery, String> {
+        self.discover()
+    }
+
+    pub fn prompt_enabled(&self) -> bool {
+        self.prompt_enabled
+    }
 }
 
 /// The fully assembled application-host runtime handed to a frontend or
@@ -127,29 +182,29 @@ where
         } else {
             None
         };
-    let mut skill_discovery = (composition.extensions != ExtensionLoadDepth::None
+    let skill_discovery_refresh = (composition.extensions != ExtensionLoadDepth::None
         && (composition.regular_agent.prompts.extensions
             || composition.regular_agent.rules.extensions))
         .then(|| {
-            registry.discover_extensions_with_builtin_groups(
-                &composition.extension_provider,
-                &workspace,
-                &composition.builtin_skill_groups,
+            SkillDiscoveryRefresh::new(
+                registry.clone(),
+                composition.extension_provider.clone(),
+                workspace.clone(),
+                composition.builtin_skill_groups.clone(),
+                composition.extension_selection.clone(),
+                composition.regular_agent.prompts.extensions,
             )
-        })
+        });
+    let mut skill_discovery = skill_discovery_refresh
+        .as_ref()
+        .map(SkillDiscoveryRefresh::discover)
         .transpose()?;
     if let Some(discovery) = &mut skill_discovery {
-        if let ExtensionSelection::Named(names) = &composition.extension_selection {
-            discovery.retain_selected(names);
-        }
         for diagnostic in discovery.diagnostics() {
             eprintln!("warning: {diagnostic}");
         }
         capability_manifest.available_skills = discovery.skill_catalog();
         let extension_fingerprint = discovery.prompt_fingerprint()?;
-        if composition.regular_agent.prompts.extensions {
-            config.system_prompt = discovery.augment_system_prompt(&config.system_prompt)?;
-        }
         if let Some(fingerprint) = extension_fingerprint {
             if composition.regular_agent.prompts.extensions {
                 capability_manifest
@@ -168,6 +223,24 @@ where
                     });
             }
         }
+    }
+    let skill_read_roots = mini_agent_capabilities::SkillReadRoots::from_paths(
+        skill_discovery
+            .as_ref()
+            .map_or_else(Vec::new, |discovery| discovery.skill_read_roots()),
+    );
+    if skill_discovery_refresh
+        .as_ref()
+        .is_some_and(SkillDiscoveryRefresh::prompt_enabled)
+    {
+        config.max_context_item_bytes = config
+            .max_context_item_bytes
+            .max(mini_agent_capabilities::MAX_SKILL_CONTEXT_BYTES)
+            .max(mini_agent_capabilities::MAX_ACTIVATED_SKILL_CONTEXT_BYTES);
+    } else if skill_discovery_refresh.is_some() {
+        config.max_context_item_bytes = config
+            .max_context_item_bytes
+            .max(mini_agent_capabilities::MAX_ACTIVATED_SKILL_CONTEXT_BYTES);
     }
     if let Some(fingerprint) = project_fingerprint {
         if composition.regular_agent.prompts.project {
@@ -194,9 +267,7 @@ where
             approval: approval.clone(),
             extra_read_roots: runtime_config.extra_read_roots(),
             session_read_roots: runtime_config.session_read_roots(),
-            skill_read_roots: skill_discovery
-                .as_ref()
-                .map_or_else(Vec::new, |discovery| discovery.skill_read_roots()),
+            skill_read_roots: skill_read_roots.clone(),
             extra_write_roots: runtime_config.extra_write_roots(),
             sandbox: composition.sandbox,
             images: images.clone(),
@@ -285,6 +356,8 @@ where
         retry_mcp_servers,
         capability_manifest,
         skill_discovery,
+        skill_discovery_refresh,
+        skill_read_roots,
         background_shells,
         scheduled_tasks,
     })

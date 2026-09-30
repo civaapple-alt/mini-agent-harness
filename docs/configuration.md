@@ -129,6 +129,14 @@ The manifest also reports the fixed prompt/rule precedence, the current rule
 resolver phase, and the effective bounded context limits; it never includes
 prompt bodies or secrets.
 
+The Host refreshes Skill metadata through `skills/list` and at the start of
+each Turn. A Skill installed into a discovered directory during one Turn is
+available to the next Turn without restarting the runtime. Catalog metadata and
+explicitly activated Skill bodies use separate bounded context slots; changing
+either does not rewrite the stable system prompt. Catalog content changes only
+when its discovery fingerprint changes, so unchanged Skills do not create
+context updates on every Turn.
+
 ### Embedding an external capability provider
 
 The internal runtime composition contains provider IDs only. An embedding
@@ -378,7 +386,8 @@ The canonical pstack name is `pstack:how`; `pstack-plugin:how` is accepted as
 a compatibility alias, and the short `how` form is accepted only when
 unambiguous. The Host revalidates each name against the effective catalog,
 reads the trusted `SKILL.md`, strips its front matter, and adds the bounded
-body to that turn's temporary prompt context. One turn can activate at most
+body to that turn's activated-Skills context slot. The next Turn replaces that
+slot with its own activation snapshot. One turn can activate at most
 eight skills, and the combined body size cannot exceed 32 KiB. A failed read or
 validation stops the turn before the model is called. Skill bodies are not
 written to later turns or to the global system prompt. A turn-local

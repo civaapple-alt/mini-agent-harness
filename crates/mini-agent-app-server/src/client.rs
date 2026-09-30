@@ -107,6 +107,17 @@ where
             .await
     }
 
+    pub async fn list_skills(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> Result<mini_agent_app_server_protocol::SkillsListResult, JsonRpcError> {
+        self.call(
+            mini_agent_app_server_protocol::METHOD_SKILLS_LIST,
+            mini_agent_app_server_protocol::SkillsListParams { thread_id },
+        )
+        .await
+    }
+
     pub async fn read_thread(
         &mut self,
         thread_id: ThreadId,

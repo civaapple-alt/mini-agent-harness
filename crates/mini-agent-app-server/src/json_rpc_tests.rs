@@ -178,6 +178,91 @@ async fn exposes_empty_scheduled_task_list_and_capability() {
 }
 
 #[tokio::test]
+async fn skills_list_refreshes_project_discovery_after_runtime_start() {
+    let root = rpc_root("skills-list-refresh");
+    let registry = mini_agent_capabilities::CapabilityRegistry::builtin();
+    let enabled_groups = Vec::new();
+    let discovery = registry
+        .discover_extensions_with_builtin_groups("builtin", &root, &enabled_groups)
+        .unwrap();
+    let skill_read_roots =
+        mini_agent_capabilities::SkillReadRoots::from_paths(discovery.skill_read_roots());
+    let refresh = mini_agent_host::SkillDiscoveryRefresh::new(
+        registry,
+        "builtin",
+        root.clone(),
+        enabled_groups,
+        mini_agent_host::ExtensionSelection::All,
+        true,
+    );
+    let approval = ApprovalController::with_preset(ApprovalPolicy::Automatic, Default::default());
+    let server = crate::tests::server(DoneModel);
+    let management = RuntimeManagementService::new_with_harness_config_and_skills(
+        server.clone(),
+        None,
+        mini_agent_host::WorldState::detect_with_roots(
+            &root,
+            Vec::new(),
+            SecurityPreset::Default,
+            ApprovalPolicy::Automatic,
+            SandboxKind::Native,
+        ),
+        Vec::new(),
+        0,
+        Vec::new(),
+        approval,
+        HarnessConfig::default(),
+        Some(discovery),
+    )
+    .with_skill_discovery_refresh(Some(refresh), skill_read_roots);
+    let services = RuntimeServices::new(
+        management,
+        ThreadSettingsService::new(),
+        ThreadGoalRequestProcessor::new(root.clone(), crate::goal_service::GoalLimits::default()),
+    )
+    .unwrap();
+    let mut connection = AppServerConnection::new(server).with_runtime_services(services);
+
+    let initialized = connection
+        .handle_request(initialize_request(1, "skills-list-test"))
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(initialized["capabilities"]["skillsList"], true);
+
+    let skill_dir = root.join(".agents/skills/installed-during-runtime");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: installed-during-runtime\ndescription: A test Skill.\n---\nUse this test Skill.\n",
+    )
+    .unwrap();
+
+    let listed = rpc_call(
+        &mut connection,
+        2,
+        mini_agent_app_server_protocol::METHOD_SKILLS_LIST,
+        serde_json::json!({"threadId": "thread-1"}),
+    )
+    .await;
+    assert!(
+        listed["value"]["skills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|skill| {
+                skill["name"] == "installed-during-runtime"
+                    && skill["source"] == "project"
+                    && skill["enabled"] == true
+            })
+    );
+
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn background_shell_survives_turn_and_is_controlled_by_next_rpc() {
     let root = rpc_root("background-shell-lifecycle");
     let background_shells = BackgroundShellManager::new();

@@ -1107,6 +1107,20 @@ pub(super) async fn worker_loop<M>(
                             );
                         }
                     }
+                    let skill_refresh_error = runtime.as_mut().and_then(|state| {
+                        match state.management.refresh_skill_catalog() {
+                            Ok(_) => match state.management.prepare_skill_context() {
+                                Ok(Some(context)) => thread
+                                    .harness_mut()
+                                    .replace_context_slot("available_extensions", context)
+                                    .err()
+                                    .map(|error| error.to_string()),
+                                Ok(None) => None,
+                                Err(error) => Some(error.to_string()),
+                            },
+                            Err(error) => Some(error.to_string()),
+                        }
+                    });
                     let original_config = thread.harness().config().clone();
                     let is_child_task = operation_id.is_some();
                     let mut turn_config = original_config.clone();
@@ -1135,20 +1149,24 @@ pub(super) async fn worker_loop<M>(
                     }
                     let too_many_selected_skills =
                         input.selected_skills.len() > mini_agent_capabilities::MAX_SELECTED_SKILLS;
-                    let group_error = workflow.as_ref().and_then(|workflow| {
-                        let result = match workflow.kind {
-                            mini_agent_protocol::TurnWorkflowKind::SkillGroup => runtime
-                                .as_ref()
-                                .and_then(|state| state.management.skill_discovery.as_ref())
-                                .ok_or_else(|| {
-                                    "skill catalog is unavailable for this runtime".to_string()
-                                })
-                                .and_then(|discovery| discovery.activate_skill_group(&workflow.id)),
-                        };
-                        result.err()
+                    let group_error = skill_refresh_error.or_else(|| {
+                        workflow.as_ref().and_then(|workflow| {
+                            let result = match workflow.kind {
+                                mini_agent_protocol::TurnWorkflowKind::SkillGroup => runtime
+                                    .as_ref()
+                                    .and_then(|state| state.management.skill_discovery.as_ref())
+                                    .ok_or_else(|| {
+                                        "skill catalog is unavailable for this runtime".to_string()
+                                    })
+                                    .and_then(|discovery| {
+                                        discovery.activate_skill_group(&workflow.id)
+                                    }),
+                            };
+                            result.err()
+                        })
                     });
                     let group_valid = group_error.is_none();
-                    let (loaded_skills, skill_error) = if let Some(error) = group_error {
+                    let (loaded_skills, mut skill_error) = if let Some(error) = group_error {
                         (Vec::new(), Some(error))
                     } else if too_many_selected_skills {
                         (
@@ -1173,6 +1191,15 @@ pub(super) async fn worker_loop<M>(
                             Err(error) => (Vec::new(), Some(error)),
                         }
                     };
+                    let activated_context =
+                        skill_activation_context(&loaded_skills, workflow.as_ref());
+                    if let Err(error) = thread
+                        .harness_mut()
+                        .replace_context_slot("activated_skills", activated_context)
+                        && skill_error.is_none()
+                    {
+                        skill_error = Some(error.to_string());
+                    }
                     let mut skill_prelude = workflow
                         .as_ref()
                         .filter(|_| group_valid)
@@ -1194,17 +1221,6 @@ pub(super) async fn worker_loop<M>(
                             },
                         });
                     } else if !loaded_skills.is_empty() {
-                        let body = loaded_skills
-                            .iter()
-                            .map(|skill| format!("### {}\n{}", skill.qualified_name, skill.body))
-                            .collect::<Vec<_>>()
-                            .join("\n\n");
-                        let mut config = thread.harness().config().clone();
-                        config.system_prompt = format!(
-                            "{}\n\n## Explicitly activated skills\n{}",
-                            config.system_prompt, body
-                        );
-                        thread.harness_mut().replace_config(config);
                         let records: Vec<mini_agent_protocol::SkillLoadRecord> = loaded_skills
                             .iter()
                             .map(|skill| mini_agent_protocol::SkillLoadRecord {
@@ -1224,19 +1240,6 @@ pub(super) async fn worker_loop<M>(
                             activation: Some("explicit".to_string()),
                             skills: records,
                         });
-                    }
-                    if let Some(workflow) = workflow.as_ref()
-                        && skill_error.is_none()
-                    {
-                        let mut config = thread.harness().config().clone();
-                        config.system_prompt = format!(
-                            "{}\n\n## Active skill group: {}\n\
-                             Use the available {} Skill metadata to choose relevant \
-                             instructions, then read matching SKILL.md files with read_file \
-                             before acting. Do not load unrelated Skill bodies.",
-                            config.system_prompt, workflow.id, workflow.id
-                        );
-                        thread.harness_mut().replace_config(config);
                     }
                     let started_at_ms = timestamp_ms();
                     let prompt = input.text.clone();
@@ -2150,6 +2153,35 @@ where
         ThreadUpdate::ExtendTools(tools) => thread.harness_mut().extend_tools(tools),
     }
     Ok(())
+}
+
+fn skill_activation_context(
+    loaded_skills: &[mini_agent_capabilities::LoadedSkill],
+    workflow: Option<&mini_agent_protocol::TurnWorkflow>,
+) -> String {
+    let mut sections = Vec::new();
+    if let Some(workflow) = workflow {
+        sections.push(format!(
+            "Active Skill group: {}. Use its available metadata to choose relevant instructions, then read matching SKILL.md files with read_file before acting. Do not load unrelated Skill bodies.",
+            workflow.id
+        ));
+    }
+    if !loaded_skills.is_empty() {
+        sections.push(
+            loaded_skills
+                .iter()
+                .map(|skill| format!("### {}\n{}", skill.qualified_name, skill.body))
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        );
+    }
+    if sections.is_empty() {
+        sections.push("No Skills are explicitly active for this turn.".to_string());
+    }
+    format!(
+        "Explicitly activated Skills apply to this turn only. This snapshot supersedes earlier activation snapshots.\n<activated_skills>\n{}\n</activated_skills>",
+        sections.join("\n\n")
+    )
 }
 
 fn respond_after_revision<T>(

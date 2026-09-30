@@ -567,6 +567,12 @@ pub(super) fn handle<M>(
             });
             respond(reply, receipt, result);
         }
+        RuntimeCommand::RefreshSkills { reply } => {
+            let result = mutate(runtime, runtime_revision, |state| {
+                state.management.refresh_skill_catalog()
+            });
+            respond(reply, receipt, result);
+        }
         RuntimeCommand::SetExecution {
             access,
             policy,
@@ -888,6 +894,7 @@ fn reject_runtime(command: RuntimeCommand, receipt: ActionReceipt, error: AppSer
         RuntimeCommand::ThreadId { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::World { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::RefreshWorld { reply } => respond(reply, receipt, Err(error)),
+        RuntimeCommand::RefreshSkills { reply } => respond(reply, receipt, Err(error)),
         RuntimeCommand::SetExecution { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::UpdateThread { reply, .. } => respond(reply, receipt, Err(error)),
         RuntimeCommand::McpStatus { reply } => respond(reply, receipt, Err(error)),
@@ -939,7 +946,7 @@ pub(super) fn handle_running<M>(
     }
     let command = request.command;
     if (stopping && command.is_mutation())
-        || (command.is_mutation() && !is_safe_goal_mutation_while_running(&command))
+        || (command.is_mutation() && !is_safe_mutation_while_running(&command))
     {
         reject_runtime(command, receipt, AppServerError::Busy);
     } else {
@@ -1048,12 +1055,13 @@ fn prepare_active_session_fork(
     session_fork_result(child, None)
 }
 
-fn is_safe_goal_mutation_while_running(command: &RuntimeCommand) -> bool {
+fn is_safe_mutation_while_running(command: &RuntimeCommand) -> bool {
     matches!(
         command,
         RuntimeCommand::BackgroundTaskStop { .. }
             | RuntimeCommand::ChildTask { .. }
             | RuntimeCommand::ChildSteerRequest { .. }
+            | RuntimeCommand::RefreshSkills { .. }
             | RuntimeCommand::BackgroundTaskRestart { .. }
             | RuntimeCommand::ScheduledTaskCancel { .. }
             | RuntimeCommand::ThreadGoalClear { .. }

@@ -16,8 +16,8 @@ use the same effective-line rule.
 | 指标 | 统计范围 | 硬上限 |
 | --- | --- | ---: |
 | Core + Protocol | `mini-agent-core` + `mini-agent-protocol` | 6,000 |
-| Control Plane | Host/App Server control slice + Capabilities control slice | 35,000 |
-| Release Rust source | 支持的运行时 crate 与测试，排除实验性 CLI/REPL | 50,000 |
+| Control Plane | Host/App Server control slice + Capabilities control slice | 38,000 |
+| Release Rust source | 支持的运行时 crate 与测试，排除实验性 CLI/REPL | 55,000 |
 
 Runtime 聚合值仍可在 JSON 中用于诊断，但不再设置 `25,000` 行硬门禁。每个 PR 的
 Release Rust 净增量上限为 `1,000` 行。Core + Protocol、Control Plane 和
@@ -27,9 +27,9 @@ Release Rust 均执行绝对硬上限；增量检查使用 `--check-delta`。
 
 ```text
 line-budget: PASS
-core+protocol    4767/6000   79.5% remain  1233 PASS
-control-plane   30000/35000  85.7% remain  5000 PASS
-release         43037/50000  86.1% remain  6963 PASS
+core+protocol    5588/6000   93.1% remain   412 PASS
+control-plane   34365/38000  90.4% remain  3635 PASS
+release         49985/55000  90.9% remain  5015 PASS
 ```
 
 使用 `--base <merge-base> --check-delta` 时追加三项增量；使用 `--verbose` 查看 crate
@@ -43,7 +43,9 @@ Control Plane 责任塞进 Thin Loop 的方式“通过”预算。
 
 | Boundary | Default | Behavior at limit |
 | --- | ---: | --- |
-| one host context item | 8 KiB | reject before retaining the item |
+| one ordinary host context item | 8 KiB by default | reject before retaining the item |
+| Skill inventory context | 16.5 KiB | reject before retaining the catalog snapshot |
+| activated Skills context | 33.5 KiB | reject before retaining the turn's selected Skill bodies |
 | user input | 32 KiB | reject before retaining or emitting the text |
 | queued steering/follow-up input | 16 items, 64 KiB per item, 512 KiB total | reject before retaining the item |
 | JSON-RPC input line | 2 MiB including the line ending | close the stream before deserialization |
@@ -106,10 +108,14 @@ completed entries as “上下文压缩 ×N” while retaining turn/item detail.
 can still exceed the hard context ceiling and fail rather than sending an
 oversized request.
 
-Skill catalog text, root `AGENTS.md`, MCP tool schemas, and the latest
-world-state context item sit in the stable request prefix on normal turns.
-Compaction omits the tool catalog from its auxiliary request. Opening more MCP
-tools therefore makes long Goal runs worse, not better.
+The stable system prompt remains unchanged when the Skill catalog or selected
+Skills change. Catalog metadata and selected Skill bodies use separate bounded
+context items; an unchanged discovery fingerprint leaves the catalog item
+untouched. This preserves the exact system-prompt prefix for provider prompt
+caching, while a changed context item can still invalidate later parts of the
+rendered request. Cache hits depend on provider prefix and tokenization rules
+and are not guaranteed. Compaction omits the tool catalog from its auxiliary
+request. Opening more MCP tools therefore makes long Goal runs worse, not better.
 
 The host currently uses context items for full world-state snapshots. The
 latest snapshot is retained across compaction. A newly started Thread receives

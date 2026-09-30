@@ -114,7 +114,9 @@ pub use session::{
 pub use skills::Discovery;
 pub use skills::LoadedSkill;
 pub use skills::MAX_ACTIVATED_SKILL_BYTES;
+pub use skills::MAX_ACTIVATED_SKILL_CONTEXT_BYTES;
 pub use skills::MAX_SELECTED_SKILLS;
+pub use skills::MAX_SKILL_CONTEXT_BYTES;
 pub use skills::McpServerConfig;
 pub use skills::McpTransportConfig;
 pub use skills::SkillActivation;
@@ -128,6 +130,7 @@ pub use skills::discover_with_builtin_root;
 pub use workspace::ApprovalController;
 pub use workspace::ApprovalFailure;
 pub use workspace::MAX_SKILL_READ_BYTES;
+pub use workspace::SkillReadRoots;
 pub use workspace::{
     workspace_tools_with_read_roots_and_results,
     workspace_tools_with_read_roots_results_and_background_shells,

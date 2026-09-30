@@ -41,6 +41,7 @@ pub use goal::with_plan_mode_overlay;
 pub use harness_builder::HarnessBuild;
 pub use harness_builder::HostRuntime;
 pub use harness_builder::ModelProviderFactory;
+pub use harness_builder::SkillDiscoveryRefresh;
 pub use harness_builder::prepare_harness_with_model_factory;
 pub use models::{
     HostResponsesModel, ModelCatalog, ModelCatalogStore, ModelCatalogView,

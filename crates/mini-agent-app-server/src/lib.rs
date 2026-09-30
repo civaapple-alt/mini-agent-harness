@@ -383,6 +383,7 @@ pub enum AppServerError {
     GoalOwnsContinuationMode,
     InvalidThreadSetting(String),
     SkillActivation(String),
+    SkillDiscovery(String),
 }
 
 /// A host-side update applied to a settled Thread by the App Server worker.
@@ -479,6 +480,7 @@ impl fmt::Display for AppServerError {
             ),
             Self::InvalidThreadSetting(error) => write!(formatter, "invalid Thread setting: {error}"),
             Self::SkillActivation(error) => write!(formatter, "skill activation failed: {error}"),
+            Self::SkillDiscovery(error) => write!(formatter, "skill catalog refresh failed: {error}"),
         }
     }
 }

@@ -40,6 +40,7 @@ pub const METHOD_THREAD_CLOSE: &str = "thread/close";
 pub const METHOD_THREAD_SETTINGS_UPDATE: &str = "thread/settings/update";
 pub const METHOD_THREAD_MODEL_SETTINGS_GET: &str = "thread/model-settings/get";
 pub const METHOD_THREAD_SETTINGS_UPDATED: &str = "thread/settings/updated";
+pub const METHOD_SKILLS_LIST: &str = "skills/list";
 pub const METHOD_MODEL_CATALOG_MANAGE: &str = "model/catalog/manage";
 pub const METHOD_TURN_START: &str = "turn/start";
 pub const METHOD_TURN_RESUME: &str = "turn/resume";
@@ -510,6 +511,20 @@ pub struct ServerCapabilities {
     pub background_tasks: bool,
     #[serde(default)]
     pub scheduled_tasks: bool,
+    #[serde(default)]
+    pub skills_list: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsListParams {
+    pub thread_id: ThreadId,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsListResult {
+    pub skills: Vec<AvailableSkill>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

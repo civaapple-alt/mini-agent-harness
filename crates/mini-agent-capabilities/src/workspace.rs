@@ -45,6 +45,50 @@ const MAX_COMMAND_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
 const INLINE_COMMAND_OUTPUT_BYTES: usize = 16 * 1024;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Read-only roots for files referenced by discovered Skills.
+///
+/// Host refreshes this set when its authoritative Skill discovery changes;
+/// workspace tools consult the same Capabilities-owned handle for admission.
+#[derive(Clone, Default)]
+pub struct SkillReadRoots(Arc<RwLock<Vec<PathBuf>>>);
+
+impl SkillReadRoots {
+    pub fn from_paths(paths: Vec<PathBuf>) -> Self {
+        let roots = Self::default();
+        let _ = roots.replace(paths);
+        roots
+    }
+
+    pub fn replace(&self, paths: Vec<PathBuf>) -> Result<(), String> {
+        let mut roots = paths
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok())
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        roots.sort();
+        roots.dedup();
+        *self
+            .0
+            .write()
+            .map_err(|_| "Skill read roots are unavailable".to_string())? = roots;
+        Ok(())
+    }
+
+    fn allows(&self, path: &Path) -> bool {
+        self.0
+            .read()
+            .is_ok_and(|roots| roots.iter().any(|root| path.starts_with(root)))
+    }
+
+    fn allows_descendant(&self, path: &Path) -> bool {
+        self.0.read().is_ok_and(|roots| {
+            roots
+                .iter()
+                .any(|root| path.starts_with(root) && path != root)
+        })
+    }
+}
+
 pub fn workspace_tools_with_read_roots_and_results(
     root: PathBuf,
     approval: ApprovalController,
@@ -83,7 +127,7 @@ pub fn workspace_tools_with_read_roots_results_and_background_shells(
             approval,
             extra_read_roots,
             session_read_roots: Vec::new(),
-            skill_read_roots: Vec::new(),
+            skill_read_roots: SkillReadRoots::default(),
             extra_write_roots,
             sandbox,
             background_shells,
@@ -99,7 +143,7 @@ pub(crate) struct WorkspaceToolConfig {
     pub(crate) approval: ApprovalController,
     pub(crate) extra_read_roots: Vec<PathBuf>,
     pub(crate) session_read_roots: Vec<PathBuf>,
-    pub(crate) skill_read_roots: Vec<PathBuf>,
+    pub(crate) skill_read_roots: SkillReadRoots,
     pub(crate) extra_write_roots: Vec<PathBuf>,
     pub(crate) sandbox: SandboxKind,
     pub(crate) background_shells: crate::background_shell::BackgroundShellManager,
@@ -144,7 +188,7 @@ struct Workspace {
     root: PathBuf,
     extra_read_roots: Vec<PathBuf>,
     session_read_roots: Vec<PathBuf>,
-    skill_read_roots: Vec<PathBuf>,
+    skill_read_roots: SkillReadRoots,
     extra_write_roots: Vec<PathBuf>,
     approval: ApprovalController,
     sandbox: SandboxKind,
@@ -157,7 +201,7 @@ impl Workspace {
         approval: ApprovalController,
         extra_read_roots: Vec<PathBuf>,
         session_read_roots: Vec<PathBuf>,
-        skill_read_roots: Vec<PathBuf>,
+        skill_read_roots: SkillReadRoots,
         extra_write_roots: Vec<PathBuf>,
         sandbox: SandboxKind,
     ) -> Result<Self, ToolError> {
@@ -174,13 +218,6 @@ impl Workspace {
             .filter_map(|path| path.canonicalize().ok())
             .filter(|path| path.is_dir())
             .collect();
-        let mut skill_read_roots = skill_read_roots
-            .into_iter()
-            .filter_map(|path| path.canonicalize().ok())
-            .filter(|path| path.is_dir())
-            .collect::<Vec<_>>();
-        skill_read_roots.sort();
-        skill_read_roots.dedup();
         let extra_write_roots = extra_write_roots
             .into_iter()
             .filter_map(|path| path.canonicalize().ok())
@@ -363,11 +400,7 @@ impl Workspace {
             let Ok(canonical) = candidate.canonicalize() else {
                 continue;
             };
-            if self
-                .skill_read_roots
-                .iter()
-                .any(|root| canonical.starts_with(root))
-            {
+            if self.skill_read_roots.allows(&canonical) {
                 return Some(canonical);
             }
         }
@@ -546,10 +579,7 @@ impl Workspace {
         self.session_read_roots
             .iter()
             .any(|root| path.starts_with(root))
-            || self
-                .skill_read_roots
-                .iter()
-                .any(|root| path.starts_with(root))
+            || self.skill_read_roots.allows(path)
             || (self
                 .extra_read_roots
                 .iter()
@@ -575,10 +605,7 @@ impl Workspace {
                 .session_read_roots
                 .iter()
                 .any(|root| path.starts_with(root) && path != *root)
-            || self
-                .skill_read_roots
-                .iter()
-                .any(|root| path.starts_with(root) && path != *root)
+            || self.skill_read_roots.allows_descendant(&path)
         {
             Ok(path)
         } else {
@@ -592,11 +619,7 @@ impl Workspace {
         turn_id: Option<&str>,
         bytes: usize,
     ) -> Result<(), ToolError> {
-        if !self
-            .skill_read_roots
-            .iter()
-            .any(|root| path.starts_with(root))
-        {
+        if !self.skill_read_roots.allows(path) {
             return Ok(());
         }
         self.skill_read_budget

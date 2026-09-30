@@ -5,7 +5,7 @@ use crate::ScheduledTaskManager;
 use crate::result_store::ResultStore;
 use crate::security::{SecurityPolicy, SecurityPreset};
 use crate::skills;
-use crate::workspace::ApprovalController;
+use crate::workspace::{ApprovalController, SkillReadRoots};
 use mini_agent_protocol::Tool;
 use mini_agent_protocol::ToolError;
 use std::path::Path;
@@ -45,7 +45,7 @@ pub struct ToolBuildRequest {
     pub approval: ApprovalController,
     pub extra_read_roots: Vec<PathBuf>,
     pub session_read_roots: Vec<PathBuf>,
-    pub skill_read_roots: Vec<PathBuf>,
+    pub skill_read_roots: SkillReadRoots,
     pub extra_write_roots: Vec<PathBuf>,
     pub sandbox: SandboxKind,
     pub images: ImageStore,

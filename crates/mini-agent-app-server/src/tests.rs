@@ -1044,8 +1044,17 @@ async fn knowledge_work_mock_provider_covers_structured_read_only_scenarios() {
         {
             let observations = observations.lock().unwrap();
             let observation = observations.last().expect("mock provider was not called");
-            assert!(observation.system_prompt.contains(marker));
+            assert_eq!(
+                observation.system_prompt,
+                HarnessConfig::default().system_prompt
+            );
+            assert!(!observation.system_prompt.contains(marker));
             assert_eq!(observation.tool_count, 1);
+            assert!(observation.messages.iter().any(|message| matches!(
+                message,
+                Message::Context { text }
+                    if text.starts_with("Explicitly activated Skills") && text.contains(marker)
+            )));
             assert!(observation.messages.iter().any(|message| matches!(
                 message,
                 Message::Tool {
@@ -1107,9 +1116,21 @@ async fn knowledge_work_group_workflow_uses_requested_group_in_prompt() {
     )));
     {
         let observations = observations.lock().unwrap();
-        let system_prompt = &observations.last().unwrap().system_prompt;
-        assert!(system_prompt.contains("## Active skill group: knowledge-work"));
-        assert!(!system_prompt.contains("Active skill group: pstack"));
+        let observation = observations.last().unwrap();
+        assert_eq!(
+            observation.system_prompt,
+            HarnessConfig::default().system_prompt
+        );
+        assert!(observation.messages.iter().any(|message| matches!(
+            message,
+            Message::Context { text }
+                if text.starts_with("Explicitly activated Skills")
+                    && text.contains("Active Skill group: knowledge-work")
+        )));
+        assert!(!observation.messages.iter().any(|message| matches!(
+            message,
+            Message::Context { text } if text.contains("Active Skill group: pstack")
+        )));
     }
     client.shutdown().await.unwrap();
     fs::remove_dir_all(root).unwrap();

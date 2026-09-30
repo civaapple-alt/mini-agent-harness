@@ -25,10 +25,13 @@ const MAX_DIRECTORY_ENTRIES: usize = 128;
 const MAX_METADATA_BYTES: u64 = 64 * 1024;
 const MAX_INSTRUCTION_FRONTMATTER_BYTES: usize = 16 * 1024;
 const MAX_CATALOG_BYTES: usize = 16 * 1024;
+pub const MAX_SKILL_CONTEXT_BYTES: usize = MAX_CATALOG_BYTES + 512;
 const MAX_SKILL_DEPENDENCIES: usize = 16;
 const MAX_SKILL_DEPENDENCY_VALUE_BYTES: usize = 64;
 pub const MAX_SELECTED_SKILLS: usize = 8;
 pub const MAX_ACTIVATED_SKILL_BYTES: usize = 32 * 1024;
+pub const MAX_ACTIVATED_SKILL_CONTEXT_BYTES: usize =
+    MAX_ACTIVATED_SKILL_BYTES + MAX_SELECTED_SKILLS * 256 + 256;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_CONNECT_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -368,6 +371,13 @@ fn skill_aliases_for(skill: &Skill, skills: &[Skill]) -> Vec<String> {
 }
 
 impl Discovery {
+    /// Replaces only Skill metadata from a fresh scan while keeping runtime
+    /// extensions such as MCP server configuration bound to startup policy.
+    pub fn replace_skills(&mut self, refreshed: Discovery) {
+        self.skills = refreshed.skills;
+        self.diagnostics = refreshed.diagnostics;
+    }
+
     pub fn mcp_servers(&self) -> &[McpServerConfig] {
         &self.mcp_servers
     }
@@ -623,19 +633,28 @@ impl Discovery {
         )))
     }
 
-    pub fn augment_system_prompt(&self, base: &str) -> Result<String, String> {
-        if !self.skills.iter().any(|skill| skill.enabled) {
-            return Ok(base.to_string());
-        }
+    /// Returns the bounded, replaceable Skills inventory kept outside the
+    /// stable system prompt so catalog refreshes do not rewrite its prefix.
+    pub fn skill_context(&self) -> Result<String, String> {
         let catalog = self.metadata_catalog()?;
-        Ok(format!(
-            "{base}\n\nAvailable project extensions (metadata only):\n\
-             When a task matches an entry, read its listed instruction file \
-             with read_file before proceeding. Resolve relative references from that file's directory. \
-             <available_extensions>\n{}{}</available_extensions>",
-            catalog,
-            if catalog.ends_with('\n') { "" } else { "\n" }
-        ))
+        let body = if catalog.is_empty() {
+            "No Skills are currently available.\n".to_string()
+        } else {
+            catalog
+        };
+        let context = format!(
+            "Available project extensions (metadata only; this snapshot supersedes earlier catalogs).\n\
+             When a task matches an entry, read its listed instruction file with read_file before proceeding. \
+             Resolve relative references from that file's directory.\n\
+             <available_extensions>\n{body}</available_extensions>"
+        );
+        if context.len() > MAX_SKILL_CONTEXT_BYTES {
+            return Err(format!(
+                "Skill context exceeds the {} byte limit",
+                MAX_SKILL_CONTEXT_BYTES
+            ));
+        }
+        Ok(context)
     }
 
     fn metadata_catalog(&self) -> Result<String, String> {

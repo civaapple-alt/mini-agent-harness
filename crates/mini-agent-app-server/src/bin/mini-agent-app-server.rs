@@ -92,9 +92,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             stable_system_prompt,
             capability_manifest,
             skill_discovery,
+            skill_discovery_refresh,
+            skill_read_roots,
             background_shells,
             scheduled_tasks,
         } = runtime;
+        let base_harness_config = harness.config().clone();
         let mut harness = harness;
         if let Some(opened) = &session {
             images.bind_session_file(opened.store.path());
@@ -199,11 +202,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 mcp_tool_count,
                 retry_mcp_servers,
                 management_approval,
-                HarnessConfig::default(),
+                base_harness_config,
                 skill_discovery,
                 background_shells,
                 scheduled_tasks,
-            );
+            )
+            .with_skill_discovery_refresh(skill_discovery_refresh, skill_read_roots);
         let thread_settings = mini_agent_app_server::ThreadSettingsService::new()
             .with_stable_system_prompt(stable_system_prompt);
         let goals = mini_agent_app_server::ThreadGoalRequestProcessor::new(

@@ -79,6 +79,9 @@ pub(super) enum RuntimeCommand {
     RefreshWorld {
         reply: oneshot::Sender<ActionResult<bool>>,
     },
+    RefreshSkills {
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::SkillsListResult>>,
+    },
     SetExecution {
         access: SecurityPreset,
         policy: ApprovalPolicy,
@@ -158,6 +161,7 @@ impl RuntimeCommand {
         matches!(
             self,
             Self::RefreshWorld { .. }
+                | Self::RefreshSkills { .. }
                 | Self::SetExecution { .. }
                 | Self::UpdateThread { .. }
                 | Self::RetryMcp { .. }

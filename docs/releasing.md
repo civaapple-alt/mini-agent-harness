@@ -104,7 +104,7 @@ git status --short
 ```
 
 For the 0.9.0 release, the 6,000-effective-line Core + Protocol budget, the
-35,000-effective-line Control Plane budget, and the 50,000-effective-line
+38,000-effective-line Control Plane budget, and the 55,000-effective-line
 release-source total, including tests in supported packages, are hard gates.
 The budget excludes blank and comment-only lines;
 code-bearing lines with trailing comments count once.

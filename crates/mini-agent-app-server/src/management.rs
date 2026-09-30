@@ -71,6 +71,8 @@ pub(crate) struct RuntimeManagementState {
     local_checkpoint_seq: u64,
     pub(crate) base_harness_config: HarnessConfig,
     pub(crate) skill_discovery: Option<mini_agent_capabilities::Discovery>,
+    pub(crate) skill_discovery_refresh: Option<mini_agent_host::SkillDiscoveryRefresh>,
+    pub(crate) skill_read_roots: mini_agent_capabilities::SkillReadRoots,
     pub(crate) background_shells: BackgroundShellManager,
     pub(crate) scheduled_tasks: ScheduledTaskManager,
 }
@@ -266,6 +268,8 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
                 local_checkpoint_seq,
                 base_harness_config,
                 skill_discovery,
+                skill_discovery_refresh: None,
+                skill_read_roots: mini_agent_capabilities::SkillReadRoots::default(),
                 background_shells,
                 scheduled_tasks,
             }),
@@ -275,6 +279,18 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             notifications,
             status,
         }
+    }
+
+    pub fn with_skill_discovery_refresh(
+        mut self,
+        refresh: Option<mini_agent_host::SkillDiscoveryRefresh>,
+        skill_read_roots: mini_agent_capabilities::SkillReadRoots,
+    ) -> Self {
+        if let Some(state) = self.state.as_mut() {
+            state.skill_discovery_refresh = refresh;
+            state.skill_read_roots = skill_read_roots;
+        }
+        self
     }
 
     pub(crate) fn bind_thread_services(
@@ -522,6 +538,15 @@ impl<M: Model + Send + 'static> RuntimeManagementService<M> {
             .await
     }
 
+    pub(crate) async fn refresh_skills_action(
+        &self,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::SkillsListResult>, ActionFailure>
+    {
+        self.client
+            .request_action(|reply| RuntimeCommand::RefreshSkills { reply })
+            .await
+    }
+
     pub(crate) async fn set_execution_action(
         &self,
         access: SecurityPreset,
@@ -712,6 +737,82 @@ impl RuntimeActorState {
 }
 
 impl RuntimeManagementState {
+    pub(crate) fn refresh_skill_catalog(
+        &mut self,
+    ) -> Result<(mini_agent_app_server_protocol::SkillsListResult, bool), AppServerError> {
+        let Some(refresh) = self.skill_discovery_refresh.as_ref() else {
+            return Ok((self.skill_catalog_snapshot(), false));
+        };
+        let refreshed = refresh.refresh().map_err(AppServerError::SkillDiscovery)?;
+        let current_fingerprint = self
+            .skill_discovery
+            .as_ref()
+            .map(mini_agent_capabilities::Discovery::prompt_fingerprint)
+            .transpose()
+            .map_err(AppServerError::SkillDiscovery)?
+            .flatten();
+        let refreshed_fingerprint = refreshed
+            .prompt_fingerprint()
+            .map_err(AppServerError::SkillDiscovery)?;
+        let current_skill_roots = self
+            .skill_discovery
+            .as_ref()
+            .map(mini_agent_capabilities::Discovery::skill_read_roots)
+            .unwrap_or_default();
+        let refreshed_skill_roots = refreshed.skill_read_roots();
+        let roots_changed = current_skill_roots != refreshed_skill_roots;
+        let changed = current_fingerprint != refreshed_fingerprint || roots_changed;
+        if changed {
+            if roots_changed {
+                self.skill_read_roots
+                    .replace(refreshed_skill_roots)
+                    .map_err(AppServerError::SkillDiscovery)?;
+            }
+            if let Some(current) = self.skill_discovery.as_mut() {
+                current.replace_skills(refreshed);
+            } else {
+                self.skill_discovery = Some(refreshed);
+            }
+        }
+        Ok((self.skill_catalog_snapshot(), changed))
+    }
+
+    fn skill_catalog_snapshot(&self) -> mini_agent_app_server_protocol::SkillsListResult {
+        mini_agent_app_server_protocol::SkillsListResult {
+            skills: self
+                .skill_discovery
+                .as_ref()
+                .map(mini_agent_capabilities::Discovery::skill_catalog)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|skill| mini_agent_app_server_protocol::AvailableSkill {
+                    name: skill.name,
+                    qualified_name: skill.qualified_name,
+                    aliases: skill.aliases,
+                    description: skill.description,
+                    source: skill.source,
+                    group: skill.group,
+                    enabled: skill.enabled,
+                })
+                .collect(),
+        }
+    }
+
+    pub(crate) fn prepare_skill_context(&self) -> Result<Option<String>, AppServerError> {
+        if !self
+            .skill_discovery_refresh
+            .as_ref()
+            .is_some_and(mini_agent_host::SkillDiscoveryRefresh::prompt_enabled)
+        {
+            return Ok(None);
+        }
+        self.skill_discovery
+            .as_ref()
+            .map(mini_agent_capabilities::Discovery::skill_context)
+            .transpose()
+            .map_err(AppServerError::SkillDiscovery)
+    }
+
     pub(crate) fn execution_journal(
         &self,
         base_messages: &[Message],
