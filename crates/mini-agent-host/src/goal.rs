@@ -371,6 +371,7 @@ const LIVING_PLAN_RIDER: &str = "\
 === LIVING PLAN MODE ===
 This session is Plan Mode. Keep the software-architect planning discipline.
 Keep project/source files read-only; Shell remains available under the selected approval policy.
+Use ask_user to clarify consequential choices or missing constraints that block a useful plan. For routine uncertainty, investigate and state a reversible assumption.
 Write the living plan to plan.md with apply_patch. Relative path plan.md maps to the Session-owned plan file.
 For bounded exploration, write scripts and outputs under plan/scratch/; they are disposable and cleaned after the turn.
 Do not produce the final deliverable in reasoning or the assistant message: no complete HTML/CSS/JS pages, full source files, or finished documents.
@@ -388,7 +389,7 @@ pub fn with_plan_mode_overlay(base: &str) -> String {
 
 pub fn goal_turn_prompt(objective: &str, milestone: usize, total: usize) -> String {
     format!(
-        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Current milestone {milestone}/{total}. The Session-owned Goal artifacts already exist: read goal/plan.md first and update it with `*** Update File: goal/plan.md`, never `*** Add File`; read goal/verifier_verdict.md only when it exists and address its findings. Use workspace-relative Goal aliases only; never use an absolute Session path, `..`, or prompt_context.json. Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
+        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Explore the workspace and resolve routine uncertainty with reversible assumptions; do not use ask_user for ordinary clarification. Ask only if progress is blocked by a consequential choice that only the user can make. Current milestone {milestone}/{total}. The Session-owned Goal artifacts already exist: read goal/plan.md first and update it with `*** Update File: goal/plan.md`, never `*** Add File`; read goal/verifier_verdict.md only when it exists and address its findings. Use workspace-relative Goal aliases only; never use an absolute Session path, `..`, or prompt_context.json. Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
     )
 }
 

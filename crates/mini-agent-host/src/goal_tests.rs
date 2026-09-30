@@ -15,9 +15,12 @@ fn plan_mode_overlay_keeps_architect_foundation() {
     assert!(overlay.contains("read-only software architect"));
     assert!(overlay.contains("=== LIVING PLAN MODE ==="));
     assert!(overlay.contains("Do not produce the final deliverable"));
+    assert!(overlay.contains("Use ask_user to clarify consequential choices"));
     assert_eq!(with_plan_mode_overlay(&overlay), overlay);
     let goal = goal_turn_prompt("提供最新 Mac Studio 介绍的 html", 1, 3);
     assert!(goal.contains("Execute the objective now"));
+    assert!(goal.contains("do not use ask_user for ordinary clarification"));
+    assert!(goal.contains("reversible assumptions"));
     assert!(goal.contains("1/3"));
     assert!(goal.contains("提供最新 Mac Studio 介绍的 html"));
     assert!(goal.contains("*** Update File: goal/plan.md"));

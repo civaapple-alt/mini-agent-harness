@@ -108,6 +108,14 @@ and re-presents only unanswered questions. The completed `ask_user` tool result
 then enters the next model request through the ordinary Core tool-result path;
 the Core loop has no question-specific control flow.
 
+Use `ask_user` most often in Plan Mode when a consequential choice changes the
+plan, or in interview-style Skills such as grill-me. Autonomous Goal turns
+should explore and proceed with reversible assumptions instead of asking about
+routine ambiguity; ask only when a user-owned decision blocks progress. A child
+Agent may ask the user directly when that same kind of blocker occurs. Do not
+route the question through the parent Agent, which would add an avoidable model
+round trip.
+
 The main execution path is `Core → Host → App Server`: Core owns the turn loop
 and records the tool outcome, Host owns admission, approval, concrete execution,
 and typed outcome propagation, and App Server serializes the settled event and

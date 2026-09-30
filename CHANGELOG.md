@@ -8,7 +8,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Add a capability-negotiated `ask_user` Host tool for App Server clients that
   collect bounded sequential answers. Persist question batches and accepted
   answers in Session execution logs, expose pending state through `thread/read`,
-  and resume the ordinary Turn after the user responds.
+  and resume the ordinary Turn after the user responds. Guide Plan Mode and
+  interview-style Skills toward clarification while keeping autonomous Goal
+  work moving; child Agents may ask the user directly rather than relaying
+  through the parent.
 - Let explicit `turn/resume` continue a StepLimit checkpoint in one additional
   bounded step slice, and allow idempotent Session resume settlement while the
   resumed Turn is active.

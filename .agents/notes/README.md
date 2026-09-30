@@ -10,7 +10,8 @@
 
 当前相关决策：
 
-- [Core + Protocol 预算与 Release 增量参考值](implemented/process/2026-09-30-core-protocol-budget-and-delta-guidance.zh.md)
+- [ask_user 在 Plan、Goal 与子 Agent 中的使用边界](implemented/process/2026-10-01-ask-user-mode-and-child-session-visibility.zh.md)
+- [Rust 有效行数硬上限调整为 7,000 / 45,000 / 65,000](implemented/process/2026-10-01-line-budget-ceilings.zh.md)
 - [Web Fetch 本地代理与搜索工具可见状态](implemented/process/2026-09-30-web-fetch-proxy-and-tool-selection.zh.md)
 - [Web Studio 上下文占比与缓存命中率呈现](implemented/process/2026-09-30-context-usage-visualization.zh.md)
 - [Web Studio 会话上下文可视化与缓存友好注入](implemented/process/2026-09-30-web-studio-session-context-visibility.zh.md)
@@ -120,8 +121,7 @@ graph LR
 
 ### Implemented
 
-- [Rust 行数预算上限校准（此前门槛）](implemented/process/2026-09-30-line-budget-ceiling-adjustment.zh.md)
-- [Core + Protocol 预算与 Release 增量参考值](implemented/process/2026-09-30-core-protocol-budget-and-delta-guidance.zh.md)
+- [Rust 有效行数硬上限调整为 7,000 / 45,000 / 65,000](implemented/process/2026-10-01-line-budget-ceilings.zh.md)
 - [Web Studio 会话上下文可视化与缓存友好注入](implemented/process/2026-09-30-web-studio-session-context-visibility.zh.md)
 - [Web Studio 手动 Turn 续接与恢复结算](implemented/process/2026-09-30-manual-turn-resume-and-session-control.zh.md)
 - [模型目录搜索能力投影证据](implemented/testing/2026-09-28-model-catalog-search-projection.md)

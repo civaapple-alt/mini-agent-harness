@@ -8,12 +8,12 @@ from pathlib import PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[1]
-KERNEL_LIMIT = 6_500
+KERNEL_LIMIT = 7_000
 # The release-source total includes production code and tests from the supported
 # runtime packages. The experimental CLI/REPL is reported separately and is not
 # part of this hard release gate.
-PROJECT_LIMIT = 55_000
-CONTROL_PLANE_LIMIT = 38_000
+PROJECT_LIMIT = 65_000
+CONTROL_PLANE_LIMIT = 45_000
 PROJECT_DELTA_GUIDANCE = 1_000
 
 # Runtime is reported for visibility but has no aggregate gate. Release growth

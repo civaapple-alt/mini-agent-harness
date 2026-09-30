@@ -72,6 +72,15 @@ impl Model for AskUserScenarioModel {
         request: ModelRequest<'a>,
         _events: &'a mut (dyn ModelEventSink + Send),
     ) -> Result<ModelResponse, Self::Error> {
+        let ask_user_tool = request
+            .tools
+            .iter()
+            .find(|tool| tool.name == "ask_user")
+            .expect("interactive Harness scenario should expose ask_user");
+        assert!(ask_user_tool.description.contains("Plan Mode"));
+        assert!(ask_user_tool.description.contains("grill-me"));
+        assert!(ask_user_tool.description.contains("Goal Mode"));
+        assert!(ask_user_tool.description.contains("子智能体可直接调用"));
         let answer = request
             .messages
             .iter()

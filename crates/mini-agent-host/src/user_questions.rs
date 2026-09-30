@@ -68,7 +68,7 @@ impl mini_agent_protocol::ToolHandler for AskUserTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "ask_user".to_string(),
-            description: "向用户提出至多三个有边界的问题。给可执行的选项；若能根据用户目标判断最佳选择，将恰好一个选项标为 recommended 并提供简短 recommendationReason。不要为了填标签而猜测。用户也可以输入自己的答案或跳过当前问题。".to_string(),
+            description: "适用于 Plan Mode 中确认重要选择，以及 grill-me 等访谈式技能的逐项澄清。向用户提出至多三个有边界的问题并提供可执行选项；若能根据用户目标判断最佳选择，将恰好一个选项标为 recommended 并给出简短理由，不要猜测。用户也可以自由输入或跳过。自主 Goal Mode 和子任务中，先探索并用可逆假设解决常规不确定性；仅在被必须由用户决定的事项阻塞时提问。子智能体可直接调用本工具，不要把问题经父会话来回转交。".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {

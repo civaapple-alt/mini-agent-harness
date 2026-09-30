@@ -15,9 +15,9 @@ use the same effective-line rule.
 
 | 指标 | 统计范围 | 硬上限 |
 | --- | --- | ---: |
-| Core + Protocol | `mini-agent-core` + `mini-agent-protocol` | 6,500 |
-| Control Plane | Host/App Server control slice + Capabilities control slice | 38,000 |
-| Release Rust source | 支持的运行时 crate 与测试，排除实验性 CLI/REPL | 55,000 |
+| Core + Protocol | `mini-agent-core` + `mini-agent-protocol` | 7,000 |
+| Control Plane | Host/App Server control slice + Capabilities control slice | 45,000 |
+| Release Rust source | 支持的运行时 crate 与测试，排除实验性 CLI/REPL | 65,000 |
 
 Runtime 聚合值仍可在 JSON 中用于诊断，但不再设置 `25,000` 行硬门禁。每个 PR 的
 Release Rust 净增量 `1,000` 行是审查参考值，不是硬门禁。Core + Protocol、Control
@@ -27,9 +27,9 @@ Plane 和 Release Rust 执行绝对硬上限；增量检查使用 `--check-delta
 
 ```text
 line-budget: PASS
-core+protocol    6101/6500   93.9% remain   399 PASS
-control-plane   35614/38000  93.7% remain  2386 PASS
-release         51809/55000  94.2% remain  3191 PASS
+core+protocol    6170/7000   88.1% remain   830 PASS
+control-plane   37847/45000  84.1% remain  7153 PASS
+release         54909/65000  84.5% remain 10091 PASS
 ```
 
 使用 `--base <merge-base> --check-delta` 时追加三项增量；超过建议值只提示、不失败。使用 `--verbose` 查看 crate
