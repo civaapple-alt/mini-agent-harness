@@ -102,6 +102,13 @@ impl WebSearchSettingsStore {
         Ok(key.map(|key| WebSearchConfig::new(backend, key)))
     }
 
+    pub fn test_search(&self, query: &str) -> Result<String, String> {
+        let config = self.runtime_config()?.ok_or_else(|| {
+            "select a search provider and configure its API key first".to_string()
+        })?;
+        mini_agent_capabilities::test_web_search(config, query).map_err(|error| error.to_string())
+    }
+
     fn lock(&self) -> Result<File, String> {
         let parent = self
             .path

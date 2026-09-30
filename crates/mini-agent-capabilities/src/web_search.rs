@@ -56,6 +56,15 @@ pub(crate) fn web_search_tools(config: WebSearchConfig) -> Vec<Box<dyn Tool>> {
     })]
 }
 
+/// Perform one bounded search for explicit Host settings diagnostics.
+pub fn test_web_search(config: WebSearchConfig, query: &str) -> Result<String, ToolError> {
+    WebSearch {
+        config,
+        search: search_provider,
+    }
+    .execute(&json!({ "query": query, "limit": 3 }))
+}
+
 impl ToolHandler for WebSearch {
     fn spec(&self) -> ToolSpec {
         ToolSpec {

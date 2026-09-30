@@ -89,7 +89,7 @@ pub use session::TurnPresentation;
 pub use session::TurnPresentationActivity;
 pub use session::TurnStatus;
 pub use session::resolve_session_file;
-pub use web_search::{WebSearchBackend, WebSearchConfig};
+pub use web_search::{WebSearchBackend, WebSearchConfig, test_web_search};
 
 // Host/App Server composition and embedding seams. These exports assemble
 // concrete providers without exposing their internal wire or process logic.

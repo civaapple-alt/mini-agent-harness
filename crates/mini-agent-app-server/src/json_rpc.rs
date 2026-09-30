@@ -279,6 +279,9 @@ where
             mini_agent_app_server_protocol::METHOD_WEB_SEARCH_SETTINGS_UPDATE => {
                 self.handle_web_search_settings_update(request).await
             }
+            mini_agent_app_server_protocol::METHOD_WEB_SEARCH_TEST => {
+                self.handle_web_search_test(request).await
+            }
             METHOD_THREAD_GOAL_SET => self.handle_thread_goal_set(request).await,
             METHOD_THREAD_GOAL_GET => self.handle_thread_goal_get(request).await,
             METHOD_THREAD_GOAL_CLEAR => self.handle_thread_goal_clear(request).await,

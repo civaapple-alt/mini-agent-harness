@@ -1,7 +1,8 @@
 use super::*;
 use mini_agent_app_server_protocol::{
     WebSearchSettingsReadParams, WebSearchSettingsResult, WebSearchSettingsUpdateParams,
-    WebSearchSettingsView as ProtocolWebSearchSettingsView,
+    WebSearchSettingsView as ProtocolWebSearchSettingsView, WebSearchTestParams,
+    WebSearchTestResult,
 };
 
 impl<M> AppServerConnection<M>
@@ -48,6 +49,50 @@ where
                 },
             ),
             Err(error) => response_error(request.id, JsonRpcError::invalid_params(error)),
+        }
+    }
+
+    pub(super) async fn handle_web_search_test(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<WebSearchTestParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        let query = params.query.trim().to_string();
+        if query.is_empty() || query.len() > 2_000 {
+            return response_error(
+                request.id,
+                JsonRpcError::invalid_params("query must contain 1 to 2000 bytes"),
+            );
+        }
+        let expected_query = query.clone();
+
+        let result = tokio::task::spawn_blocking(move || {
+            mini_agent_host::WebSearchSettingsStore::machine_default()
+                .and_then(|store| store.test_search(&query))
+        })
+        .await;
+        match result {
+            Ok(Ok(encoded)) => match serde_json::from_str::<WebSearchTestResult>(&encoded) {
+                Ok(result)
+                    if result.query == expected_query
+                        && result.results.len() <= 3
+                        && result.result_count as usize == result.results.len() =>
+                {
+                    response_value(request.id, result)
+                }
+                _ => response_error(
+                    request.id,
+                    JsonRpcError::server_error("web search test returned an invalid response"),
+                ),
+            },
+            Ok(Err(error)) => response_error(request.id, JsonRpcError::server_error(error)),
+            Err(_) => response_error(
+                request.id,
+                JsonRpcError::server_error("web search test task failed"),
+            ),
         }
     }
 }

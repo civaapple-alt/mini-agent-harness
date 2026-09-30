@@ -44,6 +44,7 @@ pub const METHOD_SKILLS_LIST: &str = "skills/list";
 pub const METHOD_MODEL_CATALOG_MANAGE: &str = "model/catalog/manage";
 pub const METHOD_WEB_SEARCH_SETTINGS_READ: &str = "web/search/settings/read";
 pub const METHOD_WEB_SEARCH_SETTINGS_UPDATE: &str = "web/search/settings/update";
+pub const METHOD_WEB_SEARCH_TEST: &str = "web/search/test";
 pub const METHOD_TURN_START: &str = "turn/start";
 pub const METHOD_TURN_RESUME: &str = "turn/resume";
 pub const METHOD_TURN_READ: &str = "turn/read";
@@ -802,6 +803,29 @@ pub struct WebSearchSettingsView {
     pub deepseek_api_key_configured: bool,
     pub exa_api_key_configured: bool,
     pub kimi_api_key_configured: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchTestParams {
+    pub query: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchTestResult {
+    pub query: String,
+    pub result_count: u32,
+    pub results: Vec<WebSearchTestResultItem>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchTestResultItem {
+    pub url: String,
+    pub title: String,
+    pub snippet: String,
+    pub published_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
