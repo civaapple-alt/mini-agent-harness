@@ -10,7 +10,7 @@
 - App Server 的每个 Turn presentation 持久化本轮所有模型响应的 Provider 用量合计。Gateway 再从有界读取到的全部 Session Turn 记录汇总，避免受 UI 历史卡片的最近 64 回合上限影响；命中率按有缓存字段报告的输入 Token 加权计算。
 - 会话面板同时展示包含缓存数值的用量报告覆盖数。旧历史回合没有逐请求累计数据时标记为未跟踪，不将单个最近请求伪装成历史均值。
 - 缓存字段缺失、缓存报告输入为零或 Provider 数值不一致时，命中率显示未知；Provider 明确报告缓存为零且输入大于零时显示 `0.0%`。
-- 输入区按钮是上下文用量详情的折叠按钮，不是控制自动注入的开关。收起时仍显示窗口占用和缓存命中率。
+- 输入区按钮是上下文用量详情的折叠按钮，不是控制自动注入的开关。收起时仍显示窗口占用和缓存命中率；点击浮层外部或按 Escape 会关闭浮层，切换项目或 Thread 会重置展开状态。
 
 ## 影响范围
 
@@ -20,7 +20,7 @@
 ## 验证
 
 - `node --test src/tests/context_usage.test.js`：9 项通过。
-- `npx vitest run src/tests/ContextUsageControl.test.jsx src/tests/PromptContextCard.test.jsx`：9 项通过。
+- `npx vitest run src/tests/ContextUsageControl.test.jsx src/tests/PromptContextCard.test.jsx`：11 项通过。
 - `uv run pytest -q tests/gateway/test_session_manager.py -k 'session_catalog_projects_context or session_context_cache_usage or session_context_cache_ratio or session_catalog_keeps_unreported_cached_usage or session_catalog_reads_bounded_history_without_web_state'`：5 项通过；覆盖超过 64 回合的完整 Session 汇总、恢复读取和安全整数边界。
 - `uv run ruff check server/session_catalog.py tests/gateway/test_session_manager.py`、`npm run lint`、`npm run build`：通过；Build 保留大 chunk 体积提示。
 - `cargo fmt --all`、`cargo clippy -p mini-agent-capabilities --all-targets -- -D warnings` 和 `cargo test -p mini-agent-capabilities`：通过，156 项测试通过。
