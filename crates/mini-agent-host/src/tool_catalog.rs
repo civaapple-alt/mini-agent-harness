@@ -7,16 +7,18 @@ pub struct BuiltinToolSelection {
     names: Vec<String>,
 }
 
-const DEFAULT_BUILTIN_TOOLS: [&str; 5] = [
+const DEFAULT_BUILTIN_TOOLS: [&str; 6] = [
     "read_file",
+    "read_tool_output",
     "apply_patch",
     "shell",
     "read_image",
     "scheduled_task",
 ];
 
-const AVAILABLE_BUILTIN_TOOLS: [&str; 7] = [
+const AVAILABLE_BUILTIN_TOOLS: [&str; 8] = [
     "read_file",
+    "read_tool_output",
     "apply_patch",
     "shell",
     "read_image",
@@ -91,7 +93,7 @@ mod tests {
         let exp: Vec<String> = DEFAULT_BUILTIN_TOOLS.into_iter().map(Into::into).collect();
         assert_eq!(def.names(), &exp);
         assert_eq!(def.hidden_names(), ["web_fetch", "ask_user"]);
-        assert_eq!(BuiltinToolSelection::all().names().len(), 7);
+        assert_eq!(BuiltinToolSelection::all().names().len(), 8);
         assert!(BuiltinToolSelection::all().hidden_names().is_empty());
     }
 
@@ -99,6 +101,6 @@ mod tests {
     fn explicit_empty_selection_is_valid_and_hides_every_builtin() {
         let selection = BuiltinToolSelection::from_names(Vec::new()).unwrap();
         assert!(selection.names().is_empty());
-        assert_eq!(selection.hidden_names().len(), 7);
+        assert_eq!(selection.hidden_names().len(), 8);
     }
 }

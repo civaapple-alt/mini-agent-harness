@@ -21,6 +21,7 @@ pub use model::ModelEventSink;
 pub use model::ModelRequest;
 pub use model::ModelResponse;
 pub use model::ModelSelection;
+pub use model::ModelTiming;
 pub use model::ModelUsage;
 pub use model::ReasoningSelection;
 pub use model::ToolCall;

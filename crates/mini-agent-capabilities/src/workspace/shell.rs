@@ -146,9 +146,21 @@ impl ToolRuntime for Shell {
         let timed_out = output.timed_out;
         let cancelled = output.cancelled;
         match self.render_command_output(&output) {
-            Ok(content) if cancelled => ToolExecutionOutcome::failed(content),
-            Ok(content) if timed_out => ToolExecutionOutcome::retryable(content),
-            Ok(content) => ToolExecutionOutcome::completed(content),
+            Ok((content, truncated)) if cancelled => {
+                let mut outcome = ToolExecutionOutcome::failed(content);
+                outcome.output_truncated = truncated;
+                outcome
+            }
+            Ok((content, truncated)) if timed_out => {
+                let mut outcome = ToolExecutionOutcome::retryable(content);
+                outcome.output_truncated = truncated;
+                outcome
+            }
+            Ok((content, truncated)) => {
+                let mut outcome = ToolExecutionOutcome::completed(content);
+                outcome.output_truncated = truncated;
+                outcome
+            }
             Err(error) => ToolExecutionOutcome::failed(error.to_string()),
         }
     }
@@ -265,25 +277,46 @@ impl Shell {
         let root = self.0.shell_root(command);
         let output = run_shell(command, &root, self.0.sandbox, COMMAND_TIMEOUT)?;
         self.render_command_output(&output)
+            .map(|(content, _)| content)
     }
 
-    fn render_command_output(&self, output: &CommandOutput) -> Result<String, ToolError> {
+    fn render_command_output(&self, output: &CommandOutput) -> Result<(String, bool), ToolError> {
         if output.text.len() <= INLINE_COMMAND_OUTPUT_BYTES {
-            return Ok(output.text.clone());
+            return Ok((output.text.clone(), output.source_truncated));
         }
-        let stored = self.1.store(
+        let stored = self.1.store_with_metadata(
             output.text.clone(),
             output.source_bytes,
             output.source_truncated,
-        )?;
-        Ok(format!(
-            "<tool_result_preview handle=\"{}\" stored_bytes=\"{}\" source_bytes=\"{}\" source_truncated=\"{}\">\n{}\n</tool_result_preview>\nOutput was truncated to the default bounded preview; result continuation is not enabled in the default builtin catalog.",
-            stored.handle,
-            stored.stored_bytes,
-            stored.source_bytes,
-            stored.source_truncated,
-            stored.preview
-        ))
+            Some(json!({"kind": "tool_output", "tool": "shell"})),
+        );
+        match stored {
+            Ok(stored) => {
+                let source_notice = if stored.source_truncated {
+                    " The original command output exceeded the 8 MiB capture or retention limit; the retained artifact is a head-and-tail excerpt."
+                } else {
+                    ""
+                };
+                Ok((
+                    format!(
+                        "Tool output exceeded the 16 KiB inline limit. Full output handle: {}. Read it with read_tool_output(handle: \"{}\", cursor: 0) and continue with each next_cursor.{}\n\n{}",
+                        stored.handle, stored.handle, source_notice, stored.preview
+                    ),
+                    true,
+                ))
+            }
+            Err(error) => {
+                let reason = ResultStore::bounded_preview(&error.to_string(), 512);
+                let preview = ResultStore::bounded_preview(&output.text, 6 * 1024);
+                Ok((
+                    format!(
+                        "Tool output exceeded the 16 KiB inline limit. The complete output was not retained because Session artifact storage failed: {reason}\nSource bytes: {}. Only this head-and-tail preview remains available:\n\n{preview}",
+                        output.source_bytes
+                    ),
+                    true,
+                ))
+            }
+        }
     }
 }
 

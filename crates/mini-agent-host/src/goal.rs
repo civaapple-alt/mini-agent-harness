@@ -99,6 +99,56 @@ pub struct PlanModeState {
     pub updated_at_ms: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlanModeToolSelection {
+    pub review_pending: bool,
+    pub allowed_tools: Vec<String>,
+}
+
+const PLAN_MODE_ALLOWED_TOOLS: [&str; 8] = [
+    "read_file",
+    "read_image",
+    "shell",
+    "apply_patch",
+    "read_tool_output",
+    "web_fetch",
+    "web_search",
+    "ask_user",
+];
+
+pub(crate) fn plan_mode_tool_selection(
+    session_dir: Option<&Path>,
+    available_tool_names: &[String],
+) -> Result<Option<PlanModeToolSelection>, String> {
+    let Some(session_dir) = session_dir else {
+        return Ok(None);
+    };
+    let state_path = session_dir.join("plan_mode.json");
+    let content = match fs::read_to_string(&state_path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("cannot read the Session Plan Mode state".to_string()),
+    };
+    let state = serde_json::from_str::<PlanModeState>(&content)
+        .map_err(|_| "cannot parse the Session Plan Mode state".to_string())?;
+    if !state.active {
+        return Ok(None);
+    }
+    let allowed_tools = PLAN_MODE_ALLOWED_TOOLS
+        .iter()
+        .filter(|name| {
+            available_tool_names
+                .iter()
+                .any(|available| available.as_str() == **name)
+        })
+        .map(|name| (*name).to_string())
+        .collect();
+    Ok(Some(PlanModeToolSelection {
+        review_pending: state.review_pending,
+        allowed_tools,
+    }))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlanCleanupManifest {
     pub schema_version: u32,
@@ -389,7 +439,7 @@ pub fn with_plan_mode_overlay(base: &str) -> String {
 
 pub fn goal_turn_prompt(objective: &str, milestone: usize, total: usize) -> String {
     format!(
-        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Explore the workspace and resolve routine uncertainty with reversible assumptions; do not use ask_user for ordinary clarification. Ask only if progress is blocked by a consequential choice that only the user can make. Current milestone {milestone}/{total}. The Session-owned Goal artifacts already exist: read goal/plan.md first and update it with `*** Update File: goal/plan.md`, never `*** Add File`; read goal/verifier_verdict.md only when it exists and address its findings. Use workspace-relative Goal aliases only; never use an absolute Session path, `..`, or prompt_context.json. Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
+        "Autonomous Goal Mode is active. Execute the objective now without waiting for another prompt. Explore the workspace and resolve routine uncertainty with reversible assumptions; do not use ask_user for ordinary clarification. Ask only if progress is blocked by a consequential choice that only the user can make. Current milestone {milestone}/{total}. The Session-owned Goal artifacts already exist: read goal/plan.md first and update it with `*** Update File: goal/plan.md`, never `*** Add File`; read goal/verifier_verdict.md only when it exists and address its findings. Before marking this milestone complete, inspect the actual `git diff` and relevant workspace state against goal/plan.md. Base completion on changed files and verification evidence, and record unfinished work or failed checks accurately. Use workspace-relative Goal aliases only; never use an absolute Session path, `..`, or prompt_context.json. Use tools and keep working until this milestone is done.\n\nObjective:\n{objective}"
     )
 }
 

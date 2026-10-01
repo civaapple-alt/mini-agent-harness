@@ -236,6 +236,10 @@ impl ToolExecutionStatus {
 pub struct ToolExecutionOutcome {
     pub status: ToolExecutionStatus,
     pub content: String,
+    /// The Host has already shortened the source output and attached its
+    /// retrieval or loss notice. Core preserves this fact in ToolFinished.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub output_truncated: bool,
     /// Context messages appended after this tool result and before the next
     /// model request. Durable execution recovery replays these unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -260,6 +264,7 @@ impl ToolExecutionOutcome {
         Self {
             status: ToolExecutionStatus::Completed,
             content: content.into(),
+            output_truncated: false,
             context_messages: Vec::new(),
             context_injections: Vec::new(),
         }
@@ -269,6 +274,7 @@ impl ToolExecutionOutcome {
         Self {
             status: ToolExecutionStatus::Failed,
             content: content.into(),
+            output_truncated: false,
             context_messages: Vec::new(),
             context_injections: Vec::new(),
         }
@@ -278,6 +284,7 @@ impl ToolExecutionOutcome {
         Self {
             status: ToolExecutionStatus::NeedsApproval,
             content: content.into(),
+            output_truncated: false,
             context_messages: Vec::new(),
             context_injections: Vec::new(),
         }
@@ -287,6 +294,7 @@ impl ToolExecutionOutcome {
         Self {
             status: ToolExecutionStatus::Deferred,
             content: content.into(),
+            output_truncated: false,
             context_messages: Vec::new(),
             context_injections: Vec::new(),
         }
@@ -296,6 +304,7 @@ impl ToolExecutionOutcome {
         Self {
             status: ToolExecutionStatus::Retryable,
             content: content.into(),
+            output_truncated: false,
             context_messages: Vec::new(),
             context_injections: Vec::new(),
         }
@@ -310,6 +319,15 @@ impl ToolExecutionOutcome {
         self.context_injections = records;
         self
     }
+
+    pub fn with_truncated_output(mut self) -> Self {
+        self.output_truncated = true;
+        self
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// Describes the admission work required before a tool can cause side effects.

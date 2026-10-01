@@ -98,6 +98,17 @@ pub struct ModelUsage {
     pub output_tokens: u64,
 }
 
+/// Host-observed latency for one provider response.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelTiming {
+    /// Time from request dispatch to the first non-empty streamed output.
+    /// This is absent when the adapter did not expose streamed output.
+    pub ttft_ms: Option<u64>,
+    /// Time from request dispatch until the response completed.
+    pub response_ms: u64,
+}
+
 /// Byte counts for the model input, grouped for approximate token attribution.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -204,6 +215,9 @@ pub struct ModelRequest<'a> {
     pub system_prompt: &'a str,
     pub messages: &'a [Message],
     pub tools: &'a [ToolSpec],
+    /// Optional Host-selected tool allowlist. Tool definitions remain complete
+    /// and stable; adapters may enforce this natively or receive a prompt hint.
+    pub allowed_tools: Option<&'a [String]>,
     pub max_response_bytes: usize,
     pub model_selection: Option<&'a ModelSelection>,
     pub reasoning_selection: Option<&'a ReasoningSelection>,
@@ -217,6 +231,12 @@ pub struct ModelRequest<'a> {
 /// They do not execute tools or decide when a run is complete.
 pub trait Model {
     type Error: Error + Send + Sync + 'static;
+
+    /// Whether this adapter can enforce `ModelRequest::allowed_tools` without
+    /// changing the stable tool definitions or prompt content.
+    fn supports_allowed_tools(&self) -> bool {
+        false
+    }
 
     fn respond<'a>(
         &'a mut self,

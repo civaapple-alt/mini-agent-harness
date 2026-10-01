@@ -228,10 +228,12 @@ impl ThreadListener {
             Event::ModelResponded {
                 usage,
                 context_bytes,
+                model_timing,
                 ..
             } => {
                 self.assistant_segments = self.assistant_segments.saturating_add(1);
                 self.presentation.set_context_usage(*usage, *context_bytes);
+                self.presentation.set_model_timing(*model_timing);
             }
             Event::ContextInjected { records } => {
                 self.presentation

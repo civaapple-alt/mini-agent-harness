@@ -52,7 +52,7 @@ Control Plane 责任塞进 Thin Loop 的方式“通过”预算。
 | JSON-RPC input line | 2 MiB including the line ending | close the stream before deserialization |
 | model response | 64 KiB | reject before retaining text or tool calls |
 | tool calls in one model step | 8 | reject the whole proposal before effects |
-| one tool result | 16 KiB | retain UTF-8-safe head and tail |
+| one tool result inline in model context | 16 KiB | retain UTF-8-safe head and tail; larger Host results include a Session artifact handle |
 | model request context | 1 MiB | reject before the provider request |
 | model steps in one run | internal safety guard | report a runtime-protection diagnostic; never treat it as a user task setting |
 | Goal milestone model steps | 200 by default | Goal becomes `usageLimited` after settling evidence |
@@ -140,14 +140,14 @@ Host tools add their own effect-side bounds before results reach core:
 | `read_image` file | 4 MiB; JPEG/PNG/GIF/WebP by magic; 4 images / request; Files API 60s, 7-day expiry; session `attachments/` reloaded on resume and copied on fork |
 | `web_fetch` response / extracted text | 8 MiB; 15s; at most 5 same-host, same-class redirects |
 | `web_fetch` inline result page | 8 KiB; longer results continue from the Session cache by handle and cursor |
-| Session-backed result cache | 64 KiB per result; at most 8 entries; 16 MiB total Session result data |
+| Session-backed result cache | 8 MiB per result; at most 8 entries; 16 MiB total Session result data |
 | `web_search` request and results | query 2,000 bytes; up to 10 results; URL 2,000 bytes; title 256 chars; snippet 640 chars; provider response 1 MiB / 35s |
 | new file or edited file | 1 MiB |
 | shell command text | 16 KiB |
 | shell runtime | 120 seconds |
 | captured foreground stdout and stderr | 8 MiB combined |
 | inline foreground result threshold | 16 KiB |
-| retained result artifact | 8 MiB in memory; session-backed records retain at most 64 KiB each, 8 entries, 16 MiB total |
+| retained result artifact | 8 MiB per result; 8 entries, 16 MiB total; Session content is stored in sidecars |
 | queued REPL operations | 16 |
 | `AGENTS.md` source | 16 KiB per file; at most 16 workspace roots and 16 applicable files; 256 KiB aggregate; UTF-8-safe head and tail if larger; reject if invalid UTF-8 |
 | rendered world-state snapshot | 8 KiB; fixed command catalog and capped path |

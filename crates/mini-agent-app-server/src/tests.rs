@@ -508,6 +508,7 @@ impl ToolRuntime for SensitiveFixtureTool {
         ToolExecutionOutcome {
             status: ToolExecutionStatus::NeedsApproval,
             content: "user denied: sensitive fixture".to_string(),
+            output_truncated: false,
             context_messages: Vec::new(),
             context_injections: Vec::new(),
         }

@@ -3,10 +3,11 @@
 The default model-visible Builtin tool set is deliberately small:
 
 ```text
-read_file | apply_patch | shell | read_image
+read_file | apply_patch | shell | read_image | read_tool_output
 ```
 
-`web_fetch`, MCP tools, child-task tools, Notebook tools, background Shell
+`read_tool_output` pages oversized results from the current Session's bounded
+result store. `web_fetch`, MCP tools, child-task tools, Notebook tools, background Shell
 tasks, and scheduled delay markers are explicit Host-composed capabilities.
 They are not compatibility names for the default set. `write_file` and
 `edit_file` are not supported fallback tools. Use `apply_patch` for workspace

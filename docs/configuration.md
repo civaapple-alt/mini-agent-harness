@@ -264,8 +264,9 @@ runtime telemetry `signals.json`, frozen environment snapshot `prompt_context.js
 the append-only `session.jsonl` log, and the bounded `thread_settings.json`
 control-plane sidecar. The sidecar stores the current Thread ID and explicit
 `manual`/`continuous` preference with an atomic replacement; it is not part of
-conversation history. Large tool results are recorded as `result_stored` entries
-in the append-only log so handles survive resume.
+conversation history. Large tool results are stored in Session-owned sidecars;
+the append-only log records only bounded metadata so handles survive resume
+without inflating JSONL.
 
 ## App Server Plan Mode and Autonomous Goal Workspaces
 
@@ -286,7 +287,14 @@ the core REPL remains focused on turn execution and run control:
   Planning state is persisted in `plan_mode.json`; after a completed Plan Turn,
   bounded `review_pending` state records whether the user still needs to choose
   “continue planning” or “start implementation”. A new Plan Turn or disabling
-  Plan clears that state so it survives reload without becoming stale.
+  Plan clears that state so it survives reload without becoming stale. During
+  Plan Mode, the stable tool definitions stay in the model request while the
+  Host constrains selection to `read_file`, `read_image`, `shell`,
+  `apply_patch`, `read_tool_output`, and configured `web_fetch`, `web_search`,
+  and `ask_user` tools. The Host defers out-of-set calls before admission or
+  execution, and makes no model request while `review_pending` is set. Leaving
+  Plan Mode restores the Thread's configured tool set; allowed calls still pass
+  through normal admission, approval, sandbox, and action-grant checks.
 - **Thread continuation (`thread/settings/update`)**: Set the optional
   `continuationMode` to `manual` for the default bounded 8-step Chat turn or
   `continuous` for an explicit uncapped ordinary Chat loop. This is independent

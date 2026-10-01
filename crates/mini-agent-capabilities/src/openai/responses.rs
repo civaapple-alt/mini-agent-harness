@@ -159,7 +159,17 @@ fn request_body_with_limit(
         "instructions": request.system_prompt,
         "input": input,
         "tools": tools,
-        "tool_choice": "auto",
+        "tool_choice": request.allowed_tools.map_or_else(
+            || json!("auto"),
+            |allowed_tools| json!({
+                "type": "allowed_tools",
+                "mode": "auto",
+                "tools": allowed_tools.iter()
+                    .filter(|name| request.tools.iter().any(|tool| tool.name.as_str() == name.as_str()))
+                    .map(|name| json!({"type": "function", "name": name}))
+                    .collect::<Vec<_>>()
+            }),
+        ),
         "parallel_tool_calls": false,
         "store": false,
         "stream": true
@@ -437,6 +447,7 @@ mod tests {
             system_prompt: &config.system_prompt,
             messages,
             tools,
+            allowed_tools: None,
             max_response_bytes: config.max_model_response_bytes,
             model_selection: None,
             reasoning_selection: None,
@@ -474,6 +485,31 @@ mod tests {
         let empty_tools: [ToolSpec; 0] = [];
         let body_empty_tools = render_body("test-model", &config, &messages, &empty_tools, &images);
         assert_eq!(body_empty_tools["tools"], json!([]));
+    }
+
+    #[test]
+    fn allowed_tool_choice_keeps_the_complete_stable_tool_manifest() {
+        let (messages, tools) = lookup_messages();
+        let config = HarnessConfig::default();
+        let images = ImageStore::memory_only();
+        let allowed_tools = vec!["lookup".to_string()];
+        let request = ModelRequest {
+            allowed_tools: Some(&allowed_tools),
+            ..request(&config, &messages, &tools)
+        };
+
+        let body = request_body("test-model", &request, &images);
+
+        assert_eq!(body["tool_choice"]["type"], "allowed_tools");
+        assert_eq!(body["tool_choice"]["mode"], "auto");
+        assert_eq!(
+            body["tool_choice"]["tools"],
+            json!([
+                {"type": "function", "name": "lookup"}
+            ])
+        );
+        assert_eq!(body["tools"].as_array().unwrap().len(), tools.len());
+        assert_eq!(body["tools"][0]["parameters"], tools[0].parameters);
     }
 
     #[test]

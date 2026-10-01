@@ -25,8 +25,47 @@ fn plan_mode_overlay_keeps_architect_foundation() {
     assert!(goal.contains("提供最新 Mac Studio 介绍的 html"));
     assert!(goal.contains("*** Update File: goal/plan.md"));
     assert!(goal.contains("never `*** Add File`"));
+    assert!(goal.contains("actual `git diff`"));
     assert!(goal.contains("never use an absolute Session path"));
     assert!(goal.contains("prompt_context.json"));
+}
+
+#[test]
+fn plan_mode_tool_selection_uses_session_state_and_configured_tools() {
+    let dir = test_dir();
+    let available = [
+        "read_file",
+        "read_tool_output",
+        "web_fetch",
+        "delegate_task",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
+    assert_eq!(
+        plan_mode_tool_selection(Some(&dir), &available).unwrap(),
+        None
+    );
+
+    init_plan_mode_with_prompt(&dir, None).unwrap();
+    let selection = plan_mode_tool_selection(Some(&dir), &available)
+        .unwrap()
+        .unwrap();
+    assert!(!selection.review_pending);
+    assert_eq!(
+        selection.allowed_tools,
+        ["read_file", "read_tool_output", "web_fetch"]
+    );
+
+    set_plan_review_pending(&dir, true).unwrap();
+    assert!(
+        plan_mode_tool_selection(Some(&dir), &available)
+            .unwrap()
+            .unwrap()
+            .review_pending
+    );
+    disable_plan_mode(&dir).unwrap();
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

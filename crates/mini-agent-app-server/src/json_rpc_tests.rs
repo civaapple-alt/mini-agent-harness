@@ -11,14 +11,17 @@ use mini_agent_capabilities::{
     workspace_tools_with_read_roots_and_results,
     workspace_tools_with_read_roots_results_and_background_shells,
 };
-use mini_agent_core::{ExecutionJournalSink, Harness, HarnessConfig, Thread, ToolRouter};
+use mini_agent_core::{
+    ContextLimitBehavior, ExecutionJournalSink, Harness, HarnessConfig, Thread, ToolRouter,
+};
 use mini_agent_protocol::{
-    Message, Model, ModelEventSink, ModelRequest, ModelResponse, ModelUsage, ThreadId, ThreadStart,
-    ToolApprovalRequest, ToolCall, ToolError, ToolExecutionStatus, ToolHandler, ToolRuntime,
-    ToolSpec, TurnInput,
+    Message, Model, ModelEvent, ModelEventSink, ModelRequest, ModelResponse, ModelUsage, ThreadId,
+    ThreadStart, ToolApprovalRequest, ToolCall, ToolError, ToolExecutionStatus, ToolHandler,
+    ToolRuntime, ToolSpec, TurnInput,
 };
 use serde_json::Value;
 use std::convert::Infallible;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
@@ -595,6 +598,233 @@ async fn wait_for_turn_finished<M: Model + Send + 'static>(
     }
 }
 
+async fn wait_for_turn_finished_id<M: Model + Send + 'static>(
+    connection: &mut AppServerConnection<M>,
+    turn_id: &str,
+) {
+    loop {
+        let notification = next_turn_event(connection).await;
+        if notification
+            .turn_id
+            .as_ref()
+            .is_some_and(|id| id.as_str() == turn_id)
+            && matches!(
+                notification.event,
+                mini_agent_protocol::Event::TurnFinished { .. }
+            )
+        {
+            break;
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ToolOutputRecoveryMode {
+    InitialTurn,
+    ResumedSession,
+}
+
+struct ToolOutputRecoveryModel {
+    mode: ToolOutputRecoveryMode,
+}
+
+impl Model for ToolOutputRecoveryModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        if request.tools.is_empty() {
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "Continue from the retained Session output pointer and cursor.".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+
+        let shell_output = last_tool_output(&request, "shell");
+        let read_output = last_tool_output(&request, "read_tool_output");
+        let tool_call = match self.mode {
+            ToolOutputRecoveryMode::InitialTurn if shell_output.is_none() => {
+                let command = if cfg!(windows) {
+                    "Write-Output ('x' * 50000)"
+                } else {
+                    "printf 'HEAD'; head -c 50000 /dev/zero | tr '\\000' 'x'; printf 'TAIL'"
+                };
+                Some(ToolCall {
+                    id: "large-shell-output".to_string(),
+                    name: "shell".to_string(),
+                    arguments: serde_json::json!({"command": command}),
+                })
+            }
+            ToolOutputRecoveryMode::InitialTurn if read_output.is_none() => {
+                let handle = shell_output
+                    .and_then(|content| content.split_once("Full output handle: "))
+                    .and_then(|(_, rest)| rest.split_whitespace().next())
+                    .map(|value| value.trim_end_matches('.'))
+                    .unwrap_or_else(|| {
+                        panic!("large Shell result should provide a Session output handle: {shell_output:?}")
+                    });
+                Some(read_output_call(handle, 0))
+            }
+            ToolOutputRecoveryMode::ResumedSession => {
+                let Some(previous_page) = read_output else {
+                    panic!("resumed Session should retain the first output page")
+                };
+                let cursor = output_page_field(previous_page, "cursor")
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(0);
+                if cursor == 0 {
+                    let handle = output_page_field(previous_page, "handle")
+                        .expect("persisted output page should retain its handle");
+                    let next_cursor = output_page_field(previous_page, "next_cursor")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .expect("first output page should expose a next cursor");
+                    Some(read_output_call(handle, next_cursor))
+                } else {
+                    None
+                }
+            }
+            ToolOutputRecoveryMode::InitialTurn => None,
+        };
+
+        if let Some(tool_call) = tool_call {
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![tool_call],
+                usage: None,
+            });
+        }
+
+        let text = match self.mode {
+            ToolOutputRecoveryMode::InitialTurn => "First bounded page read before restart.",
+            ToolOutputRecoveryMode::ResumedSession => {
+                let page = read_output.expect("the resumed page should be available");
+                assert!(page.contains("cursor: 10240"), "unexpected page: {page}");
+                "Second bounded page read after restart."
+            }
+        }
+        .to_string();
+        events.emit(ModelEvent::TextDelta(text.clone()));
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text,
+            tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
+
+fn last_tool_output<'a>(request: &ModelRequest<'a>, name: &str) -> Option<&'a str> {
+    request
+        .messages
+        .iter()
+        .rev()
+        .find_map(|message| match message {
+            Message::Tool {
+                name: tool_name,
+                content,
+                ..
+            } if tool_name == name => Some(content.as_str()),
+            _ => None,
+        })
+}
+
+fn output_page_field<'a>(content: &'a str, field: &str) -> Option<&'a str> {
+    content
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{field}: ")))
+}
+
+fn read_output_call(handle: &str, cursor: usize) -> ToolCall {
+    ToolCall {
+        id: format!("read-output-{cursor}"),
+        name: "read_tool_output".to_string(),
+        arguments: serde_json::json!({"handle": handle, "cursor": cursor, "max_bytes": 10 * 1024}),
+    }
+}
+
+fn tool_output_session_connection(
+    model: ToolOutputRecoveryModel,
+    root: PathBuf,
+    opened: mini_agent_capabilities::OpenedSession,
+) -> AppServerConnection<ToolOutputRecoveryModel> {
+    let thread_id = ThreadId::new(opened.store.thread_id().to_string());
+    let approval = ApprovalController::with_policy_and_callback(
+        ApprovalPolicy::Automatic,
+        SecurityPolicy::for_preset(SecurityPreset::Default),
+        |_| {
+            Ok(mini_agent_protocol::ToolApprovalResolution {
+                outcome: mini_agent_protocol::ApprovalOutcome::Approved,
+                grant_scope: mini_agent_protocol::ActionGrantScope::Once,
+                reason: None,
+            })
+        },
+    );
+    approval.bind_session_file(opened.store.path());
+    let results = opened.store.result_store();
+    let mut tools = workspace_tools_with_read_roots_and_results(
+        root.clone(),
+        approval.clone(),
+        Vec::new(),
+        Vec::new(),
+        SandboxKind::Native,
+        ImageStore::memory_only(),
+        results,
+    )
+    .unwrap();
+    tools.retain(|tool| matches!(tool.spec().name.as_str(), "shell" | "read_tool_output"));
+
+    let config = HarnessConfig {
+        max_context_bytes: 28 * 1024,
+        context_limit_behavior: ContextLimitBehavior::Compact,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(
+        model,
+        ToolRouter::with_executor(
+            tools,
+            Arc::new(mini_agent_host::ToolOrchestrator::new(approval.clone())),
+        ),
+        config.clone(),
+    );
+    if opened.resumed {
+        harness.restore_session(opened.state.clone()).unwrap();
+    }
+    let server = AppServer::new(
+        ThreadStart::new(thread_id.clone()),
+        Thread::new(thread_id.clone(), harness),
+    );
+    let management = RuntimeManagementService::new_with_harness_config(
+        server.clone(),
+        Some(opened),
+        mini_agent_host::WorldState::detect_with_roots(
+            &root,
+            Vec::new(),
+            SecurityPreset::Default,
+            ApprovalPolicy::Automatic,
+            SandboxKind::Native,
+        ),
+        Vec::new(),
+        0,
+        Vec::new(),
+        approval,
+        config,
+    );
+    AppServerConnection::new(server).with_runtime_services(
+        RuntimeServices::new(
+            management,
+            ThreadSettingsService::new(),
+            ThreadGoalRequestProcessor::new(root, crate::goal_service::GoalLimits::default()),
+        )
+        .unwrap(),
+    )
+}
+
 fn rpc_root(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!(
         "mini-agent-{name}-{}-{}",
@@ -606,6 +836,126 @@ fn rpc_root(name: &str) -> std::path::PathBuf {
     ));
     std::fs::create_dir_all(&root).unwrap();
     root
+}
+
+#[tokio::test]
+async fn scripted_session_reads_large_shell_output_after_compaction_and_restart() {
+    let root = rpc_root("tool-output-recovery");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let session_id = opened.store.session_id().to_string();
+    let thread_id = opened.store.thread_id().to_string();
+    let session_path = opened.store.path().to_path_buf();
+    let mut connection = tool_output_session_connection(
+        ToolOutputRecoveryModel {
+            mode: ToolOutputRecoveryMode::InitialTurn,
+        },
+        root.clone(),
+        opened,
+    );
+    initialize_connection(&mut connection, "tool-output-recovery-initial").await;
+
+    let start = rpc_result(
+        &mut connection,
+        session_turn_start_request(2, &thread_id, "inspect long Shell output", None),
+    )
+    .await;
+    assert_eq!(start["value"]["status"], "started");
+    let first_turn_id = start["value"]["turn_id"].as_str().unwrap().to_string();
+    let (mut saw_compaction, mut saw_truncated_shell, mut saw_timing) = (false, false, false);
+    loop {
+        let event = next_turn_event(&mut connection).await.event;
+        match event {
+            mini_agent_protocol::Event::ContextCompactionFinished { .. } => {
+                saw_compaction = true;
+            }
+            mini_agent_protocol::Event::ToolFinished {
+                name,
+                truncated: true,
+                ..
+            } if name == "shell" => saw_truncated_shell = true,
+            mini_agent_protocol::Event::ModelResponded {
+                model_timing: Some(timing),
+                ..
+            } if timing.ttft_ms.is_some() => saw_timing = true,
+            mini_agent_protocol::Event::TurnFinished { .. } => break,
+            _ => {}
+        }
+    }
+    assert!(
+        saw_compaction,
+        "long output should trigger context compaction"
+    );
+    assert!(
+        saw_truncated_shell,
+        "the bounded Shell notice must stay marked truncated"
+    );
+    assert!(saw_timing, "streamed final text should include TTFT");
+
+    let log = std::fs::read_to_string(&session_path).unwrap();
+    let records = log
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .collect::<Vec<_>>();
+    let artifact = records
+        .iter()
+        .find(|record| record["kind"] == "result_stored")
+        .expect("large Shell output should be persisted as a Session artifact");
+    assert_eq!(artifact["storage"], "sidecar");
+    assert_eq!(artifact["metadata"]["kind"], "tool_output");
+    assert!(artifact.get("content").is_none());
+    let turn_record = records
+        .iter()
+        .find(|record| record["kind"] == "turn_started" && record["turn_id"] == first_turn_id)
+        .expect("completed Turn should be persisted");
+    assert!(turn_record["presentation"]["modelTiming"]["ttftMs"].is_number());
+
+    let first_turn = rpc_call(
+        &mut connection,
+        3,
+        METHOD_TURN_READ,
+        serde_json::json!({"turnId": first_turn_id}),
+    )
+    .await;
+    assert_eq!(
+        first_turn["value"]["finalText"],
+        "First bounded page read before restart."
+    );
+    connection.shutdown().await.unwrap();
+
+    let resumed = SessionStore::open(&root, SessionStoreRequest::Resume(session_id)).unwrap();
+    let mut restarted = tool_output_session_connection(
+        ToolOutputRecoveryModel {
+            mode: ToolOutputRecoveryMode::ResumedSession,
+        },
+        root.clone(),
+        resumed,
+    );
+    initialize_connection(&mut restarted, "tool-output-recovery-resumed").await;
+    let resumed_start = rpc_result(
+        &mut restarted,
+        session_turn_start_request(2, &thread_id, "continue reading the output", None),
+    )
+    .await;
+    assert_eq!(resumed_start["value"]["status"], "started");
+    let resumed_turn_id = resumed_start["value"]["turn_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for_turn_finished_id(&mut restarted, &resumed_turn_id).await;
+    let resumed_turn = rpc_call(
+        &mut restarted,
+        3,
+        METHOD_TURN_READ,
+        serde_json::json!({"turnId": resumed_turn_id}),
+    )
+    .await;
+    assert_eq!(
+        resumed_turn["value"]["finalText"], "Second bounded page read after restart.",
+        "resumed Turn response: {resumed_turn}"
+    );
+
+    restarted.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 struct WebFetchFixtureTool {

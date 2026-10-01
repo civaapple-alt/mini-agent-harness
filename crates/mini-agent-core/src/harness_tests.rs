@@ -172,6 +172,7 @@ impl ToolRuntime for ApprovalTool {
         ToolExecutionOutcome {
             status: ToolExecutionStatus::NeedsApproval,
             content: "approval required".to_string(),
+            output_truncated: false,
             context_messages: Vec::new(),
             context_injections: Vec::new(),
         }

@@ -28,6 +28,7 @@ fn execution_statuses_round_trip_without_collapsing_policy() {
         let outcome = ToolExecutionOutcome {
             status,
             content: "detail".to_string(),
+            output_truncated: false,
             context_messages: Vec::new(),
             context_injections: Vec::new(),
         };

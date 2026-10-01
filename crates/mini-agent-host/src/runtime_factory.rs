@@ -76,6 +76,7 @@ impl<'a> HostRuntimeFactory<'a> {
                 None
             };
         let search_enabled = selected_search.is_some();
+        let model_approval = self.approval.clone();
         let registry = selected_search.map_or_else(
             || self.registry.clone(),
             |config| self.registry.clone().with_web_search(config),
@@ -90,11 +91,10 @@ impl<'a> HostRuntimeFactory<'a> {
             results,
             registry,
             move |_provider_id: &str, _settings: ModelProviderSettings, images: ImageStore| {
-                Ok(HostResponsesModel::new(
-                    catalog.clone(),
-                    project_id.clone(),
-                    images,
-                ))
+                Ok(
+                    HostResponsesModel::new(catalog.clone(), project_id.clone(), images)
+                        .with_plan_mode_approval(model_approval.clone()),
+                )
             },
         )?;
         if user_questions_enabled {

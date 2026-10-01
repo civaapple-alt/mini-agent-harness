@@ -1,7 +1,9 @@
 //! Machine-wide Responses model catalog and Host-side model selection.
 
 use fs2::FileExt;
-use mini_agent_capabilities::{ImageStore, ModelProviderSettings, OpenAiError, OpenAiModel};
+use mini_agent_capabilities::{
+    ApprovalController, ImageStore, ModelProviderSettings, OpenAiError, OpenAiModel,
+};
 use mini_agent_protocol::{
     Message, Model, ModelEvent, ModelEventSink, ModelRequest, ModelResponse, ModelSelection,
     ReasoningSelection,
@@ -547,6 +549,7 @@ impl ModelCatalogStore {
             system_prompt: "Reply only with OK.",
             messages: &messages,
             tools: &[],
+            allowed_tools: None,
             max_response_bytes: MODEL_TEST_MAX_RESPONSE_BYTES,
             model_selection: None,
             reasoning_selection: None,
@@ -674,6 +677,7 @@ pub struct HostResponsesModel {
     catalog: ModelCatalogStore,
     project_id: String,
     images: ImageStore,
+    approval: Option<ApprovalController>,
 }
 
 impl HostResponsesModel {
@@ -682,7 +686,13 @@ impl HostResponsesModel {
             catalog,
             project_id,
             images,
+            approval: None,
         }
+    }
+
+    pub fn with_plan_mode_approval(mut self, approval: ApprovalController) -> Self {
+        self.approval = Some(approval);
+        self
     }
 }
 
@@ -694,6 +704,27 @@ impl Model for HostResponsesModel {
         request: ModelRequest<'a>,
         events: &'a mut (dyn ModelEventSink + Send),
     ) -> Result<ModelResponse, Self::Error> {
+        let available_tool_names = request
+            .tools
+            .iter()
+            .map(|tool| tool.name.clone())
+            .collect::<Vec<_>>();
+        let tool_selection = crate::goal::plan_mode_tool_selection(
+            self.approval
+                .as_ref()
+                .and_then(ApprovalController::session_dir)
+                .as_deref(),
+            &available_tool_names,
+        )
+        .map_err(OpenAiError::Protocol)?;
+        if tool_selection
+            .as_ref()
+            .is_some_and(|selection| selection.review_pending)
+        {
+            return Err(OpenAiError::Protocol(
+                "Plan review is pending; review the Session plan before continuing".to_string(),
+            ));
+        }
         let thread_reasoning = request.reasoning_selection.cloned();
         let legacy_reasoning = request.reasoning_effort.map(ReasoningSelection::level);
         let (selection, reasoning_selection) = match request.model_selection {
@@ -741,18 +772,54 @@ impl Model for HostResponsesModel {
             validate_reasoning_for_profile(&profile, &reasoning_selection)
                 .map_err(OpenAiError::Protocol)?;
             model.set_images(self.images.clone());
-            let resolved_request = ModelRequest {
-                reasoning_selection: Some(&reasoning_selection),
-                reasoning_effort: None,
-                ..request
-            };
-            model.respond(resolved_request, events).await
+            if let Some(tool_selection) = tool_selection {
+                if model.supports_allowed_tools() {
+                    let resolved_request = ModelRequest {
+                        allowed_tools: Some(&tool_selection.allowed_tools),
+                        reasoning_selection: Some(&reasoning_selection),
+                        reasoning_effort: None,
+                        ..request
+                    };
+                    model.respond(resolved_request, events).await
+                } else {
+                    let mut hinted_messages = request.messages.to_vec();
+                    hinted_messages.push(Message::Context {
+                        text: tool_selection_hint(&tool_selection.allowed_tools),
+                    });
+                    let resolved_request = ModelRequest {
+                        messages: &hinted_messages,
+                        allowed_tools: None,
+                        reasoning_selection: Some(&reasoning_selection),
+                        reasoning_effort: None,
+                        ..request
+                    };
+                    model.respond(resolved_request, events).await
+                }
+            } else {
+                let resolved_request = ModelRequest {
+                    reasoning_selection: Some(&reasoning_selection),
+                    reasoning_effort: None,
+                    ..request
+                };
+                model.respond(resolved_request, events).await
+            }
         } else {
             Err(OpenAiError::Protocol(
                 "no enabled default Responses model is configured".to_string(),
             ))
         }
     }
+}
+
+fn tool_selection_hint(allowed_tools: &[String]) -> String {
+    format!(
+        "[Host tool selection] Plan Mode is active. Call only these tools: {}. If the set is empty, answer without calling tools. Host admission still enforces this selection.",
+        if allowed_tools.is_empty() {
+            "(none)".to_string()
+        } else {
+            allowed_tools.join(", ")
+        }
+    )
 }
 
 struct DiscardModelEvents;
@@ -1406,6 +1473,7 @@ mod tests {
                     system_prompt: "test",
                     messages: &messages,
                     tools: &tools,
+                    allowed_tools: None,
                     max_response_bytes: 64 * 1024,
                     model_selection: Some(&selection),
                     reasoning_selection: None,
@@ -1448,6 +1516,143 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn host_model_applies_plan_selection_without_removing_tool_definitions() {
+        let (base_url, server) = start_test_provider(
+            200,
+            concat!(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+            ),
+            Duration::ZERO,
+        );
+        let store = test_store(base_url);
+        let session_dir = crate::test_support::test_root();
+        let session_file = session_dir.join("session.jsonl");
+        std::fs::write(&session_file, "").unwrap();
+        crate::goal::init_plan_mode_with_prompt(&session_dir, None).unwrap();
+        let approval = ApprovalController::new(mini_agent_protocol::ApprovalPolicy::Automatic);
+        approval.bind_session_file(&session_file);
+        let mut model =
+            HostResponsesModel::new(store, "project-a".to_string(), ImageStore::memory_only())
+                .with_plan_mode_approval(approval);
+        let selection = ModelSelection {
+            provider_id: "deepseek".to_string(),
+            model_id: "deepseek-test".to_string(),
+        };
+        let messages = [Message::User {
+            text: "review the workspace".to_string(),
+        }];
+        let tools = ["read_file", "shell", "delegate_task"].map(|name| ToolSpec {
+            name: name.to_string(),
+            description: format!("Run {name}."),
+            parameters: serde_json::json!({"type": "object"}),
+        });
+        let mut events = EventCollector(Vec::new());
+
+        model
+            .respond(
+                ModelRequest {
+                    system_prompt: "test",
+                    messages: &messages,
+                    tools: &tools,
+                    allowed_tools: None,
+                    max_response_bytes: 64 * 1024,
+                    model_selection: Some(&selection),
+                    reasoning_selection: None,
+                    reasoning_effort: None,
+                },
+                &mut events,
+            )
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+        let request_body = request.split_once("\r\n\r\n").unwrap().1;
+        let payload: serde_json::Value = serde_json::from_str(request_body).unwrap();
+
+        assert_eq!(payload["tools"].as_array().unwrap().len(), tools.len());
+        assert_eq!(
+            payload["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|tool| tool["name"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["read_file", "shell", "delegate_task"]
+        );
+        assert_eq!(
+            payload["tool_choice"]["tools"],
+            serde_json::json!([
+                {"type": "function", "name": "read_file"},
+                {"type": "function", "name": "shell"}
+            ])
+        );
+        std::fs::remove_dir_all(session_dir).unwrap();
+    }
+
+    #[test]
+    fn non_native_tool_selection_hint_names_only_allowed_tools() {
+        let allowed_tools = vec!["read_file".to_string(), "shell".to_string()];
+        let hint = tool_selection_hint(&allowed_tools);
+
+        assert!(hint.contains("Call only these tools: read_file, shell"));
+        assert!(hint.contains("Host admission still enforces this selection"));
+        assert!(!hint.contains("delegate_task"));
+    }
+
+    #[tokio::test]
+    async fn host_model_does_not_issue_provider_request_while_plan_review_is_pending() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+
+        let session_dir = crate::test_support::test_root();
+        let session_file = session_dir.join("session.jsonl");
+        std::fs::write(&session_file, "").unwrap();
+        crate::goal::init_plan_mode_with_prompt(&session_dir, None).unwrap();
+        crate::goal::set_plan_review_pending(&session_dir, true).unwrap();
+        let approval = ApprovalController::new(mini_agent_protocol::ApprovalPolicy::Automatic);
+        approval.bind_session_file(&session_file);
+        let catalog = ModelCatalogStore::at(session_dir.join(STORE_FILE));
+        let mut model =
+            HostResponsesModel::new(catalog, "project-a".to_string(), ImageStore::memory_only())
+                .with_plan_mode_approval(approval);
+        let messages = [Message::User {
+            text: "review the plan".to_string(),
+        }];
+        let tools = [ToolSpec {
+            name: "read_file".to_string(),
+            description: "Read a workspace file".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        }];
+        let mut events = EventCollector(Vec::new());
+
+        let result = model
+            .respond(
+                ModelRequest {
+                    system_prompt: "test",
+                    messages: &messages,
+                    tools: &tools,
+                    allowed_tools: None,
+                    max_response_bytes: 64 * 1024,
+                    model_selection: None,
+                    reasoning_selection: None,
+                    reasoning_effort: None,
+                },
+                &mut events,
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(OpenAiError::Protocol(message)) if message.contains("Plan review is pending")
+        ));
+        assert!(matches!(
+            listener.accept(),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+        ));
+        std::fs::remove_dir_all(session_dir).unwrap();
+    }
+
+    #[tokio::test]
     async fn host_model_uses_legacy_reasoning_effort_with_default_model() {
         let (base_url, server) = start_test_provider(
             200,
@@ -1478,6 +1683,7 @@ mod tests {
                     system_prompt: "test",
                     messages: &messages,
                     tools: &[],
+                    allowed_tools: None,
                     max_response_bytes: 64 * 1024,
                     model_selection: None,
                     reasoning_selection: None,

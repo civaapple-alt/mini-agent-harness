@@ -78,6 +78,17 @@ serialized request categories. Its optional `usage` is the provider-reported
 input, cached-input, and output token count for that request. Clients preserve
 missing usage as unknown; category token counts derived from bytes are
 estimates, and cached tokens are not attributed to individual sources.
+The optional `model_timing` contains `ttft_ms` (request start to the first
+non-empty streamed reasoning or text output) and `response_ms` (request start
+to response completion). A missing TTFT means the adapter emitted no streamed
+output event; old Sessions and providers without timing report no timing data.
+
+The Host retains tool results larger than Core's 16 KiB inline limit as
+Session-scoped sidecars and emits a bounded head-and-tail preview with a
+`read_tool_output` handle. The read-only tool returns at most 12 KiB per page.
+Handles are scoped to the Session; the Session log stores only sidecar
+metadata. The result store keeps at most 8 results, 8 MiB per result, and
+16 MiB total, evicting the oldest artifacts when needed.
 
 ## Interactive user questions
 

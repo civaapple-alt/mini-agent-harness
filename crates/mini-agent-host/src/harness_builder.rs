@@ -296,7 +296,7 @@ where
             extra_write_roots: runtime_config.extra_write_roots(),
             sandbox: composition.sandbox,
             images: images.clone(),
-            results,
+            results: results.clone(),
             background_shells: background_shells.clone(),
             scheduled_tasks: scheduled_tasks.clone(),
         }) {
@@ -361,7 +361,8 @@ where
     let world_context = world.model_context()?;
     let tool_executor = Arc::new(
         ToolOrchestrator::new(approval.clone())
-            .with_project_instructions(project_instruction_loader),
+            .with_project_instructions(project_instruction_loader)
+            .with_result_store(results.clone()),
     );
     let tool_registry = ToolRouter::with_executor(tools, tool_executor);
     let mut harness = Harness::new(model, tool_registry, config);

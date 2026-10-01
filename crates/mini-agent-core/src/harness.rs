@@ -684,27 +684,27 @@ impl<M: Model> Harness<M> {
                 ),
                 tool_manifest_hash: tool_manifest_digest(&tool_specs),
             });
-            let mut model_events = ModelEventForwarder {
-                observer,
-                emitted_bytes: 0,
-                max_bytes: self.config.max_model_response_bytes,
+            let model_response = {
+                let mut model_events =
+                    ModelEventForwarder::new(observer, self.config.max_model_response_bytes);
+                self.model
+                    .respond(
+                        ModelRequest {
+                            system_prompt: &self.config.system_prompt,
+                            messages: self.session.messages(),
+                            tools: &tool_specs,
+                            allowed_tools: None,
+                            max_response_bytes: self.config.max_model_response_bytes,
+                            model_selection: self.model_selection.as_ref(),
+                            reasoning_selection: self.reasoning_selection.as_ref(),
+                            reasoning_effort: self.reasoning_effort.as_deref(),
+                        },
+                        &mut model_events,
+                    )
+                    .await
+                    .map(|response| (response, model_events.timing()))
             };
-            let response = match self
-                .model
-                .respond(
-                    ModelRequest {
-                        system_prompt: &self.config.system_prompt,
-                        messages: self.session.messages(),
-                        tools: &tool_specs,
-                        max_response_bytes: self.config.max_model_response_bytes,
-                        model_selection: self.model_selection.as_ref(),
-                        reasoning_selection: self.reasoning_selection.as_ref(),
-                        reasoning_effort: self.reasoning_effort.as_deref(),
-                    },
-                    &mut model_events,
-                )
-                .await
-            {
+            let (response, model_timing) = match model_response {
                 Ok(response) => response,
                 Err(error) => {
                     observer.observe(&Event::RunFailed {
@@ -741,6 +741,7 @@ impl<M: Model> Harness<M> {
                 text: response.text.clone(),
                 tool_calls: response.tool_calls.clone(),
                 usage: response.usage,
+                model_timing: Some(model_timing),
                 context_bytes: Some(context_byte_breakdown_for(
                     &self.config.system_prompt,
                     self.session.messages(),
@@ -984,6 +985,7 @@ impl<M: Model> Harness<M> {
                     system_prompt: &self.config.system_prompt,
                     messages: &compaction_messages,
                     tools: &[],
+                    allowed_tools: None,
                     max_response_bytes: self.config.max_model_response_bytes,
                     model_selection: self.model_selection.as_ref(),
                     reasoning_selection: self.reasoning_selection.as_ref(),

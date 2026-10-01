@@ -82,6 +82,10 @@ impl OpenAiModel {
 impl Model for OpenAiModel {
     type Error = OpenAiError;
 
+    fn supports_allowed_tools(&self) -> bool {
+        true
+    }
+
     async fn respond<'a>(
         &'a mut self,
         request: ModelRequest<'a>,

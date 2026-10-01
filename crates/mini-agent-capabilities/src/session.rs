@@ -8,7 +8,8 @@ use mini_agent_core::ExecutionToolCall;
 use mini_agent_core::SessionState;
 use mini_agent_protocol::{
     ChildTaskAttemptKind, ContextByteBreakdown, ContextInjectionRecord, Message, ModelSelection,
-    ModelUsage, ReasoningSelection, TurnId, TurnSource, TurnWorkflow, UserQuestionInteraction,
+    ModelTiming, ModelUsage, ReasoningSelection, TurnId, TurnSource, TurnWorkflow,
+    UserQuestionInteraction,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -286,6 +287,8 @@ pub struct TurnPresentation {
     activities: Vec<TurnPresentationActivity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     context_usage: Option<TurnContextUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_timing: Option<ModelTiming>,
 }
 
 /// The last model request observed during a Turn plus bounded aggregate usage
@@ -371,6 +374,7 @@ impl TurnPresentation {
             workflow: workflow.map(bounded_workflow),
             activities: Vec::new(),
             context_usage: None,
+            model_timing: None,
         }
     }
 
@@ -400,6 +404,10 @@ impl TurnPresentation {
             context_bytes,
             usage_totals: Some(usage_totals),
         });
+    }
+
+    pub fn set_model_timing(&mut self, timing: Option<ModelTiming>) {
+        self.model_timing = timing;
     }
 }
 
@@ -3790,6 +3798,30 @@ mod tests {
         let legacy: TurnContextUsage =
             serde_json::from_value(serde_json::json!({"usage": null})).unwrap();
         assert_eq!(legacy.usage_totals, None);
+    }
+
+    #[test]
+    fn turn_presentation_round_trips_optional_model_timing() {
+        let mut presentation = TurnPresentation::default();
+        presentation.set_model_timing(Some(ModelTiming {
+            ttft_ms: Some(27),
+            response_ms: 193,
+        }));
+
+        let encoded = serde_json::to_value(&presentation).unwrap();
+        assert_eq!(encoded["modelTiming"]["ttftMs"], 27);
+        assert_eq!(encoded["modelTiming"]["responseMs"], 193);
+        let decoded: TurnPresentation = serde_json::from_value(encoded).unwrap();
+        assert_eq!(
+            decoded.model_timing,
+            Some(ModelTiming {
+                ttft_ms: Some(27),
+                response_ms: 193,
+            })
+        );
+
+        let old: TurnPresentation = serde_json::from_value(json!({"activities": []})).unwrap();
+        assert_eq!(old.model_timing, None);
     }
 
     fn fork_child(

@@ -95,7 +95,7 @@ pub(super) fn execute_tool_batch<O: Observer>(
         context_injections.extend(outcome.context_injections.iter().cloned());
         let is_error = outcome.status.is_error();
         let content = outcome.content.clone();
-        let truncated = content.len() > max_output_bytes;
+        let truncated = outcome.output_truncated || content.len() > max_output_bytes;
         let content = truncate_utf8(content, max_output_bytes);
 
         observer.observe(&Event::ToolFinished {
@@ -248,7 +248,7 @@ fn append_recovered_call<O: Observer>(
     context_injections.extend(outcome.context_injections.iter().cloned());
     let content = outcome.content;
     let is_error = outcome.status.is_error();
-    let truncated = content.len() > max_output_bytes;
+    let truncated = outcome.output_truncated || content.len() > max_output_bytes;
     let content = truncate_utf8(content, max_output_bytes);
     observer.observe(&Event::ToolStarted { call: call.clone() });
     observer.observe(&Event::ToolFinished {

@@ -3,7 +3,7 @@ use crate::BackgroundShellManager;
 use crate::test_support::{approval_controller, remove_test_root, test_root};
 use mini_agent_protocol::{
     ApprovalOutcome, ApprovalPolicy, ThreadId, ToolApprovalRequest, ToolExecutionContext,
-    ToolExecutionStatus, TurnId,
+    ToolExecutionRequest, ToolExecutionStatus, TurnId,
 };
 
 struct StubFiles(&'static str);
@@ -1351,17 +1351,50 @@ fn shell_preserves_utf8_from_workspace_files() {
 #[test]
 fn large_shell_output_is_retained_as_bounded_artifact() {
     let root = test_root();
-    let workspace = automatic_workspace(root.clone());
+    let approval = ApprovalController::new(ApprovalPolicy::Automatic);
     let results = ResultStore::default();
-    let shell = Shell(workspace, results.clone(), BackgroundShellManager::new());
+    let tools = workspace_tools_with_read_roots_and_results(
+        root.clone(),
+        approval,
+        Vec::new(),
+        Vec::new(),
+        SandboxKind::Native,
+        crate::image::ImageStore::memory_only(),
+        results,
+    )
+    .unwrap();
+    let shell = tools
+        .iter()
+        .find(|tool| tool.spec().name == "shell")
+        .unwrap();
+    let read_output = tools
+        .iter()
+        .find(|tool| tool.spec().name == "read_tool_output")
+        .unwrap();
     let command = if cfg!(windows) {
         "Write-Output ('x' * 20000)"
     } else {
         "printf '%020000d' 0"
     };
 
-    let output = shell.execute(&json!({"command": command})).unwrap();
-    assert!(output.contains("handle=\"result-1\""), "{output}");
+    let request = ToolExecutionRequest::new("large-output", "shell", json!({"command": command}));
+    let admission = shell.admission(&request).unwrap();
+    let outcome = shell.execute_after_admission(&request, &admission);
+    assert!(outcome.output_truncated);
+    assert!(outcome.content.contains("read_tool_output"));
+    let handle = outcome
+        .content
+        .split("Full output handle: ")
+        .nth(1)
+        .unwrap()
+        .split('.')
+        .next()
+        .unwrap();
+    let page = read_output
+        .execute(&json!({"handle": handle, "cursor": 0, "max_bytes": 1024}))
+        .unwrap();
+    assert!(page.contains("cursor: 0"));
+    assert!(page.contains(&"0".repeat(64)) || page.contains(&"x".repeat(64)));
 
     remove_test_root(&root);
 }
