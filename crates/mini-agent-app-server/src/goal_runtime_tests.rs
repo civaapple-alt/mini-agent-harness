@@ -6,15 +6,21 @@ use mini_agent_host::VerdictOutcome;
 use mini_agent_host::VerifierVerdict;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::TurnId;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 
 fn temporary_session_dir() -> std::path::PathBuf {
+    static NEXT_TEST_SESSION: AtomicU64 = AtomicU64::new(0);
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("mini-agent-goal-runtime-test-{suffix}"));
+    let sequence = NEXT_TEST_SESSION.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "mini-agent-goal-runtime-test-{}-{suffix}-{sequence}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&path).unwrap();
     path
 }

@@ -10,6 +10,7 @@
 
 当前相关决策：
 
+- [长会话历史渐进加载与重启恢复证据](implemented/testing/2026-10-02-long-session-history-and-crash-recovery.zh.md)
 - [Session 超长工具输出恢复、模型耗时与 Plan Mode 工具约束](implemented/architecture/2026-10-01-context-engineering-session-recovery-and-plan-tools.zh.md)
 - [ask_user 在 Plan、Goal 与子 Agent 中的使用边界](implemented/process/2026-10-01-ask-user-mode-and-child-session-visibility.zh.md)
 - [Rust 有效行数硬上限调整为 7,000 / 45,000 / 65,000](implemented/process/2026-10-01-line-budget-ceilings.zh.md)

@@ -513,6 +513,38 @@ mod tests {
     }
 
     #[test]
+    fn scripted_50_turns_keep_provider_tool_json_stable_as_selection_changes() {
+        let (messages, tools) = lookup_messages();
+        let config = HarnessConfig::default();
+        let images = ImageStore::memory_only();
+        let full_selection = vec!["lookup".to_string()];
+        let empty_selection: Vec<String> = Vec::new();
+        let mut serialized_tools = Vec::new();
+        let mut choices = Vec::new();
+
+        for turn in 0..50 {
+            let selection = match turn % 3 {
+                0 => Some(full_selection.as_slice()),
+                1 => Some(empty_selection.as_slice()),
+                _ => None,
+            };
+            let request = ModelRequest {
+                allowed_tools: selection,
+                ..request(&config, &messages, &tools)
+            };
+            let body = request_body("test-model", &request, &images);
+            serialized_tools.push(serde_json::to_vec(&body["tools"]).unwrap());
+            choices.push(body["tool_choice"].clone());
+        }
+
+        assert_eq!(serialized_tools.len(), 50);
+        assert!(serialized_tools.windows(2).all(|pair| pair[0] == pair[1]));
+        assert_ne!(choices[0], choices[1]);
+        assert_ne!(choices[1], choices[2]);
+        assert!(serialized_tools[0].windows(6).any(|part| part == b"lookup"));
+    }
+
+    #[test]
     fn applies_disabled_model_level_mapping_and_omits_api_default() {
         let (messages, tools) = lookup_messages();
         let config = HarnessConfig::default();

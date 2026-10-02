@@ -22,6 +22,7 @@ use mini_agent_protocol::{
 use serde_json::Value;
 use std::convert::Infallible;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
@@ -696,7 +697,11 @@ impl Model for ToolOutputRecoveryModel {
                 reasoning: String::new(),
                 text: String::new(),
                 tool_calls: vec![tool_call],
-                usage: None,
+                usage: Some(ModelUsage {
+                    input_tokens: 120,
+                    cached_input_tokens: Some(60),
+                    output_tokens: 8,
+                }),
             });
         }
 
@@ -714,7 +719,11 @@ impl Model for ToolOutputRecoveryModel {
             reasoning: String::new(),
             text,
             tool_calls: Vec::new(),
-            usage: None,
+            usage: Some(ModelUsage {
+                input_tokens: 120,
+                cached_input_tokens: Some(60),
+                output_tokens: 8,
+            }),
         })
     }
 }
@@ -861,7 +870,8 @@ async fn scripted_session_reads_large_shell_output_after_compaction_and_restart(
     .await;
     assert_eq!(start["value"]["status"], "started");
     let first_turn_id = start["value"]["turn_id"].as_str().unwrap().to_string();
-    let (mut saw_compaction, mut saw_truncated_shell, mut saw_timing) = (false, false, false);
+    let (mut saw_compaction, mut saw_truncated_shell, mut saw_timing, mut saw_usage) =
+        (false, false, false, false);
     loop {
         let event = next_turn_event(&mut connection).await.event;
         match event {
@@ -875,8 +885,18 @@ async fn scripted_session_reads_large_shell_output_after_compaction_and_restart(
             } if name == "shell" => saw_truncated_shell = true,
             mini_agent_protocol::Event::ModelResponded {
                 model_timing: Some(timing),
+                usage: Some(usage),
                 ..
-            } if timing.ttft_ms.is_some() => saw_timing = true,
+            } if timing.ttft_ms.is_some() => {
+                assert_eq!(usage.input_tokens, 120);
+                assert_eq!(usage.cached_input_tokens, Some(60));
+                assert_eq!(
+                    usage.cached_input_tokens.unwrap() as f64 / usage.input_tokens as f64,
+                    0.5
+                );
+                saw_timing = true;
+                saw_usage = true;
+            }
             mini_agent_protocol::Event::TurnFinished { .. } => break,
             _ => {}
         }
@@ -890,6 +910,10 @@ async fn scripted_session_reads_large_shell_output_after_compaction_and_restart(
         "the bounded Shell notice must stay marked truncated"
     );
     assert!(saw_timing, "streamed final text should include TTFT");
+    assert!(
+        saw_usage,
+        "scripted Provider usage should remain observable"
+    );
 
     let log = std::fs::read_to_string(&session_path).unwrap();
     let records = log
@@ -954,6 +978,214 @@ async fn scripted_session_reads_large_shell_output_after_compaction_and_restart(
         "resumed Turn response: {resumed_turn}"
     );
 
+    restarted.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn force_kill_child_process_fixture() {
+    let (Some(root), Some(marker)) = (
+        std::env::var_os("MINI_AGENT_CRASH_FIXTURE_ROOT"),
+        std::env::var_os("MINI_AGENT_CRASH_FIXTURE_MARKER"),
+    ) else {
+        return;
+    };
+    let root = PathBuf::from(root);
+    let marker = PathBuf::from(marker);
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let session_id = opened.store.session_id().to_string();
+    let thread_id = opened.store.thread_id().to_string();
+    let session_path = opened.store.path().to_path_buf();
+    let mut connection = tool_output_session_connection(
+        ToolOutputRecoveryModel {
+            mode: ToolOutputRecoveryMode::InitialTurn,
+        },
+        root.clone(),
+        opened,
+    );
+    initialize_connection(&mut connection, "forced-crash-child").await;
+    let start = rpc_result(
+        &mut connection,
+        session_turn_start_request(
+            2,
+            &thread_id,
+            "persist large output before process exit",
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(start["value"]["status"], "started");
+    let turn_id = start["value"]["turn_id"].as_str().unwrap().to_string();
+    wait_for_turn_finished_id(&mut connection, &turn_id).await;
+    std::fs::write(
+        marker,
+        serde_json::to_vec(&serde_json::json!({
+            "session_id": session_id,
+            "thread_id": thread_id,
+            "turn_id": turn_id,
+            "session_path": session_path,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::future::pending::<()>().await;
+}
+
+#[tokio::test]
+async fn app_server_session_recovers_after_forced_process_termination() {
+    let root = rpc_root("forced-process-recovery");
+    let marker = root.join("child-ready.json");
+    let executable = std::env::current_exe().unwrap();
+    let mut child = Command::new(executable)
+        .arg("--exact")
+        .arg("json_rpc::tests::force_kill_child_process_fixture")
+        .arg("--nocapture")
+        .env("MINI_AGENT_CRASH_FIXTURE_ROOT", &root)
+        .env("MINI_AGENT_CRASH_FIXTURE_MARKER", &marker)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let marker_ready = tokio::time::timeout(Duration::from_secs(45), async {
+        while !marker.exists() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .is_ok();
+    if !marker_ready {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("scripted App Server child did not persist its Session checkpoint");
+    }
+    child.kill().unwrap();
+    let exit = child.wait().unwrap();
+    assert!(
+        !exit.success(),
+        "child process must have been force terminated"
+    );
+
+    let child_state: Value = serde_json::from_slice(&std::fs::read(&marker).unwrap()).unwrap();
+    let session_id = child_state["session_id"].as_str().unwrap().to_string();
+    let thread_id = child_state["thread_id"].as_str().unwrap().to_string();
+    let turn_id = child_state["turn_id"].as_str().unwrap().to_string();
+    let session_path = PathBuf::from(child_state["session_path"].as_str().unwrap());
+    let records = std::fs::read_to_string(&session_path)
+        .unwrap()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .collect::<Vec<_>>();
+    let turn_record = records
+        .iter()
+        .find(|record| record["kind"] == "turn_started" && record["turn_id"] == turn_id)
+        .expect("the completed turn should have a durable Journal projection");
+    assert!(turn_record["presentation"]["modelTiming"]["ttftMs"].is_number());
+    assert!(
+        turn_record["presentation"]["contextUsage"]["usageTotals"]["requestCount"]
+            .as_u64()
+            .is_some_and(|count| count >= 2)
+    );
+    assert!(
+        turn_record["presentation"]["contextUsage"]["usageTotals"]["cachedInputTokens"]
+            .as_u64()
+            .is_some_and(|count| count >= 120)
+    );
+    assert!(records.iter().any(|record| {
+        record["kind"] == "turn_settled"
+            && record["turn_id"] == turn_id
+            && record["status"] == "completed"
+    }));
+
+    let opened = SessionStore::open(&root, SessionStoreRequest::Resume(session_id)).unwrap();
+    assert!(opened.store.items().iter().any(|item| {
+        item.turn_id.as_deref() == Some(turn_id.as_str())
+            && matches!(
+                &item.message,
+                Message::Tool { name, content, .. }
+                    if name == "read_tool_output" && content.contains("next_cursor:")
+            )
+    }));
+    assert!(opened.state.messages().iter().any(|message| matches!(
+        message,
+        Message::Tool { name, content, is_error: false, .. }
+            if name == "shell" && content.contains("Full output handle:")
+    )));
+    assert!(opened.state.messages().iter().any(|message| matches!(
+        message,
+        Message::Tool { name, content, is_error: false, .. }
+            if name == "read_tool_output" && content.contains("next_cursor:")
+    )));
+
+    let mut restarted = tool_output_session_connection(
+        ToolOutputRecoveryModel {
+            mode: ToolOutputRecoveryMode::ResumedSession,
+        },
+        root.clone(),
+        opened,
+    );
+    initialize_connection(&mut restarted, "forced-crash-resume").await;
+    let checkpoint = rpc_call(
+        &mut restarted,
+        2,
+        METHOD_THREAD_READ,
+        serde_json::json!({"threadId": thread_id}),
+    )
+    .await;
+    assert!(
+        checkpoint["value"]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| {
+                message["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("Full output handle:"))
+            })
+    );
+    let items = rpc_call(
+        &mut restarted,
+        3,
+        METHOD_THREAD_ITEMS_LIST,
+        serde_json::json!({"threadId": thread_id, "turnId": turn_id, "limit": 128}),
+    )
+    .await;
+    assert!(
+        items["value"]["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| {
+                entry["item"]["type"] == "toolCall" && entry["item"]["name"] == "read_tool_output"
+            })
+    );
+
+    let resumed_start = rpc_result(
+        &mut restarted,
+        session_turn_start_request(
+            4,
+            &thread_id,
+            "read the next output page after restart",
+            None,
+        ),
+    )
+    .await;
+    let resumed_turn_id = resumed_start["value"]["turn_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for_turn_finished_id(&mut restarted, &resumed_turn_id).await;
+    let resumed_turn = rpc_call(
+        &mut restarted,
+        5,
+        METHOD_TURN_READ,
+        serde_json::json!({"turnId": resumed_turn_id}),
+    )
+    .await;
+    assert_eq!(
+        resumed_turn["value"]["finalText"],
+        "Second bounded page read after restart."
+    );
     restarted.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -90,6 +90,13 @@ Handles are scoped to the Session; the Session log stores only sidecar
 metadata. The result store keeps at most 8 results, 8 MiB per result, and
 16 MiB total, evicting the oldest artifacts when needed.
 
+After a process restart, reopening the Session rebuilds its conversation
+messages and `thread/items/list` projection from the existing Journal records.
+The Gateway likewise reconstructs bounded Turn presentations, including
+provider-reported usage and model timing, from those records. Sidecar handles
+remain readable through the reopened Session's ResultStore; a process restart
+does not copy tool output into the event stream.
+
 ## Interactive user questions
 
 Clients that can collect answers set `capabilities.userQuestions` during

@@ -255,6 +255,159 @@ async fn runs_model_tool_model_path() {
 }
 
 #[tokio::test]
+async fn scripted_50_turn_goal_keeps_tool_manifest_stable() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let model = RecordingModel {
+        responses: (0..50)
+            .map(|turn| text_response(format!("goal checkpoint {turn}")))
+            .collect(),
+        requests: requests.clone(),
+    };
+    let mut harness = Harness::new(
+        model,
+        ToolRouter::new(vec![Box::new(Uppercase)]),
+        HarnessConfig::default(),
+    );
+    let mut events = Vec::new();
+    struct Recorder<'a>(&'a mut Vec<Event>);
+    impl Observer for Recorder<'_> {
+        fn observe(&mut self, event: &Event) {
+            self.0.push(event.clone());
+        }
+    }
+
+    for turn in 0..50 {
+        harness
+            .run(
+                format!("continue scripted Goal step {turn}"),
+                &mut Recorder(&mut events),
+            )
+            .await
+            .unwrap();
+    }
+
+    let hashes = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::ModelStarted {
+                tool_manifest_hash, ..
+            } => Some(tool_manifest_hash),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let recorded = requests.lock().unwrap();
+    let serialized_specs = recorded
+        .iter()
+        .map(|request| serde_json::to_vec(&request.tools).unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(hashes.len(), 50);
+    assert!(hashes.windows(2).all(|pair| pair[0] == pair[1]));
+    assert_eq!(serialized_specs.len(), 50);
+    assert!(serialized_specs.windows(2).all(|pair| pair[0] == pair[1]));
+}
+
+struct Shell127Fixture;
+
+impl ToolHandler for Shell127Fixture {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "shell".to_string(),
+            description: "Run a scripted command fixture".to_string(),
+            parameters: json!({"type": "object"}),
+        }
+    }
+}
+
+impl ToolRuntime for Shell127Fixture {
+    fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
+        Err(ToolError(
+            "command exited with code 127: mini-agent-missing-command: not found".to_string(),
+        ))
+    }
+}
+
+struct AdaptAfterShell127 {
+    seen_error: Arc<Mutex<bool>>,
+}
+
+impl Model for AdaptAfterShell127 {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        let failure = request
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::Tool {
+                    name,
+                    content,
+                    is_error: true,
+                    ..
+                } if name == "shell" => Some(content),
+                _ => None,
+            });
+        if let Some(failure) = failure {
+            assert!(failure.contains("code 127"));
+            *self.seen_error.lock().unwrap() = true;
+            return Ok(text_response(
+                "Shell was unavailable; switched to read-only inspection.",
+            ));
+        }
+        Ok(tool_response(
+            "shell-127",
+            "shell",
+            json!({"command": "fixture"}),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn shell_exit_127_error_evidence_drives_the_next_strategy() {
+    let seen_error = Arc::new(Mutex::new(false));
+    let mut harness = Harness::new(
+        AdaptAfterShell127 {
+            seen_error: seen_error.clone(),
+        },
+        ToolRouter::new(vec![Box::new(Shell127Fixture)]),
+        HarnessConfig::default(),
+    );
+    let mut events = Vec::new();
+    struct Recorder<'a>(&'a mut Vec<Event>);
+    impl Observer for Recorder<'_> {
+        fn observe(&mut self, event: &Event) {
+            self.0.push(event.clone());
+        }
+    }
+
+    let outcome = harness
+        .run("inspect the workspace", &mut Recorder(&mut events))
+        .await
+        .unwrap();
+
+    assert!(*seen_error.lock().unwrap());
+    assert_eq!(
+        outcome.final_text,
+        "Shell was unavailable; switched to read-only inspection."
+    );
+    assert!(outcome.messages.iter().any(|message| matches!(
+        message,
+        Message::Tool { name, content, is_error: true, .. }
+            if name == "shell" && content.contains("code 127")
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::ToolFinished { name, content, is_error: true, .. }
+            if name == "shell" && content.contains("code 127")
+    )));
+}
+
+#[tokio::test]
 async fn resumes_from_checkpoint_with_the_durable_tool_result_without_replaying_it() {
     struct RecordingExecutionJournal(Vec<crate::ExecutionJournalEntry>);
     impl crate::ExecutionJournalSink for RecordingExecutionJournal {
