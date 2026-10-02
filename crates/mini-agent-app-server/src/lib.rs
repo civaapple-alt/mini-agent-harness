@@ -414,13 +414,14 @@ pub struct SettledTurn {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct EventReplaySnapshot {
-    pub(crate) events: Vec<EventEnvelope>,
+    pub(crate) events: Vec<mini_agent_capabilities::SessionEventReplayEntry>,
     pub(crate) oldest_sequence: Option<u64>,
+    pub(crate) latest_sequence: Option<u64>,
     pub(crate) has_gap: bool,
 }
 
 struct EventReplayBuffer {
-    events: VecDeque<EventEnvelope>,
+    events: VecDeque<mini_agent_capabilities::SessionEventReplayEntry>,
     latest_sequence_by_thread: HashMap<String, u64>,
 }
 
@@ -432,13 +433,30 @@ impl EventReplayBuffer {
         }
     }
 
-    fn push(&mut self, event: EventEnvelope) {
+    fn observe(&mut self, thread_id: &ThreadId, sequence: u64) {
         self.latest_sequence_by_thread
-            .insert(event.thread_id.as_str().to_string(), event.sequence);
+            .entry(thread_id.as_str().to_string())
+            .and_modify(|latest| *latest = (*latest).max(sequence))
+            .or_insert(sequence);
+    }
+
+    fn push_entry(&mut self, entry: mini_agent_capabilities::SessionEventReplayEntry) {
+        self.observe(&entry.thread_id, entry.sequence);
+        if self.events.iter().any(|existing| {
+            existing.thread_id == entry.thread_id && existing.sequence == entry.sequence
+        }) {
+            return;
+        }
         if self.events.len() == EVENT_REPLAY_BUFFER {
             self.events.pop_front();
         }
-        self.events.push_back(event);
+        self.events.push_back(entry);
+    }
+
+    fn restore(&mut self, entries: Vec<mini_agent_capabilities::SessionEventReplayEntry>) {
+        for entry in entries {
+            self.push_entry(entry);
+        }
     }
 }
 
@@ -958,28 +976,28 @@ where
         let oldest_sequence = replay
             .events
             .iter()
-            .filter(|event| event.thread_id == *thread_id)
-            .map(|event| event.sequence)
+            .filter(|entry| entry.thread_id == *thread_id)
+            .map(|entry| entry.sequence)
             .min();
+        let latest_sequence = replay
+            .latest_sequence_by_thread
+            .get(thread_id.as_str())
+            .copied();
         let has_gap = oldest_sequence.map_or_else(
-            || {
-                replay
-                    .latest_sequence_by_thread
-                    .get(thread_id.as_str())
-                    .is_some_and(|latest| after_sequence < *latest)
-            },
+            || latest_sequence.is_some_and(|latest| after_sequence < latest),
             |oldest| after_sequence.saturating_add(1) < oldest,
         );
         let events = replay
             .events
             .iter()
-            .filter(|event| event.thread_id == *thread_id && event.sequence > after_sequence)
+            .filter(|entry| entry.thread_id == *thread_id && entry.sequence > after_sequence)
             .take(limit)
             .cloned()
             .collect();
         Ok(crate::EventReplaySnapshot {
             events,
             oldest_sequence,
+            latest_sequence,
             has_gap,
         })
     }
@@ -1073,6 +1091,26 @@ where
             reply,
         })
         .await
+    }
+
+    pub(crate) async fn turn_reconcile_action(
+        &self,
+        params: mini_agent_app_server_protocol::TurnReconcileParams,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::TurnReconcileResult>, ActionFailure>
+    {
+        self.request_action(|reply| Command::Reconcile { params, reply })
+            .await
+    }
+
+    pub(crate) async fn session_context_manifest_action(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<
+        ActionResponse<mini_agent_app_server_protocol::SessionContextManifestResult>,
+        ActionFailure,
+    > {
+        self.request_action(|reply| Command::ReadContextManifest { thread_id, reply })
+            .await
     }
 
     /// Requests cooperative cancellation of the active turn.

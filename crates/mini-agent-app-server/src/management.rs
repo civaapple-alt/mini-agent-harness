@@ -853,6 +853,30 @@ impl RuntimeManagementState {
             .and_then(|opened| opened.store.execution_state())
     }
 
+    pub(crate) fn context_manifest_store(
+        &self,
+    ) -> Option<mini_agent_capabilities::SessionContextManifestStore> {
+        self.session
+            .as_ref()
+            .map(|opened| opened.store.context_manifest_store())
+    }
+
+    pub(crate) fn event_replay_store(
+        &self,
+    ) -> Option<mini_agent_capabilities::SessionEventReplayStore> {
+        self.session
+            .as_ref()
+            .map(|opened| opened.store.event_replay_store())
+    }
+
+    pub(crate) fn context_manifest(
+        &self,
+    ) -> Result<Vec<mini_agent_capabilities::SessionContextManifestEntry>, AppServerError> {
+        self.context_manifest_store()
+            .map_or_else(|| Ok(Vec::new()), |store| store.entries())
+            .map_err(AppServerError::Checkpoint)
+    }
+
     pub(crate) fn reserve_execution_resume(
         &self,
         turn_id: &mini_agent_protocol::TurnId,
@@ -866,6 +890,25 @@ impl RuntimeManagementState {
             })?
             .store
             .reserve_execution_resume(turn_id, checkpoint_seq, request_id)
+            .map_err(AppServerError::Checkpoint)
+    }
+
+    pub(crate) fn reconcile_execution_tool_call(
+        &self,
+        request: mini_agent_capabilities::SessionReconciliationRequest,
+    ) -> Result<mini_agent_capabilities::ReconciliationReservation, AppServerError> {
+        if request.turn_id.as_str().is_empty() {
+            return Err(AppServerError::Checkpoint(
+                "reconciliation Turn id must not be empty".to_string(),
+            ));
+        }
+        self.session
+            .as_ref()
+            .ok_or_else(|| {
+                AppServerError::Checkpoint("session persistence is disabled".to_string())
+            })?
+            .store
+            .reconcile_execution_tool_call(request)
             .map_err(AppServerError::Checkpoint)
     }
 

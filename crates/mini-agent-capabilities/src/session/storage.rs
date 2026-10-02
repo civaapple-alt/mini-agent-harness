@@ -163,8 +163,13 @@ pub(super) fn load_records(
                 if stored_id != session_id {
                     return Err("session id does not match its file name".to_string().into());
                 }
-                if record.get("schema_version").and_then(Value::as_u64) != Some(SCHEMA_VERSION) {
-                    return Err("unsupported session schema version".to_string().into());
+                let schema_version = record.get("schema_version").and_then(Value::as_u64);
+                if schema_version != Some(SCHEMA_VERSION) {
+                    return Err(format!(
+                        "unsupported Session schema version {}; V2 requires exporting or archiving this Session with the previous release before opening it",
+                        schema_version.map_or_else(|| "missing".to_string(), |value| value.to_string())
+                    )
+                    .into());
                 }
                 created_at_ms = record
                     .get("timestamp_ms")
@@ -405,6 +410,31 @@ pub(super) fn load_records(
                     state.last_progress_ms = Some(record_timestamp_ms);
                 }
             }
+            Some("execution_reconciled") if header_seen => {
+                let request: SessionReconciliationRequest = serde_json::from_value(record.clone())
+                    .map_err(|error| format!("invalid execution reconciliation record: {error}"))?;
+                if record.get("thread_id").and_then(Value::as_str)
+                    != latest_checkpoint
+                        .as_ref()
+                        .map(|(_, checkpoint_thread, _)| checkpoint_thread.as_str())
+                    || record.get("session_id").and_then(Value::as_str) != Some(session_id)
+                {
+                    return Err(SessionLoadError::invalid_record(
+                        "execution reconciliation identity does not match its Session",
+                        Some(offset),
+                    ));
+                }
+                if execution_state.as_ref().is_none_or(|state| {
+                    state.checkpoint.turn_id != request.turn_id
+                        || state.checkpoint_seq != request.checkpoint_seq
+                }) {
+                    return Err(SessionLoadError::invalid_record(
+                        "execution reconciliation checkpoint does not match its Session state",
+                        Some(offset),
+                    ));
+                }
+                apply_execution_reconciliation(&mut execution_state, record_timestamp_ms, request);
+            }
             Some("recovery_gap") if header_seen => {
                 if recovery_gap.is_none() {
                     recovery_gap = Some(record.get("missing_seq").and_then(Value::as_u64));
@@ -487,6 +517,7 @@ pub(super) fn apply_execution_journal_entry(
                 pending_batch: None,
                 pending_user_question: None,
                 resume_requests: HashMap::new(),
+                reconciliation_requests: HashMap::new(),
             });
         }
         ExecutionJournalEntry::ToolBatchStarted { batch } => {
@@ -617,6 +648,63 @@ pub(super) fn apply_execution_journal_entry(
             }
         }
     }
+}
+
+pub(super) fn apply_execution_reconciliation(
+    current: &mut Option<SessionExecutionState>,
+    record_timestamp_ms: u64,
+    request: SessionReconciliationRequest,
+) {
+    let Some(state) = current.as_mut().filter(|state| {
+        state.checkpoint.turn_id == request.turn_id
+            && state.checkpoint_seq == request.checkpoint_seq
+    }) else {
+        return;
+    };
+    if state
+        .reconciliation_requests
+        .contains_key(&request.request_id)
+    {
+        return;
+    }
+    if let Some(call) = state
+        .pending_batch
+        .as_mut()
+        .filter(|batch| batch.intent.turn_id == request.turn_id)
+        .and_then(|batch| {
+            batch
+                .calls
+                .iter_mut()
+                .find(|call| call.call.id == request.tool_call_id)
+        })
+    {
+        match request.disposition {
+            SessionReconciliationDisposition::Completed => {
+                call.outcome.clone_from(&request.outcome);
+            }
+            SessionReconciliationDisposition::NotExecuted => {
+                call.started = false;
+                call.outcome = None;
+            }
+        }
+    }
+    state
+        .reconciliation_requests
+        .insert(request.request_id.clone(), request.clone());
+    let still_uncertain = state.pending_batch.as_ref().is_some_and(|batch| {
+        batch
+            .calls
+            .iter()
+            .any(|call| call.started && call.outcome.is_none())
+    });
+    state.status = if still_uncertain {
+        SessionExecutionStatus::NeedsReconciliation
+    } else {
+        SessionExecutionStatus::WaitingForContinue
+    };
+    state.reason =
+        still_uncertain.then(|| "other started tool calls still need reconciliation".to_string());
+    state.last_progress_ms = Some(record_timestamp_ms);
 }
 
 pub(super) fn acquire_lock(directory: &Path, session_id: &str) -> Result<SessionLock, String> {

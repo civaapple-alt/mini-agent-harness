@@ -1927,23 +1927,32 @@ async fn reports_gap_after_the_global_replay_window_evicts_a_thread() {
     );
     {
         let mut replay = server.event_replay.lock().unwrap();
-        replay.push(mini_agent_protocol::EventEnvelope::new(
+        let event = mini_agent_protocol::EventEnvelope::new(
             ThreadId::new("thread-1"),
             None,
             1,
             Event::RunStarted {
                 prompt: "first".to_string(),
             },
-        ));
+        );
+        replay.observe(&event.thread_id, event.sequence);
+        replay.push_entry(
+            mini_agent_capabilities::SessionEventReplayEntry::from_event(&event, 1).unwrap(),
+        );
         for sequence in 1..=512 {
-            replay.push(mini_agent_protocol::EventEnvelope::new(
+            let event = mini_agent_protocol::EventEnvelope::new(
                 ThreadId::new("thread-2"),
                 None,
                 sequence,
                 Event::RunStarted {
                     prompt: "other".to_string(),
                 },
-            ));
+            );
+            replay.observe(&event.thread_id, event.sequence);
+            replay.push_entry(
+                mini_agent_capabilities::SessionEventReplayEntry::from_event(&event, sequence)
+                    .unwrap(),
+            );
         }
     }
 

@@ -4,6 +4,26 @@ impl<M> AppServerConnection<M>
 where
     M: Model + Send + 'static,
 {
+    pub(super) async fn handle_session_context_manifest(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<SessionContextManifestParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        action_response(
+            request.id,
+            self.server
+                .session_context_manifest_action(params.thread_id),
+            Clone::clone,
+        )
+        .await
+    }
+
     pub(super) async fn handle_turn_events(
         &self,
         request: JsonRpcRequest,
@@ -21,14 +41,38 @@ where
             .replay_events(&params.thread_id, params.after_sequence, limit)
         {
             Ok(snapshot) => {
-                let next_cursor = snapshot.events.last().map(|event| event.sequence);
+                let next_cursor = if snapshot.events.len() < limit {
+                    snapshot.latest_sequence
+                } else {
+                    snapshot.events.last().map(|event| event.sequence)
+                };
                 response_value(
                     request.id,
                     TurnEventsResult {
                         data: snapshot
                             .events
                             .into_iter()
-                            .map(TurnEventNotification::from)
+                            .map(|entry| TurnEventReplayNotification {
+                                thread_id: mini_agent_protocol::ThreadId::new(
+                                    entry.thread_id.as_str(),
+                                ),
+                                turn_id: entry.turn_id,
+                                sequence: entry.sequence,
+                                item_id: entry.item_id,
+                                turn_source: entry.turn_source,
+                                event_type: entry.event_type,
+                                tool_call_id: entry.tool_call_id,
+                                tool_name: entry.tool_name,
+                                context_sources: entry
+                                    .context_sources
+                                    .into_iter()
+                                    .map(|source| TurnEventContextSource {
+                                        source_id: source.source_id,
+                                        version_fingerprint: source.version_fingerprint,
+                                    })
+                                    .collect(),
+                                recorded_at_ms: entry.recorded_at_ms,
+                            })
                             .collect(),
                         next_cursor,
                         oldest_sequence: snapshot.oldest_sequence,
@@ -110,6 +154,43 @@ where
         action_response(
             request.id,
             self.server.turn_resume_action(params),
+            Clone::clone,
+        )
+        .await
+    }
+
+    pub(super) async fn handle_turn_reconcile(
+        &self,
+        request: JsonRpcRequest,
+    ) -> Option<JsonRpcResponse> {
+        let params = match request.decode_params::<TurnReconcileParams>() {
+            Ok(params) => params,
+            Err(error) => return response_error(request.id, error),
+        };
+        if let Err(error) = self.check_thread(&params.thread_id) {
+            return response_error(request.id, error);
+        }
+        if params.request_id.trim().is_empty()
+            || params.request_id.len() > 128
+            || params.tool_call_id.trim().is_empty()
+            || params.tool_call_id.len() > 128
+            || params.evidence_summary.trim().is_empty()
+            || params.evidence_summary.len() > 1024
+            || params
+                .result
+                .as_ref()
+                .is_some_and(|result| result.content.len() > 64 * 1024)
+        {
+            return response_error(
+                request.id,
+                JsonRpcError::invalid_params(
+                    "reconciliation fields exceed their fixed size limits",
+                ),
+            );
+        }
+        action_response(
+            request.id,
+            self.server.turn_reconcile_action(params),
             Clone::clone,
         )
         .await

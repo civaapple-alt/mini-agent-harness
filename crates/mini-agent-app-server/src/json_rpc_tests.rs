@@ -2,7 +2,8 @@ use super::*;
 use crate::tests::{DoneModel, harness};
 use mini_agent_app_server_protocol::{
     ActionGrantScope, ApprovalDecision, CapabilityProviderSelection, ClientCapabilities,
-    METHOD_USER_QUESTION_RESPOND, SESSION_FORK_CONFLICT_CODE, TurnSource,
+    METHOD_SESSION_CONTEXT_MANIFEST, METHOD_TURN_RECONCILE, METHOD_USER_QUESTION_RESPOND,
+    SESSION_FORK_CONFLICT_CODE, TurnSource,
 };
 use mini_agent_capabilities::{
     ApprovalController, ApprovalPolicy, BackgroundShellManager, ImageStore, ResultStore,
@@ -946,7 +947,8 @@ async fn scripted_session_reads_large_shell_output_after_compaction_and_restart(
     );
     connection.shutdown().await.unwrap();
 
-    let resumed = SessionStore::open(&root, SessionStoreRequest::Resume(session_id)).unwrap();
+    let resumed =
+        SessionStore::open(&root, SessionStoreRequest::Resume(session_id.clone())).unwrap();
     let mut restarted = tool_output_session_connection(
         ToolOutputRecoveryModel {
             mode: ToolOutputRecoveryMode::ResumedSession,
@@ -2645,8 +2647,13 @@ async fn child_wakeup_source_is_live_replayable_and_persisted_on_thread_items() 
     .await;
     let replay_events = replay["data"].as_array().unwrap();
     assert!(replay_events.iter().any(|event| {
-        event["event"]["type"] == "turn_started" && event["turnSource"] == "child_wakeup"
+        event["eventType"] == "turn_started" && event["turnSource"] == "child_wakeup"
     }));
+    assert!(
+        replay_events
+            .iter()
+            .all(|event| event.get("event").is_none())
+    );
 
     connection.shutdown().await.unwrap();
     let resumed = SessionStore::open(&root, SessionStoreRequest::Resume(session_id)).unwrap();
@@ -2665,6 +2672,22 @@ async fn child_wakeup_source_is_live_replayable_and_persisted_on_thread_items() 
             .unwrap()
             .iter()
             .all(|entry| entry["turnSource"] == "child_wakeup")
+    );
+    let replay_after_restart = rpc_call(
+        &mut restarted,
+        3,
+        METHOD_TURN_EVENTS,
+        serde_json::json!({"threadId": thread_id, "afterSequence": 0, "limit": 64}),
+    )
+    .await;
+    let replayed_after_restart = replay_after_restart["data"].as_array().unwrap();
+    assert!(replayed_after_restart.iter().any(|event| {
+        event["eventType"] == "turn_finished" && event["turnSource"] == "child_wakeup"
+    }));
+    assert!(
+        replayed_after_restart
+            .iter()
+            .all(|event| event.get("event").is_none())
     );
     restarted.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
@@ -2829,6 +2852,282 @@ async fn turn_resume_continues_the_same_turn_from_a_persisted_execution_checkpoi
     assert_eq!(result["value"]["status"], "completed");
     assert_eq!(result["value"]["finalText"], "done");
     assert_eq!(result["value"]["recovery"]["status"], "settled");
+
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn turn_reconcile_is_durable_idempotent_and_unblocks_only_the_same_turn() {
+    let root = rpc_root("execution-checkpoint-reconcile");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let session_id = opened.store.session_id().to_string();
+    let thread_id = opened.store.thread_id().to_string();
+    let input = TurnInput::new(TurnInputMode::Start, "verify the operation result");
+    let turn_id = mini_agent_protocol::TurnId::new("turn-reconcile-checkpoint");
+    let messages = vec![Message::User {
+        text: input.text.clone(),
+    }];
+    let mut journal = opened.store.execution_journal(&messages);
+    let checkpoint_seq = journal
+        .append(mini_agent_core::ExecutionJournalEntry::Checkpoint {
+            checkpoint: mini_agent_core::ExecutionCheckpoint {
+                turn_id: turn_id.clone(),
+                input,
+                messages,
+                next_model_step: 1,
+                final_text: String::new(),
+                phase: mini_agent_core::ExecutionPhase::ToolBatch,
+            },
+        })
+        .unwrap();
+    let call = ToolCall {
+        id: "call-uncertain".to_string(),
+        name: "shell".to_string(),
+        arguments: serde_json::json!({"command":"touch should-not-repeat"}),
+    };
+    journal
+        .append(mini_agent_core::ExecutionJournalEntry::ToolBatchStarted {
+            batch: mini_agent_core::ToolBatchIntent {
+                turn_id: turn_id.clone(),
+                step: 1,
+                reasoning: String::new(),
+                text: String::new(),
+                calls: vec![call.clone()],
+            },
+        })
+        .unwrap();
+    journal
+        .append(mini_agent_core::ExecutionJournalEntry::ToolCallStarted {
+            turn_id: turn_id.clone(),
+            step: 1,
+            call_id: call.id.clone(),
+        })
+        .unwrap();
+    drop(journal);
+    drop(opened);
+
+    let resumed =
+        SessionStore::open(&root, SessionStoreRequest::Resume(session_id.clone())).unwrap();
+    let mut connection = managed_connection_with_session(DoneModel, root.clone(), resumed);
+    initialize_connection(&mut connection, "execution-checkpoint-reconcile-test").await;
+
+    let checkpoint = rpc_call(
+        &mut connection,
+        2,
+        "thread/read",
+        serde_json::json!({"threadId": thread_id}),
+    )
+    .await;
+    assert_eq!(
+        checkpoint["value"]["executionRecovery"]["status"],
+        "needs_reconciliation"
+    );
+    assert_eq!(
+        checkpoint["value"]["executionRecovery"]["uncertainToolCalls"][0]["toolCallId"],
+        call.id
+    );
+
+    let blocked_start = rpc_call(
+        &mut connection,
+        3,
+        METHOD_TURN_START,
+        serde_json::json!({
+            "threadId": thread_id,
+            "input": {"mode": "start", "text": "do not replace the uncertain Turn"}
+        }),
+    )
+    .await;
+    assert_eq!(blocked_start["value"]["status"], "not_submitted");
+    let blocked_resume = connection
+        .handle_request(JsonRpcRequest::request(
+            4,
+            METHOD_TURN_RESUME,
+            serde_json::json!({
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "checkpointSeq": checkpoint_seq,
+                "requestId": "resume-before-reconciliation"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(blocked_resume.error.is_some());
+
+    let reconcile_params = serde_json::json!({
+        "threadId": thread_id,
+        "turnId": turn_id,
+        "checkpointSeq": checkpoint_seq,
+        "toolCallId": call.id,
+        "requestId": "reconcile-call-1",
+        "disposition": "completed",
+        "result": {"status": "completed", "content": "verified receipt"},
+        "evidenceSummary": "confirmed the receipt in the destination system"
+    });
+    let mut stale_params = reconcile_params.clone();
+    stale_params["checkpointSeq"] = serde_json::json!(checkpoint_seq + 1);
+    let stale = connection
+        .handle_request(JsonRpcRequest::request(
+            5,
+            METHOD_TURN_RECONCILE,
+            stale_params,
+        ))
+        .await
+        .unwrap();
+    assert!(stale.error.is_some());
+    let reconciled = rpc_call(
+        &mut connection,
+        6,
+        METHOD_TURN_RECONCILE,
+        reconcile_params.clone(),
+    )
+    .await;
+    assert_eq!(reconciled["value"]["status"], "applied");
+    assert_eq!(reconciled["value"]["turnId"], turn_id.as_str());
+    assert_eq!(reconciled["value"]["checkpointSeq"], checkpoint_seq);
+
+    let duplicate = rpc_call(
+        &mut connection,
+        7,
+        METHOD_TURN_RECONCILE,
+        reconcile_params.clone(),
+    )
+    .await;
+    assert_eq!(duplicate["value"]["status"], "already_applied");
+
+    let mut conflicting_duplicate = reconcile_params;
+    conflicting_duplicate["result"]["content"] = serde_json::json!("different result");
+    let conflict = connection
+        .handle_request(JsonRpcRequest::request(
+            8,
+            METHOD_TURN_RECONCILE,
+            conflicting_duplicate,
+        ))
+        .await
+        .unwrap();
+    assert!(conflict.error.is_some());
+
+    let recovered = rpc_call(
+        &mut connection,
+        9,
+        "thread/read",
+        serde_json::json!({"threadId": thread_id}),
+    )
+    .await;
+    assert_eq!(
+        recovered["value"]["executionRecovery"]["status"],
+        "waiting_for_continue"
+    );
+    assert_eq!(
+        recovered["value"]["executionRecovery"]["uncertainToolCalls"],
+        Value::Null
+    );
+
+    connection.shutdown().await.unwrap();
+    let durable =
+        SessionStore::open(&root, SessionStoreRequest::Resume(session_id.clone())).unwrap();
+    let durable_state = durable.store.execution_state().unwrap();
+    assert_eq!(
+        durable_state.status,
+        mini_agent_capabilities::SessionExecutionStatus::WaitingForContinue
+    );
+    assert_eq!(
+        durable_state.pending_batch.unwrap().calls[0]
+            .outcome
+            .as_ref()
+            .unwrap()
+            .content,
+        "verified receipt"
+    );
+    drop(durable);
+
+    let resumed =
+        SessionStore::open(&root, SessionStoreRequest::Resume(session_id.clone())).unwrap();
+    let mut continued = managed_connection_with_session(DoneModel, root.clone(), resumed);
+    initialize_connection(&mut continued, "reconciled-result-resume-test").await;
+    let submission = rpc_call(
+        &mut continued,
+        2,
+        METHOD_TURN_RESUME,
+        serde_json::json!({
+            "threadId": thread_id,
+            "turnId": turn_id,
+            "checkpointSeq": checkpoint_seq,
+            "requestId": "resume-after-reconciliation"
+        }),
+    )
+    .await;
+    assert_eq!(submission["value"]["status"], "started");
+    assert_eq!(submission["value"]["turn_id"], turn_id.as_str());
+    wait_for_turn_finished_id(&mut continued, turn_id.as_str()).await;
+    let resumed_result = rpc_call(
+        &mut continued,
+        3,
+        METHOD_TURN_READ,
+        serde_json::json!({"turnId": turn_id}),
+    )
+    .await;
+    assert_eq!(resumed_result["value"]["status"], "completed");
+    assert!(
+        resumed_result["value"]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["role"] == "tool" && message["content"] == "verified receipt")
+    );
+    assert!(!root.join("should-not-repeat").exists());
+    continued.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn session_context_manifest_is_read_from_the_reopened_session_store() {
+    let root = rpc_root("session-context-manifest-rpc");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let session_id = opened.store.session_id().to_string();
+    let thread_id = opened.store.thread_id().to_string();
+    opened
+        .store
+        .context_manifest_store()
+        .append(
+            &thread_id,
+            Some(&mini_agent_protocol::TurnId::new("turn-context-manifest")),
+            &[mini_agent_protocol::ContextInjectionRecord {
+                id: "project-instructions".to_string(),
+                kind: mini_agent_protocol::ContextInjectionKind::ProjectInstructions,
+                source: "AGENTS.md".to_string(),
+                workspace: Some("workspace-a".to_string()),
+                path: Some("AGENTS.md".to_string()),
+                scope: "workspace".to_string(),
+                bytes: 128,
+                fingerprint: "sha256:context-fingerprint".to_string(),
+                supersedes: None,
+                reused: false,
+            }],
+        )
+        .unwrap();
+    drop(opened);
+
+    let resumed = SessionStore::open(&root, SessionStoreRequest::Resume(session_id)).unwrap();
+    let mut connection = managed_connection_with_session(DoneModel, root.clone(), resumed);
+    initialize_connection(&mut connection, "session-context-manifest-test").await;
+    let result = rpc_call(
+        &mut connection,
+        2,
+        METHOD_SESSION_CONTEXT_MANIFEST,
+        serde_json::json!({"threadId": thread_id}),
+    )
+    .await;
+    let entry = &result["value"]["data"][0];
+    assert_eq!(entry["sourceName"], "AGENTS.md");
+    assert_eq!(entry["versionFingerprint"], "sha256:context-fingerprint");
+    assert_eq!(entry["permissionBasis"], "workspace instruction policy");
+    assert!(
+        result
+            .to_string()
+            .find("source body must stay absent")
+            .is_none()
+    );
 
     connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();

@@ -8,8 +8,8 @@ use mini_agent_core::ExecutionToolCall;
 use mini_agent_core::SessionState;
 use mini_agent_protocol::{
     ChildTaskAttemptKind, ContextByteBreakdown, ContextInjectionRecord, Message, ModelSelection,
-    ModelTiming, ModelUsage, ReasoningSelection, TurnId, TurnSource, TurnWorkflow,
-    UserQuestionInteraction,
+    ModelTiming, ModelUsage, ReasoningSelection, ToolExecutionOutcome, TurnId, TurnSource,
+    TurnWorkflow, UserQuestionInteraction,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -24,15 +24,26 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "session/context_manifest.rs"]
+mod context_manifest;
 #[path = "session/diagnostics.rs"]
 mod diagnostics;
+#[path = "session/event_replay.rs"]
+mod event_replay;
 #[path = "session/storage.rs"]
 mod storage;
+pub use context_manifest::{
+    MAX_CONTEXT_MANIFEST_ENTRIES, SessionContextManifestEntry, SessionContextManifestStore,
+};
 pub use diagnostics::{
     SESSION_DOCTOR_SCHEMA_VERSION, SessionDiagnosticCounts, SessionDiagnosticFinding,
     SessionDiagnosticIssue, SessionDiagnosticReport, SessionInspectionCounts,
     SessionInspectionStatus, SessionIntegrityCounts, SessionIntegrityStatus, SessionRecoveryCounts,
     SessionRecoveryStatus, SessionRepairResult,
+};
+pub use event_replay::{
+    MAX_SESSION_EVENT_REPLAY_ENTRIES, SessionEventContextSource, SessionEventReplayEntry,
+    SessionEventReplayStore,
 };
 use storage::{
     acquire_lock, copy_attachments, load_records, validate_session_id, write_json_atomic,
@@ -40,7 +51,7 @@ use storage::{
 };
 pub use storage::{resolve_session_file, session_directory};
 
-const SCHEMA_VERSION: u64 = 1;
+const SCHEMA_VERSION: u64 = 2;
 const MAX_SESSION_BYTES: u64 = 32 * 1024 * 1024;
 pub(crate) const MAX_RECORD_BYTES: usize = 2 * 1024 * 1024;
 const MAX_WORKSPACE_KEY: usize = 240;
@@ -210,6 +221,33 @@ pub enum ExecutionResumeReservation {
     AlreadyAccepted,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionReconciliationDisposition {
+    Completed,
+    NotExecuted,
+}
+
+/// Durable operator decision for one uncertain tool call. This is stored in
+/// the Session journal and keyed by the caller's stable request ID.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionReconciliationRequest {
+    pub turn_id: TurnId,
+    pub checkpoint_seq: u64,
+    pub tool_call_id: String,
+    pub request_id: String,
+    pub disposition: SessionReconciliationDisposition,
+    pub outcome: Option<ToolExecutionOutcome>,
+    pub evidence_summary: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReconciliationReservation {
+    Applied,
+    AlreadyApplied,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionExecutionState {
@@ -225,6 +263,8 @@ pub struct SessionExecutionState {
     pub pending_user_question: Option<UserQuestionInteraction>,
     #[serde(default)]
     pub resume_requests: HashMap<String, u64>,
+    #[serde(default)]
+    pub reconciliation_requests: HashMap<String, SessionReconciliationRequest>,
 }
 
 #[derive(Clone)]
@@ -872,6 +912,17 @@ impl SessionStore {
         Ok(ExecutionResumeReservation::Accepted(Box::new(state)))
     }
 
+    pub fn reconcile_execution_tool_call(
+        &self,
+        request: SessionReconciliationRequest,
+    ) -> Result<ReconciliationReservation, String> {
+        let state = self
+            .execution_state()
+            .ok_or_else(|| "no execution checkpoint is available".to_string())?;
+        let mut journal = self.execution_journal(&state.checkpoint.messages);
+        journal.reconcile_tool_call(request)
+    }
+
     pub fn execution_journal(&self, base_messages: &[Message]) -> SessionExecutionJournal {
         let state = self.execution_state();
         SessionExecutionJournal {
@@ -893,6 +944,22 @@ impl SessionStore {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub fn context_manifest_store(&self) -> SessionContextManifestStore {
+        SessionContextManifestStore::new(
+            &self.session_dir,
+            self.session_id.clone(),
+            Arc::clone(&self.append_lock),
+        )
+    }
+
+    pub fn event_replay_store(&self) -> SessionEventReplayStore {
+        SessionEventReplayStore::new(
+            &self.session_dir,
+            self.session_id.clone(),
+            Arc::clone(&self.append_lock),
+        )
     }
 
     pub fn session_control(&self) -> Result<SessionControlState, String> {
@@ -3542,6 +3609,87 @@ impl SessionExecutionJournal {
         self.execution_state.lock().unwrap().clone()
     }
 
+    /// Persists one operator decision as a single journal record. The reducer
+    /// applies the supplied result and releases recovery only after every
+    /// started call with an unknown result has been dispositioned.
+    pub fn reconcile_tool_call(
+        &mut self,
+        request: SessionReconciliationRequest,
+    ) -> Result<ReconciliationReservation, String> {
+        if request.request_id.trim().is_empty() || request.request_id.len() > 128 {
+            return Err("reconciliation request id must be non-empty and at most 128 bytes".into());
+        }
+        if request.tool_call_id.trim().is_empty() || request.tool_call_id.len() > 128 {
+            return Err("tool call id must be non-empty and at most 128 bytes".into());
+        }
+        if request.evidence_summary.trim().is_empty() || request.evidence_summary.len() > 1024 {
+            return Err("reconciliation evidence must be non-empty and at most 1024 bytes".into());
+        }
+        match (request.disposition, request.outcome.as_ref()) {
+            (SessionReconciliationDisposition::Completed, Some(outcome))
+                if matches!(
+                    outcome.status,
+                    mini_agent_protocol::ToolExecutionStatus::Completed
+                        | mini_agent_protocol::ToolExecutionStatus::Failed
+                ) && outcome.content.len() <= 64 * 1024
+                    && outcome.context_messages.is_empty()
+                    && outcome.context_injections.is_empty() => {}
+            (SessionReconciliationDisposition::NotExecuted, None) => {}
+            _ => {
+                return Err(
+                    "reconciliation disposition and bounded tool result do not match".into(),
+                );
+            }
+        }
+
+        let _writer = self.writer_state.lock().unwrap();
+        let mut state_guard = self.execution_state.lock().unwrap();
+        let state = state_guard
+            .as_ref()
+            .ok_or_else(|| "no execution checkpoint is available".to_string())?;
+        if let Some(previous) = state.reconciliation_requests.get(&request.request_id) {
+            return if previous == &request {
+                Ok(ReconciliationReservation::AlreadyApplied)
+            } else {
+                Err("reconciliation request id was already used for another decision".into())
+            };
+        }
+        if request.turn_id != state.checkpoint.turn_id {
+            return Err("reconciliation request does not match the current execution Turn".into());
+        }
+        if request.checkpoint_seq != state.checkpoint_seq {
+            return Err(format!(
+                "execution checkpoint is stale: expected {}, current {}",
+                request.checkpoint_seq, state.checkpoint_seq
+            ));
+        }
+        if state.status != SessionExecutionStatus::NeedsReconciliation {
+            return Err(format!(
+                "execution does not need reconciliation while status is {:?}",
+                state.status
+            ));
+        }
+        let uncertain_call_exists = state.pending_batch.as_ref().is_some_and(|batch| {
+            batch.calls.iter().any(|call| {
+                call.call.id == request.tool_call_id && call.started && call.outcome.is_none()
+            })
+        });
+        if !uncertain_call_exists {
+            return Err("tool call is not awaiting reconciliation".into());
+        }
+
+        let timestamp = timestamp_ms();
+        let mut record = serde_json::to_value(&request)
+            .map_err(|error| format!("cannot encode reconciliation record: {error}"))?;
+        record["kind"] = json!("execution_reconciled");
+        record["thread_id"] = json!(self.thread_id);
+        record["session_id"] = json!(self.session_id);
+        record["timestamp_ms"] = json!(timestamp);
+        append_execution_record(&self.path, &self.append_lock, &mut record)?;
+        storage::apply_execution_reconciliation(&mut state_guard, timestamp, request);
+        Ok(ReconciliationReservation::Applied)
+    }
+
     /// Durably records one ask_user interaction before the answer is acked.
     pub fn persist_user_question(
         &mut self,
@@ -3661,7 +3809,7 @@ fn append_execution_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mini_agent_protocol::{TurnInput, TurnInputMode};
+    use mini_agent_protocol::{ToolCall, ToolExecutionOutcome, TurnInput, TurnInputMode};
 
     fn exact_fork_metadata() -> SessionForkMetadata {
         SessionForkMetadata {
@@ -3671,6 +3819,224 @@ mod tests {
             compacted: false,
             method: "exact".to_string(),
         }
+    }
+
+    #[test]
+    fn reconciliation_is_durable_idempotent_and_keeps_other_calls_blocked() {
+        let root = crate::test_support::test_root();
+        let opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let turn_id = TurnId::new("turn-reconcile");
+        let messages = vec![Message::User {
+            text: "perform two operations".to_string(),
+        }];
+        let calls = vec![
+            ToolCall {
+                id: "call-done".to_string(),
+                name: "write_file".to_string(),
+                arguments: json!({"path":"a.txt"}),
+            },
+            ToolCall {
+                id: "call-unknown".to_string(),
+                name: "send_message".to_string(),
+                arguments: json!({"recipient":"user"}),
+            },
+        ];
+        let mut journal = opened.store.execution_journal(&messages);
+        let checkpoint_seq = journal
+            .append(ExecutionJournalEntry::Checkpoint {
+                checkpoint: ExecutionCheckpoint {
+                    turn_id: turn_id.clone(),
+                    input: TurnInput {
+                        mode: TurnInputMode::Start,
+                        text: "perform two operations".to_string(),
+                        selected_skills: Vec::new(),
+                        workflow: None,
+                        model_selection: None,
+                        reasoning_selection: None,
+                        reasoning_effort: None,
+                    },
+                    messages,
+                    next_model_step: 1,
+                    final_text: String::new(),
+                    phase: ExecutionPhase::ToolBatch,
+                },
+            })
+            .unwrap();
+        journal
+            .append(ExecutionJournalEntry::ToolBatchStarted {
+                batch: mini_agent_core::ToolBatchIntent {
+                    turn_id: turn_id.clone(),
+                    step: 1,
+                    reasoning: String::new(),
+                    text: String::new(),
+                    calls: calls.clone(),
+                },
+            })
+            .unwrap();
+        for call in &calls {
+            journal
+                .append(ExecutionJournalEntry::ToolCallStarted {
+                    turn_id: turn_id.clone(),
+                    step: 1,
+                    call_id: call.id.clone(),
+                })
+                .unwrap();
+        }
+        drop(journal);
+        drop(opened);
+
+        let resumed =
+            SessionStore::open(&root, SessionRequest::Resume(session_id.clone())).unwrap();
+        let state = resumed.store.execution_state().unwrap();
+        assert_eq!(state.status, SessionExecutionStatus::NeedsReconciliation);
+        assert_eq!(state.checkpoint_seq, checkpoint_seq);
+        let completed = SessionReconciliationRequest {
+            turn_id: turn_id.clone(),
+            checkpoint_seq,
+            tool_call_id: "call-done".to_string(),
+            request_id: "reconcile-done".to_string(),
+            disposition: SessionReconciliationDisposition::Completed,
+            outcome: Some(ToolExecutionOutcome::completed("durable result")),
+            evidence_summary: "verified in the target system".to_string(),
+        };
+        assert_eq!(
+            resumed
+                .store
+                .reconcile_execution_tool_call(completed.clone())
+                .unwrap(),
+            ReconciliationReservation::Applied
+        );
+        assert_eq!(
+            resumed
+                .store
+                .reconcile_execution_tool_call(completed)
+                .unwrap(),
+            ReconciliationReservation::AlreadyApplied
+        );
+        assert_eq!(
+            resumed.store.execution_state().unwrap().status,
+            SessionExecutionStatus::NeedsReconciliation
+        );
+        assert_eq!(
+            resumed
+                .store
+                .reconcile_execution_tool_call(SessionReconciliationRequest {
+                    turn_id: turn_id.clone(),
+                    checkpoint_seq,
+                    tool_call_id: "call-unknown".to_string(),
+                    request_id: "reconcile-not-executed".to_string(),
+                    disposition: SessionReconciliationDisposition::NotExecuted,
+                    outcome: None,
+                    evidence_summary: "verified no request reached the receiver".to_string(),
+                })
+                .unwrap(),
+            ReconciliationReservation::Applied
+        );
+        let state = resumed.store.execution_state().unwrap();
+        assert_eq!(state.status, SessionExecutionStatus::WaitingForContinue);
+        let batch = state.pending_batch.unwrap();
+        assert_eq!(
+            batch.calls[0].outcome.as_ref().unwrap().content,
+            "durable result"
+        );
+        assert!(!batch.calls[1].started);
+        drop(resumed);
+
+        let recovered = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        let state = recovered.store.execution_state().unwrap();
+        assert_eq!(state.status, SessionExecutionStatus::WaitingForContinue);
+        assert_eq!(
+            state.pending_batch.unwrap().calls[0]
+                .outcome
+                .as_ref()
+                .unwrap()
+                .content,
+            "durable result"
+        );
+        drop(recovered);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn rejects_v1_session_without_rewriting_it() {
+        let root = crate::test_support::test_root();
+        let opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let path = opened.store.path().to_path_buf();
+        drop(opened);
+        let mut bytes = fs::read(&path).unwrap();
+        let original = bytes.clone();
+        let header_end = bytes.iter().position(|byte| *byte == b'\n').unwrap();
+        let header: Value = serde_json::from_slice(&bytes[..header_end]).unwrap();
+        let mut old_header = header;
+        old_header["schema_version"] = json!(1);
+        let encoded = serde_json::to_vec(&old_header).unwrap();
+        let mut old_bytes = encoded;
+        old_bytes.push(b'\n');
+        old_bytes.extend_from_slice(&bytes[header_end + 1..]);
+        fs::write(&path, &old_bytes).unwrap();
+        bytes = fs::read(&path).unwrap();
+
+        let error = SessionStore::open(&root, SessionRequest::Resume(session_id))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("unsupported Session schema version 1"));
+        assert!(error.contains("exporting or archiving"));
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert_ne!(bytes, original);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn context_manifest_survives_session_reopen_without_context_body() {
+        let root = crate::test_support::test_root();
+        let opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let thread_id = opened.store.thread_id().to_string();
+        let record = ContextInjectionRecord {
+            id: "skill_definition_test".to_string(),
+            kind: mini_agent_protocol::ContextInjectionKind::Skill,
+            source: "Skill test".to_string(),
+            workspace: Some("project".to_string()),
+            path: None,
+            scope: "this Turn".to_string(),
+            bytes: 42,
+            fingerprint: "fingerprint-v1".to_string(),
+            supersedes: None,
+            reused: false,
+        };
+        opened
+            .store
+            .context_manifest_store()
+            .append(&thread_id, Some(&TurnId::new("turn-manifest")), &[record])
+            .unwrap();
+        let manifest_path = opened
+            .store
+            .path()
+            .parent()
+            .unwrap()
+            .join("context_manifest.json");
+        drop(opened);
+
+        let reopened = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        let entries = reopened.store.context_manifest_store().entries().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].source_id, "skill_definition_test");
+        assert_eq!(entries[0].version_fingerprint, "fingerprint-v1");
+        assert_eq!(
+            entries[0].permission_basis,
+            "explicit Turn skill activation"
+        );
+        assert_eq!(
+            entries[0].injection_reason,
+            "include the selected Skill definition"
+        );
+        let bytes = fs::read_to_string(manifest_path).unwrap();
+        assert!(!bytes.contains("private model-only body"));
+        drop(reopened);
+        crate::test_support::remove_test_root(&root);
     }
 
     #[test]

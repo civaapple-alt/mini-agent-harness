@@ -12,8 +12,10 @@ use mini_agent_protocol::ModelUsage;
 use mini_agent_protocol::ToolCall;
 use mini_agent_protocol::ToolError;
 use mini_agent_protocol::ToolExecutionOutcome;
+use mini_agent_protocol::ToolExecutionRequest;
 use mini_agent_protocol::ToolExecutionStatus;
 use mini_agent_protocol::ToolHandler;
+use mini_agent_protocol::ToolReplaySafety;
 use mini_agent_protocol::ToolRuntime;
 use mini_agent_protocol::ToolSpec;
 use mini_agent_protocol::TurnInput;
@@ -24,6 +26,7 @@ use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct ScriptedModel {
     responses: VecDeque<ModelResponse>,
@@ -496,6 +499,103 @@ async fn resumes_from_checkpoint_with_the_durable_tool_result_without_replaying_
         entry,
         crate::ExecutionJournalEntry::Checkpoint { checkpoint }
             if checkpoint.turn_id == turn_id && checkpoint.next_model_step == 2
+    )));
+}
+
+#[tokio::test]
+async fn does_not_replay_an_uncertain_side_effecting_tool_call() {
+    struct RecordingExecutionJournal(Vec<crate::ExecutionJournalEntry>);
+    impl crate::ExecutionJournalSink for RecordingExecutionJournal {
+        fn append(&mut self, entry: crate::ExecutionJournalEntry) -> Result<u64, String> {
+            self.0.push(entry);
+            Ok(self.0.len() as u64)
+        }
+    }
+
+    struct SideEffect(Arc<AtomicUsize>);
+    impl ToolHandler for SideEffect {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "side_effect".to_string(),
+                description: "A non-replayable side effect".to_string(),
+                parameters: json!({"type": "object"}),
+            }
+        }
+    }
+    impl ToolRuntime for SideEffect {
+        fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok("effect performed".to_string())
+        }
+
+        fn recovery_replay_safety(&self, _request: &ToolExecutionRequest) -> ToolReplaySafety {
+            ToolReplaySafety::Never
+        }
+    }
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut harness = Harness::new(
+        RecordingModel {
+            responses: VecDeque::from([text_response("must not run yet")]),
+            requests: Arc::clone(&requests),
+        },
+        ToolRouter::new(vec![Box::new(SideEffect(Arc::clone(&calls)))]),
+        HarnessConfig::default(),
+    );
+    let call = ToolCall {
+        id: "call-uncertain".to_string(),
+        name: "side_effect".to_string(),
+        arguments: json!({"destination": "receiver"}),
+    };
+    let input = TurnInput::new(TurnInputMode::Start, "continue the pending operation");
+    let turn_id = mini_agent_protocol::TurnId::new("turn-uncertain");
+    let checkpoint = crate::ExecutionCheckpoint {
+        turn_id: turn_id.clone(),
+        input: input.clone(),
+        messages: vec![Message::User {
+            text: input.text.clone(),
+        }],
+        next_model_step: 1,
+        final_text: String::new(),
+        phase: crate::ExecutionPhase::ToolBatch,
+    };
+    let batch = crate::ExecutionToolBatch {
+        intent: crate::ToolBatchIntent {
+            turn_id: turn_id.clone(),
+            step: 1,
+            reasoning: String::new(),
+            text: String::new(),
+            calls: vec![call.clone()],
+        },
+        calls: vec![crate::ExecutionToolCall {
+            call,
+            started: true,
+            outcome: None,
+        }],
+    };
+    let mut journal = RecordingExecutionJournal(Vec::new());
+    let result = harness
+        .run_with_control_mode_and_tool_context(
+            input.text.clone(),
+            &mut (),
+            &RunControl::new(),
+            SteeringMode::StopAtCheckpoint,
+            crate::ExecutionRunOptions {
+                execution_context: Some(crate::ExecutionRunContext { turn_id, input }),
+                journal: Some(&mut journal),
+                resume: Some((checkpoint, Some(batch))),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(matches!(result, Err(HarnessError::NeedsReconciliation(_))));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(requests.lock().unwrap().is_empty());
+    assert!(journal.0.iter().any(|entry| matches!(
+        entry,
+        crate::ExecutionJournalEntry::NeedsReconciliation { .. }
     )));
 }
 

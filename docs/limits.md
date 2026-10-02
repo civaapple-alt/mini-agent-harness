@@ -182,6 +182,31 @@ or high-risk shell confirmation. Shell itself remains governed by the selected
 approval policy in Plan mode; Plan does not add a separate read-only Shell
 restriction.
 
+## Shell execution contract
+
+Foreground Shell execution uses one bounded local-development contract for
+Native and Docker backends:
+
+- The process starts with the configured workspace as its working directory.
+  Docker mounts that workspace at `/workspace`; the container's writable layer
+  is discarded when the command exits.
+- A foreground command has a 120-second deadline and at most 8 MiB of combined
+  captured stdout and stderr. Larger output is truncated to a bounded head and
+  tail and may be read through the bounded result artifact.
+- Cancellation and timeout terminate the complete Native process tree. Docker
+  runs use a unique container name; the App Server stops the Docker client and
+  then kills and verifies the named container. If cleanup cannot be confirmed,
+  the Shell call returns an error.
+- Docker is selected explicitly. If its daemon is unavailable or the container
+  cannot start, the command fails without falling back to Native.
+
+This is not an adversarial-code sandbox. Native Shell runs with the user's OS
+permissions and can access paths available to that user; configured file-tool
+workspace roots remain enforced at their own Host boundary. Docker is intended
+for local development isolation only and does not promise resistance to code
+that can attack the Docker daemon or kernel. Docker unavailability must not be
+treated as permission to execute the same command natively.
+
 Project extension discovery scans only immediate children at fixed locations
 and at most 128 directory entries per location. Installed skills, plugins, and
 MCP stay inside the workspace. Stdio MCP servers run as local processes with a

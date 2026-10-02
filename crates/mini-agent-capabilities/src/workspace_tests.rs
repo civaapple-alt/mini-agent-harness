@@ -34,6 +34,20 @@ fn workspace(
     )
 }
 
+fn local_shell_contract_backends() -> Vec<SandboxKind> {
+    let mut backends = vec![SandboxKind::Native];
+    if Command::new("docker")
+        .args(["info", "--format", "{{.ServerVersion}}"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        backends.push(SandboxKind::Docker);
+    }
+    backends
+}
+
 fn automatic_workspace(root: PathBuf) -> Arc<Workspace> {
     workspace(
         root,
@@ -1254,51 +1268,107 @@ fn goal_mode_allows_session_goal_plan_reads_and_workspace_writes() {
 #[test]
 fn shell_process_has_a_timeout() {
     let root = test_root();
-    let command = if cfg!(windows) {
-        "Start-Sleep -Seconds 5"
-    } else {
-        "sleep 5"
-    };
+    for backend in local_shell_contract_backends() {
+        let command = if cfg!(windows) && backend == SandboxKind::Native {
+            "Start-Sleep -Seconds 5"
+        } else {
+            "sleep 5"
+        };
+        let output = run_shell(command, &root, backend, Duration::from_millis(50)).unwrap();
+        assert!(
+            output.text.contains("timed out"),
+            "{backend}: {}",
+            output.text
+        );
+    }
+    remove_test_root(&root);
+}
 
-    let output = run_shell(
-        command,
-        &root,
-        SandboxKind::Native,
-        Duration::from_millis(50),
-    )
-    .unwrap();
+#[test]
+fn shell_execution_uses_the_workspace_as_its_working_directory() {
+    let root = test_root();
+    for backend in local_shell_contract_backends() {
+        let command = if cfg!(windows) && backend == SandboxKind::Native {
+            "Get-Location"
+        } else {
+            "pwd"
+        };
+        let output = run_shell(command, &root, backend, Duration::from_secs(5)).unwrap();
+        let expected = if backend == SandboxKind::Docker {
+            "/workspace".to_string()
+        } else {
+            root.to_string_lossy().into_owned()
+        };
+        assert!(
+            output.text.contains(&expected),
+            "{backend}: {}",
+            output.text
+        );
+    }
+    remove_test_root(&root);
+}
 
-    assert!(output.text.contains("timed out"));
+#[test]
+fn shell_output_capture_stays_bounded_for_each_available_backend() {
+    let root = test_root();
+    for backend in local_shell_contract_backends() {
+        let command = if cfg!(windows) && backend == SandboxKind::Native {
+            "Write-Output ('x' * 10000000)"
+        } else {
+            "printf '%010000000d' 0"
+        };
+        let output = run_shell(command, &root, backend, Duration::from_secs(10)).unwrap();
+        assert!(output.source_truncated, "{backend}");
+        assert!(output.source_bytes >= 10_000_000, "{backend}");
+        assert!(
+            output.text.len() <= MAX_COMMAND_CAPTURE_BYTES + 256,
+            "{backend}"
+        );
+    }
     remove_test_root(&root);
 }
 
 #[test]
 fn shell_process_can_be_cancelled_before_its_deadline() {
     let root = test_root();
-    let command = if cfg!(windows) {
-        "Start-Sleep -Seconds 5"
-    } else {
-        "sleep 5"
-    };
-    let cancellation = Arc::new(AtomicBool::new(false));
-    let cancellation_for_thread = cancellation.clone();
-    let trigger = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(50));
-        cancellation_for_thread.store(true, Ordering::Release);
-    });
+    for backend in local_shell_contract_backends() {
+        let command = if cfg!(windows) && backend == SandboxKind::Native {
+            "Start-Sleep -Seconds 5"
+        } else {
+            "sleep 5"
+        };
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let cancellation_for_thread = cancellation.clone();
+        let trigger = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            cancellation_for_thread.store(true, Ordering::Release);
+        });
 
-    let output = run_shell_with_cancel(
-        command,
-        &root,
-        SandboxKind::Native,
-        Duration::from_secs(5),
-        Some(cancellation),
-    )
-    .unwrap();
+        let output = run_shell_with_cancel(
+            command,
+            &root,
+            backend,
+            Duration::from_secs(5),
+            Some(cancellation),
+        )
+        .unwrap();
 
-    trigger.join().unwrap();
-    assert!(output.cancelled);
-    assert!(output.text.contains("cancelled by user"));
+        trigger.join().unwrap();
+        assert!(output.cancelled, "{backend}: {}", output.text);
+        assert!(output.text.contains("cancelled by user"));
+        if let Some(name) = output.docker_container_name {
+            let status = Command::new("docker")
+                .args(["inspect", name.as_str()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(
+                !status.success(),
+                "cancelled Docker container still exists: {name}"
+            );
+        }
+    }
     remove_test_root(&root);
 }
 

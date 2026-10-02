@@ -10,6 +10,7 @@
 
 当前相关决策：
 
+- [Session V2 恢复、来源清单与执行边界](proposed/architecture/2026-10-03-v2-session-recovery-context-and-shell.zh.md)
 - [长会话历史渐进加载与重启恢复证据](implemented/testing/2026-10-02-long-session-history-and-crash-recovery.zh.md)
 - [Session 超长工具输出恢复、模型耗时与 Plan Mode 工具约束](implemented/architecture/2026-10-01-context-engineering-session-recovery-and-plan-tools.zh.md)
 - [ask_user 在 Plan、Goal 与子 Agent 中的使用边界](implemented/process/2026-10-01-ask-user-mode-and-child-session-visibility.zh.md)
@@ -111,6 +112,7 @@ graph LR
 
 ### Proposed
 
+- [Session V2 恢复、来源清单与执行边界](proposed/architecture/2026-10-03-v2-session-recovery-context-and-shell.zh.md)
 - [Responses 多供应商目录与 Thread 模型选择](proposed/architecture/2026-09-25-responses-model-catalog-and-thread-selection.zh.md)
 - [子代理动态协作与进展跟踪](proposed/architecture/2026-09-20-dynamic-child-agent-coordination.zh.md)
 - [Session 状态、Notebook 与 Subagent 执行策略](proposed/architecture/2026-09-17-session-state-notebook-and-subagent-execution-policy.zh.md)

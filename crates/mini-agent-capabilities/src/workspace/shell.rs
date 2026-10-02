@@ -1,4 +1,8 @@
 use super::*;
+use std::process::Output;
+use std::sync::atomic::AtomicU64;
+
+static NEXT_DOCKER_CONTAINER_ID: AtomicU64 = AtomicU64::new(1);
 
 pub(super) struct Shell(
     pub(super) Arc<Workspace>,
@@ -513,6 +517,8 @@ pub(super) struct CommandOutput {
     pub(super) source_truncated: bool,
     pub(super) timed_out: bool,
     pub(super) cancelled: bool,
+    #[cfg(test)]
+    pub(super) docker_container_name: Option<String>,
 }
 
 fn run_sandboxed_command(
@@ -521,6 +527,7 @@ fn run_sandboxed_command(
     sandbox_kind: SandboxKind,
     timeout: Duration,
     cancellation: Option<Arc<AtomicBool>>,
+    docker_container_name: Option<&str>,
 ) -> Result<CommandOutput, ToolError> {
     let sandbox = ProcessSandbox::new(sandbox_kind);
     apply_child_process_env(&mut cmd);
@@ -553,14 +560,16 @@ fn run_sandboxed_command(
             .is_some_and(|token| token.load(Ordering::Acquire))
         {
             break (
-                sandbox.terminate(&mut child).map_err(io_error)?,
+                terminate_sandboxed_command(&sandbox, &mut child, docker_container_name)
+                    .map_err(io_error)?,
                 false,
                 true,
             );
         }
         if started.elapsed() >= timeout {
             break (
-                sandbox.terminate(&mut child).map_err(io_error)?,
+                terminate_sandboxed_command(&sandbox, &mut child, docker_container_name)
+                    .map_err(io_error)?,
                 true,
                 false,
             );
@@ -595,6 +604,8 @@ fn run_sandboxed_command(
         source_truncated,
         timed_out,
         cancelled,
+        #[cfg(test)]
+        docker_container_name: docker_container_name.map(str::to_string),
     })
 }
 
@@ -627,11 +638,22 @@ pub(super) fn run_shell_with_cancel(
             ));
         }
     }
+    let docker_container_name = (sandbox_kind == SandboxKind::Docker).then(|| {
+        format!(
+            "mini-agent-shell-{}-{}",
+            std::process::id(),
+            NEXT_DOCKER_CONTAINER_ID.fetch_add(1, Ordering::Relaxed)
+        )
+    });
     let cmd = if sandbox_kind == SandboxKind::Docker {
         let mut docker_cmd = Command::new("docker");
         docker_cmd.args([
             "run",
             "--rm",
+            "--name",
+            docker_container_name
+                .as_deref()
+                .expect("Docker name is set"),
             "-i",
             "-v",
             &format!("{}:/workspace", root.display()),
@@ -646,7 +668,73 @@ pub(super) fn run_shell_with_cancel(
     } else {
         shell_command(command)
     };
-    run_sandboxed_command(cmd, root, sandbox_kind, timeout, cancellation)
+    run_sandboxed_command(
+        cmd,
+        root,
+        sandbox_kind,
+        timeout,
+        cancellation,
+        docker_container_name.as_deref(),
+    )
+}
+
+fn terminate_sandboxed_command(
+    sandbox: &ProcessSandbox,
+    child: &mut std::process::Child,
+    docker_container_name: Option<&str>,
+) -> io::Result<std::process::ExitStatus> {
+    // Stop the Docker CLI first so it cannot create a late container while the
+    // cleanup check runs. The named container is then killed through Docker's
+    // control API because killing the client alone does not stop the process.
+    let status = sandbox.terminate(child)?;
+    if let Some(name) = docker_container_name {
+        terminate_docker_container(name)?;
+    }
+    Ok(status)
+}
+
+fn terminate_docker_container(name: &str) -> io::Result<()> {
+    let killed = docker_control(&["kill", name])?;
+    if killed.status.success() {
+        return Ok(());
+    }
+
+    let inspected = docker_control(&["inspect", "--format={{.State.Running}}", name])?;
+    if inspected.status.success() && String::from_utf8_lossy(&inspected.stdout).trim() == "false" {
+        return Ok(());
+    }
+    if !inspected.status.success() {
+        let error = String::from_utf8_lossy(&inspected.stderr);
+        if error.contains("No such object") || error.contains("No such container") {
+            return Ok(());
+        }
+    }
+    Err(io::Error::other(format!(
+        "could not confirm Docker container {name} was stopped"
+    )))
+}
+
+fn docker_control(args: &[&str]) -> io::Result<Output> {
+    let mut child = Command::new("docker")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let started = Instant::now();
+    loop {
+        if child.try_wait()?.is_some() {
+            return child.wait_with_output();
+        }
+        if started.elapsed() >= Duration::from_secs(2) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Docker cleanup command exceeded its 2 second limit",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 pub(super) struct CapturedOutput {

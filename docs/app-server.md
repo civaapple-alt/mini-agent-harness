@@ -9,6 +9,16 @@ boundary. The current transport is newline-delimited JSON over stdin/stdout.
 Each input line is one JSON-RPC request; turn progress is emitted on the same
 output stream as `turn/event` notifications.
 
+The App Server protocol and Session journal are version 2. This is a breaking
+upgrade: V1 clients fail protocol negotiation, and opening a V1 Session returns
+an unsupported-schema error without changing its files. Before upgrading,
+inspect and archive the Sessions you need with the previous release. Run
+`mini-agent-app-server doctor --json` from each Project workspace, record the
+Session IDs to keep, stop the old Gateway/App Server, and copy the complete
+`~/.mini-agent/sessions/` directory to a backup location. Keep that backup
+outside the live Sessions directory. V2 does not auto-migrate old Session data;
+retain the previous release if you need to inspect or continue a V1 Session.
+
 The default binary owns one configured thread per process. Embedded callers can
 construct a service with several preconfigured thread identities and address
 them through the same methods. The service also exposes bounded thread
@@ -148,10 +158,10 @@ Configure that catalog in Web Studio before starting a provider-backed Turn.
 cargo run --release -p mini-agent-app-server --bin mini-agent-app-server
 ```
 
-The first request must negotiate protocol version 1:
+The first request must negotiate protocol version 2:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientName":"example","clientVersion":"0","capabilities":{},"providers":{"model":"openai","tools":"builtin","extensions":"builtin","policy":"builtin"}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2,"clientName":"example","clientVersion":"0","capabilities":{},"providers":{"model":"openai","tools":"builtin","extensions":"builtin","policy":"builtin"}}}
 ```
 
 Then start the configured thread and submit a turn:
@@ -307,7 +317,7 @@ JSON-RPC boundary. The current registry exposes `openai` for models and
 
 ## Public JSON-RPC interface
 
-The following is the complete public JSON-RPC surface of protocol version 1.
+The following is the complete public JSON-RPC surface of protocol version 2.
 The executable contract is defined by
 `crates/mini-agent-app-server-protocol`; this section explains the direction,
 lifecycle, and fields that an SDK or Web Studio client needs. JSON object
@@ -323,7 +333,7 @@ spelling.
 
 `initialize` must be the first request. Clients should send `initialized`
 after accepting its result. A request received before that notification is
-rejected. The server currently accepts protocol version `1` only.
+rejected. The server currently accepts protocol version `2` only.
 
 ### Method index
 
@@ -345,6 +355,7 @@ Thread returned by `thread/start`.
 | `thread/close` | `threadId` | Closes the Thread; the action value is `{closed: true}`. |
 | `thread/items/list` | `threadId`; optional `turnId`, `cursor`, `limit`, `sortDirection` | Returns cursor-bounded `data` entries, `nextCursor`, and `backwardsCursor`. |
 | `session/info` | No parameters | Returns the current session ID, Thread ID, session path, and `resumed` flag. |
+| `session/context_manifest` | `threadId` | Returns at most 512 Session-owned context-source metadata records. Records omit source bodies and secrets. |
 | `session/fork` | `sourceThreadId`, `newThreadId`; optional `contextPolicy` (`exact` or explicit `compact`, default `exact`), `operationId`, `operationAttempt`, `operationPrompt`, `operationGroupId`, `executionMode`, `groupSequence` | Persists a new Session from the latest settled checkpoint, returning child/parent IDs, bounded context sizes, and the compaction method. Fork metadata is a bounded operation projection only; it does not make Core a scheduler. |
 | `session/control` | `threadId`, `action` (`read`, `freeze`, `freeze_settled`, `resume`, `resume_settled`); state changes require a bounded `requestId` | Reads or transitions the durable Session-control state (`running`, `freezing`, `frozen`, `resuming`). Freeze intent is persisted before the Gateway interrupts the parent and active children. Only the matching request may settle a freeze or resume; repeating `resume_settled` is idempotent and remains safe while its resumed Turn is active. |
 | `child/task` | `threadId`, `parentThreadId`, `operationId`, `attempt`, `action`; action-specific bounded report, prompt, report/request identity, and for pause/active cancellation the `turnId` | Persists a validated child report or operation control. Queued updates and cancellation, follow-up, pause/resume, active cancellation, retry, and start-failure actions validate parent lineage and operation attempt. `queue_follow_up` is idempotent by `requestId`, allows one pending instruction, and allocates the next attempt on success. |
@@ -434,15 +445,15 @@ unchanged during recovery.
 | --- | --- | --- |
 | `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?, reasoningEffort?}`, optional `operationId`, `operationAttempt`, `operationAttemptKind`, `turnSource` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `reasoningEffort` is a legacy per-turn fallback used only when the Thread has no explicit `reasoningSelection`. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. `turnSource` is bounded metadata; the currently defined value `child_wakeup` marks an automatic parent continuation and does not change the input text. `operationAttemptKind` is child lifecycle metadata (`initial`, `retry`, `follow_up`); it does not change Core execution. |
 | `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, optional error, and bounded execution recovery metadata. An unsettled Turn with an execution checkpoint returns `in_progress`. |
-| `turn/resume` | `threadId`, `turnId`, `checkpointSeq`, stable `requestId` | Explicitly resumes the same logical Turn from the matching persisted execution checkpoint. The request fails if the Turn or checkpoint sequence is stale. Repeating an accepted request ID is idempotent. |
-| `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of ordered `turn/event` notifications with `nextCursor`, `oldestSequence`, and `hasGap`. |
+| `turn/resume` | `threadId`, `turnId`, `checkpointSeq`, stable `requestId` | Explicitly resumes the same logical Turn from the matching persisted execution checkpoint. The request fails if the Turn or checkpoint sequence is stale or any tool call still needs reconciliation. Repeating an accepted request ID is idempotent. |
+| `turn/reconcile` | `threadId`, `turnId`, `checkpointSeq`, `toolCallId`, stable `requestId`, `disposition`, bounded `evidenceSummary`; `result` for `completed` | Records an operator decision for one started tool call with no durable outcome. `completed` supplies a bounded structured result; `not_executed` confirms the effect did not occur and permits a later explicit resume. The tuple `(turnId, checkpointSeq, toolCallId, requestId)` rejects stale decisions and makes an identical retry idempotent. It never resumes automatically. |
+| `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of metadata-only event summaries with `nextCursor`, `oldestSequence`, and `hasGap`. The Session retains at most 512 summaries across App Server restarts. |
 | `turn/steer` | `threadId`, `turnId`, `text`, optional bounded `requestId` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. Child control supplies a stable request ID so a replayed accepted steer is idempotent. |
 | `turn/interrupt` | `threadId`, `turnId` | Requests cooperative cancellation and returns `{accepted: true}` when admitted; settlement remains pending until `turn_finished`. |
 
 An oversized `turn/start` input returns `not_submitted` before the server emits or
-caches the prompt. In `turn/events`, `hasGap` is also true when the shared cache
-has evicted every event for the requested Thread and its latest sequence is
-newer than the supplied cursor; `oldestSequence` is then `null`.
+caches the prompt. Replay cursors advance over omitted text deltas; a missing
+retained range is reported by `hasGap` and `oldestSequence`.
 
 `turn/start` is asynchronous. Clients should render `turn/event` and Item
 notifications while the turn is running, then use `turn/read` for the settled
@@ -459,17 +470,21 @@ model request or side effect.
 
 App Server startup never resumes an execution checkpoint automatically. A
 persisted active Turn becomes `waiting_for_continue` after restart. A tool call
-that started without a recorded outcome becomes `needs_reconciliation`; clients
-must verify that side effect before they continue. A completed tool batch with
-recorded outcomes can continue without rerunning those calls. `turn/read`
+that started without a recorded outcome becomes `needs_reconciliation`; an
+operator must resolve each such call through `turn/reconcile` before either
+resume or a new Turn is admitted. `completed` records a bounded result the
+operator verified; `not_executed` records confirmation that retry is safe.
+Neither choice runs a tool. A completed tool batch with recorded outcomes can
+continue using those exact outcomes without rerunning the calls. `turn/read`
 returns bounded status, phase, heartbeat and progress timestamps, checkpoint
 sequence, and recovery reason. `turn/resume` requires the current Turn ID and
 checkpoint sequence, then continues that same Turn without creating a new Turn
 or child operation attempt. Resuming an exhausted `max_steps` checkpoint grants
 one additional bounded `max_steps` slice; it does not remove the per-slice
-limit. While an execution checkpoint is waiting or needs
-reconciliation, `turn/start` returns `not_submitted` and preserves that
-checkpoint. The caller must resume or reconcile it before starting another Turn.
+limit. While an execution checkpoint is waiting or needs reconciliation,
+`turn/start` returns `not_submitted` and preserves that checkpoint. The caller
+must resolve unknown tool outcomes and explicitly resume the same Turn before
+starting a new Turn.
 The App Server records an executor heartbeat every 10 seconds. The Responses
 provider treats 120 seconds without provider data as a stalled request and does
 not retry that silent stream. Recognized transient transport, incomplete-stream,
@@ -484,11 +499,15 @@ can start another model or tool step. The approval resolves as denied. Clients
 must still wait for `turn_finished`; an accepted interrupt is not a settled
 result.
 
-`turn/events` is a reconnect aid, not a second history store. The App Server
-keeps a bounded in-memory window of Core events per process. `afterSequence` is
-exclusive; when the requested cursor is older than the retained window,
-`hasGap` is true and the client must reconcile with `thread/read` and
-`thread/items/list` before accepting the replay as complete.
+`turn/events` is a reconnect aid, not a second history store. V2 stores a
+bounded Session-owned ring of lifecycle summaries across process restarts.
+Summaries retain event type, Thread/Turn/Item identity, tool call identity, and
+Context source ID/fingerprint references. They omit assistant deltas, prompts,
+tool arguments, tool output, and injected Context bodies. Live `turn/event`
+notifications keep their existing payload. `afterSequence` is exclusive;
+`nextCursor` can advance past omitted deltas. If `hasGap` is true, reconcile
+with `thread/read` and `thread/items/list`; replay summaries must never be
+treated as complete transcript or tool-result data.
 
 When `selectedSkills` is present, the worker resolves names against the
 effective catalog before model execution. It emits `skills_loaded` with

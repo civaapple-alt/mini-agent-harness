@@ -27,7 +27,7 @@ pub use thread_item::ItemStatus;
 pub use thread_item::ThreadItem;
 
 pub const JSONRPC_VERSION: &str = "2.0";
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 pub const METHOD_INITIALIZE: &str = "initialize";
 pub const METHOD_INITIALIZED: &str = "initialized";
@@ -47,6 +47,7 @@ pub const METHOD_WEB_SEARCH_SETTINGS_UPDATE: &str = "web/search/settings/update"
 pub const METHOD_WEB_SEARCH_TEST: &str = "web/search/test";
 pub const METHOD_TURN_START: &str = "turn/start";
 pub const METHOD_TURN_RESUME: &str = "turn/resume";
+pub const METHOD_TURN_RECONCILE: &str = "turn/reconcile";
 pub const METHOD_TURN_READ: &str = "turn/read";
 pub const METHOD_TURN_STEER: &str = "turn/steer";
 pub const METHOD_TURN_INTERRUPT: &str = "turn/interrupt";
@@ -73,6 +74,7 @@ pub const METHOD_SESSION_NOTEBOOK_READ: &str = "session/notebook/read";
 pub const METHOD_SESSION_NOTEBOOK_WRITE: &str = "session/notebook/write";
 pub const METHOD_SESSION_NOTEBOOK_FORGET: &str = "session/notebook/forget";
 pub const METHOD_SESSION_NOTEBOOK_UPDATED: &str = "session/notebook/updated";
+pub const METHOD_SESSION_CONTEXT_MANIFEST: &str = "session/context_manifest";
 pub const METHOD_CHILD_TASK: &str = "child/task";
 pub const METHOD_WORLD_STATE: &str = "world/state";
 pub const METHOD_WORLD_REFRESH: &str = "world/refresh";
@@ -392,10 +394,38 @@ pub struct TurnEventsParams {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnEventsResult {
-    pub data: Vec<TurnEventNotification>,
+    pub data: Vec<TurnEventReplayNotification>,
     pub next_cursor: Option<u64>,
     pub oldest_sequence: Option<u64>,
     pub has_gap: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnEventContextSource {
+    pub source_id: String,
+    pub version_fingerprint: String,
+}
+
+/// Metadata-only event retained for bounded replay across App Server restarts.
+/// Live notifications continue to use `TurnEventNotification`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnEventReplayNotification {
+    pub thread_id: ThreadId,
+    pub turn_id: Option<TurnId>,
+    pub sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_source: Option<TurnSource>,
+    pub event_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    pub context_sources: Vec<TurnEventContextSource>,
+    pub recorded_at_ms: u64,
 }
 
 impl JsonRpcError {
@@ -1487,6 +1517,90 @@ pub struct TurnResumeResult {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum TurnReconcileDisposition {
+    Completed,
+    NotExecuted,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnReconcileResultStatus {
+    Applied,
+    AlreadyApplied,
+}
+
+/// A deliberately small operator-supplied result for a tool invocation whose
+/// durable outcome was lost. The App Server rejects content above its fixed
+/// reconciliation limit and never accepts injected context from this DTO.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconciledToolResult {
+    pub status: ReconciledToolResultStatus,
+    pub content: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReconciledToolResultStatus {
+    Completed,
+    Failed,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnReconcileParams {
+    pub thread_id: ThreadId,
+    pub turn_id: TurnId,
+    pub checkpoint_seq: u64,
+    pub tool_call_id: String,
+    pub request_id: String,
+    pub disposition: TurnReconcileDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<ReconciledToolResult>,
+    pub evidence_summary: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnReconcileResult {
+    pub turn_id: TurnId,
+    pub checkpoint_seq: u64,
+    pub status: TurnReconcileResultStatus,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionContextManifestParams {
+    pub thread_id: ThreadId,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionContextManifestEntry {
+    pub thread_id: String,
+    pub turn_id: Option<TurnId>,
+    pub source_id: String,
+    pub source_name: String,
+    pub kind: mini_agent_protocol::ContextInjectionKind,
+    pub version_fingerprint: String,
+    pub workspace: Option<String>,
+    pub path: Option<String>,
+    pub applies_to: String,
+    pub permission_basis: String,
+    pub injection_reason: String,
+    pub bytes: u64,
+    pub reused: bool,
+    pub injected_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionContextManifestResult {
+    pub data: Vec<SessionContextManifestEntry>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ExecutionRecoveryStatus {
     Running,
     WaitingForContinue,
@@ -1511,6 +1625,16 @@ pub struct ExecutionRecoveryInfo {
     pub last_progress_ms: Option<u64>,
     pub checkpoint_seq: u64,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uncertain_tool_calls: Vec<UncertainToolCall>,
+}
+
+/// Safe-to-display identity for a tool call awaiting operator reconciliation.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UncertainToolCall {
+    pub tool_call_id: String,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

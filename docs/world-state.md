@@ -39,9 +39,20 @@ Session
             └─ ordered item
 ```
 
-An interrupted Turn is not replayed. A checkpoint only authorizes resume from
-the last settled state. This prevents a tool call that began before a process
-failure from being treated as a completed or replay-safe effect.
+The settled Session checkpoint stores conversation context for a later Turn or
+fork. The execution checkpoint stores the current logical Turn and can only be
+continued by an explicit `turn/resume` against its exact Turn ID and checkpoint
+sequence. Restart never resumes automatically. A started tool call without a
+durable outcome blocks both resume and new Turns until an operator records a
+bounded `turn/reconcile` decision; Mini Agent never retries an uncertain side
+effect on its own. Already recorded tool outcomes are reused as-is.
+
+Two bounded Session sidecars keep metadata out of model input. The Context
+Manifest records source identity, fingerprint, scope, permission basis, and
+injection reason without storing the injected body. The event replay ring keeps
+at most 512 lifecycle summaries across App Server restarts; it omits text
+deltas, prompts, tool arguments, and tool output. Canonical Thread and Item
+projections remain the source for repairing replay gaps.
 
 The Session store also persists control-plane state that is not conversation
 history:

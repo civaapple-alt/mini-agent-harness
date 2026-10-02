@@ -67,6 +67,7 @@ Gateway 提供的跨层读取路径如下：
 | `/api/threads`、`/api/threads/{thread_id}` | Thread 列表与 canonical history |
 | `/api/threads/{thread_id}/items` | 有界 ThreadItem 投影 |
 | `/api/threads/{thread_id}/events` | 有界 `turn/event` 重放 |
+| `/api/threads/{thread_id}/context-manifest` | 读取 Session-owned 的有界 Context 来源元数据 |
 | `/api/threads/{thread_id}/runtime/status` | 非阻塞运行时状态 |
 | `/api/threads/{thread_id}/attach` | 恢复可写 Session，或报告外部锁 |
 | `/api/threads/{thread_id}/children` | Child Session 的控制与观察投影 |
@@ -116,13 +117,18 @@ Web Studio 的实时控制使用 `/ws/agent`：
 ```
 
 Gateway 将这些请求映射为 App Server 的 `turn/start`、`turn/steer` 和
-`turn/interrupt`。`turn/interrupt` 的成功响应只表示运行时已接纳取消请求；浏览器
+`turn/interrupt`。对未知工具结果的人工核对通过
+`POST /api/threads/{thread_id}/turns/{turn_id}/reconcile` 映射为 App Server 的
+`turn/reconcile`。`turn/interrupt` 的成功响应只表示运行时已接纳取消请求；浏览器
 必须等到 `turn_finished` 或读取 `turn/read` 的终态，才能把 Turn 视为结算。
 
 `turn/event` 的 `sequence` 属于每个 Thread 的 Core 事件流。它与 ActionResult 的
 `actionSequence` 不同，不能混用。WebSocket 重连后，浏览器用最后的 sequence 调用
-事件重放。若响应 `hasGap=true`，浏览器必须重新读取 `thread/read` 和
-`thread/items/list` 的 canonical 投影，再继续处理新事件。
+事件重放。V2 在 Session 中跨 App Server 重启保留最多 512 条有界生命周期摘要；
+摘要包含 Thread/Turn/Item 身份、事件类型、工具调用标识和 Context 来源指纹，不包含文本增量、
+prompt、工具参数、工具正文或 Context 正文。Live `turn/event` 仍携带原有实时内容。
+重放摘要只推进游标和标记待对账活动，不得当作聊天内容。出现 `hasGap=true` 或重连后有摘要时，
+Studio 从 `thread/read` 和 `thread/items/list` 的 canonical 投影恢复持久内容，再读取 Runtime 状态。
 
 ToolCall 的稳定 item identity 是模型 `callId`。浏览器可以据此合并模型、工具开始、
 工具完成与重放投影；`ThreadItem.status` 是生命周期，`ThreadItem.outcome` 是结构化
@@ -169,8 +175,10 @@ Web Studio 将活动分成持久活动和实时状态。持久活动来自 App S
 
 浏览器与 Gateway 的 WebSocket 断开时，已接纳的 Gateway Turn stream 可以继续运行。重连后应观察并
 对账该 Turn，不得因连接重建而重新提交相同输入。Gateway 或 App Server 进程重启后，未结算的普通
-Turn 不会从中断点继续；Session 从最近一次已结算 checkpoint 恢复。Core 不重放中断的 Turn 或工具副作用。
-界面显示持久化的中断或失败状态，等待用户操作或 App Server 创建一个新的 Turn。Goal 和 Child operation 按其各自的
+Turn 不会自动从中断点继续；Session checkpoint 为新 Turn 或 fork 提供已结算上下文，Execution checkpoint 只供
+操作者显式恢复同一个 Turn。若工具已开始但结果未知，Studio 要求操作者选择“已完成并提交有界结果”或
+“确认未执行”；`turnId`、checkpoint 序号、`toolCallId` 和稳定 `requestId` 绑定该决定，重复请求幂等，过期检查点被拒绝。
+核对不会自动重放工具。界面在所有未知调用核对完毕前不提供继续或新 Turn 执行。Goal 和 Child operation 按其各自的
 持久生命周期恢复；客户端不得自行重跑 Goal 输入或重复启动已有 Child Turn。
 
 #### 实时活动的方向提示和交互

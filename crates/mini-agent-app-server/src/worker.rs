@@ -131,6 +131,10 @@ pub(super) enum Command {
         execution_resume: Option<mini_agent_app_server_protocol::TurnResumeParams>,
         reply: oneshot::Sender<ActionResult<TurnSubmission>>,
     },
+    Reconcile {
+        params: mini_agent_app_server_protocol::TurnReconcileParams,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::TurnReconcileResult>>,
+    },
     GoalVerificationCompleted {
         thread_id: ThreadId,
         goal_id: String,
@@ -170,6 +174,12 @@ pub(super) enum Command {
         params: ThreadItemsListParams,
         reply: oneshot::Sender<ActionResult<ThreadItemsListResult>>,
     },
+    ReadContextManifest {
+        thread_id: ThreadId,
+        reply: oneshot::Sender<
+            ActionResult<mini_agent_app_server_protocol::SessionContextManifestResult>,
+        >,
+    },
     CreateThread {
         thread_id: ThreadId,
         reply: oneshot::Sender<ActionResult<ThreadId>>,
@@ -191,6 +201,8 @@ struct ThreadListener {
     events: broadcast::Sender<EventEnvelope>,
     notifications: broadcast::Sender<RuntimeNotification>,
     event_replay: Arc<Mutex<EventReplayBuffer>>,
+    context_manifest: Option<mini_agent_capabilities::SessionContextManifestStore>,
+    session_event_replay: Option<mini_agent_capabilities::SessionEventReplayStore>,
     runtime_status: RuntimeStatusHandle,
     runtime_revision: Arc<AtomicU64>,
     stopping: Arc<AtomicBool>,
@@ -285,7 +297,27 @@ impl ThreadListener {
 
     fn send_event(&self, mut event: EventEnvelope) {
         event.turn_source = self.turn_source;
-        self.event_replay.lock().unwrap().push(event.clone());
+        if let Event::ContextInjected { records } = &event.event
+            && let Some(manifest) = self.context_manifest.as_ref()
+            && let Err(error) =
+                manifest.append(event.thread_id.as_str(), event.turn_id.as_ref(), records)
+        {
+            eprintln!("warning: failed to persist context manifest: {error}");
+        }
+        {
+            let mut replay = self.event_replay.lock().unwrap();
+            replay.observe(&event.thread_id, event.sequence);
+            if let Some(entry) =
+                mini_agent_capabilities::SessionEventReplayEntry::from_event(&event, timestamp_ms())
+            {
+                if let Some(store) = self.session_event_replay.as_ref()
+                    && let Err(error) = store.append(entry.clone())
+                {
+                    eprintln!("warning: failed to persist event replay entry: {error}");
+                }
+                replay.push_entry(entry);
+            }
+        }
         let turn_id = event.turn_id.clone();
         if let Some(turn_id) = turn_id.clone() {
             for item in ThreadItem::started_from_event(&event) {
@@ -645,6 +677,12 @@ pub(super) async fn worker_loop<M>(
             break;
         }
         if let Command::InstallRuntime { state } = command {
+            if let Some(store) = state.management.event_replay_store() {
+                match store.entries() {
+                    Ok(entries) => event_replay.lock().unwrap().restore(entries),
+                    Err(error) => eprintln!("warning: failed to load event replay: {error}"),
+                }
+            }
             runtime = Some(*state);
             if let Some(runtime_state) = runtime.as_ref()
                 && let (Some(questions), Some(execution)) = (
@@ -758,6 +796,64 @@ pub(super) async fn worker_loop<M>(
                     );
                     eprintln!("warning: failed to restore Thread continuation: {error}");
                 }
+            }
+            Command::Reconcile { params, reply } => {
+                let result = runtime
+                    .as_ref()
+                    .ok_or_else(|| {
+                        AppServerError::Checkpoint("session persistence is disabled".to_string())
+                    })
+                    .and_then(|state| {
+                        if state.management.thread_id() != params.thread_id {
+                            return Err(AppServerError::ThreadNotFound(params.thread_id.clone()));
+                        }
+                        let request = mini_agent_capabilities::SessionReconciliationRequest {
+                            turn_id: params.turn_id.clone(),
+                            checkpoint_seq: params.checkpoint_seq,
+                            tool_call_id: params.tool_call_id.clone(),
+                            request_id: params.request_id.clone(),
+                            disposition: match params.disposition {
+                                mini_agent_app_server_protocol::TurnReconcileDisposition::Completed => {
+                                    mini_agent_capabilities::SessionReconciliationDisposition::Completed
+                                }
+                                mini_agent_app_server_protocol::TurnReconcileDisposition::NotExecuted => {
+                                    mini_agent_capabilities::SessionReconciliationDisposition::NotExecuted
+                                }
+                            },
+                            outcome: params.result.as_ref().map(|result| {
+                                let content = result.content.clone();
+                                match result.status {
+                                    mini_agent_app_server_protocol::ReconciledToolResultStatus::Completed => {
+                                        mini_agent_protocol::ToolExecutionOutcome::completed(content)
+                                    }
+                                    mini_agent_app_server_protocol::ReconciledToolResultStatus::Failed => {
+                                        mini_agent_protocol::ToolExecutionOutcome::failed(content)
+                                    }
+                                }
+                            }),
+                            evidence_summary: params.evidence_summary.clone(),
+                        };
+                        state.management.reconcile_execution_tool_call(request)
+                    })
+                    .map(|status| mini_agent_app_server_protocol::TurnReconcileResult {
+                        turn_id: params.turn_id,
+                        checkpoint_seq: params.checkpoint_seq,
+                        status: match status {
+                            mini_agent_capabilities::ReconciliationReservation::Applied => {
+                                mini_agent_app_server_protocol::TurnReconcileResultStatus::Applied
+                            }
+                            mini_agent_capabilities::ReconciliationReservation::AlreadyApplied => {
+                                mini_agent_app_server_protocol::TurnReconcileResultStatus::AlreadyApplied
+                            }
+                        },
+                    });
+                if result.as_ref().is_ok_and(|result| {
+                    result.status
+                        == mini_agent_app_server_protocol::TurnReconcileResultStatus::Applied
+                }) {
+                    runtime_actor::advance_revision(&mut runtime, &runtime_revision);
+                }
+                respond(reply, receipt, result);
             }
             Command::Start {
                 thread_id,
@@ -1436,6 +1532,12 @@ pub(super) async fn worker_loop<M>(
                         events: events.clone(),
                         notifications: notifications.clone(),
                         event_replay: event_replay.clone(),
+                        context_manifest: runtime
+                            .as_ref()
+                            .and_then(|state| state.management.context_manifest_store()),
+                        session_event_replay: runtime
+                            .as_ref()
+                            .and_then(|state| state.management.event_replay_store()),
                         runtime_status: runtime_status.clone(),
                         runtime_revision: runtime_revision.clone(),
                         stopping: stopping.clone(),
@@ -2122,6 +2224,43 @@ pub(super) async fn worker_loop<M>(
                 let result = project_thread_items(&threads, runtime.as_ref(), &params);
                 respond(reply, receipt, result);
             }
+            Command::ReadContextManifest { thread_id, reply } => {
+                let result = runtime
+                    .as_ref()
+                    .filter(|state| state.management.thread_id() == thread_id)
+                    .map(|state| state.management.context_manifest())
+                    .transpose()
+                    .map(|entries| {
+                        entries
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|entry| {
+                                mini_agent_app_server_protocol::SessionContextManifestEntry {
+                                    thread_id: entry.thread_id,
+                                    turn_id: entry.turn_id,
+                                    source_id: entry.source_id,
+                                    source_name: entry.source_name,
+                                    kind: entry.kind,
+                                    version_fingerprint: entry.version_fingerprint,
+                                    workspace: entry.workspace,
+                                    path: entry.path,
+                                    applies_to: entry.applies_to,
+                                    permission_basis: entry.permission_basis,
+                                    injection_reason: entry.injection_reason,
+                                    bytes: entry.bytes,
+                                    reused: entry.reused,
+                                    injected_at_ms: entry.injected_at_ms,
+                                }
+                            })
+                            .collect()
+                    })
+                    .map(
+                        |data| mini_agent_app_server_protocol::SessionContextManifestResult {
+                            data,
+                        },
+                    );
+                respond(reply, receipt, result);
+            }
             Command::CreateThread { thread_id, reply } => {
                 let result = threads.create(thread_id);
                 respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);
@@ -2415,6 +2554,17 @@ fn execution_recovery_info(
         last_progress_ms: state.last_progress_ms,
         checkpoint_seq: state.checkpoint_seq,
         reason: state.reason,
+        uncertain_tool_calls: state
+            .pending_batch
+            .as_ref()
+            .into_iter()
+            .flat_map(|batch| batch.calls.iter())
+            .filter(|call| call.started && call.outcome.is_none())
+            .map(|call| mini_agent_app_server_protocol::UncertainToolCall {
+                tool_call_id: call.call.id.clone(),
+                name: call.call.name.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -2495,6 +2645,9 @@ fn handle_running_command<M>(
             };
             respond(reply, receipt, result);
         }
+        Command::Reconcile { reply, .. } => {
+            respond(reply, receipt, Err(AppServerError::Busy));
+        }
         Command::Cancel {
             thread_id,
             request,
@@ -2564,6 +2717,9 @@ fn handle_running_command<M>(
             );
         }
         Command::ReadItems { reply, .. } => {
+            respond(reply, receipt, Err(AppServerError::Busy));
+        }
+        Command::ReadContextManifest { reply, .. } => {
             respond(reply, receipt, Err(AppServerError::Busy));
         }
         Command::CreateThread { reply, .. } => {
