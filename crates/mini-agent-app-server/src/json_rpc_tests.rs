@@ -3134,6 +3134,72 @@ async fn session_context_manifest_is_read_from_the_reopened_session_store() {
 }
 
 #[tokio::test]
+async fn session_context_manifest_remains_readable_during_an_active_turn() {
+    let root = rpc_root("session-context-manifest-active-turn");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let thread_id = opened.store.thread_id().to_string();
+    opened
+        .store
+        .context_manifest_store()
+        .append(
+            &thread_id,
+            Some(&mini_agent_protocol::TurnId::new("turn-context-manifest")),
+            &[mini_agent_protocol::ContextInjectionRecord {
+                id: "project-instructions".to_string(),
+                kind: mini_agent_protocol::ContextInjectionKind::ProjectInstructions,
+                source: "AGENTS.md".to_string(),
+                workspace: Some("workspace-a".to_string()),
+                path: Some("AGENTS.md".to_string()),
+                scope: "workspace".to_string(),
+                bytes: 128,
+                fingerprint: "sha256:context-fingerprint".to_string(),
+                supersedes: None,
+                reused: false,
+            }],
+        )
+        .unwrap();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let mut connection = managed_connection_with_session(
+        ScenarioModel::Timeout(release.clone()),
+        root.clone(),
+        opened,
+    );
+    initialize_connection(&mut connection, "session-context-manifest-active-turn-test").await;
+
+    let start = rpc_result(
+        &mut connection,
+        session_turn_start_request(2, &thread_id, "wait while reading context metadata", None),
+    )
+    .await;
+    assert_eq!(start["value"]["status"], "started");
+    let started = loop {
+        let event = next_turn_event(&mut connection).await;
+        if matches!(event.event, mini_agent_protocol::Event::TurnStarted { .. }) {
+            break event;
+        }
+    };
+    let turn_id = started.turn_id.unwrap().as_str().to_string();
+
+    let result = rpc_call(
+        &mut connection,
+        3,
+        METHOD_SESSION_CONTEXT_MANIFEST,
+        serde_json::json!({"threadId": thread_id}),
+    )
+    .await;
+    assert_eq!(result["value"]["data"][0]["sourceName"], "AGENTS.md");
+    assert_eq!(
+        result["value"]["data"][0]["versionFingerprint"],
+        "sha256:context-fingerprint"
+    );
+
+    release.notify_one();
+    wait_for_turn_finished_id(&mut connection, &turn_id).await;
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn turn_resume_after_step_limit_gets_another_bounded_step_slice() {
     let root = rpc_root("step-limit-resume-slice");
     let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();

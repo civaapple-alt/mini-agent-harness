@@ -2225,40 +2225,7 @@ pub(super) async fn worker_loop<M>(
                 respond(reply, receipt, result);
             }
             Command::ReadContextManifest { thread_id, reply } => {
-                let result = runtime
-                    .as_ref()
-                    .filter(|state| state.management.thread_id() == thread_id)
-                    .map(|state| state.management.context_manifest())
-                    .transpose()
-                    .map(|entries| {
-                        entries
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|entry| {
-                                mini_agent_app_server_protocol::SessionContextManifestEntry {
-                                    thread_id: entry.thread_id,
-                                    turn_id: entry.turn_id,
-                                    source_id: entry.source_id,
-                                    source_name: entry.source_name,
-                                    kind: entry.kind,
-                                    version_fingerprint: entry.version_fingerprint,
-                                    workspace: entry.workspace,
-                                    path: entry.path,
-                                    applies_to: entry.applies_to,
-                                    permission_basis: entry.permission_basis,
-                                    injection_reason: entry.injection_reason,
-                                    bytes: entry.bytes,
-                                    reused: entry.reused,
-                                    injected_at_ms: entry.injected_at_ms,
-                                }
-                            })
-                            .collect()
-                    })
-                    .map(
-                        |data| mini_agent_app_server_protocol::SessionContextManifestResult {
-                            data,
-                        },
-                    );
+                let result = project_context_manifest(runtime.as_ref(), &thread_id);
                 respond(reply, receipt, result);
             }
             Command::CreateThread { thread_id, reply } => {
@@ -2719,8 +2686,9 @@ fn handle_running_command<M>(
         Command::ReadItems { reply, .. } => {
             respond(reply, receipt, Err(AppServerError::Busy));
         }
-        Command::ReadContextManifest { reply, .. } => {
-            respond(reply, receipt, Err(AppServerError::Busy));
+        Command::ReadContextManifest { thread_id, reply } => {
+            let result = project_context_manifest(context.runtime.as_ref(), &thread_id);
+            respond(reply, receipt, result);
         }
         Command::CreateThread { reply, .. } => {
             respond(reply, receipt, Err(AppServerError::Busy));
@@ -2751,6 +2719,38 @@ fn handle_running_command<M>(
 }
 
 const MAX_ITEM_LIST_LIMIT: usize = 128;
+
+fn project_context_manifest(
+    runtime: Option<&RuntimeActorState>,
+    thread_id: &ThreadId,
+) -> Result<mini_agent_app_server_protocol::SessionContextManifestResult, AppServerError> {
+    let data = runtime
+        .filter(|state| state.management.thread_id() == *thread_id)
+        .map(|state| state.management.context_manifest())
+        .transpose()?
+        .unwrap_or_default()
+        .into_iter()
+        .map(
+            |entry| mini_agent_app_server_protocol::SessionContextManifestEntry {
+                thread_id: entry.thread_id,
+                turn_id: entry.turn_id,
+                source_id: entry.source_id,
+                source_name: entry.source_name,
+                kind: entry.kind,
+                version_fingerprint: entry.version_fingerprint,
+                workspace: entry.workspace,
+                path: entry.path,
+                applies_to: entry.applies_to,
+                permission_basis: entry.permission_basis,
+                injection_reason: entry.injection_reason,
+                bytes: entry.bytes,
+                reused: entry.reused,
+                injected_at_ms: entry.injected_at_ms,
+            },
+        )
+        .collect();
+    Ok(mini_agent_app_server_protocol::SessionContextManifestResult { data })
+}
 
 fn project_thread_items<M>(
     threads: &ThreadManager<M>,
