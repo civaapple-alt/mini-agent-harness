@@ -68,10 +68,15 @@ where
             );
         }
         let expected_query = query.clone();
+        let provider = params.provider.map(|provider| provider.as_str());
 
         let result = tokio::task::spawn_blocking(move || {
-            mini_agent_host::WebSearchSettingsStore::machine_default()
-                .and_then(|store| store.test_search(&query))
+            mini_agent_host::WebSearchSettingsStore::machine_default().and_then(|store| {
+                match provider {
+                    Some(provider) => store.test_search_for_provider(provider, &query),
+                    None => store.test_search(&query),
+                }
+            })
         })
         .await;
         match result {

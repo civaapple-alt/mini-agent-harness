@@ -847,6 +847,27 @@ pub struct WebSearchSettingsView {
 #[serde(rename_all = "camelCase")]
 pub struct WebSearchTestParams {
     pub query: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<WebSearchProvider>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchProvider {
+    #[serde(rename = "deepseek")]
+    DeepSeek,
+    Exa,
+    Kimi,
+}
+
+impl WebSearchProvider {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DeepSeek => "deepseek",
+            Self::Exa => "exa",
+            Self::Kimi => "kimi",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -91,14 +91,29 @@ impl WebSearchSettingsStore {
     pub fn runtime_config(&self) -> Result<Option<WebSearchConfig>, String> {
         let _lock = self.lock()?;
         let saved = self.read_unlocked()?;
-        let backend = match saved.provider.as_str() {
+        if saved.provider == "none" {
+            return Ok(None);
+        }
+        self.config_for_provider(&saved.provider)
+    }
+
+    pub fn test_search_for_provider(&self, provider: &str, query: &str) -> Result<String, String> {
+        let _lock = self.lock()?;
+        let config = self
+            .config_for_provider(provider)?
+            .ok_or_else(|| "configure this search provider's API key first".to_string())?;
+        drop(_lock);
+        mini_agent_capabilities::test_web_search(config, query).map_err(|error| error.to_string())
+    }
+
+    fn config_for_provider(&self, provider: &str) -> Result<Option<WebSearchConfig>, String> {
+        let backend = match provider {
             "deepseek" => WebSearchBackend::DeepSeek,
             "exa" => WebSearchBackend::Exa,
             "kimi" => WebSearchBackend::Kimi,
-            "none" => return Ok(None),
-            _ => return Err("stored web search provider is invalid".to_string()),
+            _ => return Err("provider must be deepseek, exa, or kimi".to_string()),
         };
-        let key = self.read_key(&saved.provider)?;
+        let key = self.read_key(provider)?;
         Ok(key.map(|key| WebSearchConfig::new(backend, key)))
     }
 
