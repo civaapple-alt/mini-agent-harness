@@ -1161,6 +1161,41 @@ fn restores_only_history_that_fits_the_current_harness() {
     assert_eq!(assistant_err.kind, LimitKind::ModelResponseBytes);
 }
 
+#[tokio::test]
+async fn accepts_model_responses_above_the_previous_default_limit() {
+    let text = "x".repeat(65 * 1024);
+    let model = ScriptedModel {
+        responses: VecDeque::from([text_response(text.clone())]),
+    };
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
+
+    let outcome = harness.run("answer", &mut ()).await.unwrap();
+
+    assert_eq!(outcome.final_text.len(), text.len());
+}
+
+#[tokio::test]
+async fn accepts_request_context_above_the_previous_default_limit() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let model = RecordingModel {
+        responses: VecDeque::from([text_response("ok")]),
+        requests: Arc::clone(&requests),
+    };
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
+    let history = (0..140)
+        .map(|_| Message::Context {
+            text: "x".repeat(8 * 1024),
+        })
+        .collect();
+    harness.restore_history(history).unwrap();
+
+    harness.run("capture context", &mut ()).await.unwrap();
+
+    let requests = requests.lock().unwrap();
+    let serialized = serde_json::to_vec(&requests[0].messages).unwrap();
+    assert!(serialized.len() > 1024 * 1024);
+}
+
 struct RequestSteer(RunControl);
 
 impl ToolHandler for RequestSteer {

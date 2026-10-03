@@ -50,10 +50,13 @@ Control Plane 责任塞进 Thin Loop 的方式“通过”预算。
 | user input | 32 KiB | reject before retaining or emitting the text |
 | queued steering/follow-up input | 16 items, 64 KiB per item, 512 KiB total | reject before retaining the item |
 | JSON-RPC input line | 2 MiB including the line ending | close the stream before deserialization |
-| model response | 64 KiB | reject before retaining text or tool calls |
+| model response | 16 MiB | reject before retaining text or tool calls |
 | tool calls in one model step | 8 | reject the whole proposal before effects |
 | one tool result inline in model context | 16 KiB | retain UTF-8-safe head and tail; larger Host results include a Session artifact handle |
-| model request context | 1 MiB | reject before the provider request |
+| model request context | 64 MiB | reject before the provider request |
+| one Session journal record | 128 MiB | reject before appending the record |
+| one Session journal file | 256 MiB | reject before appending the record |
+| persisted ThreadItem text projection | 16 KiB | truncate the client-facing text |
 | model steps in one run | internal safety guard | report a runtime-protection diagnostic; never treat it as a user task setting |
 | Goal milestone model steps | 200 by default | Goal becomes `usageLimited` after settling evidence |
 | Goal milestone wall-clock time | 1,800 seconds by default | request cooperative cancellation, then `usageLimited` |
@@ -62,9 +65,11 @@ Control Plane 责任塞进 Thin Loop 的方式“通过”预算。
 
 Context size is the byte length of the system prompt plus JSON-serialized
 messages and tool specifications. It is a provider-neutral safety ceiling, not
-a prediction of provider tokenization. DeepSeek V4 advertises a 1M-token
-context and 384K-token output; the harness still caps a request at 1 MiB and a
-model step at 64 KiB so one turn cannot fill that window. Provider-reported
+a prediction of provider tokenization. A model profile's `contextWindow` is
+token metadata for Studio's usage gauge; the selected model and provider decide
+the actual token window. The Host can send at most 64 MiB of serialized context.
+The profile's `maxOutputTokens` is sent as `max_output_tokens`; the Core accepts
+at most 16 MiB of response data. Provider limits still apply. Provider-reported
 token counts remain available separately in model-response events.
 
 Reasoning and assistant text deltas share the model-response ceiling. They stop
@@ -90,15 +95,15 @@ sets `max_steps=0` for ordinary Chat. Goal's long-running behavior is owned by
 the Goal Runtime and temporarily uses its own milestone budget; Auto Copilot is
 the explicit `trusted + continuous` Web Studio preset, while each grant is still
 bounded by its action key and selected scope. Before a normal sampling request,
-settled history at or above half of the 1 MiB ceiling
+settled history at or above half of the 64 MiB ceiling
 is compacted. The newest context item and a bounded recent tail stay verbatim:
 the last two model-step groups (each an assistant message plus its following
 tool results, or a final tool-less assistant), capped at 128 KiB serialized.
 Only the older prefix is sent to the same model with the unchanged system
 prompt and an empty tool catalog (so compact cannot call tools or attach
 images), followed by one appended compaction user message. If that compaction
-request would exceed 1 MiB, the oldest prefix messages are dropped until it
-fits. The 1 MiB JSON ceiling does not count host-projected image bytes; image
+request would exceed 64 MiB, the oldest prefix messages are dropped until it
+fits. The 64 MiB JSON ceiling does not count host-projected image bytes; image
 data URLs are a host wire payload, not core history. The returned summary must be non-empty, contain no tool
 calls, reduce context size, and fit the existing response and request ceilings.
 If it does not, the harness drops oldest prefix messages until the request is
@@ -151,7 +156,7 @@ Host tools add their own effect-side bounds before results reach core:
 | queued REPL operations | 16 |
 | `AGENTS.md` source | 16 KiB per file; at most 16 workspace roots and 16 applicable files; 256 KiB aggregate; UTF-8-safe head and tail if larger; reject if invalid UTF-8 |
 | rendered world-state snapshot | 8 KiB; fixed command catalog and capped path |
-| durable session file / JSONL record | 32 MiB / 512 KiB |
+| durable session file / JSONL record | 256 MiB / 128 MiB |
 | listed durable sessions | 128 per workspace under `~/.mini-agent/sessions/` |
 | Goal verifier criteria | 32 KiB |
 | Goal verifier execution | 1 model step, 0 tool calls |
@@ -228,7 +233,7 @@ new records are appended. One lock file prevents concurrent writers; a stale
 lock is never ignored automatically.
 
 Goal verifier analysis restores only the newest settled checkpoint under the same
-session lock. It uses the normal 1 MiB context and 64 KiB response ceilings,
+session lock. It uses the normal 64 MiB context and 16 MiB response ceilings,
 rejects any proposed tool call, and stores a bounded 32 KiB result in the Goal
 workspace without appending verifier output to the primary session history.
 The monotonic checkpoint sequence is the authoritative source reference.

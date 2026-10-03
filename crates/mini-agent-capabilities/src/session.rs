@@ -52,8 +52,8 @@ use storage::{
 pub use storage::{resolve_session_file, session_directory};
 
 const SCHEMA_VERSION: u64 = 2;
-const MAX_SESSION_BYTES: u64 = 32 * 1024 * 1024;
-pub(crate) const MAX_RECORD_BYTES: usize = 2 * 1024 * 1024;
+const MAX_SESSION_BYTES: u64 = 256 * 1024 * 1024;
+pub(crate) const MAX_RECORD_BYTES: usize = 128 * 1024 * 1024;
 const MAX_WORKSPACE_KEY: usize = 240;
 const MAX_OPERATION_ID_BYTES: usize = 128;
 const MAX_OPERATION_KIND_BYTES: usize = 64;
@@ -4394,6 +4394,50 @@ mod tests {
         let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
         assert_eq!(resumed.store.items().len(), 2);
         assert_eq!(resumed.store.items()[0].turn_id.as_deref(), Some("turn-1"));
+        drop(resumed);
+        crate::test_support::remove_test_root(&root);
+    }
+
+    #[test]
+    fn large_model_response_survives_session_resume() {
+        let root = crate::test_support::test_root();
+        let mut opened = SessionStore::open(&root, SessionRequest::New).unwrap();
+        let session_id = opened.store.session_id().to_string();
+        let response = "x".repeat(3 * 1024 * 1024);
+        let messages = vec![
+            Message::User {
+                text: "generate a large result".to_string(),
+            },
+            Message::Assistant {
+                reasoning: String::new(),
+                text: response.clone(),
+                tool_calls: Vec::new(),
+            },
+        ];
+        opened
+            .store
+            .record_turn_with_id(
+                "turn-large-response",
+                TurnCommit {
+                    started_at_ms: timestamp_ms(),
+                    prompt: "generate a large result",
+                    status: TurnStatus::Completed,
+                    steps: 1,
+                    error: None,
+                    messages: &messages,
+                    tool_arguments: &[],
+                    presentation: None,
+                    checkpoint: &messages,
+                },
+            )
+            .unwrap();
+        drop(opened);
+
+        let resumed = SessionStore::open(&root, SessionRequest::Resume(session_id)).unwrap();
+        assert!(matches!(
+            &resumed.store.items()[1].message,
+            Message::Assistant { text, .. } if text == &response
+        ));
         drop(resumed);
         crate::test_support::remove_test_root(&root);
     }

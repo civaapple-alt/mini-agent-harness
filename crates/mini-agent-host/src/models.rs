@@ -1127,8 +1127,8 @@ mod tests {
                     id: "deepseek-test".to_string(),
                     name: "DeepSeek Test".to_string(),
                     enabled: true,
-                    context_window: Some(64_000),
-                    max_output_tokens: Some(4_000),
+                    context_window: Some(1_000_000),
+                    max_output_tokens: Some(1_000_000),
                     input_modalities: vec!["text".to_string()],
                     capabilities: Vec::new(),
                     reasoning_levels: vec!["high".to_string(), "disabled".to_string()],
@@ -1496,6 +1496,7 @@ mod tests {
         assert!(!request_body.contains("test-secret-key"));
         let payload: serde_json::Value = serde_json::from_str(request_body).unwrap();
         assert_eq!(payload["model"], "deepseek-test");
+        assert_eq!(payload["max_output_tokens"], 1_000_000);
         assert_eq!(payload["reasoning"]["effort"], "high");
         assert_eq!(payload["tools"][0]["name"], "lookup");
         assert_eq!(response.text, "mock answer");

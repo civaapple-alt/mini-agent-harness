@@ -704,6 +704,71 @@ async fn run_turn_to_finished<M: Model + Send + 'static>(
     received
 }
 
+struct LargeModelBoundaryScenario {
+    response: String,
+    observed_context_bytes: Arc<Mutex<Option<usize>>>,
+    observed_response_limit: Arc<Mutex<Option<usize>>>,
+}
+
+impl Model for LargeModelBoundaryScenario {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        *self.observed_context_bytes.lock().unwrap() =
+            Some(serde_json::to_vec(request.messages).unwrap().len());
+        *self.observed_response_limit.lock().unwrap() = Some(request.max_response_bytes);
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: self.response.clone(),
+            tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn bounded_harness_large_model_context_and_response_scenario() {
+    let response = "x".repeat(65 * 1024);
+    let observed_context_bytes = Arc::new(Mutex::new(None));
+    let observed_response_limit = Arc::new(Mutex::new(None));
+    let model = LargeModelBoundaryScenario {
+        response: response.clone(),
+        observed_context_bytes: Arc::clone(&observed_context_bytes),
+        observed_response_limit: Arc::clone(&observed_response_limit),
+    };
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
+    harness
+        .restore_history(
+            (0..140)
+                .map(|_| Message::Context {
+                    text: "x".repeat(8 * 1024),
+                })
+                .collect(),
+        )
+        .unwrap();
+    let thread_id = ThreadId::new("thread-1");
+    let server = AppServer::new(
+        ThreadStart::new(thread_id.clone()),
+        Thread::new(ThreadId::new("initial"), harness),
+    );
+
+    let events = run_turn_to_finished(&server, "continue with the saved context").await;
+
+    assert!(observed_context_bytes.lock().unwrap().unwrap() > 1024 * 1024);
+    assert_eq!(
+        observed_response_limit.lock().unwrap().unwrap(),
+        16 * 1024 * 1024
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::ModelResponded { text, .. } if text.len() == response.len()
+    )));
+}
+
 #[tokio::test]
 async fn bounded_harness_ask_user_scenario_returns_answer_to_next_model_request() {
     let thread_id = ThreadId::new("ask-user-thread");

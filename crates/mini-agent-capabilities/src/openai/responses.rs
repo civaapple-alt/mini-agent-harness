@@ -713,17 +713,17 @@ mod tests {
     }
 
     #[test]
-    fn serializes_provider_output_token_budget() {
+    fn serializes_large_provider_output_token_budget() {
         let config = HarnessConfig::default();
         let images = crate::image::ImageStore::memory_only();
         let body = request_body_with_limit(
             "test-model",
             &request(&config, &[], &[]),
             &images,
-            Some(64),
+            Some(1_000_000),
             &std::collections::BTreeMap::new(),
         );
-        assert_eq!(body["max_output_tokens"], 64);
+        assert_eq!(body["max_output_tokens"], 1_000_000);
     }
 
     #[test]

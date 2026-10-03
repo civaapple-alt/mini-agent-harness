@@ -5,6 +5,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+- Raise the default serialized model-context ceiling to 64 MiB and model-response
+  ceiling to 16 MiB. Let Session journals store records up to 128 MiB and files
+  up to 256 MiB so larger configured model outputs can be persisted and resumed.
 - Add a capability-negotiated `ask_user` Host tool for App Server clients that
   collect bounded sequential answers. Persist question batches and accepted
   answers in Session execution logs, expose pending state through `thread/read`,
