@@ -3,7 +3,7 @@
 Every value sent to or accepted from a model has a direct hard bound. The
 defaults are part of the harness rather than terminal flags.
 
-The Rust line-budget report from `python scripts/line_budget.py` uses effective
+The Rust line-budget report from `python3 scripts/line_budget.py` uses effective
 code lines: blank lines and comment-only lines, including documentation and
 multi-line block comments, are excluded. A line containing code and a trailing
 comment still counts once. Production, unit-test, and integration-test totals
@@ -23,18 +23,19 @@ Runtime 聚合值仍可在 JSON 中用于诊断，但不再设置 `25,000` 行�
 Release Rust 净增量 `1,000` 行是审查参考值，不是硬门禁。Core + Protocol、Control
 Plane 和 Release Rust 执行绝对硬上限；增量检查使用 `--check-delta` 报告变化。
 
-在当前 revision，默认报告为：
+当前 revision 的有效行数为：
 
 ```text
-line-budget: PASS
-core+protocol    6170/7000   88.1% remain   830 PASS
-control-plane   37847/45000  84.1% remain  7153 PASS
-release         54909/65000  84.5% remain 10091 PASS
+core+protocol    6519/7000
+control-plane   40729/45000
+release         58732/65000
 ```
 
-使用 `--base <merge-base> --check-delta` 时追加三项增量；超过建议值只提示、不失败。使用 `--verbose` 查看 crate
-和 production/unit/integration 拆分；使用 `--json` 获取完整的 categories、layers、
-limits、status 和 violations。详细统计用于诊断，不能绕过硬门禁或结构性验收。
+运行 `python3 scripts/line_budget.py` 可重新计算这些数字。使用
+`--base <merge-base> --check-delta` 可查看三项增量。超过建议值只提示，不失败。
+使用 `--verbose` 查看 crate 和 production、unit、integration 拆分。使用 `--json`
+获取完整的 categories、layers、limits、status 和 violations。详细统计用于诊断，不能
+绕过硬门禁或结构性验收。
 
 行数门禁之外，交付门禁还要求受影响 Rust 包测试、Clippy、fmt、Cargo boundary 检查
 通过；如果变更影响 prompt、tool schema、loop-control、context、event 或 persistence，
