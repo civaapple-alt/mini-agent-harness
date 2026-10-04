@@ -6,7 +6,6 @@ import tempfile
 import unittest
 import zipfile
 
-
 SCRIPT = pathlib.Path(__file__).with_name("package_release.py")
 SPEC = importlib.util.spec_from_file_location("package_release", SCRIPT)
 assert SPEC and SPEC.loader
@@ -20,14 +19,16 @@ class PackageReleaseTests(unittest.TestCase):
             root = pathlib.Path(directory)
             binary = root / "mini-agent"
             binary.write_bytes(b"release-binary")
+            app_server_binary = root / "mini-agent-app-server"
+            app_server_binary.write_bytes(b"app-server-binary")
             first = root / "first"
             second = root / "second"
 
             first_archive, _ = package_release.package_release(
-                binary, "x86_64-unknown-linux-gnu", "1.2.3", first
+                binary, app_server_binary, "x86_64-unknown-linux-gnu", "1.2.3", first
             )
             second_archive, _ = package_release.package_release(
-                binary, "x86_64-unknown-linux-gnu", "1.2.3", second
+                binary, app_server_binary, "x86_64-unknown-linux-gnu", "1.2.3", second
             )
 
             self.assertEqual(sha256(first_archive), sha256(second_archive))
@@ -37,9 +38,15 @@ class PackageReleaseTests(unittest.TestCase):
             root = pathlib.Path(directory)
             binary = root / "mini-agent"
             binary.write_bytes(b"linux-release-binary")
+            app_server_binary = root / "mini-agent-app-server"
+            app_server_binary.write_bytes(b"linux-app-server-binary")
 
             archive, checksum = package_release.package_release(
-                binary, "x86_64-unknown-linux-gnu", "1.2.3", root / "out"
+                binary,
+                app_server_binary,
+                "x86_64-unknown-linux-gnu",
+                "1.2.3",
+                root / "out",
             )
 
             package_name = "mini-agent-v1.2.3-x86_64-unknown-linux-gnu"
@@ -54,15 +61,21 @@ class PackageReleaseTests(unittest.TestCase):
                     [
                         package_name,
                         f"{package_name}/mini-agent",
+                        f"{package_name}/mini-agent-app-server",
                         f"{package_name}/README.md",
                         f"{package_name}/LICENSE",
                         f"{package_name}/CHANGELOG.md",
                     ],
                 )
                 self.assertEqual(executable.mode, 0o755)
+                app_server = contents.getmember(f"{package_name}/mini-agent-app-server")
+                app_server_payload = contents.extractfile(app_server)
+                self.assertEqual(app_server.mode, 0o755)
                 self.assertEqual(readme.mode, 0o644)
                 self.assertIsNotNone(payload)
                 self.assertEqual(payload.read(), b"linux-release-binary")
+                self.assertIsNotNone(app_server_payload)
+                self.assertEqual(app_server_payload.read(), b"linux-app-server-binary")
             self.assert_checksum(archive, checksum)
 
     def test_zip_archive_is_deterministic_and_has_expected_contents(self) -> None:
@@ -70,11 +83,21 @@ class PackageReleaseTests(unittest.TestCase):
             root = pathlib.Path(directory)
             binary = root / "mini-agent.exe"
             binary.write_bytes(b"windows-release-binary")
+            app_server_binary = root / "mini-agent-app-server.exe"
+            app_server_binary.write_bytes(b"windows-app-server-binary")
             first_archive, checksum = package_release.package_release(
-                binary, "x86_64-pc-windows-msvc", "1.2.3", root / "first"
+                binary,
+                app_server_binary,
+                "x86_64-pc-windows-msvc",
+                "1.2.3",
+                root / "first",
             )
             second_archive, _ = package_release.package_release(
-                binary, "x86_64-pc-windows-msvc", "1.2.3", root / "second"
+                binary,
+                app_server_binary,
+                "x86_64-pc-windows-msvc",
+                "1.2.3",
+                root / "second",
             )
 
             package_name = "mini-agent-v1.2.3-x86_64-pc-windows-msvc"
@@ -86,14 +109,20 @@ class PackageReleaseTests(unittest.TestCase):
                     names,
                     [
                         f"{package_name}/mini-agent.exe",
+                        f"{package_name}/mini-agent-app-server.exe",
                         f"{package_name}/README.md",
                         f"{package_name}/LICENSE",
                         f"{package_name}/CHANGELOG.md",
                     ],
                 )
                 self.assertEqual(executable.external_attr >> 16, 0o755)
+                app_server = contents.getinfo(
+                    f"{package_name}/mini-agent-app-server.exe"
+                )
+                self.assertEqual(app_server.external_attr >> 16, 0o755)
+                self.assertEqual(contents.read(executable), b"windows-release-binary")
                 self.assertEqual(
-                    contents.read(executable), b"windows-release-binary"
+                    contents.read(app_server), b"windows-app-server-binary"
                 )
             self.assertEqual(sha256(first_archive), sha256(second_archive))
             self.assert_checksum(first_archive, checksum)
@@ -102,18 +131,19 @@ class PackageReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             binary = pathlib.Path(directory) / "mini-agent.exe"
             binary.write_bytes(b"release-binary")
+            app_server_binary = pathlib.Path(directory) / "mini-agent-app-server.exe"
+            app_server_binary.write_bytes(b"app-server-binary")
 
             with self.assertRaisesRegex(ValueError, "strict SemVer"):
                 package_release.package_release(
                     binary,
+                    app_server_binary,
                     "x86_64-pc-windows-msvc",
                     "v1.2",
                     pathlib.Path(directory) / "out",
                 )
 
-    def assert_checksum(
-        self, archive: pathlib.Path, checksum: pathlib.Path
-    ) -> None:
+    def assert_checksum(self, archive: pathlib.Path, checksum: pathlib.Path) -> None:
         self.assertEqual(
             checksum.read_text(encoding="ascii"),
             f"{sha256(archive)}  {archive.name}\n",

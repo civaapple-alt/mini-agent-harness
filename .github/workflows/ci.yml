@@ -37,6 +37,8 @@ jobs:
           --json
       - name: Check Cargo dependency direction
         run: python3 scripts/cargo_boundary.py --json
+      - name: Check Python SDK version and protocol contract
+        run: python3 scripts/check_sdk_version.py
       - name: Validate Cargo packages
         run: cargo package --workspace --locked --no-verify
 
@@ -50,6 +52,29 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: python3 scripts/check_pr_admission.py
+
+  python-sdk:
+    name: Python SDK and Cookbook (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install SDK development dependencies
+        run: uv sync --project sdk/python --locked --group dev
+      - name: Lint SDK and Cookbook
+        run: |
+          uv run --project sdk/python --locked ruff check sdk/python/src sdk/python/tests cookbook/python-demo
+          uv run --project sdk/python --locked ruff format --check sdk/python/src sdk/python/tests cookbook/python-demo
+      - name: Test SDK and Cookbook
+        run: uv run --project sdk/python --locked pytest sdk/python/tests -q
 
   test:
     name: Test (${{ matrix.os }})

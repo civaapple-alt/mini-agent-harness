@@ -14,13 +14,19 @@ accumulate unrelated responsibilities.
 | Capabilities | providers, workspace tools, process execution, sandboxing, MCP, Skills, and concrete side effects | the Core turn loop or a second Session history |
 | Host | prompt and rule composition, tool admission, approval ordering, and runtime assembly | public Thread lifecycle or a browser-facing state store |
 | App Server | Thread, Turn, Goal, Session, Actor/CAS control, runtime status, recovery, and JSON-RPC projection | a second model/tool loop |
-| SDK, Gateway, and Web Studio | process connection, protocol mapping, Project metadata, control requests, and bounded UI projections | execution authority, approval grants, or canonical Session history |
+| Python SDK | launches/connects to the local App Server, negotiates JSON-RPC, and exposes typed bounded projections and controls to Gateway or personal applications | execution authority, approval grants, or canonical Session history |
+| Gateway and Web Studio | Gateway maps the SDK to Web APIs and owns Project/UI metadata; Web Studio presents bounded runtime projections | execution authority, approval grants, or canonical Session history |
 
 `mini-agent` and Web Studio are clients of the same App Server runtime. The
 CLI is useful for local runs, scripts, and lower-level boundary checks. Web
 Studio is the main control and observation interface for long-running work.
 The Rust REPL and Python TUI are experimental clients. They do not define a
 separate runtime model.
+
+The Python SDK is a general App Server client, not a Web Studio component.
+Applications such as a personal agent can use it directly, and the Harness
+Cookbook contains protocol and lifecycle examples. The Web repository consumes
+the released SDK package for its Gateway and experimental TUI.
 
 ## Runtime path
 

@@ -25,15 +25,16 @@ Provider calls are not part of the release gate. Use local tests and build
 verification; paid provider checks, if needed, belong in an external evaluation
 harness.
 
-The commands below use the repository's current `1.0.0` version as a concrete
-example. For a later release, replace the version in the checklist, tag, archive
-names, and verification commands together; never publish a different commit
-under an existing tag.
+`1.0.0` is the already published baseline. The commands below illustrate the
+release procedure; source changes made after the `v1.0.0` tag require a new
+version and a new tag. Never dispatch the old tag to include newer source or
+replace the existing release assets.
 
-Coordinate this version with the companion `mini-agent-web` repository. Its
-Python SDK, Gateway, frontend, and lockfiles must use the same release number.
-Create each repository's release tag only after both release commits pass their
-own checks.
+The Python SDK is versioned and released with Harness. The companion
+`mini-agent-web` repository has its own Gateway/frontend release version and
+pins a compatible released SDK wheel in `uv.lock`; its release does not build
+or publish SDK source. The historical SDK 1.0.0 wheel remains attached to the
+Web v1.0.0 release. New SDK artifacts are attached to Harness releases.
 
 ## Before changing the version
 
@@ -42,13 +43,13 @@ release, every user-visible behavior change should be represented in
 `CHANGELOG.md`; breaking changes require an explicit migration note and a
 major-version decision.
 
-For `1.0.0`, check:
+Before each release, check:
 
 - [ ] The release scope is agreed and no unrelated work is included.
 - [ ] `README.md` answers “what is it, how do I install it, and how do I run it”
       without requiring the reader to understand the architecture first.
-- [ ] `CHANGELOG.md` has a dated `1.0.0` section and an empty `Unreleased`
-      section for subsequent work.
+- [ ] `CHANGELOG.md` has a dated section for the release version and an empty
+      `Unreleased` section for subsequent work.
 - [ ] The App Server V2 breaking change is called out, and operators can find
       the V1 Session backup instructions in `docs/app-server.md`.
 - [ ] Configuration, limits, troubleshooting, security, and privacy docs agree
@@ -75,13 +76,22 @@ content is frozen.
 
 ## Local verification
 
-Run the repository contract on the machine where the release is prepared:
+Run the repository contract and SDK package checks on the machine where the
+release is prepared:
 
 ```sh
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 python3 scripts/line_budget.py
-cargo build --release --locked -p mini-agent-cli
+cargo build --release --locked -p mini-agent-cli -p mini-agent-app-server
+python3 scripts/check_sdk_version.py
+uv sync --project sdk/python --locked --group dev
+uv run --project sdk/python --locked ruff check sdk/python/src sdk/python/tests cookbook/python-demo
+uv run --project sdk/python --locked ruff format --check sdk/python/src sdk/python/tests cookbook/python-demo
+uv run --project sdk/python --locked pytest sdk/python/tests -q
+uv run --project sdk/python --locked python cookbook/python-demo/06_protocol_compatibility.py
+uv build sdk/python --out-dir dist
+(cd dist && sha256sum mini_agent-*.whl mini_agent-*.tar.gz > SHA256SUMS && sha256sum --check SHA256SUMS)
 ```
 
 Run affected package tests locally. The full workspace test matrix is evidence
@@ -119,9 +129,10 @@ practical; this is review guidance rather than a hard limit. Run
 `python3 scripts/line_budget.py --base <merge-base> --check-delta --json` to
 report the increment and check all three absolute hard limits.
 
-The release archives contain only the binary, `README.md`, `LICENSE`, and
-`CHANGELOG.md`. `scripts/package_release.py` creates deterministic archives and
-their `.sha256` files.
+Each platform archive contains both `mini-agent` and `mini-agent-app-server`,
+plus `README.md`, `LICENSE`, and `CHANGELOG.md`. `scripts/package_release.py`
+creates deterministic archives and their `.sha256` files. The SDK release job
+also builds a wheel and sdist and publishes their `SHA256SUMS` file.
 
 ## Commit and tag
 
@@ -131,10 +142,10 @@ must point at the exact commit that passed local review and CI:
 ```sh
 git status --short
 git add Cargo.toml Cargo.lock crates/*/Cargo.toml README.md CHANGELOG.md docs scripts/line_budget.py
-git commit -m "release: prepare v1.0.0"
+git commit -m "release: prepare v<version>"
 git push origin main
-git tag -a v1.0.0 -m "Release v1.0.0"
-git push origin v1.0.0
+git tag -a v<version> -m "Release v<version>"
+git push origin v<version>
 ```
 
 Do not move or overwrite an existing release tag. If the commit is wrong,
@@ -151,9 +162,10 @@ The workflow:
 
 1. checks that the tag is strict SemVer and exactly matches the root Cargo
    version;
-2. builds Linux x86_64, macOS x86_64, macOS arm64, and Windows x86_64;
-3. packages each binary with the public release files;
-4. verifies every downloaded archive against its SHA-256 file; and
+2. builds the CLI and App Server for Linux x86_64, macOS x86_64, macOS arm64,
+   and Windows x86_64;
+3. packages both executables with the public release files;
+4. builds the Python SDK wheel and sdist and verifies all downloaded checksums;
 5. publishes the GitHub Release and generated release notes.
 
 Do not manually upload replacement archives while the workflow is running.
@@ -164,28 +176,33 @@ tag, not for publishing a different commit under the same tag.
 ## Post-release verification
 
 After the workflow succeeds, open the
-[v1.0.0 release page](https://github.com/civaapple-alt/mini-agent-harness/releases/tag/v1.0.0)
-and verify that all four platform archives and matching `.sha256` files are
-present. Download at least one archive from each operating system family when
-possible.
+[Harness Releases page](https://github.com/civaapple-alt/mini-agent-harness/releases)
+and verify that the new release contains all four platform archives and matching
+`.sha256` files, the Python wheel and sdist, and `SHA256SUMS`. The existing
+v1.0.0 release predates the SDK and App Server packaging changes. Download at
+least one archive from each operating system family when possible.
 
 On macOS/Linux:
 
 ```sh
-shasum -a 256 -c mini-agent-v1.0.0-<target>.tar.gz.sha256
-tar -xzf mini-agent-v1.0.0-<target>.tar.gz
-./mini-agent-v1.0.0-<target>/mini-agent --version
+shasum -a 256 -c mini-agent-v<version>-<target>.tar.gz.sha256
+tar -xzf mini-agent-v<version>-<target>.tar.gz
+./mini-agent-v<version>-<target>/mini-agent --version
 ```
 
 On Windows PowerShell:
 
 ```powershell
-Get-FileHash .\\mini-agent-v1.0.0-x86_64-pc-windows-msvc.zip -Algorithm SHA256
-Expand-Archive .\\mini-agent-v1.0.0-x86_64-pc-windows-msvc.zip .\\mini-agent-v1.0.0
-.\\mini-agent-v1.0.0\\mini-agent.exe --version
+Get-FileHash .\\mini-agent-v<version>-x86_64-pc-windows-msvc.zip -Algorithm SHA256
+Expand-Archive .\\mini-agent-v<version>-x86_64-pc-windows-msvc.zip .\\mini-agent-v<version>
+.\\mini-agent-v<version>\\mini-agent.exe --version
 ```
 
-Confirm that `--version` reports `1.0.0`. Then announce the release with a
+Also verify that the extracted archive contains the `mini-agent-app-server`
+binary. It speaks JSON-RPC over stdio and is launched by the SDK; it is not a
+standalone interactive command.
+
+Confirm that `--version` reports the tagged version. Then announce the release with a
 short summary, supported platforms, upgrade instructions, and known
 limitations. Link to the GitHub Release rather than attaching unverified
 builds elsewhere.

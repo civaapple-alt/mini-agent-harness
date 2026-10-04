@@ -39,8 +39,10 @@ agent runtime = thin Agent Loop + thick Control Plane
 ### 使用发布包
 
 从 [GitHub Releases](https://github.com/civaapple-alt/mini-agent-harness/releases)
-下载对应平台的归档，校验 `.sha256` 后将 `mini-agent` 放入 `PATH`。支持
-Linux x86_64、macOS x86_64、macOS arm64 和 Windows x86_64。
+下载对应平台的归档并校验 `.sha256`。本分支之后创建的版本归档会包含
+`mini-agent` 和 `mini-agent-app-server`；使用 Python SDK 或 Web Studio 时，将两者
+都放入 `PATH`。已发布的 v1.0.0 归档早于此打包变更，只包含 CLI。支持 Linux
+x86_64、macOS x86_64、macOS arm64 和 Windows x86_64。
 
 ### 从源码构建
 
@@ -53,6 +55,17 @@ cargo build --release --locked -p mini-agent-cli
 
 Windows 使用 `target\release\mini-agent.exe`。Shell 工具在 Unix 使用 `sh`，
 Windows 需要 PowerShell 7 (`pwsh`)。
+
+Web Studio、Gateway 和 Python SDK 需要独立的 `mini-agent-app-server` 进程；从 Harness
+仓库源码构建：
+
+```sh
+cargo build --release --locked -p mini-agent-app-server
+export PATH="$PWD/target/release:$PATH"
+```
+
+Windows PowerShell 可将 `target\release` 加入 `PATH`，或设置
+`MINI_AGENT_APP_SERVER_PATH` 指向该可执行文件。
 
 ### 运行
 
@@ -91,12 +104,15 @@ Experimental edges: Rust REPL / Python TUI → App Server
 | Capabilities | Provider、Workspace、Process、Sandbox、MCP、Skill/Plugin |
 | Host | Prompt/Rule、ToolOrchestrator 和 Runtime 组合 |
 | App Server | Thread/Turn/Goal、Actor/CAS、事件、审批和 JSON-RPC |
+| Python SDK | 供 Gateway、Web Studio 和个人 Agent 应用使用的 App Server stdio JSON-RPC client |
 | CLI | 终端输入、输出、批准交互和实验性本地客户端入口 |
 
 主线是 `mini-agent-core → Host → App Server → Python SDK → FastAPI Gateway →
 Web Studio`。`mini-agent` CLI 和 Web Studio 都消费 App Server 的 Thread/Turn/Item
 契约，不另建执行循环。Web Studio 是长时间运行任务的默认控制和观察界面；Rust REPL
 和 Python TUI 仍是用于验证 App Server 边界的实验性客户端。
+SDK 与通用 App Server 示例由本仓维护；Web Studio 仓库维护 Gateway、前端和 TUI，
+并依赖已发布的 SDK。
 
 默认 model-visible Builtin 工具只有 `read_file`、`apply_patch`、`shell` 和
 `read_image`；MCP 与 `web_fetch` 是显式扩展。文件修改统一由 `apply_patch`
@@ -113,6 +129,8 @@ Web Studio`。`mini-agent` CLI 和 Web Studio 都消费 App Server 的 Thread/Tu
 | 运行时架构与所有权 | [`docs/harness-framework.md`](docs/harness-framework.md) |
 | 责任边界与变更准入 | [`docs/harness-boundaries.md`](docs/harness-boundaries.md) |
 | Builtin 工具契约 | [`docs/harness-tool-surface.md`](docs/harness-tool-surface.md) |
+| Python SDK 使用与开发 | [`sdk/python/README.md`](sdk/python/README.md)、[`sdk/python/python-sdk-guide.md`](sdk/python/python-sdk-guide.md) |
+| App Server 集成示例 | [`cookbook/python-demo/README.md`](cookbook/python-demo/README.md) |
 | 限制、超时与上下文预算 | [`docs/limits.md`](docs/limits.md) |
 | World state、Session 和 Goal verifier | [`docs/world-state.md`](docs/world-state.md) |
 | Scenario 与 Evidence | [`docs/harness-evidence.md`](docs/harness-evidence.md) |

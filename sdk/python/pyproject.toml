@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mini-agent"
+version = "1.0.0"
+description = "Official Python SDK for Mini Agent App Server and Harness"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Mini Agent Team" }]
+keywords = ["mini-agent", "agent", "ai", "coding-agent", "jsonrpc", "sdk"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/civaapple-alt/mini-agent-harness/tree/main/sdk/python"
+Repository = "https://github.com/civaapple-alt/mini-agent-harness"
+Issues = "https://github.com/civaapple-alt/mini-agent-harness/issues"
+Documentation = "https://github.com/civaapple-alt/mini-agent-harness/tree/main/sdk/python"
+
+[dependency-groups]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "ruff>=0.4.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mini_agent"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,6 +1,6 @@
 # Web Studio 集成
 
-本页定义 `mini-codex` 与 `mini-agent-web` 的跨仓库运行边界。它说明 Web Studio
+本页定义 `mini-agent-harness` 与 `mini-agent-web` 的跨仓库运行边界。它说明 Web Studio
 如何连接 App Server，不重复 JSON-RPC 线协议，也不替代 Gateway、SDK 或前端的目录
 README。
 
@@ -270,6 +270,6 @@ Notebook 属于当前 Session。Gateway 通过 App Server 读写它，不缓存�
 ## 维护边界
 
 修改 JSON-RPC 方法、DTO、事件或错误码时，更新 [`app-server.md`](app-server.md)。
-修改 SDK 行为时，更新 `mini-agent-web/sdk/python/` 下的文档。修改 Gateway 路由或
-Web Studio 组件时，更新其各自目录 README。不要用 Gateway 缓存、浏览器状态或 Session
+修改 SDK 行为时，更新 [`../sdk/python/README.md`](../sdk/python/README.md) 和 SDK guide。
+修改 Gateway 路由或 Web Studio 组件时，更新其各自目录 README。不要用 Gateway 缓存、浏览器状态或 Session
 sidecar 修补缺失的运行时投影。

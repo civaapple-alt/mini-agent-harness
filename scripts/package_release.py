@@ -9,7 +9,6 @@ import re
 import tarfile
 import zipfile
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PUBLIC_FILES = ("README.md", "LICENSE", "CHANGELOG.md")
 SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -18,9 +17,10 @@ ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Package one Mini Agent Harness release binary"
+        description="Package Mini Agent CLI and App Server release binaries"
     )
     parser.add_argument("--binary", required=True, type=pathlib.Path)
+    parser.add_argument("--app-server-binary", required=True, type=pathlib.Path)
     parser.add_argument("--target", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", default=pathlib.Path("dist"), type=pathlib.Path)
@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
 
 def package_release(
     binary: pathlib.Path,
+    app_server_binary: pathlib.Path,
     target: str,
     version: str,
     output: pathlib.Path,
@@ -37,6 +38,8 @@ def package_release(
         raise ValueError(f"version is not strict SemVer: {version}")
     if not binary.is_file():
         raise ValueError(f"release binary does not exist: {binary}")
+    if not app_server_binary.is_file():
+        raise ValueError(f"App Server binary does not exist: {app_server_binary}")
     for name in PUBLIC_FILES:
         if not (ROOT / name).is_file():
             raise ValueError(f"release input does not exist: {ROOT / name}")
@@ -49,7 +52,11 @@ def package_release(
     if archive.exists() or checksum.exists():
         raise ValueError(f"release output already exists: {archive}")
 
-    members = [(binary, "mini-agent.exe" if windows else "mini-agent", 0o755)]
+    suffix = ".exe" if windows else ""
+    members = [
+        (binary, f"mini-agent{suffix}", 0o755),
+        (app_server_binary, f"mini-agent-app-server{suffix}", 0o755),
+    ]
     members.extend((ROOT / name, name, 0o644) for name in PUBLIC_FILES)
     if windows:
         write_zip(archive, package_name, members)
@@ -66,19 +73,21 @@ def write_tar_gz(
     package_name: str,
     members: list[tuple[pathlib.Path, str, int]],
 ) -> None:
-    with archive.open("xb") as raw:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
-            with tarfile.open(fileobj=compressed, mode="w") as output:
-                directory = tarfile.TarInfo(package_name)
-                normalize_tar_info(directory, 0o755)
-                directory.type = tarfile.DIRTYPE
-                output.addfile(directory)
-                for source, name, mode in members:
-                    payload = source.read_bytes()
-                    info = tarfile.TarInfo(f"{package_name}/{name}")
-                    normalize_tar_info(info, mode)
-                    info.size = len(payload)
-                    output.addfile(info, io.BytesIO(payload))
+    with (
+        archive.open("xb") as raw,
+        gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+        tarfile.open(fileobj=compressed, mode="w") as output,
+    ):
+        directory = tarfile.TarInfo(package_name)
+        normalize_tar_info(directory, 0o755)
+        directory.type = tarfile.DIRTYPE
+        output.addfile(directory)
+        for source, name, mode in members:
+            payload = source.read_bytes()
+            info = tarfile.TarInfo(f"{package_name}/{name}")
+            normalize_tar_info(info, mode)
+            info.size = len(payload)
+            output.addfile(info, io.BytesIO(payload))
 
 
 def normalize_tar_info(info: tarfile.TarInfo, mode: int) -> None:
@@ -109,6 +118,7 @@ def main() -> int:
     try:
         archive, checksum = package_release(
             arguments.binary,
+            arguments.app_server_binary,
             arguments.target,
             arguments.version,
             arguments.output,

@@ -13,6 +13,11 @@ must stay on the control-plane side of the boundary. The project is not a
 smaller copy of every feature in Codex, Pi, fx, or Qi; it is evaluated by
 observable, recoverable, and verifiable runtime behavior.
 
+The Python SDK is the reusable App Server client for Gateway and direct
+applications. SDK source, documentation, tests, and generic integration
+examples belong in this repository; Web Studio consumes the released SDK
+package.
+
 ## Documentation topology
 
 - `README.md` is the lightweight project entry point. It owns project identity,
@@ -153,6 +158,11 @@ cargo clippy -p <affected-package> --all-targets -- -D warnings
 cargo test -p <affected-package>
 python scripts/line_budget.py
 ```
+
+For Python SDK or Cookbook changes, run the SDK checks from the repository
+root with `uv sync --project sdk/python --group dev` followed by Ruff and
+`uv run --project sdk/python pytest sdk/python/tests -q`. CI runs these checks
+on Python 3.10, 3.11, and 3.12.
 
 Run `cargo clippy --workspace --all-targets -- -D warnings` when the change
 crosses package boundaries or as part of release/CI validation. Run
