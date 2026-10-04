@@ -9,36 +9,72 @@ Agent Loop、Session history、授权 grant 或恢复策略。
 SDK 由 `mini-agent-harness` 仓库维护，不发布到 PyPI。历史 `1.0.0` wheel 附在
 [`mini-agent-web` v1.0.0 GitHub Release](https://github.com/civaapple-alt/mini-agent-web/releases/tag/v1.0.0)；
 后续版本的 wheel 和 sdist 附在 Harness Release。下载对应版本的 wheel，进入保存该文件
-的目录后安装：
+的目录后安装。在 macOS 或 Linux 上运行：
 
 ```bash
-python -m pip install ./mini_agent-1.0.0-py3-none-any.whl
+python3 -m pip install ./mini_agent-1.0.0-py3-none-any.whl
 ```
 
-从仓库根目录运行以下命令，构建当前 Harness 源码的 wheel 和 sdist：
+Windows PowerShell 运行：
+
+```powershell
+py -3 -m pip install .\mini_agent-1.0.0-py3-none-any.whl
+```
+
+从仓库根目录构建当前 Harness 源码的 wheel 和 sdist：
 
 ```bash
 uv build sdk/python
 ```
 
-构建文件写入 `sdk/python/dist/`。从仓库根目录安装当前源码构建出的 wheel：
+如果当前目录已经是 `sdk/python`，运行：
 
 ```bash
-python -m pip install ./sdk/python/dist/mini_agent-1.0.0-py3-none-any.whl
+uv build .
 ```
 
-从仓库根目录直接安装源码，不需要先构建 wheel：
+构建文件写入 `sdk/python/dist/`。在 macOS 或 Linux 上从仓库根目录安装 wheel：
 
 ```bash
-python -m venv .venv
-# macOS / Linux
+python3 -m pip install ./sdk/python/dist/mini_agent-1.0.0-py3-none-any.whl
+```
+
+Windows PowerShell 使用：
+
+```powershell
+py -3 -m pip install .\sdk\python\dist\mini_agent-1.0.0-py3-none-any.whl
+```
+
+如果当前目录是 `sdk/python`，macOS 或 Linux 使用：
+
+```bash
+python3 -m pip install ./dist/mini_agent-1.0.0-py3-none-any.whl
+```
+
+Windows PowerShell 使用：
+
+```powershell
+py -3 -m pip install .\dist\mini_agent-1.0.0-py3-none-any.whl
+```
+
+从仓库根目录直接安装源码，不需要先构建 wheel。在 macOS 或 Linux 上运行：
+
+```bash
+python3 -m venv .venv
 source .venv/bin/activate
-# Windows PowerShell 使用：.venv\Scripts\Activate.ps1
 python -m pip install ./sdk/python
 cargo build --release --locked -p mini-agent-app-server
-# macOS / Linux
 export PATH="$PWD/target/release:$PATH"
-# Windows PowerShell 使用：$env:PATH = "$PWD\target\release;$env:PATH"
+```
+
+Windows PowerShell 运行：
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install .\sdk\python
+cargo build --release --locked -p mini-agent-app-server
+$env:PATH = "$PWD\target\release;$env:PATH"
 ```
 
 SDK 需要 Python 3.10 或更高版本，且运行时不依赖第三方 Python 包。确保
