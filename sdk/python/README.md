@@ -6,16 +6,28 @@ Agent Loop、Session history、授权 grant 或恢复策略。
 
 ## 安装
 
-SDK 由 `mini-agent-harness` 仓库维护。历史 `1.0.0` wheel 仍附在
+SDK 由 `mini-agent-harness` 仓库维护，不发布到 PyPI。历史 `1.0.0` wheel 附在
 [`mini-agent-web` v1.0.0 GitHub Release](https://github.com/civaapple-alt/mini-agent-web/releases/tag/v1.0.0)；
-后续版本由 Harness Release 发布 wheel 和 sdist。SDK 不发布到 PyPI，请从 GitHub
-Release 下载对应版本 wheel 后安装：
+后续版本的 wheel 和 sdist 附在 Harness Release。下载对应版本的 wheel，进入保存该文件
+的目录后安装：
 
 ```bash
-pip install ./mini_agent-1.0.0-py3-none-any.whl
+python -m pip install ./mini_agent-1.0.0-py3-none-any.whl
 ```
 
-从 Harness 源码安装：
+从仓库根目录运行以下命令，构建当前 Harness 源码的 wheel 和 sdist：
+
+```bash
+uv build sdk/python
+```
+
+构建文件写入 `sdk/python/dist/`。从仓库根目录安装当前源码构建出的 wheel：
+
+```bash
+python -m pip install ./sdk/python/dist/mini_agent-1.0.0-py3-none-any.whl
+```
+
+从仓库根目录直接安装源码，不需要先构建 wheel：
 
 ```bash
 python -m venv .venv
@@ -125,6 +137,8 @@ request 并抛出 `AppServerRequestTimeoutError`（它继承 `ServerProcessError
 审批、恢复和协议验证方式。
 
 ## 开发检查
+
+从仓库根目录运行以下命令：
 
 ```bash
 uv sync --project sdk/python --group dev

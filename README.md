@@ -67,6 +67,25 @@ export PATH="$PWD/target/release:$PATH"
 Windows PowerShell 可将 `target\release` 加入 `PATH`，或设置
 `MINI_AGENT_APP_SERVER_PATH` 指向该可执行文件。
 
+### 运行 Python SDK 示例
+
+需要 Python 3.10 或更高版本和 `uv`。从仓库根目录先运行离线协议示例；它不启动
+App Server，也不调用模型：
+
+```sh
+uv run --project sdk/python python cookbook/python-demo/06_protocol_compatibility.py
+```
+
+运行实时示例前，先构建上面的 App Server，并在 Web Studio 的**设置 → Agent 能力 →
+模型设置**中配置供应商凭证和默认模型：
+
+```sh
+uv run --project sdk/python python cookbook/python-demo/01_basic_turn.py
+```
+
+SDK 安装和打包步骤见 [`sdk/python/README.md`](sdk/python/README.md)。其他示例见
+[`Python Cookbook`](cookbook/python-demo/README.md)。
+
 ### 运行
 
 首次使用先启动 Web Studio，在 **设置 → Agent 能力 → 模型设置** 配置供应商、API

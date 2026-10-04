@@ -18,11 +18,47 @@
 
 ## 运行
 
-先确保 App Server 可执行文件可被 SDK 找到；不在 `PATH` 时设置
-`MINI_AGENT_APP_SERVER_PATH`。Live 示例还需要模型 Provider 的凭证。
+以下命令都从仓库根目录运行。需要 Python 3.10 或更高版本和 `uv`。
+
+先运行离线协议示例，确认 SDK 能解析已知和未知事件及工具结果。它不启动 App Server，
+也不调用模型：
+
+```bash
+uv run --project sdk/python python cookbook/python-demo/06_protocol_compatibility.py
+```
+
+Live 示例需要 `mini-agent-app-server` 可执行文件，以及已配置的模型 Provider 和默认模型。
+先构建 App Server：
+
+```bash
+cargo build --release --locked -p mini-agent-app-server
+```
+
+首次运行前，在 Web Studio 的**设置 → Agent 能力 → 模型设置**中配置供应商凭证和默认模型。
+配置说明见 [`docs/configuration.md`](../../docs/configuration.md)。SDK 会从 `PATH` 查找
+App Server。如果它不在 `PATH`，请从仓库根目录设置 `MINI_AGENT_APP_SERVER_PATH`。
+然后运行第一个实时示例：
+
+```bash
+# macOS / Linux
+export MINI_AGENT_APP_SERVER_PATH="$PWD/target/release/mini-agent-app-server"
+```
+
+Windows PowerShell 使用：
+
+```powershell
+$env:MINI_AGENT_APP_SERVER_PATH = (Resolve-Path 'target\release\mini-agent-app-server.exe').Path
+```
+
+配置好路径后，运行示例：
 
 ```bash
 uv run --project sdk/python python cookbook/python-demo/01_basic_turn.py
+```
+
+其他 Live 示例：
+
+```bash
 uv run --project sdk/python python cookbook/python-demo/02_streaming_events.py
 uv run --project sdk/python python cookbook/python-demo/03_approval_handling.py
 uv run --project sdk/python python cookbook/python-demo/04_steering_and_interrupt.py
