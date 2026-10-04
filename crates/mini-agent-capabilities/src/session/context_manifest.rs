@@ -1,6 +1,6 @@
 use mini_agent_protocol::{ContextInjectionKind, ContextInjectionRecord, TurnId};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File};
+use std::fs::{self, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -146,7 +146,9 @@ impl SessionContextManifestStore {
         let temp = parent.join(".context_manifest.tmp");
         fs::write(&temp, &bytes)
             .map_err(|error| format!("cannot write context manifest: {error}"))?;
-        File::open(&temp)
+        OpenOptions::new()
+            .write(true)
+            .open(&temp)
             .and_then(|file| file.sync_all())
             .map_err(|error| format!("cannot sync context manifest: {error}"))?;
         fs::rename(&temp, &self.path).map_err(|error| {

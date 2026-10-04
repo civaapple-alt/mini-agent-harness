@@ -1,6 +1,6 @@
 use mini_agent_protocol::{Event, EventEnvelope, ThreadId, TurnId, TurnSource};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File};
+use std::fs::{self, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -188,7 +188,9 @@ impl SessionEventReplayStore {
         let temp = parent.join(".turn_event_replay.tmp");
         fs::write(&temp, &bytes)
             .map_err(|error| format!("cannot write Session event replay: {error}"))?;
-        File::open(&temp)
+        OpenOptions::new()
+            .write(true)
+            .open(&temp)
             .and_then(|file| file.sync_all())
             .map_err(|error| format!("cannot sync Session event replay: {error}"))?;
         fs::rename(&temp, &self.path).map_err(|error| {

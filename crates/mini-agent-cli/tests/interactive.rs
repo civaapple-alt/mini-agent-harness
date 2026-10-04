@@ -675,8 +675,14 @@ fn repl_is_fail_closed_for_non_interactive_tool_approval() {
         .map(|_| serde_json::from_slice::<Value>(&requests_rx.recv().unwrap()).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(requests[0]["instructions"], requests[1]["instructions"]);
+    let shell_tool = requests[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "shell")
+        .expect("shell tool must be included in the model request");
     assert!(
-        requests[0]["tools"][2]["description"]
+        shell_tool["description"]
             .as_str()
             .unwrap()
             .contains("after user approval when required")
