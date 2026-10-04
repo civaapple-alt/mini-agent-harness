@@ -1281,31 +1281,20 @@ fn shell_process_has_a_timeout() {
 #[test]
 fn shell_execution_uses_the_workspace_as_its_working_directory() {
     let root = test_root();
+    let marker = ".mini-agent-workspace-cwd-probe";
+    fs::write(root.join(marker), "workspace").unwrap();
     for backend in local_shell_contract_backends() {
         let command = if cfg!(windows) && backend == SandboxKind::Native {
-            "Write-Output ([System.IO.Directory]::GetCurrentDirectory())"
+            format!(
+                "if (Test-Path -LiteralPath '{marker}') {{ 'workspace-cwd' }} else {{ 'wrong-cwd' }}"
+            )
         } else {
-            "pwd"
+            format!("test -f '{marker}' && printf 'workspace-cwd'")
         };
-        let output = run_shell(command, &root, backend, Duration::from_secs(5)).unwrap();
-        let expected = if backend == SandboxKind::Docker {
-            "/workspace".to_string()
-        } else {
-            root.to_string_lossy().into_owned()
-        };
-        let normalize = |value: &str| {
-            if cfg!(windows) {
-                value
-                    .replace(r"\\?\", "")
-                    .replace('/', "\\")
-                    .to_ascii_lowercase()
-            } else {
-                value.to_string()
-            }
-        };
+        let output = run_shell(&command, &root, backend, Duration::from_secs(5)).unwrap();
         assert!(
-            normalize(&output.text).contains(&normalize(&expected)),
-            "{backend}: expected workspace path {expected:?}, got {}",
+            output.text.contains("exit: 0") && output.text.contains("workspace-cwd"),
+            "{backend}: command did not resolve the workspace marker: {}",
             output.text
         );
     }
