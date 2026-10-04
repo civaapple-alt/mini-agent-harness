@@ -105,6 +105,12 @@ impl GoalRuntimeHandle {
         self.store.load_goal_state()
     }
 
+    pub(crate) fn owns_continuation_mode(&self) -> io::Result<bool> {
+        Ok(self
+            .load_goal_state()?
+            .is_some_and(|goal| goal.status == mini_agent_host::GoalStatus::Running))
+    }
+
     pub(crate) fn goal_dir(&self) -> std::path::PathBuf {
         self.store.goal_dir()
     }

@@ -2406,54 +2406,84 @@ async fn exact_session_fork_can_prepare_from_an_active_parent_turn() {
 }
 
 #[tokio::test]
-async fn rejects_thread_continuation_updates_while_goal_runtime_is_active() {
-    let (mut connection, root) = managed_connection("goal-owns-continuation");
-    initialize_connection(&mut connection, "goal-continuation-test").await;
-    mini_agent_host::HostWorkflowStore::new(
-        root.clone(),
+async fn rejects_thread_settings_updates_while_goal_turn_is_running() {
+    let release = Arc::new(tokio::sync::Notify::new());
+    let (mut connection, root) = managed_connection_with(
+        ScenarioModel::Timeout(release.clone()),
+        "goal-owns-continuation",
         crate::goal_service::GoalLimits::default(),
-    )
-    .set_goal("preserve Goal loop ownership", None)
-    .unwrap();
-
-    let response = connection
-        .handle_request(JsonRpcRequest::request(
-            2,
-            METHOD_THREAD_SETTINGS_UPDATE,
-            serde_json::json!({
-                "threadId": "thread-1",
-                "collaborationMode": {"mode": "default"},
-                "continuationMode": "continuous"
-            }),
-        ))
-        .await
-        .unwrap();
-    let error = response.error.expect("active Goal must own continuation");
-    assert_eq!(error.code, -32000);
-    assert!(
-        error.message.contains("owns continuation mode"),
-        "unexpected error message: {}",
-        error.message
     );
+    initialize_connection(&mut connection, "goal-continuation-test").await;
 
-    mini_agent_host::HostWorkflowStore::new(
-        root.clone(),
-        crate::goal_service::GoalLimits::default(),
-    )
-    .clear_goal()
-    .unwrap();
-    let resumed_settings = rpc_call(
+    let active_goal = set_goal(
         &mut connection,
-        3,
-        METHOD_THREAD_SETTINGS_UPDATE,
-        serde_json::json!({
-            "threadId": "thread-1",
-            "collaborationMode": {"mode": "default"},
-            "continuationMode": "continuous"
-        }),
+        2,
+        Some("preserve Goal loop ownership"),
+        None,
+        None,
     )
     .await;
-    assert_eq!(resumed_settings["value"]["continuationMode"], "continuous");
+    assert_eq!(
+        active_goal["value"]["goal"]["objective"],
+        "preserve Goal loop ownership"
+    );
+    assert_eq!(active_goal["value"]["goal"]["status"], "active");
+    loop {
+        let event = next_turn_event(&mut connection).await;
+        if matches!(event.event, mini_agent_protocol::Event::TurnStarted { .. }) {
+            break;
+        }
+    }
+
+    let update_while_goal_active = connection
+        .thread_settings_service()
+        .unwrap()
+        .update_action(
+            None,
+            None,
+            Some(mini_agent_app_server_protocol::ContinuationMode::Continuous),
+            None,
+            None,
+        )
+        .await;
+    let failure = match update_while_goal_active {
+        Err(failure) => failure,
+        Ok(_) => panic!("settings updates must be rejected while a Goal Turn runs"),
+    };
+    assert!(
+        matches!(&failure.error, crate::AppServerError::Busy),
+        "unexpected error: {:?}",
+        failure.error
+    );
+
+    release.notify_one();
+    wait_for_turn_finished(&mut connection).await;
+    wait_for_goal_status(&mut connection, "blocked").await;
+    let cleared = rpc_call(
+        &mut connection,
+        4,
+        METHOD_THREAD_GOAL_CLEAR,
+        serde_json::json!({"threadId": "thread-1"}),
+    )
+    .await;
+    assert_eq!(cleared["value"]["cleared"], true);
+    let resumed_settings = connection
+        .thread_settings_service()
+        .unwrap()
+        .update_action(
+            None,
+            None,
+            Some(mini_agent_app_server_protocol::ContinuationMode::Continuous),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resumed_settings.value.continuation_mode,
+        mini_agent_app_server_protocol::ContinuationMode::Continuous
+    );
+    connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 

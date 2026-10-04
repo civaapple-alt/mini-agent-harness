@@ -1120,9 +1120,8 @@ where
     if continuation_mode.is_some()
         && state
             .goal_runtime_handle
-            .load_goal_state()
+            .owns_continuation_mode()
             .map_err(workflow_error)?
-            .is_some_and(|goal| goal.status == mini_agent_host::GoalStatus::Running)
     {
         return Err(AppServerError::GoalOwnsContinuationMode);
     }

@@ -73,6 +73,38 @@ fn goal_runtime_supports_pause_and_resume() {
     std::fs::remove_dir_all(session_dir).unwrap();
 }
 
+#[test]
+fn running_goal_owns_continuation_mode() {
+    let session_dir = temporary_session_dir();
+    let store = HostWorkflowStore::new(&session_dir, GoalLimits::default());
+    let (events, _) = broadcast::channel(4);
+    let mut runtime = super::GoalRuntimeHandle::with_notifications(store, events, None, None);
+
+    assert!(!runtime.owns_continuation_mode().unwrap());
+    let active = runtime
+        .set_goal(
+            Some("own continuation while active"),
+            Some(ThreadGoalStatus::Active),
+            None,
+        )
+        .unwrap();
+    assert!(runtime.owns_continuation_mode().unwrap());
+
+    runtime
+        .set_goal(None, Some(ThreadGoalStatus::Paused), None)
+        .unwrap();
+    assert!(!runtime.owns_continuation_mode().unwrap());
+    runtime
+        .set_goal(None, Some(ThreadGoalStatus::Active), None)
+        .unwrap();
+    assert!(runtime.owns_continuation_mode().unwrap());
+
+    runtime.clear_goal().unwrap();
+    assert!(!runtime.owns_continuation_mode().unwrap());
+    assert_eq!(active.current.status, mini_agent_host::GoalStatus::Running);
+    std::fs::remove_dir_all(session_dir).unwrap();
+}
+
 fn set_pending_verification(
     runtime: &mut super::GoalRuntimeHandle,
     goal_id: &str,
