@@ -2430,7 +2430,11 @@ async fn rejects_thread_continuation_updates_while_goal_runtime_is_active() {
         .unwrap();
     let error = response.error.expect("active Goal must own continuation");
     assert_eq!(error.code, -32000);
-    assert!(error.message.contains("owns continuation mode"));
+    assert!(
+        error.message.contains("owns continuation mode"),
+        "unexpected error message: {}",
+        error.message
+    );
 
     mini_agent_host::HostWorkflowStore::new(
         root.clone(),
