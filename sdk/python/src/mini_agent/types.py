@@ -135,6 +135,153 @@ class UncertainToolCall:
 
 
 @dataclass
+class UserQuestionOption:
+    """One option presented by the App Server's interactive ``ask_user`` tool."""
+
+    id: str
+    label: str
+    description: str | None = None
+    recommended: bool = False
+    recommendation_reason: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> UserQuestionOption:
+        return cls(
+            id=str(data.get("id", "")),
+            label=str(data.get("label", "")),
+            description=data.get("description"),
+            recommended=bool(data.get("recommended", False)),
+            recommendation_reason=data.get("recommendationReason")
+            or data.get("recommendation_reason"),
+        )
+
+
+@dataclass
+class UserQuestion:
+    """One bounded question in a sequential user interaction."""
+
+    id: str
+    prompt: str
+    options: list[UserQuestionOption] = field(default_factory=list)
+    allow_free_text: bool = False
+    allow_skip: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> UserQuestion:
+        return cls(
+            id=str(data.get("id", "")),
+            prompt=str(data.get("prompt", "")),
+            options=[
+                UserQuestionOption.from_dict(option)
+                for option in data.get("options", [])
+                if isinstance(option, dict)
+            ],
+            allow_free_text=bool(
+                data.get("allowFreeText", data.get("allow_free_text", False))
+            ),
+            allow_skip=bool(data.get("allowSkip", data.get("allow_skip", False))),
+        )
+
+
+@dataclass
+class UserQuestionAnswer:
+    """A structured answer sent for the current question."""
+
+    type: str
+    option_id: str | None = None
+    text: str | None = None
+
+    @classmethod
+    def for_option(cls, option_id: str) -> UserQuestionAnswer:
+        return cls(type="option", option_id=option_id)
+
+    @classmethod
+    def free_text(cls, text: str) -> UserQuestionAnswer:
+        return cls(type="text", text=text)
+
+    @classmethod
+    def skipped(cls) -> UserQuestionAnswer:
+        return cls(type="skipped")
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> UserQuestionAnswer:
+        return cls(
+            type=str(data.get("type", "unknown")),
+            option_id=data.get("optionId") or data.get("option_id"),
+            text=data.get("text"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        if self.type == "option" and self.option_id:
+            return {"type": self.type, "optionId": self.option_id}
+        if self.type == "text" and self.text is not None:
+            return {"type": self.type, "text": self.text}
+        if self.type == "skipped":
+            return {"type": self.type}
+        raise ValueError("answer must be an option, free-text, or skipped value")
+
+
+@dataclass
+class UserQuestionInteraction:
+    """Persisted identity and progress for one question batch."""
+
+    interaction_id: str
+    thread_id: str
+    turn_id: str
+    call_id: str
+    questions: list[UserQuestion] = field(default_factory=list)
+    answers: list[UserQuestionAnswer | None] = field(default_factory=list)
+    current_index: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> UserQuestionInteraction:
+        return cls(
+            interaction_id=data.get("interactionId") or data.get("interaction_id", ""),
+            thread_id=data.get("threadId") or data.get("thread_id", ""),
+            turn_id=data.get("turnId") or data.get("turn_id", ""),
+            call_id=data.get("callId") or data.get("call_id", ""),
+            questions=[
+                UserQuestion.from_dict(question)
+                for question in data.get("questions", [])
+                if isinstance(question, dict)
+            ],
+            answers=[
+                UserQuestionAnswer.from_dict(answer)
+                if isinstance(answer, dict)
+                else None
+                for answer in data.get("answers", [])
+            ],
+            current_index=int(data.get("currentIndex", data.get("current_index", 0))),
+            raw=data,
+        )
+
+    @property
+    def current_question(self) -> UserQuestion | None:
+        if 0 <= self.current_index < len(self.questions):
+            return self.questions[self.current_index]
+        return None
+
+
+@dataclass
+class UserQuestionNotification:
+    """Typed projection of a user-question request or update notification."""
+
+    phase: str
+    interaction: UserQuestionInteraction
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> UserQuestionNotification:
+        interaction = data.get("interaction")
+        return cls(
+            phase=str(data.get("phase", "unknown")),
+            interaction=UserQuestionInteraction.from_dict(
+                interaction if isinstance(interaction, dict) else {}
+            ),
+        )
+
+
+@dataclass
 class ToolCall:
     """Represents a tool invocation requested by the model."""
 

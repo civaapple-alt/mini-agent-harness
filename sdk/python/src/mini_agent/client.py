@@ -56,6 +56,8 @@ from mini_agent.types import (
     TurnReconcileDisposition,
     TurnReconcileResult,
     TurnSubmissionResult,
+    UserQuestionAnswer,
+    UserQuestionNotification,
     WorkflowState,
     WorldRefreshResult,
     WorldSetExecutionResult,
@@ -245,6 +247,7 @@ class MiniAgentClient:
         :param log_level: Logging level ('DEBUG', 'INFO', logging.DEBUG, etc.).
         :param log_mode: Log file open mode ('a' for append, 'w' for overwrite/fresh log).
         :param request_timeout: Timeout in seconds for one JSON-RPC request/response.
+        :param user_questions: Advertise support for interactive ``ask_user`` requests.
         """
         _ensure_utf8_console()
         self.executable = executable
@@ -585,6 +588,10 @@ class MiniAgentClient:
                             or self._active_thread_id
                         )
                         self._cache_thread_settings(thread_id, settings)
+                    if method in ("user-question/request", "user-question/updated"):
+                        notification["typed_user_question"] = (
+                            UserQuestionNotification.from_dict(params)
+                        )
                     if method in ("item/started", "item/completed"):
                         notification["typed_item_notification"] = (
                             ItemLifecycleNotification.from_dict(method, params)
@@ -925,9 +932,12 @@ class MiniAgentClient:
         turn_id: str,
         call_id: str,
         question_id: str,
-        answer: dict[str, Any],
+        answer: UserQuestionAnswer | dict[str, Any],
     ) -> dict[str, Any]:
         """Submit one answer to the active App Server user-question request."""
+        answer_value = (
+            answer.to_dict() if isinstance(answer, UserQuestionAnswer) else answer
+        )
         return await self._send_request(
             "user-question/respond",
             {
@@ -936,7 +946,7 @@ class MiniAgentClient:
                 "turnId": turn_id,
                 "callId": call_id,
                 "questionId": question_id,
-                "answer": answer,
+                "answer": answer_value,
             },
         )
 

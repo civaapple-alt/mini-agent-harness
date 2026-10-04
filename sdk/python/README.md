@@ -62,13 +62,14 @@ asyncio.run(main())
 
 | 范围 | 主要方法 |
 | --- | --- |
-| 连接与协议 | `start()`、`stop()`、`initialize()` |
-| Thread | `start_thread()`、`list_threads()`、`read_thread()`、`close_thread()`、`fork_thread()`、`resume_thread()` |
-| Turn | `start_turn()`、`stream_turn()`、`read_turn()`、`wait_for_turn()`、`steer_turn()`、`interrupt_turn()` |
-| 观察 | `get_runtime_status()`、`replay_events()`、`list_thread_items()` |
-| Session | `get_session_info()`、`fork_session()`、`read_notebook()`、`search_notebook()`、`write_notebook()`、`forget_notebook()` |
-| 控制 | `update_thread_settings()`、Goal 方法、`get_world_state()`、`set_world_execution()`、MCP 方法 |
-| 模型配置 | `manage_model_catalog()`、`test_model_connection()` |
+| 连接与协议 | `start()`、`stop()`、`restart()`、`initialize()` |
+| Thread | `start_thread()`、`list_threads()`、`list_skills()`、`read_thread()`、`close_thread()`、`fork_thread()`、`resume_thread()` |
+| Turn | `start_turn()`、`stream_turn()`、`read_turn()`、`wait_for_turn()`、`resume_turn()`、`reconcile_turn()`、`steer_turn()`、`interrupt_turn()` |
+| 观察与协作 | `get_runtime_status()`、`replay_events()`、`list_thread_items()`、`session_control()`、`child_task_action()` |
+| Session | `get_session_info()`、`fork_session()`、`read_context_manifest()`、`read_notebook()`、`search_notebook()`、`write_notebook()`、`forget_notebook()` |
+| Thread 设置与 Goal | `update_thread_settings()`、`get_thread_model_settings()`、`update_thread_model_settings()`、`set_collaboration_mode()`、`get_workflow_state()`、`set_goal()`、`update_goal()`、`get_goal()`、`clear_goal()` |
+| 用户交互 | `approval_handler`、`user_questions=True`、类型化 `user-question/*` 通知、`respond_user_question()` |
+| Host 配置 | `manage_model_catalog()`、`test_model_connection()`、Web Search 设置与测试、World 方法、MCP 方法 |
 | 本地任务 | 后台 Shell task 与 scheduled task 的 list/read/control 方法 |
 
 `manage_model_catalog()` 读写 Host 拥有的用户级模型目录；Web Studio 和 SDK
@@ -88,6 +89,12 @@ App Server history 的读取投影，不是 SDK 的第二个持久化存储。
 `recommended_action` 只给出提示，不会恢复 Turn 或重试工具。未知恢复值保留在
 `raw` 中，并建议调用方检查状态。请读取 `recovery.status.value`，不要再用
 `recovery["status"]` 访问恢复状态。
+
+设置 `user_questions=True` 后，App Server 可向客户端发送 `ask_user` 请求。
+通知中的 `typed_user_question` 提供当前问题和选项；客户端用
+`UserQuestionAnswer` 构造并提交答案。断线后可以从 `read_thread()` 返回的
+`pending_user_question` 恢复展示。完整的交互式本地个人助手示例见
+[`08_personal_agent.py`](../../cookbook/python-demo/08_personal_agent.py)。
 
 ## 审批与通知
 

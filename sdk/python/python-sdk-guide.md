@@ -185,6 +185,19 @@ resolved. It must return a decision and, for approval, a grant scope allowed
 by the request. Without a handler, the SDK denies the request. The SDK reports
 the same approval record through `stream_turn()`.
 
+To let the Host expose its `ask_user` tool, construct the client with
+`user_questions=True`. On `user-question/request` and
+`user-question/updated`, the notification envelope includes a typed
+`UserQuestionNotification` in `typed_user_question`. Its interaction identifies
+the Thread, Turn, tool call, current question, and prior answers. Send one answer with
+`respond_user_question()`, using `UserQuestionAnswer.for_option()`,
+`UserQuestionAnswer.free_text()`, or `UserQuestionAnswer.skipped()` according
+to the question's allowed choices. The SDK never picks a recommended option
+for the user. If the client reconnects while a question is open,
+`read_thread()` returns the pending interaction so the application can present
+it again. See [`08_personal_agent.py`](../../cookbook/python-demo/08_personal_agent.py)
+for a persistent interactive example.
+
 ## Set execution and lifecycle controls
 
 Access scope and approval policy are independent. Host and Capabilities
@@ -217,9 +230,11 @@ resume a Thread or start a later Turn.
 
 The default request timeout is 30 seconds. A positive `request_timeout`
 changes that value for one client. On timeout, the SDK removes the pending
-request and raises `ServerProcessError`. `AppServerError` retains the JSON-RPC
-error `code`, `message`, and `data`. `session/fork` identity or context-policy
-conflicts use `SESSION_FORK_CONFLICT_CODE` (`-32001`).
+request and raises `AppServerRequestTimeoutError`, which records the method and
+timeout. A process exit or transport failure raises `ServerProcessError`.
+`AppServerError` retains the JSON-RPC error `code`, `message`, and `data`.
+`session/fork` identity or context-policy conflicts use
+`SESSION_FORK_CONFLICT_CODE` (`-32001`).
 `wait_for_turn()` retries timed-out `turn/read` requests and successful
 `in_progress` results. Other App Server errors, including an unknown Turn ID,
 are returned immediately.

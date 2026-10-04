@@ -14,6 +14,7 @@
 | `05_workflows_and_inspection.py` | World、独立执行策略、Plan、Goal 和 Checkpoint | live |
 | `06_protocol_compatibility.py` | 事件、ThreadItem 与已知/未知 outcome 检查 | offline |
 | `07_recovery_and_projection.py` | EOF 恢复、Session fork 和身份投影 | offline |
+| `08_personal_agent.py` | 命名 Session、持续对话、用户提问与中断恢复边界 | live |
 
 ## 运行
 
@@ -26,6 +27,16 @@ uv run --project sdk/python python cookbook/python-demo/02_streaming_events.py
 uv run --project sdk/python python cookbook/python-demo/03_approval_handling.py
 uv run --project sdk/python python cookbook/python-demo/04_steering_and_interrupt.py
 uv run --project sdk/python python cookbook/python-demo/05_workflows_and_inspection.py
+uv run --project sdk/python python cookbook/python-demo/08_personal_agent.py
+```
+
+`08_personal_agent.py` 在 App Server 中使用名为 `personal-agent` 的 Session，
+退出后再次运行会附着该 Session。它通过 SDK 类型化处理 `ask_user` 通知，并在
+重启后重新展示尚未回答的问题。输入 `/quit` 退出。示例需要已配置的模型 Provider；
+如需为自己保留一份独立对话，可在运行前设置专用 ID：
+
+```bash
+MINI_AGENT_SESSION_ID=my-personal-agent uv run --project sdk/python python cookbook/python-demo/08_personal_agent.py
 ```
 
 离线协议检查不启动 App Server，也不调用模型：
