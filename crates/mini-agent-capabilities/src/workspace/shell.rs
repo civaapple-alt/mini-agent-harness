@@ -625,18 +625,11 @@ pub(super) fn run_shell_with_cancel(
     timeout: Duration,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<CommandOutput, ToolError> {
-    if sandbox_kind == SandboxKind::Docker {
-        let docker_available = Command::new("docker")
-            .args(["info", "--format", "{{.ServerVersion}}"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        if !docker_available.is_ok_and(|status| status.success()) {
-            return Err(ToolError(
-                "docker sandbox is unavailable on this host; ensure docker daemon is running, or use '--sandbox native'"
-                    .to_string(),
-            ));
-        }
+    if sandbox_kind == SandboxKind::Docker && !docker_linux_container_runtime_available() {
+        return Err(ToolError(
+            "docker sandbox is unavailable unless an available daemon is configured for Linux containers; use '--sandbox native' otherwise"
+                .to_string(),
+        ));
     }
     let docker_container_name = (sandbox_kind == SandboxKind::Docker).then(|| {
         format!(
@@ -676,6 +669,15 @@ pub(super) fn run_shell_with_cancel(
         cancellation,
         docker_container_name.as_deref(),
     )
+}
+
+pub(super) fn docker_linux_container_runtime_available() -> bool {
+    Command::new("docker")
+        .args(["info", "--format", "{{.OSType}}"])
+        .output()
+        .is_ok_and(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "linux"
+        })
 }
 
 fn terminate_sandboxed_command(

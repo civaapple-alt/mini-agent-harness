@@ -28,7 +28,7 @@ Plane 和 Release Rust 执行绝对硬上限；增量检查使用 `--check-delta
 ```text
 core+protocol    6519/7000
 control-plane   40729/45000
-release         58796/65000
+release         58804/65000
 ```
 
 运行 `python3 scripts/line_budget.py` 可重新计算这些数字。使用
@@ -203,8 +203,9 @@ Native and Docker backends:
   runs use a unique container name; the App Server stops the Docker client and
   then kills and verifies the named container. If cleanup cannot be confirmed,
   the Shell call returns an error.
-- Docker is selected explicitly. If its daemon is unavailable or the container
-  cannot start, the command fails without falling back to Native.
+- Docker is selected explicitly and requires an available daemon configured for
+  Linux containers. If that runtime is unavailable or the container cannot
+  start, the command fails without falling back to Native.
 
 This is not an adversarial-code sandbox. Native Shell runs with the user's OS
 permissions and can access paths available to that user; configured file-tool

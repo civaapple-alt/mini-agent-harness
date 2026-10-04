@@ -36,13 +36,7 @@ fn workspace(
 
 fn local_shell_contract_backends() -> Vec<SandboxKind> {
     let mut backends = vec![SandboxKind::Native];
-    if Command::new("docker")
-        .args(["info", "--format", "{{.ServerVersion}}"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-    {
+    if docker_linux_container_runtime_available() {
         backends.push(SandboxKind::Docker);
     }
     backends
@@ -1289,7 +1283,7 @@ fn shell_execution_uses_the_workspace_as_its_working_directory() {
     let root = test_root();
     for backend in local_shell_contract_backends() {
         let command = if cfg!(windows) && backend == SandboxKind::Native {
-            "Get-Location"
+            "Write-Output ([System.IO.Directory]::GetCurrentDirectory())"
         } else {
             "pwd"
         };
@@ -1299,9 +1293,19 @@ fn shell_execution_uses_the_workspace_as_its_working_directory() {
         } else {
             root.to_string_lossy().into_owned()
         };
+        let normalize = |value: &str| {
+            if cfg!(windows) {
+                value
+                    .replace(r"\\?\", "")
+                    .replace('/', "\\")
+                    .to_ascii_lowercase()
+            } else {
+                value.to_string()
+            }
+        };
         assert!(
-            output.text.contains(&expected),
-            "{backend}: {}",
+            normalize(&output.text).contains(&normalize(&expected)),
+            "{backend}: expected workspace path {expected:?}, got {}",
             output.text
         );
     }
