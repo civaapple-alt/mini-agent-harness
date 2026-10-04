@@ -6,3 +6,13 @@
 .agents/*
 !.agents/notes/
 .DS_Store
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+/sdk/python/dist/
+
+# Local Mini Agent runtime logs
+logs/
