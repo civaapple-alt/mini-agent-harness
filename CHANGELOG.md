@@ -5,6 +5,20 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+No changes yet.
+
+## [1.0.0] - 2026-10-04
+
+### Breaking Changes
+
+- The App Server protocol and Session journal now use V2. V1 clients fail
+  protocol negotiation, and V1 Session files are rejected without automatic
+  migration or changing their contents. Back up the complete
+  `~/.mini-agent/sessions/` directory before upgrading; use the previous release
+  to inspect or continue V1 Sessions.
+
+### Changes
+
 - Raise the default serialized model-context ceiling to 64 MiB and model-response
   ceiling to 16 MiB. Let Session journals store records up to 128 MiB and files
   up to 256 MiB so larger configured model outputs can be persisted and resumed.
@@ -32,8 +46,6 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Add project-level Session diagnostics to Web Studio. A bounded App Server
   maintenance command checks Session JSONL records without opening the Agent
   runtime; users can back up and repair only an incomplete final record.
-
-## [0.9.0] - 2026-09-27
 
 - Persist per-Session execution checkpoints and tool-batch outcomes for long
   Turns. Expose explicit same-Turn resume, recover cleanly after process restart,

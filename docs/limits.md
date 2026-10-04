@@ -28,7 +28,7 @@ Plane 和 Release Rust 执行绝对硬上限；增量检查使用 `--check-delta
 ```text
 core+protocol    6519/7000
 control-plane   40729/45000
-release         58732/65000
+release         58796/65000
 ```
 
 运行 `python3 scripts/line_budget.py` 可重新计算这些数字。使用

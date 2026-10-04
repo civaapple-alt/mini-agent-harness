@@ -856,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "mini-agent-app-server"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "mini-agent-app-server-protocol",
  "mini-agent-capabilities",
@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "mini-agent-app-server-protocol"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "mini-agent-protocol",
  "serde",
@@ -879,7 +879,7 @@ dependencies = [
 
 [[package]]
 name = "mini-agent-capabilities"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "eventsource-stream",
  "futures-util",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "mini-agent-cli"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "mini-agent-app-server",
  "mini-agent-protocol",
@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "mini-agent-core"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "mini-agent-protocol",
  "serde",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "mini-agent-host"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "eventsource-stream",
  "fs2",
@@ -939,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "mini-agent-protocol"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",

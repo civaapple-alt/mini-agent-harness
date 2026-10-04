@@ -25,7 +25,7 @@ Provider calls are not part of the release gate. Use local tests and build
 verification; paid provider checks, if needed, belong in an external evaluation
 harness.
 
-The commands below use the repository's current `0.9.0` version as a concrete
+The commands below use the repository's current `1.0.0` version as a concrete
 example. For a later release, replace the version in the checklist, tag, archive
 names, and verification commands together; never publish a different commit
 under an existing tag.
@@ -42,13 +42,15 @@ release, every user-visible behavior change should be represented in
 `CHANGELOG.md`; breaking changes require an explicit migration note and a
 major-version decision.
 
-For `0.9.0`, check:
+For `1.0.0`, check:
 
 - [ ] The release scope is agreed and no unrelated work is included.
 - [ ] `README.md` answers “what is it, how do I install it, and how do I run it”
       without requiring the reader to understand the architecture first.
-- [ ] `CHANGELOG.md` has a dated `0.9.0` section and an empty `Unreleased`
+- [ ] `CHANGELOG.md` has a dated `1.0.0` section and an empty `Unreleased`
       section for subsequent work.
+- [ ] The App Server V2 breaking change is called out, and operators can find
+      the V1 Session backup instructions in `docs/app-server.md`.
 - [ ] Configuration, limits, troubleshooting, security, and privacy docs agree
       with the current implementation.
 - [ ] No credentials, local paths, build output, or generated session data are
@@ -64,7 +66,7 @@ Use strict SemVer and the `v` prefix for the Git tag:
 
 ```sh
 rg -n '^version = |mini-agent-core = ' Cargo.toml crates/*/Cargo.toml
-rg -n '^## \[(Unreleased|0\.9\.0)\]' CHANGELOG.md
+rg -n '^## \[(Unreleased|1\.0\.0)\]' CHANGELOG.md
 ```
 
 Keep `Unreleased` at the top. Move the completed entries into the dated
@@ -78,10 +80,13 @@ Run the repository contract on the machine where the release is prepared:
 ```sh
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
 python3 scripts/line_budget.py
 cargo build --release --locked -p mini-agent-cli
 ```
+
+Run affected package tests locally. The full workspace test matrix is evidence
+from CI; do not run `cargo test --workspace` locally without explicit approval.
+The release tag must point to the commit whose CI matrix passed.
 
 Exercise the built binary without contacting a provider:
 
@@ -125,11 +130,11 @@ must point at the exact commit that passed local review and CI:
 
 ```sh
 git status --short
-git add Cargo.toml Cargo.lock crates/mini-agent-cli/Cargo.toml README.md CHANGELOG.md docs scripts/line_budget.py
-git commit -m "release: prepare v0.9.0"
+git add Cargo.toml Cargo.lock crates/*/Cargo.toml README.md CHANGELOG.md docs scripts/line_budget.py
+git commit -m "release: prepare v1.0.0"
 git push origin main
-git tag -a v0.9.0 -m "Release v0.9.0"
-git push origin v0.9.0
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
 ```
 
 Do not move or overwrite an existing release tag. If the commit is wrong,
@@ -159,7 +164,7 @@ tag, not for publishing a different commit under the same tag.
 ## Post-release verification
 
 After the workflow succeeds, open the
-[v0.9.0 release page](https://github.com/civaapple-alt/mini-agent-harness/releases)
+[v1.0.0 release page](https://github.com/civaapple-alt/mini-agent-harness/releases/tag/v1.0.0)
 and verify that all four platform archives and matching `.sha256` files are
 present. Download at least one archive from each operating system family when
 possible.
@@ -167,20 +172,20 @@ possible.
 On macOS/Linux:
 
 ```sh
-shasum -a 256 -c mini-agent-v0.9.0-<target>.tar.gz.sha256
-tar -xzf mini-agent-v0.9.0-<target>.tar.gz
-./mini-agent-v0.9.0-<target>/mini-agent --version
+shasum -a 256 -c mini-agent-v1.0.0-<target>.tar.gz.sha256
+tar -xzf mini-agent-v1.0.0-<target>.tar.gz
+./mini-agent-v1.0.0-<target>/mini-agent --version
 ```
 
 On Windows PowerShell:
 
 ```powershell
-Get-FileHash .\\mini-agent-v0.9.0-x86_64-pc-windows-msvc.zip -Algorithm SHA256
-Expand-Archive .\\mini-agent-v0.9.0-x86_64-pc-windows-msvc.zip .\\mini-agent-v0.9.0
-.\\mini-agent-v0.9.0\\mini-agent.exe --version
+Get-FileHash .\\mini-agent-v1.0.0-x86_64-pc-windows-msvc.zip -Algorithm SHA256
+Expand-Archive .\\mini-agent-v1.0.0-x86_64-pc-windows-msvc.zip .\\mini-agent-v1.0.0
+.\\mini-agent-v1.0.0\\mini-agent.exe --version
 ```
 
-Confirm that `--version` reports `0.9.0`. Then announce the release with a
+Confirm that `--version` reports `1.0.0`. Then announce the release with a
 short summary, supported platforms, upgrade instructions, and known
 limitations. Link to the GitHub Release rather than attaching unverified
 builds elsewhere.
