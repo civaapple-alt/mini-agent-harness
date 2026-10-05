@@ -17,7 +17,7 @@
 2. 对有可靠模型级 token 估算器的请求，在 Core 发送模型请求前按 token 预算评估并压缩。初始候选水位为可用输入预算的 **80%**；压缩目标候选为 **65%**，形成迟滞，避免连续请求反复压缩。阈值需由 bounded scenario 校准后才能成为当前规范。
 3. 估算器由 Host 中所选 provider/model adapter 提供；Core 独占水位判断、压缩和是否继续请求的决定。无可靠估算器时，显示水位未知，保留字节硬上限和现有供应商超窗恢复，不伪造 token 百分比。
 4. Provider 返回的实际 `input_tokens` 用于展示最近一次请求，并用于检验估算偏差；不能当作下一次请求的预估值。模型配置的 `contextWindow` 不因单次用量自动改写。
-5. Web Studio 分开展示“最近请求实际输入 / 配置的模型窗口”和“自动压缩水位”。用量超过配置窗口时保留 100% 以上的数字，并提示 metadata/usage 不匹配。
+5. Web Studio 主入口参考 Codex 的单一水位读法，显示“已用 tokens / 本次模型可用预算 + 百分比”；详情再列最近请求 usage、缓存和来源估算。usage 必须绑定产生它的模型及当时预算，不能用当前选择的模型窗口去除上一模型请求的 usage。数据不匹配时保留超 100% 数值并提示。
 
 非目标：此提案不改变模型上下文长度、不把 64 MiB 换算成 token、不调整 provider API Key 或 Kimi Coding Base URL，也不引入面向用户的水位配置项。若两个行为确实需要共存，再按仓库默认优先规则讨论配置项。
 
@@ -40,8 +40,9 @@ compact toward estimated_input_tokens <= floor(0.65 * available_input_tokens)
 | E1 | `crates/mini-agent-core/src/harness.rs`：`HarnessConfig::default` 将 `max_context_bytes` 设为 64 MiB；`prepare_context` 用 `max_context_bytes / 2` 触发压缩。 | 触发点为 32 MiB 字节，不是模型上下文窗口的 50%。 | 若当前运行时覆盖了默认值，仍需从实际配置 trace 核实；代码默认值本身明确。 |
 | E2 | `docs/limits.md` 将 64 MiB 定义为 provider-neutral serialized-context safety ceiling，并说明 profile 的 `contextWindow` 是 Studio token metadata。 | 文档已经区分字节与 token，但运行时主动压缩仍把字节预算的一半作为水位，UI 又按 token 显示百分比，概念容易混淆。 | 无。 |
 | E3 | `harness.rs::compact_context_after_window_error` 在识别到 provider 超窗后按当前字节量的 90% 目标压缩，并只重试一次。 | 可恢复 provider 错误，但只有请求失败后才发生，不能解释“达到什么比例会主动压缩”。 | provider 错误分类和一次重试已有测试，仍需留作后备行为。 |
-| E4 | Web `InputBar.jsx::ContextUsageControl` 以最近一次 provider `inputTokens / contextWindow` 计算百分比；进度条宽度截到 100%，数值本身可超过 100%。`contextUsage.js::estimateContextCategoryTokens` 按类别字节占比摊分 token。 | 窗口百分比、最近输入用量、来源分类估算是三种不同量；类别估算不能驱动 Core 压缩。 | Gateway 投影的 usage 与所选模型 profile 是否始终属于同一请求/模型，需要跨层 fixture 确认。 |
-| E5 | 用户截图显示最近请求实际输入 350,429 tokens、模型窗口 metadata 262,144 tokens、窗口占比 133.7%。 | 显示值明确暴露配置窗口和 usage 不一致，不能解释成字节预算触发了压缩，也不能单凭截图断言 provider 实际超出硬上下文窗口。 | 需核查该 provider 的 usage 字段语义、模型 ID/版本与 `contextWindow` 来源是否一致。 |
+| E4 | Web `InputBar.jsx::ContextUsageControl` 用最近一次 provider `inputTokens` 除以当前 `effectiveEntry.model.contextWindow`；`App.jsx` 从 `model_responded` 写入 usage，Protocol 的 `ModelResponded` 不携带 model ID；窗口字段可在模型设置中编辑。`contextUsage.js::estimateContextCategoryTokens` 按类别字节占比摊分 token。 | 模型切换后分子可能仍属于上一个请求/模型，分母却已是当前模型。类别估算也不能驱动 Core 压缩。 | 需要把请求 model ID、窗口快照与 usage 关联起来，并用跨层 fixture 覆盖切换前后。 |
+| E5 | 用户截图先后显示 350,429 / 262,144 = 133.7%，以及当前模型选择 `k3-256k`、配置窗口 262,144、最大输出 64,000、最近输入 431,483 = 164.6%；缓存输入为 431,232。[Kimi Code 模型配置](https://www.kimi.com/code/docs/kimi-code/models.html) 将 `k3-256k` 标为固定 262,144；[错误参考](https://www.kimi.com/code/docs/en/kimi-code/error-reference.html) 说明超限会返回模型 token limit 错误。 | 如果这些 usage 真对应同一 `k3-256k` 请求，成功返回与文档约束冲突；但当前 trace 缺少请求 model ID，截图不能证明 numerator 来自当前模型。缓存命中也不应从总上下文中扣除；[Kimi 缓存用量说明](https://www.kimi.com/academy/best-practices-for-context-caching) 将缓存 tokens 作为总输入的组成部分。 | 检查同一请求的 model ID、HTTP status、request ID 和原始 usage；确定是模型切换后 UI 分母错配、usage 投影问题，还是 provider 行为与文档不符。 |
+| E6 | 用户提供的 Codex 上下文指示器截图展示 `68% used` 和 `176K / 258K`。 | 这种“用量 / 预算 + 百分比”的呈现比单独百分比更容易解释压缩水位。截图只能支持视觉结构，不足以推断 Codex 的内部预算口径。 | Mini Agent 必须使用自身同一请求、同一模型的预算来源，不能照抄 Codex 的数字语义。 |
 
 根因不是 MiB 与 token 之间缺少一个全局固定换算率，而是把资源字节限制用于模型 token 水位。UTF-8 字节、JSON/tool schema、多语言文本、图像输入和不同 tokenizer 之间不存在可用于所有模型的稳定换算。即使 provider API 返回了最近一次准确用量，它也不是下一次请求的准确预估。
 
@@ -67,6 +68,10 @@ compact toward estimated_input_tokens <= floor(0.65 * available_input_tokens)
 | 64 MiB 序列化上下文硬限制 | Core Harness | 在预估压缩之后仍限制可保留/发送的序列化上下文。 | 把字节比例显示成 model-window 百分比。 |
 | 压缩原因与预算 trace | Protocol Event → App Server 持久化/投影 | 用有界数值字段说明 `token_watermark`、`provider_overflow` 等触发原因；SDK/Gateway 透传。 | 下游根据 usage 重算 Core 的触发决定。 |
 | 水位、最近请求 usage 与 mismatch 呈现 | Web Studio | 分栏展示估算水位与 provider 实际 usage；显示窗口 metadata 来源/不可用状态。 | 静默截断超过 100% 的数值、自动改写窗口 metadata 或把类别估算说成实际值。 |
+
+### UI 参考：Codex 的“已用 / 总预算”
+
+用户提供的 Codex 截图显示 `68% 已用`、`已用 176K tokens，共 258K`。提案借用其信息层级：主入口先展示可解释的占用分数与百分比，详情再展示缓存率和来源构成。Mini Agent 的分子应是当前请求模型对应的实际 usage（若尚无成功请求则明确标记估算值/未知），分母应是同一模型按 provider 约束算出的可用上下文预算；不能把当前模型下拉框的值套到一个未绑定模型 ID 的旧 usage 上。Codex 截图不作为其内部 token budget 算法的证据。
 
 候选契约由两个独立值构成：`ContextTokenEstimate`（预请求估算及来源/可用状态）和 `ContextTokenBudget`（窗口、输出预留、水位/目标）。字段必须有硬范围、缺失语义和版本策略。具体 Rust 类型在实现批次开始前确定，避免把可用状态压成 `Option<u32>` 后丢失“不支持”“未配置”和“内容无法估算”的差异。
 
