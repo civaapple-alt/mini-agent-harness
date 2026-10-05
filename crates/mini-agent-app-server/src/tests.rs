@@ -26,6 +26,7 @@ use mini_agent_protocol::ModelEventSink;
 use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::ModelResponse;
 use mini_agent_protocol::ModelSelection;
+use mini_agent_protocol::ModelUsage;
 use mini_agent_protocol::SkillLoadPhase;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
@@ -51,6 +52,7 @@ use mini_agent_protocol::UserQuestionAnswer;
 use serde_json::Value;
 use serde_json::from_str;
 use serde_json::json;
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -803,6 +805,167 @@ async fn bounded_harness_large_model_context_and_response_scenario() {
             && snapshot.context_window_tokens == Some(1_048_576)
             && snapshot.max_output_tokens == Some(64_000)
     )));
+}
+
+struct ContextUsageWaterlineScenario {
+    responses: VecDeque<ModelResponse>,
+    context: ModelContextSnapshot,
+}
+
+impl Model for ContextUsageWaterlineScenario {
+    type Error = Infallible;
+
+    fn context_snapshot(
+        &self,
+        _selection: Option<&ModelSelection>,
+    ) -> Option<ModelContextSnapshot> {
+        Some(self.context.clone())
+    }
+
+    async fn respond<'a>(
+        &'a mut self,
+        _request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        Ok(self
+            .responses
+            .pop_front()
+            .expect("missing waterline scenario response"))
+    }
+}
+
+#[tokio::test]
+async fn bounded_harness_compacts_after_reported_usage_reaches_model_size_waterline() {
+    let model = ContextUsageWaterlineScenario {
+        responses: VecDeque::from([
+            ModelResponse {
+                reasoning: String::new(),
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call-missing".to_string(),
+                    name: "unregistered_tool".to_string(),
+                    arguments: json!({}),
+                }],
+                usage: Some(ModelUsage {
+                    input_tokens: 500_000,
+                    cached_input_tokens: None,
+                    output_tokens: 20,
+                }),
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: "Summarize the earlier exchange.".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            },
+            ModelResponse {
+                reasoning: String::new(),
+                text: "The answer is ready.".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            },
+        ]),
+        context: ModelContextSnapshot {
+            selection: ModelSelection::new("another-provider", "custom-model"),
+            context_window_tokens: Some(1_000_000),
+            max_output_tokens: Some(384_000),
+        },
+    };
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
+    harness
+        .restore_history(vec![
+            Message::User {
+                text: "old request ".repeat(2_000),
+            },
+            Message::Assistant {
+                reasoning: String::new(),
+                text: "old answer".to_string(),
+                tool_calls: Vec::new(),
+            },
+            Message::User {
+                text: "another old request".to_string(),
+            },
+            Message::Assistant {
+                reasoning: String::new(),
+                text: "another old answer".to_string(),
+                tool_calls: Vec::new(),
+            },
+        ])
+        .unwrap();
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(ThreadId::new("initial"), harness),
+    );
+
+    let events = run_turn_to_finished(&server, "continue").await;
+
+    let response_index = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                Event::ModelResponded {
+                    usage: Some(ModelUsage { input_tokens: 500_000, .. }),
+                    model_context: Some(context),
+                    ..
+                } if context.selection.provider_id == "another-provider"
+                    && context.context_window_tokens == Some(1_000_000)
+            )
+        })
+        .unwrap();
+    let compaction_index = events
+        .iter()
+        .position(|event| matches!(event, Event::ContextCompactionStarted { .. }))
+        .unwrap();
+    let continuation_index = events
+        .iter()
+        .enumerate()
+        .filter_map(|(index, event)| matches!(event, Event::ModelStarted { .. }).then_some(index))
+        .nth(1)
+        .unwrap();
+    assert!(response_index < compaction_index);
+    assert!(compaction_index < continuation_index);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::ContextCompactionFinished { after_bytes, before_bytes, .. }
+            if after_bytes < before_bytes
+    )));
+}
+
+#[tokio::test]
+async fn bounded_harness_reject_policy_skips_usage_waterline_compaction() {
+    let model = ContextUsageWaterlineScenario {
+        responses: VecDeque::from([ModelResponse {
+            reasoning: String::new(),
+            text: "The answer is ready.".to_string(),
+            tool_calls: Vec::new(),
+            usage: Some(ModelUsage {
+                input_tokens: 500_000,
+                cached_input_tokens: None,
+                output_tokens: 20,
+            }),
+        }]),
+        context: ModelContextSnapshot {
+            selection: ModelSelection::new("another-provider", "custom-model"),
+            context_window_tokens: Some(1_000_000),
+            max_output_tokens: Some(384_000),
+        },
+    };
+    let server = server_with_config(
+        model,
+        HarnessConfig {
+            context_limit_behavior: mini_agent_core::ContextLimitBehavior::Reject,
+            ..HarnessConfig::default()
+        },
+    );
+
+    let events = run_turn_to_finished(&server, "finish").await;
+
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::ContextCompactionStarted { .. }))
+    );
 }
 
 #[tokio::test]

@@ -1,6 +1,6 @@
 # 上下文字节硬限制与模型快照
 
-状态：已实现（token 水位部分仍在提案中）；日期：2026-10-05；范围：Core、Protocol、Host、App Server、Python SDK、Web Studio
+状态：已实现（窗口中间档位与校准仍待定）；日期：2026-10-05；范围：Core、Protocol、Host、App Server、Python SDK、Web Studio
 
 ## 结果
 
@@ -9,9 +9,17 @@
 `ContextBytes` 限制错误。若 provider 明确报告所选模型的上下文窗口溢出，Harness
 仍压缩历史并对该模型步骤重试一次；普通 provider 错误不触发这条恢复路径。
 
-这次改动没有把字节数换算成 token，也没有实现请求前 token 估算和百分比压缩水位。
-这避免以 64 MiB 的一半解释 Kimi 的 256K/1M 模型窗口，但还不能在 token 占用到某个
-百分比时主动压缩。
+Core 还会使用成功模型响应中的 provider `input_tokens` 作为反馈水位：profile
+窗口不超过 262,144 tokens 时为完整窗口的 80%，窗口至少 1,000,000 tokens 时为
+50%；中间窗口暂不设百分比。若报告的输入 tokens 加有效 `maxOutputTokens` 超过完整
+窗口，也会触发压缩。压缩在报告该用量的响应之后执行，位于下一次模型请求之前；若这是
+最终响应，则在该 Turn 完成前压缩。没有实际 usage 或窗口快照时跳过水位判断。该行为不
+预估正在发送的请求；provider 拒绝超窗时仍使用一次恢复重试。
+
+水位使用 provider 报告的实际 `input_tokens`，不把字节数或字符数换算成 token，也不需要
+另一个 provider 估算端点。请求前 token 估算仍未实现；所以对刚越过水位的成功请求，压缩
+会在响应后才发生，不能保证拦住这次请求。64 MiB 只表示序列化请求上限，不代表 Kimi 或
+其他模型的 token 窗口。
 
 ## 每次请求的模型配置快照
 
@@ -49,8 +57,10 @@ ID。为了保留用户选定的 Kimi Code 配置，本批没有新增第二个 
 ## 验证与限制
 
 - Core 单测覆盖：超过旧半字节门槛但低于硬上限时继续发送；超过硬上限时不做预压缩
-  且不调用模型；明确 provider overflow 时仍只压缩重试一次。
-- App Server bounded scenario 覆盖大历史上下文、模型快照事件和输出的完整路径。
+  且不调用模型；明确 provider overflow 时仍只压缩重试一次；窗口尺寸水位边界和输出预留
+  提前触发。
+- App Server bounded scenario 覆盖 1M 窗口 50% 水位：响应先报告 500K 实际输入用量，随后
+  在 Turn 完成前发出压缩事件；另有大历史上下文、模型快照和输出路径场景。
 - Rust 包测试：Protocol、Core、Host、Capabilities、App Server 通过。
 - 强杀恢复 fixture 改为等待 marker 成为完整 JSON，避免把文件创建瞬间误判为已写完。
 - Python SDK 模型快照解析测试通过；SDK Ruff 通过。SDK 全量测试有一项不在本批改动范围的
@@ -60,11 +70,11 @@ ID。为了保留用户选定的 Kimi Code 配置，本批没有新增第二个 
 - Web Studio 的 Node/Vitest 定向测试、lint、build 通过；build 有 Vite bundle 大于
   500 kB 的提示。未做手动浏览器 smoke。
 - `cargo fmt --all`、受影响 Rust 包 Clippy、Harness docs link check 与 line budget
-  通过。当前有效行数：Core + Protocol `6797/7000`，Control Plane `40964/45000`，
-  Release `59299/65000`。
+  通过。当前有效行数：Core + Protocol `6903/7000`，Control Plane `41117/45000`，
+  Release `59558/65000`。
 
 ## 后续
 
-Token 水位提案仍保持 `proposed`。晋级前需要针对保留的 Kimi Code 产品确认可用、准确且
-覆盖实际请求形状的请求前估算途径，并补齐估算误差、上下文边界、压缩迟滞和多轮
-bounded Scenario 证据。见 [Token 水位驱动的上下文压缩与字节上限解耦](../../proposed/architecture/2026-10-05-token-aware-context-compaction-waterline.zh.md)。
+候选比例已按模型 profile 窗口大小在 Core 落地，与 provider/model ID 无关。下一步需要确定
+262,145–999,999 窗口的策略，并通过更多多轮 Scenario 校准响应后反馈水位、输出预留和
+摘要效果。见 [Token 水位驱动的上下文压缩与字节上限解耦](../../proposed/architecture/2026-10-05-token-aware-context-compaction-waterline.zh.md)。

@@ -1,6 +1,6 @@
 # Token 水位驱动的上下文压缩与字节上限解耦
 
-状态：提案中
+状态：部分实现；候选比例已落地，窗口中间档位与运行校准待完成
 日期：2026-10-05
 范围：Harness Core、Protocol、Host/模型适配器、App Server、SDK/Gateway、Web Studio
 初始证据基线：本提案实现前的 Harness 与 Web Studio checkout；用户提供的上下文用量截图
@@ -11,19 +11,19 @@
 
 提案最初的实现基线中，默认 `max_context_bytes` 为 `64 * 1024 * 1024` 字节，`Harness::prepare_context` 在序列化上下文达到其一半时尝试压缩，因此主动压缩水位实际为 **32 MiB**。这衡量 JSON/UTF-8 字节大小，不等于 256K 或 1M tokens。超过供应商窗口时，Harness 另有一次错误识别后的压缩重试；这不是预先可解释的水位。
 
-2026-10-05 的部分实现已删除这条 32 MiB 预压缩路径。Harness 现在只在序列化上下文超过字节硬上限时拒绝请求，并保留明确识别的 provider 窗口溢出压缩重试。`model_responded` 与持久化的 `contextUsage` 也会保存该次请求所选模型的窗口和最大输出配置，Studio 不再拿当前下拉框的模型解释旧用量；UI 按完整模型窗口显示最近实际输入占比，另列扣除最大输出后的可用输入预算，并保留超过 100% 的值。该快照仍不是请求前 token 估算器，故不能触发提前压缩。实现记录见 [上下文字节硬限制与模型快照](../../implemented/architecture/2026-10-05-context-waterline-safety-and-model-snapshot.zh.md)。
+2026-10-05 的实现已删除这条 32 MiB 预压缩路径。Harness 现在只在序列化上下文超过字节硬上限时拒绝请求，并保留明确识别的 provider 窗口溢出压缩重试。`model_responded` 与持久化的 `contextUsage` 会保存该次请求所选模型的窗口和最大输出配置，Studio 按完整模型窗口显示最近实际输入占比。Core 也使用成功响应的实际 `input_tokens` 作为反馈水位：窗口不超过 262,144 时 80%，至少 1,000,000 时 50%；输出预留超窗也会触发。压缩在报告用量的响应之后、下一次模型请求之前执行。此行为不预测正在发送的请求，具体运行限制见 [实现记录](../../implemented/architecture/2026-10-05-context-waterline-safety-and-model-snapshot.zh.md)。
 
-本轮没有实现 Kimi Code 的请求前 token 估算器。[Kimi Code 模型文档](https://www.kimi.com/code/docs/kimi-code/models.html)列出 coding 模型与窗口，但没有文档化的 Kimi Code 估算端点。[Kimi API 开放平台](https://platform.kimi.com/docs/api/estimate)确实提供 token 估算 API，不过它属于另一产品，使用 `MOONSHOT_API_KEY`，模型 ID 列表也与当前 Kimi Code 配置不同；[官方说明](https://www.kimi.com/help/kimi-api/api-troubleshooting)确认开放平台和 Kimi Code 的 API Key 不通用。保留 Kimi Code Base URL 与凭据意味着不能把开放平台估算请求套到 Code Key 上，也不应未经确认就新增第二套凭据和模型映射。候选比例现在由模型 profile 的上下文窗口大小决定；因为尚无可靠的 Kimi Code 请求前估算途径，这些候选水位还不能用于自动压缩，提案保持待完成。
+候选比例由模型 profile 的上下文窗口大小决定，与 provider/model ID 无关。实现复用成功响应已有的 provider `input_tokens`，不需要把 Kimi Open Platform estimate API 套用到 Kimi Code Key，也不新增凭据或模型映射。请求前 token 估算仍未实现：水位只会在 provider 成功返回 usage 后触发；如果响应没有 usage/窗口快照则跳过比例水位。provider 超窗错误的单次恢复重试保留为后备。
 
-2026-10-05 用户明确该比例按**模型配置的上下文窗口大小**分档，而不是 Kimi 专属：窗口约 100,000 和 256,000 tokens 使用 **80%**；1,000,000 tokens 使用 **50%**。百分比分母是完整上下文窗口，`contextWindow`/`context_window_tokens` 是模型 profile 中配置的窗口 token 数，不是 Harness 字节上限，也不是供应商实时返回或验证的事实。窗口占用率展示与候选压缩水位因此使用相同分母。触发后的目标需低于触发点，并留出最大输出预留；具体目标仍须由 bounded scenario 校准。估算器缺失时这些值不启用。
+2026-10-05 用户明确该比例按**模型配置的上下文窗口大小**分档，而不是 Kimi 专属：窗口约 100,000 和 256,000 tokens 使用 **80%**；1,000,000 tokens 使用 **50%**。百分比分母是完整上下文窗口，`contextWindow`/`context_window_tokens` 是模型 profile 中配置的窗口 token 数，不是 Harness 字节上限，也不是供应商实时返回或验证的事实。窗口占用率展示与反馈水位因此使用相同分母。触发后复用现有摘要/机械裁剪逻辑，目标按 serialized bytes 至少减少 10%；这不是压缩后 token 数低于特定比例的保证，仍待多轮 Scenario 校准。
 
-建议的目标行为：
+当前实现与待校准行为：
 
 1. `max_context_bytes` 继续只负责限制序列化上下文的资源大小，不再触发日常预压缩。
-2. 对有可靠模型级 token 估算器的请求，在 Core 发送模型请求前按本次 profile 配置的完整上下文窗口评估并压缩。候选窗口档位为 `context_window_tokens <= 262,144` 时 **80%**（覆盖 100,000、256,000 和 262,144），`context_window_tokens >= 1,000,000` 时 **50%**。中间区间暂不插值或启用自动水位，须经校准后再定。压缩目标须低于对应触发点并为最大输出预留空间，具体值待 bounded scenario 校准。
-3. 估算器由 Host 中所选 provider/model adapter 提供；Core 独占水位判断、压缩和是否继续请求的决定。无可靠估算器时，显示水位未知，保留字节硬上限和现有供应商超窗恢复，不伪造 token 百分比。
-4. Provider 返回的实际 `input_tokens` 用于展示最近一次请求，并用于检验估算偏差；不能当作下一次请求的预估值。模型配置的 `contextWindow` 不因单次用量自动改写。
-5. Web Studio 主入口参考 Codex 的单一水位读法，显示“已用 tokens / 本次模型完整窗口 + 百分比”；详情再列最大输出预留、可用输入预算、最近请求 usage、缓存和来源估算。usage 必须绑定产生它的模型及当时窗口，不能用当前选择的模型窗口去除上一模型请求的 usage。数据不匹配时保留超 100% 数值并提示。
+2. 对 `context_limit_behavior=Compact` 的请求，Core 在收到成功响应后使用该请求报告的实际 input usage 评估反馈水位，并在继续模型循环或结束 Turn 前压缩。候选窗口档位为 `context_window_tokens <= 262,144` 时 **80%**（覆盖 100,000、256,000 和 262,144），`context_window_tokens >= 1,000,000` 时 **50%**。中间区间暂不使用百分比水位。
+3. 若报告的 `input_tokens + max_output_tokens` 大于完整窗口，Core 独立触发压缩；有效输出预留不改变百分比的完整窗口分母。Core 独占水位判断，provider 超窗错误重试仍作为后备。
+4. 没有成功响应 usage 或配置窗口快照时不触发比例水位；上报 usage 只描述刚完成的请求，不当作下一次请求的预估。模型配置的 `contextWindow` 不因单次用量自动改写。profile 与 provider 实际路由不匹配时，水位也会受该 metadata 影响。
+5. Web Studio 主入口参考 Codex 的单一水位读法，显示“最近请求已用 tokens / 本次模型完整窗口 + 百分比”；详情再列最大输出预留、可用输入预算、最近请求 usage、缓存和来源估算。usage 必须绑定产生它的模型及当时窗口，不能用当前选择的模型窗口去除上一模型请求的 usage。数据不匹配时保留超 100% 数值并提示。
 
 非目标：此提案不改变模型上下文长度、不把 64 MiB 换算成 token、不调整 provider API Key 或 Kimi Coding Base URL，也不引入面向用户的水位配置项。若两个行为确实需要共存，再按仓库默认优先规则讨论配置项。
 
@@ -32,15 +32,13 @@
 ```text
 trigger_ratio = 0.80 when context_window_tokens <= 262,144
 trigger_ratio = 0.50 when context_window_tokens >= 1,000,000
-trigger_ratio = unknown for 262,145..999,999 until calibrated
-compact_before_request when estimated_input_tokens >= ceil(trigger_ratio * context_window_tokens)
-compact also when estimated_input_tokens + reserved_output_tokens > context_window_tokens
-compact toward a calibrated target below the trigger and within the output-reserved budget
+trigger_ratio = unknown for 262,145..999,999
+after_successful_response compact when usage.input_tokens >= ceil(trigger_ratio * context_window_tokens)
+after_successful_response compact when usage.input_tokens + valid_max_output_tokens > context_window_tokens
+compact with the existing summary/mechanical reducer before the next model request
 ```
 
-`reserved_output_tokens` 优先取本次模型配置的输出上限；缺失或超过窗口的配置须在模型配置边界显式处理，不可静默变成零预算。候选水位示例：100,000 窗口为 80,000 tokens；256,000 窗口为 204,800；262,144 窗口为 209,716；1,000,000 窗口为 500,000；1,048,576 窗口为 524,288。若请求估算加最大输出预留会超窗，则独立的可行性检查也必须在发送前压缩或明确失败；压缩目标还需确保输出预留后仍能装入窗口。窗口水位与输出预留是不同检查，不相互换算。
-
-估算输入必须覆盖实际发出的 system prompt、messages、tool definitions 和当前模型支持的多模态内容。未被估算器覆盖的内容应使结果标记为不可用或低置信度，并进入明确的安全策略；不得把类别字节分摊值冒充预请求 token 估算。
+`valid_max_output_tokens` 指不大于窗口的配置值；缺失或大于窗口时，跳过输出预留检查，不把无效配置当作零预算。候选水位示例：100,000 窗口为 80,000 tokens；256,000 窗口为 204,800；262,144 窗口为 209,716；1,000,000 窗口为 500,000；1,048,576 窗口为 524,288。百分比按完整窗口计算，最大输出预留是独立的提前触发条件。因为实际 usage 在请求成功后才可得，反馈水位不能阻止刚越过阈值的当前请求；provider 显式超窗恢复仍覆盖该路径。
 
 ## 现状证据与问题
 
@@ -61,9 +59,9 @@ compact toward a calibrated target below the trigger and within the output-reser
 
 | 方案 | 结果 | 结论 |
 | --- | --- | --- |
-| A. Provider/model 级预请求 token 估算 + Core 水位决策；字节上限独立 | 能提前解释阈值；估算能力随模型适配器声明；未知时明确降级；需要校准估算器和跨层契约。 | **推荐。** 可靠估算器是启用 token 水位的前提，不把通用字符比例包装成精确值。 |
-| B. 用最近请求的 token/字节比率推算下一次用量 | 省去 tokenizer，但内容语言、工具定义、图像和历史结构变化会让比例漂移；历史请求也可能不是同一模型配置。 | 不作为压缩权威；可作为离线诊断指标，不输出“实际占用”。 |
-| C. 只在 provider 拒绝超窗后压缩重试 | 不需预估算器，现有实现已有一次恢复路径。 | 保留为后备；不满足提前压缩与可解释水位，且失败请求会增加延迟，可能产生费用。 |
+| A. 使用已完成请求的 provider input usage 作反馈水位；字节上限独立 | 无需另一个 tokenizer；水位按同次模型窗口解释；跨 provider 通用。阈值只能在成功响应后确认，刚越线的当前请求可能已被接受。 | **已实现。** 缺 usage/window 时跳过水位，保留 provider overflow 后备。 |
+| B. Provider/model 级预请求 token 估算 + Core 水位决策 | 能在发送前预测并提前压缩；需要模型级估算能力、覆盖输入形状并校准误差。 | 可作为后续增强；不以通用字符/字节比例代替估算器。 |
+| C. 只在 provider 拒绝超窗后压缩重试 | 不需预估算器，现有实现已有一次恢复路径。 | 仅作后备；失败请求会增加延迟，可能产生费用。 |
 
 不建议把 64 MiB 改成某个更小的固定值或按 DeepSeek 的中英文字符/token 经验比例换算。这样会将一种不通用的估算扩展成全局运行策略，而且无法覆盖 Kimi Coding、工具定义、多模态内容和不同 tokenizer。
 
@@ -72,83 +70,74 @@ compact toward a calibrated target below the trigger and within the output-reser
 | 对象 | 唯一权威 | 允许的职责 | 禁止的职责 |
 | --- | --- | --- | --- |
 | 模型上下文窗口、输出预留、tokenizer 能力 | Host 所选 model/provider profile 与 adapter | 提供有来源标记的模型级估算能力和配置值。 | Web/Gateway 根据名称猜测上下文长度；用另一模型的 tokenizer 兜底。 |
-| 请求 token 估算 | provider/model adapter（Host 实现，Protocol 定义有界输入输出契约） | 在发送前估算完整 `ModelRequest`，返回 token 数、来源/能力状态和置信/限制信息。 | 把类别字节分摊或最近一次 usage 当作本次精确估算。 |
-| 预算判断、压缩状态及是否发送 | Core Harness | 使用模型预算估算执行水位和迟滞；超窗错误重试仍是后备。 | Host、App Server、Gateway 或 Web 再实现一套压缩阈值。 |
+| provider token usage 与窗口配置 | Host 所选 model/provider adapter 与 model profile | 响应报告实际 usage；profile 快照附上本次模型的窗口和最大输出配置。 | 将最近 usage 当作下一个请求的精确估算，或猜测 profile 未配置的窗口。 |
+| 预算判断、压缩状态及是否继续 | Core Harness | 根据成功响应的实际 usage 和同次 profile 快照执行反馈水位；超窗错误重试仍是后备。 | Host、App Server、Gateway 或 Web 再实现一套压缩阈值。 |
 | 64 MiB 序列化上下文硬限制 | Core Harness | 在预估压缩之后仍限制可保留/发送的序列化上下文。 | 把字节比例显示成 model-window 百分比。 |
-| 压缩原因与预算 trace | Protocol Event → App Server 持久化/投影 | 用有界数值字段说明 `token_watermark`、`provider_overflow` 等触发原因；SDK/Gateway 透传。 | 下游根据 usage 重算 Core 的触发决定。 |
-| 水位、最近请求 usage 与 mismatch 呈现 | Web Studio | 分栏展示估算水位与 provider 实际 usage；显示窗口 metadata 来源/不可用状态。 | 静默截断超过 100% 的数值、自动改写窗口 metadata 或把类别估算说成实际值。 |
+| 压缩 trace | Protocol Event → App Server 持久化/投影 | 沿用现有压缩开始/结束事件记录反馈水位和 provider overflow 引发的压缩。 | 下游根据 usage 重算 Core 的触发决定。 |
+| 最近请求 usage 与 mismatch 呈现 | Web Studio | 展示最近 provider 实际 usage 和其模型窗口 metadata；窗口来源缺失时显示未知。 | 静默截断超过 100% 的数值、自动改写窗口 metadata 或把类别估算说成实际值。 |
 
 ### UI 参考：Codex 的“已用 / 总预算”
 
-用户提供的 Codex 截图显示 `68% 已用`、`已用 176K tokens，共 258K`。提案借用其信息层级：主入口先展示可解释的占用分数与百分比，详情再展示缓存率和来源构成。Mini Agent 的分子应是当前请求模型对应的实际 usage（若尚无成功请求则明确标记估算值/未知），分母应是同一模型按 provider 约束算出的可用上下文预算；不能把当前模型下拉框的值套到一个未绑定模型 ID 的旧 usage 上。Codex 截图不作为其内部 token budget 算法的证据。
+用户提供的 Codex 截图显示 `68% 已用`、`已用 176K tokens，共 258K`。Mini Agent 借用其信息层级：主入口显示最近实际输入 tokens 与本次请求模型的完整配置窗口；详情再展示缓存率和来源构成。输出预留单独显示为可用输入预算。Codex 截图不作为其内部 token budget 算法的证据。
 
-候选契约由两个独立值构成：`ContextTokenEstimate`（预请求估算及来源/可用状态）和 `ContextTokenBudget`（窗口、输出预留、水位/目标）。字段必须有硬范围、缺失语义和版本策略。具体 Rust 类型在实现批次开始前确定，避免把可用状态压成 `Option<u32>` 后丢失“不支持”“未配置”和“内容无法估算”的差异。
-
-现有 `Model` trait 只有 provider 超窗错误识别，没有预估算方法；Host profile 有可选 `context_window` 和 `max_output_tokens`，但当前运行时路径是否完整传入所选 profile 仍需实现前追踪确认。现有 `ContextCompactionStarted` 只携带 `before_bytes`，需要评估扩充有界触发原因字段，或在既有事件体系中用不重复的方式记录预算 trace。若扩充公共事件，须同步 App Server、SDK/Gateway、Studio fixture 和协议文档。
+实现复用现有 `ModelUsage` 与 `ModelContextSnapshot`，没有增加 token estimate API、事件字段或持久化字段。现有 `ContextCompactionStarted/Finished` 沿用在模型响应之后观察自动压缩。
 
 ## 可证伪验收标准
 
 | ID | 给定 / 操作 | 可观察结果 | 失败反例 | 证据 |
 | --- | --- | --- | --- | --- |
-| AC-01 | 给定配置窗口 100,000 / 256,000 / 262,144 / 1,000,000，分别在 `80,000 / 204,800 / 209,716 / 500,000` 的边界前后发送同一请求；另测窗口 262,144、输出预留 64,000、估算输入 198,145。 | <=262,144 的窗口按 80%、>=1,000,000 的窗口按 50% 完整窗口水位触发；中间窗口不套用未经校准的比例；输出可行性仍由独立检查保障。 | 绑定供应商或模型 ID 决定比例，以扣除输出预留后的预算代替水位分母，或在已知会超窗时仍发送请求。 | Core 单元测试 + bounded Harness Scenario。 |
-| AC-02 | 两个供应商的模型配置相同 `context_window_tokens`；水位触发后模型摘要降到校准目标以下。 | 相同窗口值命中相同候选档位，与 provider/model ID 无关；目标低于触发点并留出最大输出空间，连续请求不反复压缩。 | 同一窗口因供应商或模型 ID 不同而采用不同比例，或只要求字节变小导致后续每个 step 重复摘要。 | Core 单测及连续多步 Scenario trace。 |
-| AC-03 | adapter 未提供可靠估算器，或模型窗口/output reserve 缺失、无效。 | 自动水位显示 unknown/unavailable；Core 不把 bytes 或最近一次 usage 伪装成 preflight estimate；字节硬限制及明确识别的 provider overflow recovery 仍有效。 | 把 unknown 当 0、默认 64 MiB/2，或静默用通用字符比例。 | Protocol/Host 边界测试 + Web fixture。 |
+| AC-01 | 成功响应分别报告 100,000 / 256,000 / 262,144 / 1,000,000 窗口的输入 usage，边界在 `80,000 / 204,800 / 209,716 / 500,000` tokens 前后；另测窗口 262,144、输出预留 64,000、输入 usage 198,145。 | <=262,144 的窗口按 80%、>=1,000,000 的窗口按 50% 完整窗口水位触发；中间窗口不套比例；输出可行性独立触发。压缩事件在成功响应之后、Turn 完成之前发生。 | 绑定供应商或模型 ID 决定比例，以扣除输出预留后的预算代替水位分母，或把真实 usage 说成下次请求的预估。 | Core 单元测试 + bounded Harness Scenario。 |
+| AC-02 | 两个供应商的模型配置相同 `context_window_tokens`；provider 返回达到水位的成功响应。 | 相同窗口值命中相同档位，与 provider/model ID 无关；Core 使用既有 summary/mechanical reducer，并在继续下一步前压缩。 | 同一窗口因供应商或模型 ID 不同而采用不同比例，或把压缩决策复制到 Host/Web。 | Core 单测及连续多步 Scenario trace。 |
+| AC-03 | 成功响应缺 usage、窗口快照缺失或中间窗口无档位。 | Core 跳过比例水位；字节硬限制和明确识别的 provider overflow 恢复仍有效。`Reject` 行为不自动压缩。 | 把 unknown 当 0、默认 64 MiB/2，或静默用通用字符比例。 | Core 边界测试 + App Server Scenario。 |
 | AC-04 | 使用用户截图中的 usage 350,429、配置窗口 262,144。 | 最近请求仍显示 133.7% 和实际数值，并明确提示 usage 与配置 metadata 不一致；不自动把窗口改成 350,429。 | 百分比被截成 100% 或 UI 声称 provider 已被证实超窗。 | SDK/Gateway/Studio 投影 fixture 与组件测试。 |
-| AC-05 | 配置 1,000,000 或 1,048,576 窗口并使用受支持 estimator。 | 分别在 500,000 或 524,288 tokens 的 50% 水位触发；估算覆盖 system prompt、messages、工具定义及已支持模态，压缩目标另行留出输出预留。 | 只估 messages 文本，遗漏 system/tools，或把缓存命中率当成窗口容量折扣。 | Provider adapter fixture + Harness Scenario；估算结果与对应模型 tokenizer/官方计数证据对照。 |
-| AC-06 | 序列化请求超过 64 MiB，但 token 估算仍低于水位；另构造 token 预算不足而字节较小的输入。 | 前者由独立字节硬限制拒绝；后者由 token 水位提前压缩，表明两个阈值彼此独立。 | 任一条件错误地换算成另一个条件，或实际请求无边界。 | Core boundary tests + bounded Scenario。 |
-| AC-07 | provider 明确返回窗口溢出，且请求未触发预估水位。 | 当前最多一次 overflow compaction retry 继续工作，trace 显示 `provider_overflow`；其他 provider 错误不触发该路径。 | 网络/认证错误触发压缩重试，或一次重试失败后无限继续。 | 现有 Core retry tests 保留并补 reason trace 断言。 |
+| AC-05 | profile 配置 1,000,000 或 1,048,576 窗口，成功响应报告输入 usage 达到 500,000 或 524,288。 | 分别按完整窗口的 50% 在响应后触发；压缩后继续或结束 Turn，profile 不随 usage 自动改写。 | 误用 80%、可用输入预算为分母，或只因 provider ID 而选择阈值。 | Core 单测 + App Server bounded Scenario。 |
+| AC-06 | 序列化请求超过 64 MiB；另构造已成功响应 usage 达水位但字节远低于硬上限。 | 前者在 provider 请求前由字节硬限制拒绝；后者由 token usage 水位触发响应后压缩，两个限制彼此独立。 | 把字节数换算成 token 或用 64 MiB 比例决定窗口水位。 | Core boundary tests + bounded Scenario。 |
+| AC-07 | provider 明确返回窗口溢出，且没有可用成功 usage。 | 当前最多一次 overflow compaction retry 继续工作；其他 provider 错误不触发该路径。 | 网络/认证错误触发压缩重试，或一次重试失败后无限继续。 | 现有 Core retry tests 保留并补 reason trace 断言。 |
 
 跨层 scenario 至少覆盖中英文混合、较大的工具 schema、工具结果增长和多个连续 model step。CI 不调用付费 provider；真实 provider 用量对照须另行授权，并不能替代本地确定性 scenario。
 
 ## 实施批次与停止条件
 
-### Batch 1：确认 Kimi/DeepSeek 等 adapter 的估算能力
+### Batch 1：Core 反馈水位（已实现）
 
-- 范围：Host provider/model adapter、模型 profile、Protocol 候选契约。
-- 删除/替换：无；先验证可用 tokenizer/官方计数路径、模态覆盖和模型 ID 对齐。
-- 契约变化：内部估算结果候选；暂不改公共事件。
-- 证据：每个目标模型建立 fixture，记录 tokenizer/计数方法、输出预留来源和已知误差范围。
-- 停止条件：目标模型没有可验证且覆盖请求形状的估算方法时，不启用其 token 水位，也不使用通用字符比率假装精确。
+- 范围：Core `Harness` 与现有 `ModelContextSnapshot`/`ModelUsage`。
+- 删除/替换：不恢复 byte/token 换算；复用 Core 现有压缩 reducer 和 provider overflow 后备。
+- 契约变化：无公共协议新增；成功响应 usage 达阈值后压缩。
+- 证据：窗口边界单测、输出预留边界单测、App Server bounded scenario。
+- 停止条件：没有成功 usage 或窗口快照时跳过水位，不合成估算值。
 
-### Batch 2：Core token 水位与字节限制分离
+### Batch 2：跨层投影与当前文档（部分实现）
 
-- 范围：Core/Protocol。
-- 删除/替换：移除 `max_context_bytes / 2` 作为默认主动压缩水位；保留序列化字节硬上限和一次 provider overflow 恢复。
-- 契约变化：Core 消费 bounded estimate/budget；压缩 trace 能区分 token 水位与 provider overflow。无估算器时有明确状态。
-- 证据：AC-01、02、03、06、07 与 Scenario。
-- 停止条件：估算不完整时可能使模型请求越过窗口，或增加行为后 Core + Protocol 超过硬预算且没有等量删除旧概念。
+- 范围：Protocol、App Server、Python SDK、Gateway、Web Studio、`docs/limits.md`。
+- 删除/替换：无新的公共事件字段；复用 `ModelResponded` 中 usage/profile 快照和已有压缩事件。
+- 契约变化：展示完整窗口占比；自动压缩是响应后的反馈动作，不是预请求估算。
+- 证据：SDK/UI fixtures、已有 App Server profile scenario 和本次压缩 scenario。
+- 停止条件：UI 不把 profile metadata 描述成 provider 验证值，也不把上一请求 usage 展示成下一请求预测。
 
-### Batch 3：预算 trace 跨层投影与 Studio 提示
+### Batch 3：中间窗口与多轮行为校准（待完成）
 
-- 范围：App Server、Python SDK、Gateway、Web Studio。
-- 删除/替换：复用最近请求 usage 展示，不创建第二套前端阈值决策；将 usage 与估算水位分开展示。
-- 契约变化：只增加解释水位所必需的有界事件字段；更新协议文档、SDK 类型、Gateway projection 和 Web fixture。
-- 证据：AC-04，检查历史事件缺字段时可读且明确显示 unknown。
-- 停止条件：字段需引入无界 payload、前端复制压缩决策，或无法对齐请求和所选 model profile。
-
-### Batch 4：校准阈值并更新当前文档
-
-- 范围：Harness Scenario/Eval、`docs/limits.md`、notes 状态晋级。
-- 删除/替换：将“半个 64 MiB 即主动压缩”的当前描述改为独立 token 水位与字节硬上限；旧实现记录保持冻结。
-- 证据：至少一个 256K 级与一个 1M 级 profile 场景，覆盖估算误差、连续压缩和无法裁剪情况。
-- 停止条件：<=262,144 窗口 80% / >=1,000,000 窗口 50% 的水位及经校准的回落目标不能在 scenario 中稳定避免超窗或重复压缩时，调整候选值并重跑，不晋级提案状态。
+- 范围：Core/App Server bounded Scenarios 与 `docs/limits.md`。
+- 删除/替换：无；中间窗口目前不触发百分比水位。
+- 契约变化：只有用户确认档位后才增加中间窗口规则；不引入逐 provider ID 的阈值。
+- 证据：工具结果突增、连续 tool/model 步骤、输出 reserve、无可裁剪前缀和缺失 usage。
+- 停止条件：若比例在这些 Scenario 中导致重复压缩或 provider overflow 增多，先校准窗口档位/压缩目标。
 
 ## PR 六问与预算
 
-1. **归属？** token 估算由 Host provider/model adapter 提供，Core 决定预压缩与否；Protocol 定义有界契约/事件；App Server 保留 trace；SDK/Gateway 透传；Web 只呈现。64 MiB 继续由 Core 作为字节硬限制。
-2. **已有所有者？** `Harness::prepare_context` 已拥有压缩决策，`Model::is_context_window_error` 已有 provider 超窗后备；Host profile 已保存 `context_window`/`max_output_tokens`；Web 已呈现 provider usage。应替换字节预压缩水位并补齐估算契约，不在 UI 或 Gateway 新增权威决策。
-3. **可删除概念？** 删除“64 MiB 一半等于预压缩水位”的含义；保留真正保护序列化资源的字节上限和 provider overflow 后备重试。不引入全局 byte/token 比率。
-4. **行数预算？** 本提案仅改 Markdown，Rust 行数 delta 为 0。当前基线：Core + Protocol 6,703/7,000（余量 297），Control Plane 40,832/45,000，Release Rust 59,073/65,000。实现粗估 Core + Protocol 净增 100–250 行、其他 release 源净增 150–300 行；这些是规划值，第一批实现前需重算。Core + Protocol 目标不得超过现有 297 行余量；若超出必须先删/简化旧分支或缩小契约。每批运行 `python scripts/line_budget.py`，提交前报告实际 delta。
-5. **是否扩展可见输入/事件/持久化/协议？** 不修改模型 prompt、tool schema 或历史内容。新增的是有界内部预算计算；若为了 UI 解释扩展 `ContextCompactionStarted`，它会影响公共事件、App Server 持久化投影、SDK/Gateway 和 Web fixtures，须显式做兼容评估。Provider tokenizer 不应把 token 或原文持久化到 history。
-6. **测试和缺失证据？** Core boundary tests、Host estimator fixtures、App Server/SDK/Gateway/Web projection fixtures、bounded Harness Scenario/Eval 均可覆盖；当前缺各 provider tokenizer 的可靠性/覆盖证据、真实 `contextWindow` metadata 与 provider usage 的同源证明，以及不同模态估算误差。除非另行授权，CI 不发付费 provider 请求。
+1. **归属？** Core `Harness` 使用当前成功响应的 usage 和其 `ModelContextSnapshot` 决定是否压缩；Host 提供 profile 快照，App Server 只持久化既有事件，Web 展示。
+2. **已有所有者？** `Harness` 已拥有压缩与超窗重试；`Model::context_snapshot` 和 `ModelResponse.usage` 已分别提供配置窗口与真实请求 usage。复用这些类型，不在 Host/Gateway/Web 建第二个判断。
+3. **可删除概念？** 日常阈值不再依赖 `max_context_bytes / 2`；64 MiB 保留为序列化硬限制，显式 fork compaction 和 provider overflow 的既有恢复路径保留。
+4. **行数预算？** Core + Protocol `6,797 -> 6,903`（`+106`）；Control Plane `40,964 -> 41,117`（`+153`）；Release Rust `59,299 -> 59,558`（`+259`）。Core + Protocol 余量 97 行；实现 delta 低于 1,000 行参考值，仍需每次验证硬预算。
+5. **可见面变化？** 不新增模型输入、公共字段、持久化字段或协议版本；沿用现有 `ModelResponded` usage/profile 和压缩开始/结束事件。自动压缩仍会改写同一 Session 历史，遵循现有 compaction 规则。
+6. **测试和缺失证据？** Core 覆盖 100K、256K/262,144、1M/1,048,576 边界及输出预留；App Server bounded scenario 覆盖 1M 窗口的 50% 响应后压缩。未用真实付费 provider；profile 是否与供应商实时路由限制一致仍无法由 fixture 证明。
 
 ## 风险与未决项
 
-- **估算器覆盖**：Kimi Coding 与其他 OpenAI-compatible adapter 是否提供可验证的本地 tokenizer/计数 API，需逐模型确认。没有证据的模型必须保持水位未知；该提案不承诺所有 provider 都能预压缩。
+- **响应后反馈**：真实 usage 只在 provider 成功响应后得到；压缩不会阻止刚越过水位的这次请求。没有 usage/profile 时不触发比例水位，保留 provider 明确超窗恢复。
 - **metadata 与 usage 语义**：截图中 133.7% 可能来自窗口配置过小/过期、模型 ID/版本不匹配或 usage 语义差异。实现应报告 mismatch，不自动修正 profile，也不把一次成功响应解释成上下文上限已被突破。
-- **多模态内容**：图片等输入可能没有按文本 tokenizer 计数；估算器需声明支持范围，超范围请求必须明确降级或拒绝 token 水位判断。
+- **多模态内容**：以 provider 报告的 `input_tokens` 作为已完成请求的事实，因此不依赖文本 tokenizer 覆盖；不同 provider 对 usage 字段的定义仍需检查。
 - **模型摘要自身预算**：压缩请求也必须按目标模型的输入/输出预算预检，并保持无工具调用、原有尾部保留和 byte ceiling。不能只校验用户下一条主请求。
-- **水位校准**：<=262,144 窗口 80%、>=1,000,000 窗口 50% 是用户提出的候选档位，不是供应商保证；中间窗口的比例待定，所有档位须用估算误差、输出预留和连续压缩证据校准。
+- **水位校准**：<=262,144 窗口 80%、>=1,000,000 窗口 50% 按用户要求落地；中间窗口的比例待定。压缩目标以当前 serialized-byte reducer 回落 10%，而不是 token 目标保证；还需多轮场景证据判断是否足够。
 - **字节上限解释**：64 MiB 仍可能高于典型 token 窗口可容纳的实际内容；它只防止序列化请求无限增长。若还需降低内存/传输占用，应另开资源预算决策，不要借 token 水位的名义修改。
 
-提案状态保持 `proposed`，直到模型级 estimator 有可复核证据、bounded Scenario 覆盖水位边界和降级路径、跨层事件投影通过 fixture，且当前 `docs/limits.md` 与实现一致。
+剩余提案范围是中间窗口档位、多轮/工具输出突增行为和压缩目标校准。若这些结果需要新档位，按模型配置窗口值更新通用规则，不为 Kimi 或其他 provider 单独命名比例。

@@ -108,6 +108,19 @@ does not discover or verify the provider's actual limit automatically.
 Harness records that profile with the request's provider usage so clients can
 compare the two values. These profile limits do not estimate request tokens.
 
+When `context_limit_behavior` is `Compact`, the Core can use reported usage
+from a successful model response as a feedback waterline. For configured
+windows up to 262,144 tokens it compacts at 80% of the full window; for windows
+of 1,000,000 tokens or more it compacts at 50%. Windows between those ranges do
+not use a percentage threshold yet. Independently, it compacts when the
+reported input usage plus a valid configured output reserve exceeds the full
+window. Compaction happens after the response that reported the usage and
+before the next model request (or before the turn finishes). Missing usage or
+window metadata skips the waterline; explicit provider overflow still has its
+single compaction retry. This feedback policy does not estimate a request
+before sending it, so the provider may accept a request above the configured
+waterline before compaction runs.
+
 When a provider explicitly rejects a request because it exceeds the selected
 model's context window, Harness compacts history and retries that model step
 once. It aims to reduce the current serialized context by 10%. It keeps the
@@ -150,10 +163,12 @@ them as estimates. Cached tokens are shown only as a provider-reported total.
 Studio pairs the latest provider input usage with the context window and output
 limit saved for that request's model. The occupancy percentage uses reported
 input tokens divided by the full configured context window in that profile.
-Studio separately shows the input budget as the context window minus the configured output limit
-when both values are available, and warns when usage exceeds either limit.
+Studio separately shows the input budget as the context window minus the
+configured output limit when both values are available, and warns when usage
+exceeds either limit.
 Historical usage without a model snapshot has an unknown window. This comparison
-displays reported usage; it does not predict or trigger pre-request compaction.
+displays usage from the latest successful request; the Core uses that report
+for the post-response waterline described above.
 Compaction omits the tool catalog from its auxiliary request. Opening more MCP
 tools therefore makes long Goal runs worse, not better.
 

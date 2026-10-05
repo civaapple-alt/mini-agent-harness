@@ -1,4 +1,6 @@
 use mini_agent_protocol::Message;
+use mini_agent_protocol::ModelContextSnapshot;
+use mini_agent_protocol::ModelUsage;
 
 use crate::session::context_bytes_for;
 use crate::tool_batch_executor::truncate_utf8;
@@ -6,6 +8,35 @@ use crate::tool_batch_executor::truncate_utf8;
 pub(super) const LOOP_WARNING_PREFIX: &str = "[Loop warning:";
 
 pub(super) const COMPACTION_PREFIX: &str = "[Compacted conversation context]";
+
+const SMALL_CONTEXT_WINDOW_MAX: u32 = 262_144;
+const LARGE_CONTEXT_WINDOW_MIN: u32 = 1_000_000;
+const SMALL_CONTEXT_WATERLINE_PERCENT: u64 = 80;
+const LARGE_CONTEXT_WATERLINE_PERCENT: u64 = 50;
+
+/// Applies the feedback watermark to provider usage from the request that just completed.
+pub(super) fn usage_reaches_context_waterline(
+    context: &ModelContextSnapshot,
+    usage: ModelUsage,
+) -> bool {
+    let Some(window) = context.context_window_tokens.filter(|window| *window > 0) else {
+        return false;
+    };
+    let ratio = match window {
+        ..=SMALL_CONTEXT_WINDOW_MAX => SMALL_CONTEXT_WATERLINE_PERCENT,
+        LARGE_CONTEXT_WINDOW_MIN.. => LARGE_CONTEXT_WATERLINE_PERCENT,
+        _ => 0,
+    };
+    let watermark = (ratio > 0).then(|| (u64::from(window) * ratio).div_ceil(100));
+    let reached_watermark = watermark.is_some_and(|tokens| usage.input_tokens >= tokens);
+    let output_reserve_exceeded = context
+        .max_output_tokens
+        .filter(|output| *output <= window)
+        .is_some_and(|output| {
+            usage.input_tokens.saturating_add(u64::from(output)) > u64::from(window)
+        });
+    reached_watermark || output_reserve_exceeded
+}
 
 pub(super) fn compaction_prompt() -> &'static str {
     include_str!("../builtin/prompts/system/compaction.md").trim_end()
@@ -171,7 +202,76 @@ pub(super) fn mechanical_compact(
 #[cfg(test)]
 mod tests {
     use super::take_latest_contexts;
-    use mini_agent_protocol::{ContextInjectionKind, ContextInjectionRecord, Message};
+    use super::usage_reaches_context_waterline;
+    use mini_agent_protocol::{
+        ContextInjectionKind, ContextInjectionRecord, Message, ModelContextSnapshot,
+        ModelSelection, ModelUsage,
+    };
+
+    fn snapshot(window: u32, output: Option<u32>) -> ModelContextSnapshot {
+        ModelContextSnapshot {
+            selection: ModelSelection::new("provider", "model"),
+            context_window_tokens: Some(window),
+            max_output_tokens: output,
+        }
+    }
+
+    #[test]
+    fn usage_waterline_is_selected_by_configured_window_size() {
+        for (window, threshold) in [
+            (100_000, 80_000),
+            (256_000, 204_800),
+            (262_144, 209_716),
+            (1_000_000, 500_000),
+            (1_048_576, 524_288),
+        ] {
+            assert!(!usage_reaches_context_waterline(
+                &snapshot(window, None),
+                ModelUsage {
+                    input_tokens: threshold - 1,
+                    cached_input_tokens: None,
+                    output_tokens: 0
+                },
+            ));
+            assert!(usage_reaches_context_waterline(
+                &snapshot(window, None),
+                ModelUsage {
+                    input_tokens: threshold,
+                    cached_input_tokens: None,
+                    output_tokens: 0
+                },
+            ));
+        }
+        assert!(!usage_reaches_context_waterline(
+            &snapshot(500_000, None),
+            ModelUsage {
+                input_tokens: 400_000,
+                cached_input_tokens: None,
+                output_tokens: 0
+            },
+        ));
+    }
+
+    #[test]
+    fn output_reserve_can_trigger_before_the_window_percentage() {
+        let context = snapshot(262_144, Some(64_000));
+        assert!(!usage_reaches_context_waterline(
+            &context,
+            ModelUsage {
+                input_tokens: 198_144,
+                cached_input_tokens: None,
+                output_tokens: 0
+            },
+        ));
+        assert!(usage_reaches_context_waterline(
+            &context,
+            ModelUsage {
+                input_tokens: 198_145,
+                cached_input_tokens: None,
+                output_tokens: 0
+            },
+        ));
+    }
 
     #[test]
     fn compaction_keeps_latest_active_injected_instruction() {

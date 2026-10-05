@@ -16,6 +16,7 @@ use crate::context_controller::bounded_compaction_prompt;
 use crate::context_controller::mechanical_compact;
 use crate::context_controller::split_compaction_parts;
 use crate::context_controller::trim_prefix_to_fit;
+use crate::context_controller::usage_reaches_context_waterline;
 use crate::execution::ExecutionCheckpoint;
 use crate::execution::ExecutionJournalEntry;
 use crate::execution::ExecutionPhase;
@@ -713,7 +714,7 @@ impl<M: Model> Harness<M> {
                     {
                         context_window_retries += 1;
                         if self
-                            .compact_context_after_window_error(&tool_specs, observer)
+                            .compact_context_with_reduction_target(&tool_specs, observer)
                             .await?
                         {
                             if let Some(execution) = execution_context.as_ref() {
@@ -770,6 +771,14 @@ impl<M: Model> Harness<M> {
                 ));
             }
 
+            let compact_after_response = self.config.context_limit_behavior
+                == ContextLimitBehavior::Compact
+                && response.usage.is_some_and(|usage| {
+                    model_context
+                        .as_ref()
+                        .is_some_and(|context| usage_reaches_context_waterline(context, usage))
+                });
+
             observer.observe(&Event::ModelResponded {
                 reasoning: response.reasoning.clone(),
                 text: response.text.clone(),
@@ -789,6 +798,10 @@ impl<M: Model> Harness<M> {
                 text: response.text.clone(),
                 tool_calls: response.tool_calls.clone(),
             });
+            if compact_after_response {
+                self.compact_context_with_reduction_target(&tool_specs, observer)
+                    .await?;
+            }
 
             if response.tool_calls.is_empty() {
                 match self.control_action(
@@ -985,7 +998,7 @@ impl<M: Model> Harness<M> {
             .await
     }
 
-    async fn compact_context_after_window_error<O: Observer + Send>(
+    async fn compact_context_with_reduction_target<O: Observer + Send>(
         &mut self,
         tool_specs: &[mini_agent_protocol::ToolSpec],
         observer: &mut O,

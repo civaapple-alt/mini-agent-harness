@@ -7,6 +7,11 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changes
 
+- Compact history after a successful model response reaches the configured
+  context-window waterline: 80% for windows up to 262,144 tokens and 50% for
+  windows of at least 1,000,000 tokens. Also compact when input usage plus the
+  valid output reserve exceeds the window. Keep the 64 MiB serialized-context
+  ceiling independent and retain provider-overflow recovery.
 - Set Kimi connection probes to `reasoning.effort=low` and
   `max_output_tokens=128` so models with higher default reasoning effort can
   complete the bounded test request.
