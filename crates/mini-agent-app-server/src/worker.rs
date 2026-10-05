@@ -241,10 +241,12 @@ impl ThreadListener {
                 usage,
                 context_bytes,
                 model_timing,
+                model_context,
                 ..
             } => {
                 self.assistant_segments = self.assistant_segments.saturating_add(1);
-                self.presentation.set_context_usage(*usage, *context_bytes);
+                self.presentation
+                    .set_context_usage(*usage, *context_bytes, model_context.clone());
                 self.presentation.set_model_timing(*model_timing);
             }
             Event::ContextInjected { records } => {

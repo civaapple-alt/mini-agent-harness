@@ -21,9 +21,11 @@ use mini_agent_core::ToolRouter;
 use mini_agent_protocol::Event;
 use mini_agent_protocol::Message;
 use mini_agent_protocol::Model;
+use mini_agent_protocol::ModelContextSnapshot;
 use mini_agent_protocol::ModelEventSink;
 use mini_agent_protocol::ModelRequest;
 use mini_agent_protocol::ModelResponse;
+use mini_agent_protocol::ModelSelection;
 use mini_agent_protocol::SkillLoadPhase;
 use mini_agent_protocol::ThreadId;
 use mini_agent_protocol::ThreadStart;
@@ -713,6 +715,17 @@ struct LargeModelBoundaryScenario {
 impl Model for LargeModelBoundaryScenario {
     type Error = Infallible;
 
+    fn context_snapshot(
+        &self,
+        _selection: Option<&ModelSelection>,
+    ) -> Option<ModelContextSnapshot> {
+        Some(ModelContextSnapshot {
+            selection: ModelSelection::new("kimi", "k3"),
+            context_window_tokens: Some(1_048_576),
+            max_output_tokens: Some(64_000),
+        })
+    }
+
     async fn respond<'a>(
         &'a mut self,
         request: ModelRequest<'a>,
@@ -740,7 +753,14 @@ async fn bounded_harness_large_model_context_and_response_scenario() {
         observed_context_bytes: Arc::clone(&observed_context_bytes),
         observed_response_limit: Arc::clone(&observed_response_limit),
     };
-    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
+    let mut harness = Harness::new(
+        model,
+        ToolRouter::default(),
+        HarnessConfig {
+            max_context_bytes: 2 * 1024 * 1024,
+            ..HarnessConfig::default()
+        },
+    );
     harness
         .restore_history(
             (0..140)
@@ -758,7 +778,14 @@ async fn bounded_harness_large_model_context_and_response_scenario() {
 
     let events = run_turn_to_finished(&server, "continue with the saved context").await;
 
-    assert!(observed_context_bytes.lock().unwrap().unwrap() > 1024 * 1024);
+    let actual_context_bytes = observed_context_bytes.lock().unwrap().unwrap();
+    assert!(actual_context_bytes > 1024 * 1024);
+    assert!(actual_context_bytes < 2 * 1024 * 1024);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::ContextCompactionStarted { .. }))
+    );
     assert_eq!(
         observed_response_limit.lock().unwrap().unwrap(),
         16 * 1024 * 1024
@@ -766,6 +793,15 @@ async fn bounded_harness_large_model_context_and_response_scenario() {
     assert!(events.iter().any(|event| matches!(
         event,
         Event::ModelResponded { text, .. } if text.len() == response.len()
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::ModelResponded {
+            model_context: Some(snapshot),
+            ..
+        } if snapshot.selection == ModelSelection::new("kimi", "k3")
+            && snapshot.context_window_tokens == Some(1_048_576)
+            && snapshot.max_output_tokens == Some(64_000)
     )));
 }
 

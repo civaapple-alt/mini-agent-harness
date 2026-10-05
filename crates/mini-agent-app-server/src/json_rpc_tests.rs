@@ -12,9 +12,7 @@ use mini_agent_capabilities::{
     workspace_tools_with_read_roots_and_results,
     workspace_tools_with_read_roots_results_and_background_shells,
 };
-use mini_agent_core::{
-    ContextLimitBehavior, ExecutionJournalSink, Harness, HarnessConfig, Thread, ToolRouter,
-};
+use mini_agent_core::{ExecutionJournalSink, Harness, HarnessConfig, Thread, ToolRouter};
 use mini_agent_protocol::{
     Message, Model, ModelEvent, ModelEventSink, ModelRequest, ModelResponse, ModelUsage, ThreadId,
     ThreadStart, ToolApprovalRequest, ToolCall, ToolError, ToolExecutionStatus, ToolHandler,
@@ -626,12 +624,28 @@ enum ToolOutputRecoveryMode {
     ResumedSession,
 }
 
+#[derive(Debug)]
+struct ToolOutputContextWindowExceeded;
+
+impl std::fmt::Display for ToolOutputContextWindowExceeded {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("provider context window exceeded")
+    }
+}
+
+impl std::error::Error for ToolOutputContextWindowExceeded {}
+
 struct ToolOutputRecoveryModel {
     mode: ToolOutputRecoveryMode,
+    context_rejected: bool,
 }
 
 impl Model for ToolOutputRecoveryModel {
-    type Error = Infallible;
+    type Error = ToolOutputContextWindowExceeded;
+
+    fn is_context_window_error(&self, _error: &Self::Error) -> bool {
+        true
+    }
 
     async fn respond<'a>(
         &'a mut self,
@@ -649,6 +663,10 @@ impl Model for ToolOutputRecoveryModel {
 
         let shell_output = last_tool_output(&request, "shell");
         let read_output = last_tool_output(&request, "read_tool_output");
+        if !self.context_rejected && (shell_output.is_some() || read_output.is_some()) {
+            self.context_rejected = true;
+            return Err(ToolOutputContextWindowExceeded);
+        }
         let tool_call = match self.mode {
             ToolOutputRecoveryMode::InitialTurn if shell_output.is_none() => {
                 let command = if cfg!(windows) {
@@ -789,11 +807,7 @@ fn tool_output_session_connection(
     .unwrap();
     tools.retain(|tool| matches!(tool.spec().name.as_str(), "shell" | "read_tool_output"));
 
-    let config = HarnessConfig {
-        max_context_bytes: 28 * 1024,
-        context_limit_behavior: ContextLimitBehavior::Compact,
-        ..HarnessConfig::default()
-    };
+    let config = HarnessConfig::default();
     let mut harness = Harness::new(
         model,
         ToolRouter::with_executor(
@@ -858,6 +872,7 @@ async fn scripted_session_reads_large_shell_output_after_compaction_and_restart(
     let mut connection = tool_output_session_connection(
         ToolOutputRecoveryModel {
             mode: ToolOutputRecoveryMode::InitialTurn,
+            context_rejected: false,
         },
         root.clone(),
         opened,
@@ -952,6 +967,7 @@ async fn scripted_session_reads_large_shell_output_after_compaction_and_restart(
     let mut restarted = tool_output_session_connection(
         ToolOutputRecoveryModel {
             mode: ToolOutputRecoveryMode::ResumedSession,
+            context_rejected: false,
         },
         root.clone(),
         resumed,
@@ -1001,6 +1017,7 @@ async fn force_kill_child_process_fixture() {
     let mut connection = tool_output_session_connection(
         ToolOutputRecoveryModel {
             mode: ToolOutputRecoveryMode::InitialTurn,
+            context_rejected: false,
         },
         root.clone(),
         opened,
@@ -1050,7 +1067,14 @@ async fn app_server_session_recovers_after_forced_process_termination() {
         .unwrap();
 
     let marker_ready = tokio::time::timeout(Duration::from_secs(45), async {
-        while !marker.exists() {
+        loop {
+            let marker_is_complete = std::fs::read(&marker)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                .is_some();
+            if marker_is_complete {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
@@ -1122,6 +1146,7 @@ async fn app_server_session_recovers_after_forced_process_termination() {
     let mut restarted = tool_output_session_connection(
         ToolOutputRecoveryModel {
             mode: ToolOutputRecoveryMode::ResumedSession,
+            context_rejected: false,
         },
         root.clone(),
         opened,

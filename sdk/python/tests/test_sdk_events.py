@@ -200,6 +200,26 @@ def test_model_responded_event_keeps_unreported_cache_usage_unknown():
     assert event.model_timing is None
 
 
+def test_model_responded_event_parses_the_model_context_snapshot():
+    event = parse_event(
+        {
+            "type": "model_responded",
+            "model_context": {
+                "selection": {"provider_id": "kimi", "model_id": "k3-256k"},
+                "context_window_tokens": 262144,
+                "max_output_tokens": 64000,
+            },
+        }
+    )
+
+    assert isinstance(event, ModelRespondedEvent)
+    assert event.model_context is not None
+    assert event.model_context.provider_id == "kimi"
+    assert event.model_context.model_id == "k3-256k"
+    assert event.model_context.context_window_tokens == 262144
+    assert event.model_context.max_output_tokens == 64000
+
+
 def test_model_responded_event_parses_model_timing_in_wire_and_persisted_shapes():
     event = parse_event(
         {

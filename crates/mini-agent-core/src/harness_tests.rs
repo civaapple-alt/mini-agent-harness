@@ -1306,10 +1306,11 @@ fn verifier_can_restore_tool_history_before_disabling_new_tool_calls() {
 async fn compacts_context_and_continues_the_tool_loop() {
     let long_tool_value = "x".repeat(300);
     let requests = Arc::new(Mutex::new(Vec::new()));
-    let model = RecordingModel {
+    let model = ContextWindowRetryModel {
         responses: VecDeque::from([
-            tool_response("call-1", "uppercase", json!({"text": long_tool_value})),
-            ModelResponse {
+            Ok(tool_response("call-1", "uppercase", json!({"text": long_tool_value}))),
+            Err(ContextWindowExceeded),
+            Ok(ModelResponse {
                 reasoning: String::new(),
                 text: "The user asked for a long operation. The uppercase tool completed successfully. Continue by reporting completion.".to_string(),
                 tool_calls: Vec::new(),
@@ -1318,8 +1319,8 @@ async fn compacts_context_and_continues_the_tool_loop() {
                     cached_input_tokens: Some(0),
                     output_tokens: 20,
                 }),
-            },
-            text_response("Long operation completed."),
+            }),
+            Ok(text_response("Long operation completed.")),
         ]),
         requests: Arc::clone(&requests),
     };
@@ -1370,12 +1371,30 @@ async fn compacts_context_and_continues_the_tool_loop() {
             usage: Some(ModelUsage { input_tokens: 100, .. }),
         } if *before_bytes >= 1400 && after_bytes < before_bytes
     )));
+    let first_model_start = events
+        .0
+        .iter()
+        .position(|event| matches!(event, Event::ModelStarted { .. }))
+        .unwrap();
+    let first_compaction = events
+        .0
+        .iter()
+        .position(|event| matches!(event, Event::ContextCompactionStarted { .. }))
+        .unwrap();
+    assert!(first_model_start < first_compaction);
 
     let requests = requests.lock().unwrap();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4);
     let first = &requests[0];
-    let compaction = &requests[1];
-    let continuation = &requests[2];
+    let rejected = &requests[1];
+    let compaction = &requests[2];
+    let continuation = &requests[3];
+    assert!(!rejected.tools.is_empty());
+    assert!(
+        rejected.messages.iter().any(
+            |message| matches!(message, Message::Tool { content, .. } if content.contains('X'))
+        )
+    );
     assert_eq!(compaction.system_prompt, first.system_prompt);
     assert!(compaction.tools.is_empty());
     assert_eq!(continuation.system_prompt, first.system_prompt);
@@ -1403,12 +1422,18 @@ async fn compacts_context_and_continues_the_tool_loop() {
 
 #[tokio::test]
 async fn empty_summary_falls_back_to_mechanical_trim() {
-    let model = ScriptedModel {
+    let model = ContextWindowRetryModel {
         responses: VecDeque::from([
-            tool_response("call-1", "uppercase", json!({"text": "x".repeat(300)})),
-            text_response("   "),
-            text_response("Long operation completed."),
+            Ok(tool_response(
+                "call-1",
+                "uppercase",
+                json!({"text": "x".repeat(300)}),
+            )),
+            Err(ContextWindowExceeded),
+            Ok(text_response("   ")),
+            Ok(text_response("Long operation completed.")),
         ]),
+        requests: Arc::new(Mutex::new(Vec::new())),
     };
     let config = HarnessConfig {
         max_model_response_bytes: 1024,
@@ -1549,13 +1574,10 @@ async fn reject_policy_does_not_retry_provider_context_overflow() {
 }
 
 #[tokio::test]
-async fn trims_over_budget_compaction_prefix_and_continues() {
+async fn rejects_context_above_the_byte_ceiling_without_compacting_by_bytes() {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let model = RecordingModel {
-        responses: VecDeque::from([
-            text_response("Older turns covered padding and the latest user asked to continue."),
-            text_response("Continued."),
-        ]),
+        responses: VecDeque::from([text_response("unused")]),
         requests: Arc::clone(&requests),
     };
     let padding = "p".repeat(300);
@@ -1581,38 +1603,63 @@ async fn trims_over_budget_compaction_prefix_and_continues() {
     harness.restore_history(history).unwrap();
     let mut events = RecordingObserver::default();
 
+    let error = harness.run("continue", &mut events).await.unwrap_err();
+    assert!(matches!(
+        error,
+        HarnessError::Limit(LimitExceeded {
+            kind: LimitKind::ContextBytes,
+            ..
+        })
+    ));
+    let requests = requests.lock().unwrap();
+    assert!(requests.is_empty());
+    assert!(
+        !events
+            .0
+            .iter()
+            .any(|event| matches!(event, Event::ContextCompactionStarted { .. }))
+    );
+}
+
+#[tokio::test]
+async fn does_not_compact_when_context_is_over_half_but_under_the_byte_ceiling() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let model = RecordingModel {
+        responses: VecDeque::from([text_response("Continued.")]),
+        requests: Arc::clone(&requests),
+    };
+    let history = (0..3)
+        .map(|_| Message::Context {
+            text: "x".repeat(7 * 1024),
+        })
+        .collect();
+    let config = HarnessConfig {
+        max_context_bytes: 32 * 1024,
+        context_limit_behavior: ContextLimitBehavior::Compact,
+        ..HarnessConfig::default()
+    };
+    let mut harness = Harness::new(model, ToolRouter::default(), config.clone());
+    harness.restore_history(history).unwrap();
+    let mut events = RecordingObserver::default();
+
     let outcome = harness.run("continue", &mut events).await.unwrap();
 
-    assert_eq!(outcome.stop_reason, StopReason::Completed);
     assert_eq!(outcome.final_text, "Continued.");
     let requests = requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    let compaction = &requests[0];
-    assert!(matches!(
-        compaction.messages.last(),
-        Some(Message::User { text }) if text == compaction_prompt()
-    ));
+    assert_eq!(requests.len(), 1);
+    let actual = context_bytes_for(
+        &config.system_prompt,
+        &requests[0].messages,
+        &requests[0].tools,
+    );
+    assert!(actual > config.max_context_bytes / 2);
+    assert!(actual < config.max_context_bytes);
     assert!(
-        !compaction
-            .messages
+        !events
+            .0
             .iter()
-            .any(|message| matches!(message, Message::User { text } if text.starts_with("old:")))
+            .any(|event| matches!(event, Event::ContextCompactionStarted { .. }))
     );
-    assert!(
-        context_bytes_for(
-            &compaction.system_prompt,
-            &compaction.messages,
-            &compaction.tools
-        ) <= config.max_context_bytes
-    );
-    assert!(events.0.iter().any(|event| matches!(
-        event,
-        Event::ContextCompactionFinished {
-            before_bytes,
-            after_bytes,
-            ..
-        } if after_bytes < before_bytes
-    )));
 }
 
 #[tokio::test]

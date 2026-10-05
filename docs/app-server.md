@@ -87,11 +87,19 @@ alongside persisted turn presentations.
 serialized request categories. Its optional `usage` is the provider-reported
 input, cached-input, and output token count for that request. Clients preserve
 missing usage as unknown; category token counts derived from bytes are
-estimates, and cached tokens are not attributed to individual sources.
+estimates, and cached tokens are not attributed to individual sources. The
+optional `model_context` field records the selected provider/model ID and the
+configured context-window and output-token limits for that request. These
+profile values are metadata, not a pre-request token estimate or a guarantee
+that the provider accepted the full configured window.
 The optional `model_timing` contains `ttft_ms` (request start to the first
 non-empty streamed reasoning or text output) and `response_ms` (request start
 to response completion). A missing TTFT means the adapter emitted no streamed
 output event; old Sessions and providers without timing report no timing data.
+
+The persisted Turn presentation stores the latest snapshot as
+`contextUsage.modelContext`. Historical records without the field remain
+readable and have no known model window.
 
 The Host retains tool results larger than Core's 16 KiB inline limit as
 Session-scoped sidecars and emits a bounded head-and-tail preview with a

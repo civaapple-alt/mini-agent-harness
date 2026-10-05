@@ -1,4 +1,4 @@
-use super::{Message, ModelUsage};
+use super::{Message, ModelContextSnapshot, ModelSelection, ModelUsage};
 use crate::ToolExecutionStatus;
 use serde_json::json;
 
@@ -18,6 +18,43 @@ fn provider_cached_usage_distinguishes_missing_from_reported_zero() {
     }))
     .unwrap();
     assert_eq!(reported_zero.cached_input_tokens, Some(0));
+}
+
+#[test]
+fn model_context_snapshot_reports_the_input_budget_without_underflow() {
+    let snapshot = ModelContextSnapshot {
+        selection: ModelSelection::new("kimi", "k3-256k"),
+        context_window_tokens: Some(262_144),
+        max_output_tokens: Some(64_000),
+    };
+
+    assert_eq!(snapshot.available_input_tokens(), Some(198_144));
+
+    let invalid_reserve = ModelContextSnapshot {
+        max_output_tokens: Some(300_000),
+        ..snapshot
+    };
+    assert_eq!(invalid_reserve.available_input_tokens(), None);
+}
+
+#[test]
+fn legacy_model_responded_event_has_no_model_context_snapshot() {
+    let event: crate::Event = serde_json::from_value(json!({
+        "type": "model_responded",
+        "reasoning": "",
+        "text": "answer",
+        "tool_calls": [],
+        "usage": null
+    }))
+    .unwrap();
+
+    assert!(matches!(
+        event,
+        crate::Event::ModelResponded {
+            model_context: None,
+            ..
+        }
+    ));
 }
 
 #[test]

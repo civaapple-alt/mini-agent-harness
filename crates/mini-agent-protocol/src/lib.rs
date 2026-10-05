@@ -16,6 +16,7 @@ pub use model::ContextInjectionKind;
 pub use model::ContextInjectionRecord;
 pub use model::Message;
 pub use model::Model;
+pub use model::ModelContextSnapshot;
 pub use model::ModelEvent;
 pub use model::ModelEventSink;
 pub use model::ModelRequest;

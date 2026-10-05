@@ -40,6 +40,7 @@ fn trace_redacts_payloads_and_carries_round_metadata() {
             usage: None,
             model_timing: None,
             context_bytes: None,
+            model_context: None,
         },
     ));
     let _ = trace.finish().unwrap();

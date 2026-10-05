@@ -542,7 +542,7 @@ impl<M: Model> Harness<M> {
                 )
                 .map_err(HarnessError::ExecutionJournal)?;
             }
-            if let Err(error) = self.prepare_context(&tool_specs, observer).await {
+            if let Err(error) = self.prepare_context(&tool_specs, observer) {
                 if self.config.context_limit_behavior == ContextLimitBehavior::Reject {
                     self.session.truncate_messages(previous_message_count);
                 }
@@ -658,7 +658,7 @@ impl<M: Model> Harness<M> {
                         .collect(),
                 });
             }
-            self.prepare_context(&tool_specs, observer).await?;
+            self.prepare_context(&tool_specs, observer)?;
             if let Some(execution) = execution_context.as_ref() {
                 crate::execution::append_if_present(
                     &mut journal,
@@ -676,7 +676,7 @@ impl<M: Model> Harness<M> {
                 .map_err(HarnessError::ExecutionJournal)?;
             }
             let mut context_window_retries = 0;
-            let (response, model_timing) = loop {
+            let (response, model_timing, model_context) = loop {
                 observer.observe(&Event::ModelStarted {
                     step,
                     input_bytes: self.context_bytes(&self.config.system_prompt, &tool_specs),
@@ -690,23 +690,19 @@ impl<M: Model> Harness<M> {
                 let model_response = {
                     let mut model_events =
                         ModelEventForwarder::new(observer, self.config.max_model_response_bytes);
-                    let result = self
-                        .model
-                        .respond(
-                            ModelRequest {
-                                system_prompt: &self.config.system_prompt,
-                                messages: self.session.messages(),
-                                tools: &tool_specs,
-                                allowed_tools: None,
-                                max_response_bytes: self.config.max_model_response_bytes,
-                                model_selection: self.model_selection.as_ref(),
-                                reasoning_selection: self.reasoning_selection.as_ref(),
-                                reasoning_effort: self.reasoning_effort.as_deref(),
-                            },
-                            &mut model_events,
-                        )
-                        .await;
-                    result.map(|response| (response, model_events.timing()))
+                    let request = ModelRequest {
+                        system_prompt: &self.config.system_prompt,
+                        messages: self.session.messages(),
+                        tools: &tool_specs,
+                        allowed_tools: None,
+                        max_response_bytes: self.config.max_model_response_bytes,
+                        model_selection: self.model_selection.as_ref(),
+                        reasoning_selection: self.reasoning_selection.as_ref(),
+                        reasoning_effort: self.reasoning_effort.as_deref(),
+                    };
+                    let model_context = self.model.context_snapshot(request.model_selection);
+                    let result = self.model.respond(request, &mut model_events).await;
+                    result.map(|response| (response, model_events.timing(), model_context))
                 };
                 match model_response {
                     Ok(response) => break response,
@@ -780,6 +776,7 @@ impl<M: Model> Harness<M> {
                 tool_calls: response.tool_calls.clone(),
                 usage: response.usage,
                 model_timing: Some(model_timing),
+                model_context,
                 context_bytes: Some(context_byte_breakdown_for(
                     &self.config.system_prompt,
                     self.session.messages(),
@@ -969,19 +966,11 @@ impl<M: Model> Harness<M> {
         self.session.context_bytes(system_prompt, tool_specs)
     }
 
-    async fn prepare_context<O: Observer + Send>(
+    fn prepare_context<O: Observer + Send>(
         &mut self,
         tool_specs: &[mini_agent_protocol::ToolSpec],
         observer: &mut O,
     ) -> Result<(), HarnessError<M::Error>> {
-        let actual = self.context_bytes(&self.config.system_prompt, tool_specs);
-        let compact_at = self.config.max_context_bytes / 2;
-        let should_compact = self.config.context_limit_behavior == ContextLimitBehavior::Compact
-            && self.session.messages().len() > 1
-            && actual >= compact_at;
-        if should_compact {
-            let _ = self.compact_context(tool_specs, observer).await?;
-        }
         self.ensure_context_limit(tool_specs)
             .map_err(|limit| fail_limit(limit, observer))
     }

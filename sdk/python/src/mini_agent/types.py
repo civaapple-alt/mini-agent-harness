@@ -450,6 +450,30 @@ class ModelUsage:
 
 
 @dataclass
+class ModelContextSnapshot:
+    """Configured limits for the model that produced one usage report."""
+
+    provider_id: str
+    model_id: str
+    context_window_tokens: int | None = None
+    max_output_tokens: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> ModelContextSnapshot | None:
+        if not isinstance(data, dict):
+            return None
+        selection = data.get("selection") or {}
+        return cls(
+            provider_id=selection.get("provider_id", selection.get("providerId", "")),
+            model_id=selection.get("model_id", selection.get("modelId", "")),
+            context_window_tokens=data.get(
+                "context_window_tokens", data.get("contextWindowTokens")
+            ),
+            max_output_tokens=data.get("max_output_tokens", data.get("maxOutputTokens")),
+        )
+
+
+@dataclass
 class ModelTiming:
     """Request-to-first-output and complete response latency in milliseconds."""
 

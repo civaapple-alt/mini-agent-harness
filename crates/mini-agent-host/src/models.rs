@@ -5,8 +5,8 @@ use mini_agent_capabilities::{
     ApprovalController, ImageStore, ModelProviderSettings, OpenAiError, OpenAiModel,
 };
 use mini_agent_protocol::{
-    Message, Model, ModelEvent, ModelEventSink, ModelRequest, ModelResponse, ModelSelection,
-    ReasoningSelection,
+    Message, Model, ModelContextSnapshot, ModelEvent, ModelEventSink, ModelRequest, ModelResponse,
+    ModelSelection, ReasoningSelection,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -708,10 +708,31 @@ impl HostResponsesModel {
         self.approval = Some(approval);
         self
     }
+
+    fn context_snapshot(&self, requested: Option<&ModelSelection>) -> Option<ModelContextSnapshot> {
+        let selection = match requested {
+            Some(selection) => selection.clone(),
+            None => match self.catalog.project_default(&self.project_id) {
+                Ok(Some(selection)) => selection,
+                Ok(None) => self.catalog.global_default().ok().flatten()?,
+                Err(_) => return None,
+            },
+        };
+        let profile = self.catalog.model_profile(&selection).ok()?;
+        Some(ModelContextSnapshot {
+            selection,
+            context_window_tokens: profile.context_window,
+            max_output_tokens: profile.max_output_tokens,
+        })
+    }
 }
 
 impl Model for HostResponsesModel {
     type Error = OpenAiError;
+
+    fn context_snapshot(&self, selection: Option<&ModelSelection>) -> Option<ModelContextSnapshot> {
+        HostResponsesModel::context_snapshot(self, selection)
+    }
 
     fn is_context_window_error(&self, error: &Self::Error) -> bool {
         error.is_context_window_error()
@@ -1169,6 +1190,36 @@ mod tests {
             )
             .unwrap();
         store
+    }
+
+    #[test]
+    fn context_snapshot_uses_the_selected_kimi_profile_limits() {
+        let store = test_store_with_provider_kind(
+            "https://api.kimi.com/coding/v1".to_string(),
+            ProviderKind::Kimi,
+        );
+        let mut profile = store.read().unwrap().providers[0].models[0].clone();
+        profile.context_window = Some(262_144);
+        profile.max_output_tokens = Some(64_000);
+        store.upsert_model("kimi", profile, None).unwrap();
+        store
+            .set_project_default(
+                "project-a".to_string(),
+                Some(ModelSelection::new("kimi", "kimi-for-coding")),
+            )
+            .unwrap();
+        let model =
+            HostResponsesModel::new(store, "project-a".to_string(), ImageStore::memory_only());
+
+        let snapshot = model.context_snapshot(None).unwrap();
+
+        assert_eq!(
+            snapshot.selection,
+            ModelSelection::new("kimi", "kimi-for-coding")
+        );
+        assert_eq!(snapshot.context_window_tokens, Some(262_144));
+        assert_eq!(snapshot.max_output_tokens, Some(64_000));
+        assert_eq!(snapshot.available_input_tokens(), Some(198_144));
     }
 
     fn start_test_provider(

@@ -26,9 +26,9 @@ Plane 和 Release Rust 执行绝对硬上限；增量检查使用 `--check-delta
 当前 revision 的有效行数为：
 
 ```text
-core+protocol    6519/7000
-control-plane   40729/45000
-release         58804/65000
+core+protocol    6797/7000
+control-plane   40964/45000
+release         59299/65000
 ```
 
 运行 `python3 scripts/line_budget.py` 可重新计算这些数字。使用
@@ -66,12 +66,15 @@ Control Plane 责任塞进 Thin Loop 的方式“通过”预算。
 
 Context size is the byte length of the system prompt plus JSON-serialized
 messages and tool specifications. It is a provider-neutral safety ceiling, not
-a prediction of provider tokenization. A model profile's `contextWindow` is
-token metadata for Studio's usage gauge; the selected model and provider decide
-the actual token window. The Host can send at most 64 MiB of serialized context.
-The profile's `maxOutputTokens` is sent as `max_output_tokens`; the Core accepts
-at most 16 MiB of response data. Provider limits still apply. Provider-reported
-token counts remain available separately in model-response events.
+a prediction of provider tokenization. A model profile's `contextWindow` and
+`maxOutputTokens` are configuration metadata for Studio's usage gauge; the
+selected model and provider decide the actual token window. The Host attaches
+the selected profile snapshot to the model-response event, and the App Server
+persists it with that request's usage. This snapshot does not estimate request
+tokens. The Host can send at most 64 MiB of serialized context. The profile's
+`maxOutputTokens` is sent as `max_output_tokens`; the Core accepts at most 16 MiB
+of response data. Provider limits still apply. Provider-reported token counts
+remain available separately in model-response events.
 
 Reasoning and assistant text deltas share the model-response ceiling. They stop
 reaching observers once the combined response crosses it, and the completed
@@ -83,8 +86,9 @@ retains a bounded result and marks `truncated` explicitly instead of discarding
 the outcome.
 
 Every runtime limit failure emits `run_failed` with a structured
-`limit_exceeded` reason. The default Harness behavior compacts history when
-needed; callers can explicitly select `Reject` to disable automatic compaction.
+`limit_exceeded` reason. `Compact` allows the Harness to recover after a model
+explicitly rejects a request for exceeding its context window. `Reject` disables
+that recovery.
 The current interactive terminal has no `/new` command: exit it and start
 `mini-agent` without `--session-id` to create a new conversation, or use
 `resume` to continue a settled Session.
@@ -96,15 +100,23 @@ Chat. Goal Runtime owns long-running Goal behavior and uses its milestone
 budget. Auto Copilot selects the `trusted + continuous` preset. Each tool grant
 remains bounded by its action key and selected scope.
 
-Before a model request, Harness compacts history when its serialized size
-reaches half of the 64 MiB context budget. It keeps the latest context for each
-source slot and the last two model-step groups verbatim. A group contains an
-assistant message and its following tool results, or a final assistant message
-without tool calls. The recent tail is capped at 128 KiB when it contains more
-than one assistant group. Harness keeps the most recent group intact even when
-it exceeds 128 KiB. Harness sends only the older prefix to the same model with
-the unchanged system prompt, no tool definitions, and one compaction user
-message. The model cannot call tools or attach images during this request.
+Harness does not use a fraction of the byte limit as a model context waterline.
+Before each model request, it rejects serialized context above the configured
+64 MiB default. A model profile may include a context window and output limit.
+Harness records that profile with the request's provider usage so clients can
+compare the two values. These profile limits do not estimate request tokens.
+
+When a provider explicitly rejects a request because it exceeds the selected
+model's context window, Harness compacts history and retries that model step
+once. It aims to reduce the current serialized context by 10%. It keeps the
+latest context for each source slot and the last two model-step groups verbatim.
+A group contains an assistant message and its following tool results, or a final
+assistant message without tool calls. The recent tail is capped at 128 KiB when
+it contains more than one assistant group. Harness keeps the most recent group
+intact even when it exceeds 128 KiB. Harness sends only the older prefix to the
+same model with the unchanged system prompt, no tool definitions, and one
+compaction user message. The model cannot call tools or attach images during
+this request.
 
 If the prefix and compaction prompt exceed 64 MiB, Harness drops the oldest
 prefix messages until they fit. The 64 MiB JSON budget excludes host-projected
@@ -112,17 +124,13 @@ image bytes. Harness accepts a summary only when it is non-empty, contains no
 tool calls, reduces the context size, and fits the existing response and
 request limits. If the summary request fails or the summary does not meet these
 conditions, Harness drops the oldest prefix messages until the context is below
-the compaction target.
+the compaction target. If no prefix can be removed, the request fails.
 
-If a compatible model provider explicitly rejects a request because it exceeds
-the model's token context window, Harness compacts toward 90% of the current
-serialized context and retries that model step once. This recovery does not use
-the byte pre-compaction threshold. Other provider errors do not trigger a
-retry. Tokenization differs by provider, so the byte budget cannot predict every
-token-window failure. A request can still fail when its history has no removable
-prefix. Compaction emits live lifecycle events and does not consume an agent
-step. Each start and finish event has a bounded item identity. Studio groups
-adjacent completed entries under `上下文压缩 ×N` and retains Turn and item detail.
+Other provider errors do not trigger compaction. Tokenization differs by
+provider, so the byte budget cannot predict every token-window failure.
+Compaction emits live lifecycle events and does not consume an agent step. Each
+start and finish event has a bounded item identity. Studio groups adjacent
+completed entries under `上下文压缩 ×N` and retains Turn and item detail.
 
 The stable system prompt and tool definitions remain unchanged when dynamic
 context changes. Project instructions, Skill catalog and bodies, workspace
@@ -137,9 +145,13 @@ provider's cache boundary, and tokenization and cache policy vary by provider;
 the App Server reports actual input and cached-input usage when the provider
 returns it. Web Studio estimates category token counts by byte share and labels
 them as estimates. Cached tokens are shown only as a provider-reported total.
-The model context window and provider usage are shown as unknown when their
-metadata is unavailable. Compaction omits the tool catalog from its auxiliary
-request. Opening more MCP tools therefore makes long Goal runs worse, not better.
+Studio pairs the latest provider input usage with the context window and output
+limit saved for that request's model. It shows the input budget as the context
+window minus the configured output limit when both values are available.
+Historical usage without a model snapshot has an unknown window. This comparison
+displays reported usage; it does not predict or trigger pre-request compaction.
+Compaction omits the tool catalog from its auxiliary request. Opening more MCP
+tools therefore makes long Goal runs worse, not better.
 
 The Host stores world-state snapshots as append-only context messages. A changed
 snapshot supersedes the previous version; compaction retains the latest

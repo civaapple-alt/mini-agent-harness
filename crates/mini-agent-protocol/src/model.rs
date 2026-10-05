@@ -21,6 +21,29 @@ impl ModelSelection {
     }
 }
 
+/// The configured context limits for the model that handled one request.
+/// This snapshot keeps provider usage paired with the profile that produced it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelContextSnapshot {
+    pub selection: ModelSelection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+}
+
+impl ModelContextSnapshot {
+    /// Returns the input budget after reserving the configured output limit.
+    pub fn available_input_tokens(&self) -> Option<u32> {
+        match (self.context_window_tokens, self.max_output_tokens) {
+            (Some(window), Some(output)) => window.checked_sub(output),
+            (Some(window), None) => Some(window),
+            (None, _) => None,
+        }
+    }
+}
+
 /// How a Turn chooses a model's reasoning behavior. `ApiDefault` means the
 /// provider request omits the model-specific reasoning parameter. `Level`
 /// carries one value declared by the selected model profile, including values
@@ -231,6 +254,15 @@ pub struct ModelRequest<'a> {
 /// They do not execute tools or decide when a run is complete.
 pub trait Model {
     type Error: Error + Send + Sync + 'static;
+
+    /// Snapshots the selected model's configured context limits for usage
+    /// reporting. This metadata is not a token estimate for the request.
+    fn context_snapshot(
+        &self,
+        _selection: Option<&ModelSelection>,
+    ) -> Option<ModelContextSnapshot> {
+        None
+    }
 
     /// Identifies an explicit provider rejection because the request exceeds
     /// the selected model's context window. Other request errors must return

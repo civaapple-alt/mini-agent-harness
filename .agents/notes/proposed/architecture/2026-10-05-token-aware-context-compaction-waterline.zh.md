@@ -3,13 +3,17 @@
 状态：提案中
 日期：2026-10-05
 范围：Harness Core、Protocol、Host/模型适配器、App Server、SDK/Gateway、Web Studio
-证据基线：当前 Harness 与 Web Studio checkout；用户提供的上下文用量截图
+初始证据基线：本提案实现前的 Harness 与 Web Studio checkout；用户提供的上下文用量截图
 
 ## 一页结论
 
 **建议把自动压缩水位改为模型 token 预算，把 64 MiB 保留为与供应商无关的序列化字节硬上限。** 两个上限回答不同问题，不应再用 64 MiB 的一半来代表模型上下文百分比。
 
-当前默认 `max_context_bytes` 是 `64 * 1024 * 1024` 字节。`Harness::prepare_context` 在序列化上下文达到其一半时尝试压缩，因此当前主动压缩水位实际为 **32 MiB**。这衡量 JSON/UTF-8 字节大小，不等于 256K 或 1M tokens。超过供应商窗口时，Harness 另有一次错误识别后的压缩重试；这不是预先可解释的水位。
+提案最初的实现基线中，默认 `max_context_bytes` 为 `64 * 1024 * 1024` 字节，`Harness::prepare_context` 在序列化上下文达到其一半时尝试压缩，因此主动压缩水位实际为 **32 MiB**。这衡量 JSON/UTF-8 字节大小，不等于 256K 或 1M tokens。超过供应商窗口时，Harness 另有一次错误识别后的压缩重试；这不是预先可解释的水位。
+
+2026-10-05 的部分实现已删除这条 32 MiB 预压缩路径。Harness 现在只在序列化上下文超过字节硬上限时拒绝请求，并保留明确识别的 provider 窗口溢出压缩重试。`model_responded` 与持久化的 `contextUsage` 也会保存该次请求所选模型的窗口和最大输出配置，Studio 不再拿当前下拉框的模型解释旧用量；UI 展示最近实际输入与配置的可用输入预算，并保留超过 100% 的值。该快照仍不是请求前 token 估算器，故不能触发提前压缩。实现记录见 [上下文字节硬限制与模型快照](../../implemented/architecture/2026-10-05-context-waterline-safety-and-model-snapshot.zh.md)。
+
+本轮没有实现 Kimi Code 的请求前 token 估算器。[Kimi Code 模型文档](https://www.kimi.com/code/docs/kimi-code/models.html)列出 coding 模型与窗口，但没有文档化的 Kimi Code 估算端点。[Kimi API 开放平台](https://platform.kimi.com/docs/api/estimate)确实提供 token 估算 API，不过它属于另一产品，使用 `MOONSHOT_API_KEY`，模型 ID 列表也与当前 Kimi Code 配置不同；[官方说明](https://www.kimi.com/help/kimi-api/api-troubleshooting)确认开放平台和 Kimi Code 的 API Key 不通用。保留 Kimi Code Base URL 与凭据意味着不能把开放平台估算请求套到 Code Key 上，也不应未经确认就新增第二套凭据和模型映射。Kimi Code 的预压缩水位仍为未知；提案保持待完成。
 
 建议的目标行为：
 
@@ -37,10 +41,10 @@ compact toward estimated_input_tokens <= floor(0.65 * available_input_tokens)
 
 | ID | 观察与证据 | 影响 / 根因 | 反例或待验证项 |
 | --- | --- | --- | --- |
-| E1 | `crates/mini-agent-core/src/harness.rs`：`HarnessConfig::default` 将 `max_context_bytes` 设为 64 MiB；`prepare_context` 用 `max_context_bytes / 2` 触发压缩。 | 触发点为 32 MiB 字节，不是模型上下文窗口的 50%。 | 若当前运行时覆盖了默认值，仍需从实际配置 trace 核实；代码默认值本身明确。 |
-| E2 | `docs/limits.md` 将 64 MiB 定义为 provider-neutral serialized-context safety ceiling，并说明 profile 的 `contextWindow` 是 Studio token metadata。 | 文档已经区分字节与 token，但运行时主动压缩仍把字节预算的一半作为水位，UI 又按 token 显示百分比，概念容易混淆。 | 无。 |
+| E1 | 初始实现证据：`crates/mini-agent-core/src/harness.rs` 的 `HarnessConfig::default` 将 `max_context_bytes` 设为 64 MiB；`prepare_context` 用 `max_context_bytes / 2` 触发压缩。 | 初始触发点为 32 MiB 字节，不是模型上下文窗口的 50%。本批已删除这条字节比例预压缩路径。 | 若运行时覆盖了默认值，仍需从实际配置 trace 核实；字节硬上限仍可配置。 |
+| E2 | 初始 `docs/limits.md` 将 64 MiB 定义为 provider-neutral serialized-context safety ceiling，并说明 profile 的 `contextWindow` 是 Studio token metadata。 | 当时文档区分字节与 token，但运行时却把字节预算的一半作为水位，UI 又按 token 显示百分比。当前规范已明确分开字节拒绝、provider overflow 恢复和模型 profile 展示。 | 可靠的请求前 token estimator 尚未实现。 |
 | E3 | `harness.rs::compact_context_after_window_error` 在识别到 provider 超窗后按当前字节量的 90% 目标压缩，并只重试一次。 | 可恢复 provider 错误，但只有请求失败后才发生，不能解释“达到什么比例会主动压缩”。 | provider 错误分类和一次重试已有测试，仍需留作后备行为。 |
-| E4 | Web `InputBar.jsx::ContextUsageControl` 用最近一次 provider `inputTokens` 除以当前 `effectiveEntry.model.contextWindow`；`App.jsx` 从 `model_responded` 写入 usage，Protocol 的 `ModelResponded` 不携带 model ID；窗口字段可在模型设置中编辑。`contextUsage.js::estimateContextCategoryTokens` 按类别字节占比摊分 token。 | 模型切换后分子可能仍属于上一个请求/模型，分母却已是当前模型。类别估算也不能驱动 Core 压缩。 | 需要把请求 model ID、窗口快照与 usage 关联起来，并用跨层 fixture 覆盖切换前后。 |
+| E4 | 初始实现证据：Web `InputBar.jsx::ContextUsageControl` 用最近一次 provider `inputTokens` 除以当前 `effectiveEntry.model.contextWindow`；Protocol `ModelResponded` 不携带 model ID；类别估算按字节占比摊分 token。 | 模型切换后分子可能仍属于上一个请求/模型。本批已将 selection、窗口和输出上限快照随 `ModelResponded` 持久化，并让 Web 绑定该快照；类别估算仍只是展示分摊，不能驱动 Core 压缩。 | 需用真实 provider 请求确认 provider usage 与模型 profile 的对应关系；当前证据为 bounded fixture。 |
 | E5 | 用户截图先后显示 350,429 / 262,144 = 133.7%，以及当前模型选择 `k3-256k`、配置窗口 262,144、最大输出 64,000、最近输入 431,483 = 164.6%；缓存输入为 431,232。[Kimi Code 模型配置](https://www.kimi.com/code/docs/kimi-code/models.html) 将 `k3-256k` 标为固定 262,144；[错误参考](https://www.kimi.com/code/docs/en/kimi-code/error-reference.html) 说明超限会返回模型 token limit 错误。 | 如果这些 usage 真对应同一 `k3-256k` 请求，成功返回与文档约束冲突；但当前 trace 缺少请求 model ID，截图不能证明 numerator 来自当前模型。缓存命中也不应从总上下文中扣除；[Kimi 缓存用量说明](https://www.kimi.com/academy/best-practices-for-context-caching) 将缓存 tokens 作为总输入的组成部分。 | 检查同一请求的 model ID、HTTP status、request ID 和原始 usage；确定是模型切换后 UI 分母错配、usage 投影问题，还是 provider 行为与文档不符。 |
 | E6 | 用户提供的 Codex 上下文指示器截图展示 `68% used` 和 `176K / 258K`。 | 这种“用量 / 预算 + 百分比”的呈现比单独百分比更容易解释压缩水位。截图只能支持视觉结构，不足以推断 Codex 的内部预算口径。 | Mini Agent 必须使用自身同一请求、同一模型的预算来源，不能照抄 Codex 的数字语义。 |
 

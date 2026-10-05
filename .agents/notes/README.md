@@ -10,6 +10,7 @@
 
 当前相关决策：
 
+- [上下文字节硬限制与模型快照](implemented/architecture/2026-10-05-context-waterline-safety-and-model-snapshot.zh.md)
 - [Token 水位驱动的上下文压缩与字节上限解耦](proposed/architecture/2026-10-05-token-aware-context-compaction-waterline.zh.md)
 - [Session V2 恢复、来源清单与执行边界](proposed/architecture/2026-10-03-v2-session-recovery-context-and-shell.zh.md)
 - [长会话历史渐进加载与重启恢复证据](implemented/testing/2026-10-02-long-session-history-and-crash-recovery.zh.md)

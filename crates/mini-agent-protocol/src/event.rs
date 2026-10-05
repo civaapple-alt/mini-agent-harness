@@ -1,6 +1,7 @@
 use crate::ContextByteBreakdown;
 use crate::ContextInjectionRecord;
 use crate::LimitExceeded;
+use crate::ModelContextSnapshot;
 use crate::ModelTiming;
 use crate::ModelUsage;
 use crate::StopReason;
@@ -72,6 +73,8 @@ pub enum Event {
         model_timing: Option<ModelTiming>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context_bytes: Option<ContextByteBreakdown>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model_context: Option<ModelContextSnapshot>,
     },
     ToolStarted {
         call: ToolCall,

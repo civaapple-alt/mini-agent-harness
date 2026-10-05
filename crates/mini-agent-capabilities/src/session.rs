@@ -333,13 +333,15 @@ pub struct TurnPresentation {
 
 /// The last model request observed during a Turn plus bounded aggregate usage
 /// for the Provider cache-hit ratio.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnContextUsage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<ModelUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_bytes: Option<ContextByteBreakdown>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_context: Option<mini_agent_protocol::ModelContextSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_totals: Option<TurnUsageTotals>,
 }
@@ -433,15 +435,18 @@ impl TurnPresentation {
         &mut self,
         usage: Option<ModelUsage>,
         context_bytes: Option<ContextByteBreakdown>,
+        model_context: Option<mini_agent_protocol::ModelContextSnapshot>,
     ) {
         let mut usage_totals = self
             .context_usage
+            .as_ref()
             .and_then(|context_usage| context_usage.usage_totals)
             .unwrap_or_default();
         usage_totals.record(usage);
         self.context_usage = Some(TurnContextUsage {
             usage,
             context_bytes,
+            model_context,
             usage_totals: Some(usage_totals),
         });
     }
@@ -3809,7 +3814,10 @@ fn append_execution_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mini_agent_protocol::{ToolCall, ToolExecutionOutcome, TurnInput, TurnInputMode};
+    use mini_agent_protocol::{
+        ModelContextSnapshot, ModelSelection, ToolCall, ToolExecutionOutcome, TurnInput,
+        TurnInputMode,
+    };
 
     fn exact_fork_metadata() -> SessionForkMetadata {
         SessionForkMetadata {
@@ -4126,6 +4134,7 @@ mod tests {
                 output_tokens: 10,
             }),
             None,
+            None,
         );
         presentation.set_context_usage(
             Some(ModelUsage {
@@ -4137,9 +4146,14 @@ mod tests {
                 conversation: 64,
                 ..ContextByteBreakdown::default()
             }),
+            Some(ModelContextSnapshot {
+                selection: ModelSelection::new("kimi", "k3-256k"),
+                context_window_tokens: Some(262_144),
+                max_output_tokens: Some(64_000),
+            }),
         );
 
-        let context_usage = presentation.context_usage.unwrap();
+        let context_usage = presentation.context_usage.as_ref().unwrap();
         assert_eq!(
             context_usage.usage_totals,
             Some(TurnUsageTotals {
@@ -4158,9 +4172,21 @@ mod tests {
                 output_tokens: 20,
             })
         );
+        assert_eq!(
+            context_usage.model_context,
+            Some(ModelContextSnapshot {
+                selection: ModelSelection::new("kimi", "k3-256k"),
+                context_window_tokens: Some(262_144),
+                max_output_tokens: Some(64_000),
+            })
+        );
 
         let serialized = serde_json::to_value(presentation).unwrap();
         assert_eq!(serialized["contextUsage"]["usageTotals"]["requestCount"], 2);
+        assert_eq!(
+            serialized["contextUsage"]["modelContext"]["contextWindowTokens"],
+            262_144
+        );
         let legacy: TurnContextUsage =
             serde_json::from_value(serde_json::json!({"usage": null})).unwrap();
         assert_eq!(legacy.usage_totals, None);

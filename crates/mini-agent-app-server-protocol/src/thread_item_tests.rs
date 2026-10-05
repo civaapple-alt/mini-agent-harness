@@ -159,6 +159,7 @@ fn lifecycle_projection_does_not_duplicate_model_tool_calls() {
             usage: None,
             model_timing: None,
             context_bytes: None,
+            model_context: None,
         },
     );
 
