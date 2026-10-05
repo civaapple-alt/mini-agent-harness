@@ -7,6 +7,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changes
 
+- Set Kimi connection probes to `reasoning.effort=low` and
+  `max_output_tokens=128` so models with higher default reasoning effort can
+  complete the bounded test request.
 - Match the Builtin tool list to the default Host selection, including
   `scheduled_task`, and clarify its delay-marker behavior.
 - Maintain the Python SDK, its documentation and tests, and generic App Server
