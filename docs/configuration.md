@@ -43,8 +43,10 @@ if they are no longer needed.
 The catalog accepts `deepseek`, `kimi`, `glm`, `volcengine`, and `custom`
 providers. Each provider stores a name, an enabled flag, a Responses API Base
 URL, and its model list. Web Studio
-offers offline Base URL suggestions for built-in providers; custom providers
-are entered manually. The Host appends `/responses` to the configured URL root.
+offers offline Base URL suggestions for built-in providers; Kimi API and Kimi
+Code have separate presets because they use different Base URLs and model IDs.
+Custom providers are entered manually. The Host appends `/responses` to the
+configured URL root.
 Search service selection is a separate machine-wide Host setting; see
 [web search](web-search.md).
 
@@ -57,9 +59,11 @@ parameters for disabling reasoning. The global default pairs a model with
 either one of its supported levels or `api_default`, which omits reasoning
 parameters from the request. The local smart-match list suggests model IDs and
 metadata. The suggestion does not verify a remote endpoint. **Test connection**
-sends one bounded request without tools, only after a user clicks the button;
-the provider may charge for that request. The result is reduced to a status and
-a short message, without returning the key or raw request/response.
+sends one bounded request without tools after you click the button. The provider
+may charge for it. For Kimi providers, Host sets `reasoning.effort` to `low` and
+`max_output_tokens` to `128` to reduce the chance that the probe reaches its
+output limit. The result contains a status and short message; it does not include
+the key or raw request/response.
 
 The Host resolves the primary model in this order: explicit Thread selection,
 Project default, then global default. There is no environment-variable fallback.
