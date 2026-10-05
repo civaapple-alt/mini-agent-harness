@@ -16,20 +16,23 @@
 ## 每次请求的模型配置快照
 
 为了让最近一次 provider 用量与实际请求的模型配置对应，本批增加了可选的
-`ModelContextSnapshot`，记录 provider/model ID、配置的上下文窗口和最大输出 token：
+`ModelContextSnapshot`，记录 provider/model ID、模型 profile 配置的上下文窗口和最大输出 token。
+其中 `contextWindow` / `context_window_tokens` 是按 token 填写的模型上下文窗口元数据，
+不是 Harness 的字节限制，也不是供应商实时返回或验证的值：
 
 1. Host 从本次请求选择或项目/全局默认中解析模型 profile。
 2. Core 在请求前读取该 profile 快照；成功的 `model_responded` 事件携带可选
    `model_context` 字段。
 3. App Server 将快照与最近一次 usage 一起持久化到
    `contextUsage.modelContext`。旧 Session 缺少此字段仍可读取。
-4. Python SDK 解析并导出该字段，Web Studio 根据最近一次请求快照计算显示预算。
+4. Python SDK 解析并导出该字段，Web Studio 用最近一次请求快照计算完整窗口占用率，并单独展示输出预留后的可用输入预算。
 
-Studio 的“可用输入预算”按配置窗口减去配置的最大输出计算；如果没有输出上限，
-则仅以配置窗口作为预算。如果没有模型快照，窗口显示为未知。UI 保留高于 100% 的
-实际输入数值：超过配置窗口时提示核对请求路由和模型；超过扣除输出预留后的预算时
-提示实际输出上限可能需要下调。这个比较是对最近实际 usage 的解释，不是下一次
-请求的估算，也不会触发 Core 压缩。按上下文来源分摊 token 的详情仍是字节占比估算。
+Studio 的窗口占用率按最近实际 `input_tokens / contextWindow` 计算；“可用输入预算”
+仍按配置窗口减去配置的最大输出计算，如果没有输出上限则仅以配置窗口作为预算。
+如果没有模型快照，窗口显示为未知。UI 保留高于 100% 的实际输入数值：超过配置窗口时
+提示核对请求路由和模型；超过扣除输出预留后的预算时提示实际输出上限可能需要下调。
+这个比较是对最近实际 usage 的解释，不是下一次请求的估算，也不会触发 Core 压缩。
+按上下文来源分摊 token 的详情仍是字节占比估算。
 
 ## Kimi Code 的边界
 

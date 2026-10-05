@@ -102,7 +102,9 @@ remains bounded by its action key and selected scope.
 
 Harness does not use a fraction of the byte limit as a model context waterline.
 Before each model request, it rejects serialized context above the configured
-64 MiB default. A model profile may include a context window and output limit.
+64 MiB default. A model profile may include a configured context window and
+output limit. The context-window value is profile metadata in tokens; Harness
+does not discover or verify the provider's actual limit automatically.
 Harness records that profile with the request's provider usage so clients can
 compare the two values. These profile limits do not estimate request tokens.
 
@@ -146,8 +148,10 @@ the App Server reports actual input and cached-input usage when the provider
 returns it. Web Studio estimates category token counts by byte share and labels
 them as estimates. Cached tokens are shown only as a provider-reported total.
 Studio pairs the latest provider input usage with the context window and output
-limit saved for that request's model. It shows the input budget as the context
-window minus the configured output limit when both values are available.
+limit saved for that request's model. The occupancy percentage uses reported
+input tokens divided by the full configured context window in that profile.
+Studio separately shows the input budget as the context window minus the configured output limit
+when both values are available, and warns when usage exceeds either limit.
 Historical usage without a model snapshot has an unknown window. This comparison
 displays reported usage; it does not predict or trigger pre-request compaction.
 Compaction omits the tool catalog from its auxiliary request. Opening more MCP
