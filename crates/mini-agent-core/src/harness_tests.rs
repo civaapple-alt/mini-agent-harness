@@ -79,6 +79,45 @@ impl Model for RecordingModel {
     }
 }
 
+#[derive(Debug)]
+struct ContextWindowExceeded;
+
+impl std::fmt::Display for ContextWindowExceeded {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("provider context window exceeded")
+    }
+}
+
+impl std::error::Error for ContextWindowExceeded {}
+
+struct ContextWindowRetryModel {
+    responses: VecDeque<Result<ModelResponse, ContextWindowExceeded>>,
+    requests: Arc<Mutex<Vec<RecordedRequest>>>,
+}
+
+impl Model for ContextWindowRetryModel {
+    type Error = ContextWindowExceeded;
+
+    fn is_context_window_error(&self, _error: &Self::Error) -> bool {
+        true
+    }
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        self.requests.lock().unwrap().push(RecordedRequest {
+            system_prompt: request.system_prompt.to_string(),
+            messages: request.messages.to_vec(),
+            tools: request.tools.to_vec(),
+        });
+        self.responses
+            .pop_front()
+            .expect("missing context-window scenario response")
+    }
+}
+
 fn text_response(text: impl Into<String>) -> ModelResponse {
     ModelResponse {
         reasoning: String::new(),
@@ -968,6 +1007,14 @@ fn copilot_loop_uses_compaction_and_unlimited_default() {
     assert_eq!(config.context_limit_behavior, ContextLimitBehavior::Compact);
 }
 
+#[test]
+fn default_harness_compacts_context() {
+    assert_eq!(
+        HarnessConfig::default().context_limit_behavior,
+        ContextLimitBehavior::Compact
+    );
+}
+
 #[tokio::test]
 async fn preserves_history_across_runs_and_can_clear_it() {
     let model = ScriptedModel {
@@ -1401,6 +1448,107 @@ async fn empty_summary_falls_back_to_mechanical_trim() {
 }
 
 #[tokio::test]
+async fn retries_provider_context_overflow_after_compacting_history() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let model = ContextWindowRetryModel {
+        responses: VecDeque::from([
+            Err(ContextWindowExceeded),
+            Err(ContextWindowExceeded),
+            Ok(text_response("Recovered after compacting history.")),
+        ]),
+        requests: Arc::clone(&requests),
+    };
+    let history = (0..4)
+        .flat_map(|index| {
+            [
+                Message::User {
+                    text: format!("old-{index}:{}", "x".repeat(2048)),
+                },
+                Message::Assistant {
+                    reasoning: String::new(),
+                    text: format!("answer-{index}"),
+                    tool_calls: Vec::new(),
+                },
+            ]
+        })
+        .collect::<Vec<_>>();
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
+    harness.restore_history(history).unwrap();
+    let mut events = RecordingObserver::default();
+
+    let outcome = harness.run("current request", &mut events).await.unwrap();
+
+    assert_eq!(outcome.final_text, "Recovered after compacting history.");
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[1].tools.is_empty());
+    assert!(requests[2].messages.len() < requests[0].messages.len());
+    assert!(
+        requests[2]
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::User { text } if text == "current request"))
+    );
+    assert!(
+        !requests[2]
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::User { text } if text.starts_with("old-0:")))
+    );
+    assert!(events.0.iter().any(|event| matches!(
+        event,
+        Event::ContextCompactionFinished {
+            before_bytes,
+            after_bytes,
+            usage: None,
+        } if after_bytes < before_bytes
+    )));
+}
+
+#[tokio::test]
+async fn reject_policy_does_not_retry_provider_context_overflow() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let model = ContextWindowRetryModel {
+        responses: VecDeque::from([Err(ContextWindowExceeded)]),
+        requests: Arc::clone(&requests),
+    };
+    let history = vec![
+        Message::User {
+            text: format!("old:{}", "x".repeat(2048)),
+        },
+        Message::Assistant {
+            reasoning: String::new(),
+            text: "old answer".to_string(),
+            tool_calls: Vec::new(),
+        },
+    ];
+    let mut harness = Harness::new(
+        model,
+        ToolRouter::default(),
+        HarnessConfig {
+            context_limit_behavior: ContextLimitBehavior::Reject,
+            ..HarnessConfig::default()
+        },
+    );
+    harness.restore_history(history).unwrap();
+    let mut events = RecordingObserver::default();
+
+    let error = harness
+        .run("current request", &mut events)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, HarnessError::Model(_)));
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    assert!(
+        !events
+            .0
+            .iter()
+            .any(|event| matches!(event, Event::ContextCompactionStarted { .. }))
+    );
+}
+
+#[tokio::test]
 async fn trims_over_budget_compaction_prefix_and_continues() {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let model = RecordingModel {
@@ -1744,6 +1892,7 @@ async fn rejects_context_before_calling_the_model() {
     };
     let config = HarnessConfig {
         max_context_bytes: 1,
+        context_limit_behavior: ContextLimitBehavior::Reject,
         ..HarnessConfig::default()
     };
     let mut harness = Harness::new(model, ToolRouter::default(), config);

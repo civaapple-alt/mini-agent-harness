@@ -83,37 +83,46 @@ retains a bounded result and marks `truncated` explicitly instead of discarding
 the outcome.
 
 Every runtime limit failure emits `run_failed` with a structured
-`limit_exceeded` reason. The default behavior does not compact or delete
-history behind the user's back. The current interactive terminal has no `/new`
-command: exit it and start `mini-agent` without `--session-id` to create a new
-conversation, or use `resume` to continue a settled Session.
+`limit_exceeded` reason. The default Harness behavior compacts history when
+needed; callers can explicitly select `Reject` to disable automatic compaction.
+The current interactive terminal has no `/new` command: exit it and start
+`mini-agent` without `--session-id` to create a new conversation, or use
+`resume` to continue a settled Session.
 
-Core keeps an internal runaway-loop guard and may compact context when the
-runtime composition allows it. `max_steps` and `step_limit` are not direct
-Goal progress semantics. Web Studio exposes them through the explicit Thread
-`continuationMode`: `manual` keeps the default 8-step bound, while `continuous`
-sets `max_steps=0` for ordinary Chat. Goal's long-running behavior is owned by
-the Goal Runtime and temporarily uses its own milestone budget; Auto Copilot is
-the explicit `trusted + continuous` Web Studio preset, while each grant is still
-bounded by its action key and selected scope. Before a normal sampling request,
-settled history at or above half of the 64 MiB ceiling
-is compacted. The newest context item and a bounded recent tail stay verbatim:
-the last two model-step groups (each an assistant message plus its following
-tool results, or a final tool-less assistant), capped at 128 KiB serialized.
-Only the older prefix is sent to the same model with the unchanged system
-prompt and an empty tool catalog (so compact cannot call tools or attach
-images), followed by one appended compaction user message. If that compaction
-request would exceed 64 MiB, the oldest prefix messages are dropped until it
-fits. The 64 MiB JSON ceiling does not count host-projected image bytes; image
-data URLs are a host wire payload, not core history. The returned summary must be non-empty, contain no tool
-calls, reduce context size, and fit the existing response and request ceilings.
-If it does not, the harness drops oldest prefix messages until the request is
-under the compact threshold, instead of aborting the run. Compaction emits live
-lifecycle events and does not consume an agent step. Each live compaction
-start/finish pair carries a bounded item identity; Studio may group adjacent
-completed entries as “上下文压缩 ×N” while retaining turn/item detail. A pathological single step
-can still exceed the hard context ceiling and fail rather than sending an
-oversized request.
+Core keeps an internal runaway-loop guard. `max_steps` and `step_limit` do not
+define Goal progress. Web Studio exposes `continuationMode` on each Thread:
+`manual` keeps the 8-step bound, and `continuous` sets `max_steps=0` for ordinary
+Chat. Goal Runtime owns long-running Goal behavior and uses its milestone
+budget. Auto Copilot selects the `trusted + continuous` preset. Each tool grant
+remains bounded by its action key and selected scope.
+
+Before a model request, Harness compacts history when its serialized size
+reaches half of the 64 MiB context budget. It keeps the latest context for each
+source slot and the last two model-step groups verbatim. A group contains an
+assistant message and its following tool results, or a final assistant message
+without tool calls. The recent tail is capped at 128 KiB when it contains more
+than one assistant group. Harness keeps the most recent group intact even when
+it exceeds 128 KiB. Harness sends only the older prefix to the same model with
+the unchanged system prompt, no tool definitions, and one compaction user
+message. The model cannot call tools or attach images during this request.
+
+If the prefix and compaction prompt exceed 64 MiB, Harness drops the oldest
+prefix messages until they fit. The 64 MiB JSON budget excludes host-projected
+image bytes. Harness accepts a summary only when it is non-empty, contains no
+tool calls, reduces the context size, and fits the existing response and
+request limits. If the summary request fails or the summary does not meet these
+conditions, Harness drops the oldest prefix messages until the context is below
+the compaction target.
+
+If a compatible model provider explicitly rejects a request because it exceeds
+the model's token context window, Harness compacts toward 90% of the current
+serialized context and retries that model step once. This recovery does not use
+the byte pre-compaction threshold. Other provider errors do not trigger a
+retry. Tokenization differs by provider, so the byte budget cannot predict every
+token-window failure. A request can still fail when its history has no removable
+prefix. Compaction emits live lifecycle events and does not consume an agent
+step. Each start and finish event has a bounded item identity. Studio groups
+adjacent completed entries under `上下文压缩 ×N` and retains Turn and item detail.
 
 The stable system prompt and tool definitions remain unchanged when dynamic
 context changes. Project instructions, Skill catalog and bodies, workspace

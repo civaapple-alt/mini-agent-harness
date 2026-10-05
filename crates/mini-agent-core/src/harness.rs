@@ -32,6 +32,7 @@ use crate::turn_engine::SilentModelEvents;
 use crate::turn_engine::model_response_bytes;
 
 const MAX_CONTEXT_INJECTION_BYTES: usize = 64 * 1024;
+const MAX_CONTEXT_WINDOW_COMPACTION_RETRIES: usize = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContextLimitBehavior {
@@ -91,7 +92,7 @@ impl Default for HarnessConfig {
             max_tool_calls_per_step: 8,
             max_tool_output_bytes: 16 * 1024,
             max_context_bytes: 64 * 1024 * 1024,
-            context_limit_behavior: ContextLimitBehavior::Reject,
+            context_limit_behavior: ContextLimitBehavior::Compact,
         }
     }
 }
@@ -674,43 +675,80 @@ impl<M: Model> Harness<M> {
                 )
                 .map_err(HarnessError::ExecutionJournal)?;
             }
-            observer.observe(&Event::ModelStarted {
-                step,
-                input_bytes: self.context_bytes(&self.config.system_prompt, &tool_specs),
-                input_hash: model_input_digest(
-                    &self.config.system_prompt,
-                    self.session.messages(),
-                    &tool_specs,
-                ),
-                tool_manifest_hash: tool_manifest_digest(&tool_specs),
-            });
-            let model_response = {
-                let mut model_events =
-                    ModelEventForwarder::new(observer, self.config.max_model_response_bytes);
-                self.model
-                    .respond(
-                        ModelRequest {
-                            system_prompt: &self.config.system_prompt,
-                            messages: self.session.messages(),
-                            tools: &tool_specs,
-                            allowed_tools: None,
-                            max_response_bytes: self.config.max_model_response_bytes,
-                            model_selection: self.model_selection.as_ref(),
-                            reasoning_selection: self.reasoning_selection.as_ref(),
-                            reasoning_effort: self.reasoning_effort.as_deref(),
-                        },
-                        &mut model_events,
-                    )
-                    .await
-                    .map(|response| (response, model_events.timing()))
-            };
-            let (response, model_timing) = match model_response {
-                Ok(response) => response,
-                Err(error) => {
-                    observer.observe(&Event::RunFailed {
-                        reason: mini_agent_protocol::RunFailure::Model,
-                    });
-                    return Err(HarnessError::Model(error));
+            let mut context_window_retries = 0;
+            let (response, model_timing) = loop {
+                observer.observe(&Event::ModelStarted {
+                    step,
+                    input_bytes: self.context_bytes(&self.config.system_prompt, &tool_specs),
+                    input_hash: model_input_digest(
+                        &self.config.system_prompt,
+                        self.session.messages(),
+                        &tool_specs,
+                    ),
+                    tool_manifest_hash: tool_manifest_digest(&tool_specs),
+                });
+                let model_response = {
+                    let mut model_events =
+                        ModelEventForwarder::new(observer, self.config.max_model_response_bytes);
+                    let result = self
+                        .model
+                        .respond(
+                            ModelRequest {
+                                system_prompt: &self.config.system_prompt,
+                                messages: self.session.messages(),
+                                tools: &tool_specs,
+                                allowed_tools: None,
+                                max_response_bytes: self.config.max_model_response_bytes,
+                                model_selection: self.model_selection.as_ref(),
+                                reasoning_selection: self.reasoning_selection.as_ref(),
+                                reasoning_effort: self.reasoning_effort.as_deref(),
+                            },
+                            &mut model_events,
+                        )
+                        .await;
+                    result.map(|response| (response, model_events.timing()))
+                };
+                match model_response {
+                    Ok(response) => break response,
+                    Err(error)
+                        if self.config.context_limit_behavior == ContextLimitBehavior::Compact
+                            && context_window_retries < MAX_CONTEXT_WINDOW_COMPACTION_RETRIES
+                            && self.model.is_context_window_error(&error) =>
+                    {
+                        context_window_retries += 1;
+                        if self
+                            .compact_context_after_window_error(&tool_specs, observer)
+                            .await?
+                        {
+                            if let Some(execution) = execution_context.as_ref() {
+                                crate::execution::append_if_present(
+                                    &mut journal,
+                                    ExecutionJournalEntry::Checkpoint {
+                                        checkpoint: ExecutionCheckpoint {
+                                            turn_id: execution.turn_id.clone(),
+                                            input: execution.input.clone(),
+                                            messages: self.session.messages().to_vec(),
+                                            next_model_step: step,
+                                            final_text: final_text.clone(),
+                                            phase: ExecutionPhase::ModelRequest,
+                                        },
+                                    },
+                                )
+                                .map_err(HarnessError::ExecutionJournal)?;
+                            }
+                        } else {
+                            observer.observe(&Event::RunFailed {
+                                reason: mini_agent_protocol::RunFailure::Model,
+                            });
+                            return Err(HarnessError::Model(error));
+                        }
+                    }
+                    Err(error) => {
+                        observer.observe(&Event::RunFailed {
+                            reason: mini_agent_protocol::RunFailure::Model,
+                        });
+                        return Err(HarnessError::Model(error));
+                    }
                 }
             };
 
@@ -953,8 +991,33 @@ impl<M: Model> Harness<M> {
         tool_specs: &[mini_agent_protocol::ToolSpec],
         observer: &mut O,
     ) -> Result<ForkCompactionMethod, HarnessError<M::Error>> {
-        let before_bytes = self.context_bytes(&self.config.system_prompt, tool_specs);
         let compact_at = self.config.max_context_bytes / 2;
+        self.compact_context_to(tool_specs, observer, compact_at, false)
+            .await
+    }
+
+    async fn compact_context_after_window_error<O: Observer + Send>(
+        &mut self,
+        tool_specs: &[mini_agent_protocol::ToolSpec],
+        observer: &mut O,
+    ) -> Result<bool, HarnessError<M::Error>> {
+        let before_bytes = self.context_bytes(&self.config.system_prompt, tool_specs);
+        let target_bytes = before_bytes.saturating_mul(9) / 10;
+        let method = self
+            .compact_context_to(tool_specs, observer, target_bytes, true)
+            .await?;
+        let after_bytes = self.context_bytes(&self.config.system_prompt, tool_specs);
+        Ok(method != ForkCompactionMethod::Exact && after_bytes < before_bytes)
+    }
+
+    async fn compact_context_to<O: Observer + Send>(
+        &mut self,
+        tool_specs: &[mini_agent_protocol::ToolSpec],
+        observer: &mut O,
+        compact_at: usize,
+        summary_must_reach_target: bool,
+    ) -> Result<ForkCompactionMethod, HarnessError<M::Error>> {
+        let before_bytes = self.context_bytes(&self.config.system_prompt, tool_specs);
         let (mut prefix, contexts, tail) = split_compaction_parts(self.session.messages());
         if prefix.is_empty() {
             return Ok(ForkCompactionMethod::Exact);
@@ -978,7 +1041,7 @@ impl<M: Model> Harness<M> {
         compaction_messages.push(Message::User {
             text: compaction_prompt,
         });
-        let response = match self
+        let response = self
             .model
             .respond(
                 ModelRequest {
@@ -994,38 +1057,28 @@ impl<M: Model> Harness<M> {
                 &mut SilentModelEvents,
             )
             .await
-        {
-            Ok(response) => response,
-            Err(error) => {
-                observer.observe(&Event::RunFailed {
-                    reason: mini_agent_protocol::RunFailure::Model,
-                });
-                return Err(HarnessError::Model(error));
-            }
-        };
-        let response_bytes = model_response_bytes(&response);
-        if response_bytes > self.config.max_model_response_bytes {
-            return Err(fail_limit(
-                LimitExceeded {
-                    kind: LimitKind::ModelResponseBytes,
-                    limit: self.config.max_model_response_bytes,
-                    actual: response_bytes,
-                },
-                observer,
-            ));
-        }
-        let summary = response.text.trim();
+            .ok();
         let mut compacted = None;
-        if response.tool_calls.is_empty() && !summary.is_empty() {
-            let candidate = assemble_compacted(
-                Some(summary),
-                contexts.clone(),
-                tail.clone(),
-                self.config.max_user_input_bytes,
-            );
-            let after_bytes = context_bytes_for(&self.config.system_prompt, &candidate, tool_specs);
-            if after_bytes < before_bytes && after_bytes <= self.config.max_context_bytes {
-                compacted = Some(candidate);
+        if let Some(response) = response.as_ref()
+            && model_response_bytes(response) <= self.config.max_model_response_bytes
+        {
+            let summary = response.text.trim();
+            if response.tool_calls.is_empty() && !summary.is_empty() {
+                let candidate = assemble_compacted(
+                    Some(summary),
+                    contexts.clone(),
+                    tail.clone(),
+                    self.config.max_user_input_bytes,
+                );
+                let after_bytes =
+                    context_bytes_for(&self.config.system_prompt, &candidate, tool_specs);
+                let reaches_target = !summary_must_reach_target || after_bytes < compact_at;
+                if after_bytes < before_bytes
+                    && after_bytes <= self.config.max_context_bytes
+                    && reaches_target
+                {
+                    compacted = Some(candidate);
+                }
             }
         }
         let method = if compacted.is_some() {
@@ -1044,13 +1097,8 @@ impl<M: Model> Harness<M> {
                 self.config.max_user_input_bytes,
             )
         });
-        self.finish_compacted(
-            compacted,
-            before_bytes,
-            response.usage,
-            tool_specs,
-            observer,
-        )?;
+        let usage = response.and_then(|response| response.usage);
+        self.finish_compacted(compacted, before_bytes, usage, tool_specs, observer)?;
         Ok(method)
     }
 

@@ -232,6 +232,13 @@ pub struct ModelRequest<'a> {
 pub trait Model {
     type Error: Error + Send + Sync + 'static;
 
+    /// Identifies an explicit provider rejection because the request exceeds
+    /// the selected model's context window. Other request errors must return
+    /// `false` so the Harness does not retry them as a compaction opportunity.
+    fn is_context_window_error(&self, _error: &Self::Error) -> bool {
+        false
+    }
+
     /// Whether this adapter can enforce `ModelRequest::allowed_tools` without
     /// changing the stable tool definitions or prompt content.
     fn supports_allowed_tools(&self) -> bool {

@@ -82,6 +82,10 @@ impl OpenAiModel {
 impl Model for OpenAiModel {
     type Error = OpenAiError;
 
+    fn is_context_window_error(&self, error: &Self::Error) -> bool {
+        error.is_context_window_error()
+    }
+
     fn supports_allowed_tools(&self) -> bool {
         true
     }
@@ -323,6 +327,30 @@ pub enum OpenAiError {
     Protocol(String),
 }
 
+impl OpenAiError {
+    pub fn is_context_window_error(&self) -> bool {
+        let Self::Api { status, message } = self else {
+            return false;
+        };
+        if !matches!(*status, 400 | 413 | 422) {
+            return false;
+        }
+
+        let message = message.to_ascii_lowercase();
+        [
+            "context_length_exceeded",
+            "maximum context length",
+            "max context length",
+            "context window exceeded",
+            "exceeds the model's context window",
+            "reduce the length of the messages or completion",
+            "prompt is too long",
+        ]
+        .iter()
+        .any(|marker| message.contains(marker))
+    }
+}
+
 impl fmt::Display for OpenAiError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -337,3 +365,33 @@ impl fmt::Display for OpenAiError {
 }
 
 impl Error for OpenAiError {}
+
+#[cfg(test)]
+mod error_tests {
+    use super::OpenAiError;
+
+    #[test]
+    fn identifies_context_window_rejections_from_compatible_providers() {
+        let error = OpenAiError::Api {
+            status: 400,
+            message: r#"{"error":{"message":"This model's maximum context length is 1048576 tokens. However, you requested 1048712 tokens. Please reduce the length of the messages or completion."}}"#.to_string(),
+        };
+
+        assert!(error.is_context_window_error());
+    }
+
+    #[test]
+    fn ignores_other_provider_errors() {
+        let error = OpenAiError::Api {
+            status: 400,
+            message: r#"{"error":{"message":"Invalid model parameter"}}"#.to_string(),
+        };
+        let authorization_error = OpenAiError::Api {
+            status: 401,
+            message: "maximum context length".to_string(),
+        };
+
+        assert!(!error.is_context_window_error());
+        assert!(!authorization_error.is_context_window_error());
+    }
+}

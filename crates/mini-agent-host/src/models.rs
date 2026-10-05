@@ -699,6 +699,10 @@ impl HostResponsesModel {
 impl Model for HostResponsesModel {
     type Error = OpenAiError;
 
+    fn is_context_window_error(&self, error: &Self::Error) -> bool {
+        error.is_context_window_error()
+    }
+
     async fn respond<'a>(
         &'a mut self,
         request: ModelRequest<'a>,
