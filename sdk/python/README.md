@@ -141,8 +141,9 @@ App Server history 的读取投影，不是 SDK 的第二个持久化存储。
 设置 `user_questions=True` 后，App Server 可向客户端发送 `ask_user` 请求。
 通知中的 `typed_user_question` 提供当前问题和选项；客户端用
 `UserQuestionAnswer` 构造并提交答案。断线后可以从 `read_thread()` 返回的
-`pending_user_question` 恢复展示。完整的交互式本地个人助手示例见
-[`08_personal_agent.py`](../../cookbook/python-demo/08_personal_agent.py)。
+`pending_user_question` 恢复展示。[`08_personal_agent.py`](../../cookbook/python-demo/08_personal_agent.py)
+演示命名 Session 中的 `ask_user` 交互，以及重启后处理待答问题和未解决执行检查点的方式。
+它展示 SDK 机制，不实现比价、邮件或日程等领域个人助理功能。
 
 ## 审批与通知
 
