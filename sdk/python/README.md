@@ -184,7 +184,9 @@ uv run --project sdk/python pytest sdk/python/tests -q
 ```
 
 SDK 代码、文档、测试和通用 App Server 示例由 Harness 维护。Web Studio
-使用已发布的 SDK 包，并单独维护 Gateway 和界面集成。
+单独维护 Gateway 和界面集成；同级目录布局下，Web 仓库通过
+`../mini-agent-harness/sdk/python` 的 editable path source 使用这里的 SDK。仓库布局和启动步骤见
+[Web Studio 开发说明](https://github.com/civaapple-alt/mini-agent-web/blob/main/README.md#同时开发-harness-sdk)。
 
 ## License
 
