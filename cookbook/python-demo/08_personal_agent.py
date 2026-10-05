@@ -1,4 +1,4 @@
-"""Run a small personal agent over one named, resumable App Server Session."""
+"""Demonstrate SDK session interaction and recovery, not a domain personal assistant."""
 
 from __future__ import annotations
 

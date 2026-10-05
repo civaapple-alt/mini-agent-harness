@@ -14,7 +14,7 @@
 | `05_workflows_and_inspection.py` | World、独立执行策略、Plan、Goal 和 Checkpoint | live |
 | `06_protocol_compatibility.py` | 事件、ThreadItem 与已知/未知 outcome 检查 | offline |
 | `07_recovery_and_projection.py` | EOF 恢复、Session fork 和身份投影 | offline |
-| `08_personal_agent.py` | 命名 Session、持续对话、用户提问与中断恢复边界 | live |
+| `08_personal_agent.py` | 命名 Session SDK 示例：持续对话、`ask_user` 与恢复边界；非领域个人助理 | live |
 
 ## 运行
 
@@ -66,10 +66,12 @@ uv run --project sdk/python python cookbook/python-demo/05_workflows_and_inspect
 uv run --project sdk/python python cookbook/python-demo/08_personal_agent.py
 ```
 
-`08_personal_agent.py` 在 App Server 中使用名为 `personal-agent` 的 Session，
-退出后再次运行会附着该 Session。它通过 SDK 类型化处理 `ask_user` 通知，并在
-重启后重新展示尚未回答的问题。输入 `/quit` 退出。示例需要已配置的模型 Provider；
-如需为自己保留一份独立对话，可在运行前设置专用 ID：
+`08_personal_agent.py` 演示 SDK 的会话和交互机制，不是面向比价、邮件或日程的
+个人助理产品。它在 App Server 中使用名为 `personal-agent` 的 Session，退出后再次
+运行会附着该 Session；Session ID 保持不变以延续已有示例数据。示例通过 SDK 类型化
+处理 `ask_user` 通知，并在重启后重新展示尚未回答的问题。如果存在未解决的执行检查点，
+它会提示先显式恢复，再接受新提示词；示例本身不提供工具结果核对界面。输入 `/quit`
+退出。示例需要已配置的模型 Provider；如需为自己保留一份独立对话，可在运行前设置专用 ID：
 
 ```bash
 MINI_AGENT_SESSION_ID=my-personal-agent uv run --project sdk/python python cookbook/python-demo/08_personal_agent.py

@@ -7,6 +7,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changes
 
+- Match the Builtin tool list to the default Host selection, including
+  `scheduled_task`, and clarify its delay-marker behavior.
 - Maintain the Python SDK, its documentation and tests, and generic App Server
   Cookbook examples in Harness. Release the SDK wheel/sdist and package the
   App Server beside the CLI for future releases.

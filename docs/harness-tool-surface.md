@@ -3,15 +3,17 @@
 The default model-visible Builtin tool set is deliberately small:
 
 ```text
-read_file | apply_patch | shell | read_image | read_tool_output
+read_file | read_tool_output | apply_patch | shell | read_image | scheduled_task
 ```
 
 `read_tool_output` pages oversized results from the current Session's bounded
-result store. `web_fetch`, MCP tools, child-task tools, Notebook tools, background Shell
-tasks, and scheduled delay markers are explicit Host-composed capabilities.
-They are not compatibility names for the default set. `write_file` and
-`edit_file` are not supported fallback tools. Use `apply_patch` for workspace
-changes.
+result store. `scheduled_task` records a bounded delay marker; it does not run a
+scheduler, end the current Turn, or start a later Turn. `web_fetch`, `ask_user`,
+MCP tools, child-task tools, Notebook tools, and background Shell tasks are
+available through negotiated selection or explicit Host composition. `web_search`
+is a separately configured Host capability, not a name in the Builtin selection.
+`write_file` and `edit_file` are not supported fallback tools. Use `apply_patch`
+for workspace changes.
 
 ## Ownership and admission
 
