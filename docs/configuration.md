@@ -47,6 +47,10 @@ offers offline Base URL suggestions for built-in providers; Kimi API and Kimi
 Code have separate presets because they use different Base URLs and model IDs.
 Custom providers are entered manually. The Host appends `/responses` to the
 configured URL root.
+For GLM Coding Plan's Responses protocol, use
+`https://open.bigmodel.cn/api/v1`. The `/api/paas/v4` and
+`/api/coding/paas/v4` roots are Chat Completions endpoints and are not valid
+Responses Base URLs.
 Search service selection is a separate machine-wide Host setting; see
 [web search](web-search.md).
 
@@ -62,8 +66,10 @@ metadata. The suggestion does not verify a remote endpoint. **Test connection**
 sends one bounded request without tools after you click the button. The provider
 may charge for it. For Kimi providers, Host sets `reasoning.effort` to `low` and
 `max_output_tokens` to `128` to reduce the chance that the probe reaches its
-output limit. The result contains a status and short message; it does not include
-the key or raw request/response.
+output limit. GLM probes set `reasoning.effort` to `none` and allow up to `128`
+output tokens because GLM Responses defaults to maximum reasoning effort and
+counts reasoning tokens toward that limit. The result contains a status and
+short message; it does not include the key or raw request/response.
 
 The Host resolves the primary model in this order: explicit Thread selection,
 Project default, then global default. There is no environment-variable fallback.

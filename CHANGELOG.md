@@ -7,6 +7,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changes
 
+- Correct the GLM Coding Plan Responses Base URL guidance to `/api/v1` and make
+  connection probes use a bounded output allowance with reasoning disabled.
 - Compact history after a successful model response reaches the configured
   context-window waterline: 80% for windows up to 262,144 tokens and 50% for
   windows of at least 1,000,000 tokens. Also compact when input usage plus the

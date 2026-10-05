@@ -22,6 +22,7 @@ const REASONING_RESERVED_FIELDS: &str =
 const MODEL_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
 const MODEL_TEST_MAX_OUTPUT_TOKENS: usize = 32;
 const MODEL_TEST_KIMI_MAX_OUTPUT_TOKENS: usize = 128;
+const MODEL_TEST_GLM_MAX_OUTPUT_TOKENS: usize = 128;
 const MODEL_TEST_MAX_RESPONSE_BYTES: usize = 4 * 1024;
 const MODEL_TEST_PROMPT: &str = "Reply with OK.";
 
@@ -550,12 +551,23 @@ impl ModelCatalogStore {
         timeout: std::time::Duration,
     ) -> Result<ModelConnectionTestStatus, String> {
         let (mut model, _, provider_kind) = self.resolve_with_provider_kind(selection)?;
-        let (max_output_tokens, reasoning_effort) = if provider_kind == ProviderKind::Kimi {
-            (MODEL_TEST_KIMI_MAX_OUTPUT_TOKENS, Some("low"))
-        } else {
-            (MODEL_TEST_MAX_OUTPUT_TOKENS, None)
+        let (max_output_tokens, reasoning_effort, reasoning_parameter_map) = match provider_kind {
+            ProviderKind::Kimi => (
+                MODEL_TEST_KIMI_MAX_OUTPUT_TOKENS,
+                Some("low"),
+                BTreeMap::new(),
+            ),
+            ProviderKind::Glm => (
+                MODEL_TEST_GLM_MAX_OUTPUT_TOKENS,
+                Some("none"),
+                BTreeMap::from([(
+                    "none".to_string(),
+                    serde_json::json!({"reasoning": {"effort": "none"}}),
+                )]),
+            ),
+            _ => (MODEL_TEST_MAX_OUTPUT_TOKENS, None, BTreeMap::new()),
         };
-        model = model.with_model_options(Some(max_output_tokens), BTreeMap::new());
+        model = model.with_model_options(Some(max_output_tokens), reasoning_parameter_map);
         let messages = [Message::User {
             text: MODEL_TEST_PROMPT.to_string(),
         }];
@@ -1150,10 +1162,10 @@ mod tests {
     fn test_store_with_provider_kind(base_url: String, kind: ProviderKind) -> ModelCatalogStore {
         let root = crate::test_support::test_root();
         let store = ModelCatalogStore::at(root.join(STORE_FILE));
-        let (provider_id, provider_name, model_id, model_name) = if kind == ProviderKind::Kimi {
-            ("kimi", "Kimi", "kimi-for-coding", "Kimi for Coding")
-        } else {
-            ("deepseek", "DeepSeek", "deepseek-test", "DeepSeek Test")
+        let (provider_id, provider_name, model_id, model_name) = match kind {
+            ProviderKind::Kimi => ("kimi", "Kimi", "kimi-for-coding", "Kimi for Coding"),
+            ProviderKind::Glm => ("glm", "GLM", "glm-test", "GLM Test"),
+            _ => ("deepseek", "DeepSeek", "deepseek-test", "DeepSeek Test"),
         };
         store
             .upsert_provider(
@@ -1337,6 +1349,30 @@ mod tests {
         assert_eq!(
             payload["max_output_tokens"],
             MODEL_TEST_KIMI_MAX_OUTPUT_TOKENS
+        );
+    }
+
+    #[tokio::test]
+    async fn glm_connection_test_disables_reasoning_and_allows_a_bounded_response() {
+        let body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}\n\n"
+        );
+        let (base_url, server) = start_test_provider(200, body, Duration::ZERO);
+        let store = test_store_with_provider_kind(base_url, ProviderKind::Glm);
+        let status = store
+            .test_connection(&ModelSelection::new("glm", "glm-test"))
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+        let request_body = request.split_once("\r\n\r\n").unwrap().1;
+        let payload: serde_json::Value = serde_json::from_str(request_body).unwrap();
+
+        assert_eq!(status, ModelConnectionTestStatus::Succeeded);
+        assert_eq!(payload["reasoning"], serde_json::json!({"effort": "none"}));
+        assert_eq!(
+            payload["max_output_tokens"],
+            MODEL_TEST_GLM_MAX_OUTPUT_TOKENS
         );
     }
 
