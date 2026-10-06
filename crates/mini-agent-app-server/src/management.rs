@@ -835,6 +835,7 @@ impl RuntimeManagementState {
                     }),
                     group: skill.group,
                     enabled: skill.enabled,
+                    model_invocable: skill.model_invocable,
                 })
                 .collect(),
         }

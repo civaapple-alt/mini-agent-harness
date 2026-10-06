@@ -439,6 +439,7 @@ pub fn capability_manifest_to_protocol(
                 }),
                 group: skill.group.clone(),
                 enabled: skill.enabled,
+                model_invocable: skill.model_invocable,
             })
             .collect(),
     }

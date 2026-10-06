@@ -145,6 +145,7 @@ fn parse_instruction(
         origin: options.origin,
         group: options.group.map(str::to_string),
         enabled: options.enabled,
+        model_invocable: !metadata.disable_model_invocation,
         path,
         dependencies,
     })

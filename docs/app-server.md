@@ -560,10 +560,18 @@ Host 会把它解析到已授权的实际根目录；模型可以在需要时用
 The capability manifest returned by `initialize` contains
 `builtinSkillGroups` and `availableSkills`. Each available-skill entry contains
 only `name`, `qualifiedName`, compatibility `aliases`, `description`, `source`,
-optional `origin`, optional `group`, and `enabled`. `origin` classifies the
+optional `origin`, optional `group`, `enabled`, and `modelInvocable`. A missing
+`modelInvocable` field in an older response means `true`. `origin` classifies the
 catalog entry as `builtin_group`, `user_agents`, `user_mini_agent`, `project`,
 or `plugin`; clients must tolerate older responses that omit it. The manifest
 does not expose skill paths or bodies.
+
+The runtime includes only enabled, model-invocable Skills in the automatic
+metadata directory. A missing `disable-model-invocation` frontmatter field
+defaults to model selection enabled. When the field is `true`, the catalog
+reports `modelInvocable: false` and the model cannot select that Skill through
+metadata. A user can still activate it with `selectedSkills`. This field does
+not change Skill enablement or Host read authorization.
 
 #### Child operations and Session notebook
 

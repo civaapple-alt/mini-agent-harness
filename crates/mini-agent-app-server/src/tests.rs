@@ -248,6 +248,19 @@ struct ReferenceReadFixtureTool {
     root: PathBuf,
 }
 
+#[derive(Clone)]
+struct ModelInvocableSkillMockModel {
+    skill_path: String,
+    automatic_skill_name: String,
+    manual_skill_name: String,
+    observations: Arc<Mutex<Vec<Vec<Message>>>>,
+}
+
+struct ModelInvocableSkillReadFixtureTool {
+    skill_path: String,
+    body: String,
+}
+
 impl ToolHandler for ReferenceReadFixtureTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -273,6 +286,106 @@ impl ToolRuntime for ReferenceReadFixtureTool {
         }
         fs::read_to_string(self.root.join("needed.md"))
             .map_err(|error| ToolError(format!("fixture reference read failed: {error}")))
+    }
+}
+
+impl ToolHandler for ModelInvocableSkillReadFixtureTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "read_file".to_string(),
+            description: "Read the selected Skill instruction fixture.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"]
+            }),
+        }
+    }
+}
+
+impl ToolRuntime for ModelInvocableSkillReadFixtureTool {
+    fn execute(&self, arguments: &Value) -> Result<String, ToolError> {
+        let path = arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ToolError("read_file path is required".to_string()))?;
+        if path != self.skill_path {
+            return Err(ToolError(format!("fixture path is not allowed: {path}")));
+        }
+        Ok(self.body.clone())
+    }
+}
+
+impl Model for ModelInvocableSkillMockModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        let messages = request.messages.to_vec();
+        self.observations.lock().unwrap().push(messages.clone());
+        let latest_user_text = messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::User { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        if latest_user_text.contains("手动选择") {
+            let expected_skill_context = format!("[Skill: {}", self.manual_skill_name);
+            let manual_skill_loaded = messages.iter().any(|message| {
+                matches!(message, Message::Context { text } if text.contains(&expected_skill_context))
+            });
+            assert!(manual_skill_loaded, "explicit Skill body was not injected");
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "已按显式选择加载 bro。".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        if latest_user_text.contains("不匹配技能") {
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "这个任务不需要领域建模技能。".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        if messages.iter().any(|message| {
+            matches!(
+                message,
+                Message::Tool {
+                    name,
+                    content,
+                    is_error: false,
+                    ..
+                } if name == "read_file" && content.contains("MODEL DOMAIN BODY")
+            )
+        }) {
+            return Ok(ModelResponse {
+                reasoning: String::new(),
+                text: "我会按领域模型技能的规则完成状态设计。".to_string(),
+                tool_calls: Vec::new(),
+                usage: None,
+            });
+        }
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: format!(
+                "我会使用 {}，因为任务需要整理状态和领域边界。",
+                self.automatic_skill_name
+            ),
+            tool_calls: vec![ToolCall {
+                id: "model-domain-skill-read".to_string(),
+                name: "read_file".to_string(),
+                arguments: json!({"path": self.skill_path}),
+            }],
+            usage: None,
+        })
     }
 }
 
@@ -1198,8 +1311,98 @@ fn knowledge_work_client(
     LocalAppServerClient::new(AppServerConnection::new(server).with_runtime_services(services))
 }
 
+fn model_invocable_skill_client(
+    model: ModelInvocableSkillMockModel,
+    workspace: &Path,
+    skill_path: String,
+    skill_body: String,
+) -> LocalAppServerClient<ModelInvocableSkillMockModel> {
+    let registry = mini_agent_capabilities::CapabilityRegistry::builtin();
+    let enabled_groups = Vec::new();
+    let discovery = registry
+        .discover_extensions_with_builtin_groups("builtin", workspace, &enabled_groups)
+        .unwrap();
+    let skill_read_roots =
+        mini_agent_capabilities::SkillReadRoots::from_paths(discovery.skill_read_roots());
+    let refresh = mini_agent_host::SkillDiscoveryRefresh::new(
+        registry,
+        "builtin",
+        workspace.to_path_buf(),
+        enabled_groups,
+        mini_agent_host::ExtensionSelection::All,
+        true,
+    );
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(
+            ThreadId::new("initial"),
+            Harness::new(
+                model,
+                ToolRouter::new(vec![Box::new(ModelInvocableSkillReadFixtureTool {
+                    skill_path,
+                    body: skill_body,
+                })]),
+                HarnessConfig::default(),
+            ),
+        ),
+    );
+    let management = RuntimeManagementService::new_with_harness_config_and_skills(
+        server.clone(),
+        None,
+        mini_agent_host::WorldState::detect_with_roots(
+            workspace,
+            Vec::new(),
+            SecurityPreset::Default,
+            ApprovalPolicy::Automatic,
+            SandboxKind::Native,
+        ),
+        Vec::new(),
+        0,
+        Vec::new(),
+        ApprovalController::with_preset(ApprovalPolicy::Automatic, Default::default()),
+        HarnessConfig::default(),
+        Some(discovery),
+    )
+    .with_skill_discovery_refresh(Some(refresh), skill_read_roots);
+    let services = RuntimeServices::new(
+        management,
+        ThreadSettingsService::new(),
+        ThreadGoalRequestProcessor::new(
+            workspace.to_path_buf(),
+            crate::goal_service::GoalLimits::default(),
+        ),
+    )
+    .unwrap();
+    LocalAppServerClient::new(AppServerConnection::new(server).with_runtime_services(services))
+}
+
 async fn run_turn_input(
     client: &mut LocalAppServerClient<KnowledgeWorkMockModel>,
+    input: TurnInput,
+) -> (mini_agent_app_server_protocol::TurnReadResult, Vec<Event>) {
+    let submission = client
+        .start_turn(ThreadId::new("thread-1"), input)
+        .await
+        .unwrap();
+    let turn_id = match submission {
+        TurnSubmission::Started { turn_id } => turn_id,
+        other => panic!("unexpected turn submission: {other:?}"),
+    };
+    let mut events = Vec::new();
+    loop {
+        let envelope = client.next_event().await.unwrap();
+        let finished = matches!(&envelope.event, Event::TurnFinished { .. });
+        events.push(envelope.event);
+        if finished {
+            break;
+        }
+    }
+    let result = client.read_turn(turn_id).await.unwrap();
+    (result, events)
+}
+
+async fn run_model_invocable_skill_turn(
+    client: &mut LocalAppServerClient<ModelInvocableSkillMockModel>,
     input: TurnInput,
 ) -> (mini_agent_app_server_protocol::TurnReadResult, Vec<Event>) {
     let submission = client
@@ -1229,6 +1432,27 @@ fn write_builtin_skill(builtin_root: &Path, name: &str, description: &str, body:
     fs::write(
         path.join("SKILL.md"),
         format!("---\nname: {name}\ndescription: {description}\n---\n{body}\n"),
+    )
+    .unwrap();
+}
+
+fn write_model_invocable_skill(
+    workspace: &Path,
+    name: &str,
+    description: &str,
+    body: &str,
+    disable_model_invocation: bool,
+) {
+    let path = workspace.join(".agents/skills").join(name);
+    fs::create_dir_all(&path).unwrap();
+    let model_invocation = if disable_model_invocation {
+        "disable-model-invocation: true\n"
+    } else {
+        ""
+    };
+    fs::write(
+        path.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: {description}\n{model_invocation}---\n{body}\n"),
     )
     .unwrap();
 }
@@ -1363,6 +1587,174 @@ async fn explicit_skill_activation_failure_precedes_model_execution() {
             .iter()
             .any(|event| matches!(event, Event::RunStarted { .. }))
     );
+}
+
+#[tokio::test]
+async fn model_reads_matching_skills_on_demand_skips_unmatched_skills_and_keeps_manual_loading() {
+    let root = test_root("model-invocable-skills");
+    let workspace = root.join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let unique = root
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .rsplit('-')
+        .next()
+        .unwrap()
+        .to_string();
+    let automatic_skill_name = format!("model-domain-{unique}");
+    let manual_skill_name = format!("manual-bro-{unique}");
+    let writing_skill_name = format!("manual-writing-{unique}");
+    let skill_path = format!(".agents/skills/{automatic_skill_name}/SKILL.md");
+    let skill_body = "MODEL DOMAIN BODY: represent domain state explicitly.";
+    write_model_invocable_skill(
+        &workspace,
+        &automatic_skill_name,
+        "Model stateful domain logic explicitly.",
+        skill_body,
+        false,
+    );
+    write_model_invocable_skill(
+        &workspace,
+        &manual_skill_name,
+        "Restate the request in plain language.",
+        "MANUAL BRO BODY",
+        true,
+    );
+    write_model_invocable_skill(
+        &workspace,
+        &writing_skill_name,
+        "Write technical documentation.",
+        "MANUAL WRITING BODY",
+        true,
+    );
+
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let mut client = model_invocable_skill_client(
+        ModelInvocableSkillMockModel {
+            skill_path: skill_path.clone(),
+            automatic_skill_name: automatic_skill_name.clone(),
+            manual_skill_name: manual_skill_name.clone(),
+            observations: observations.clone(),
+        },
+        &workspace,
+        skill_path,
+        skill_body.to_string(),
+    );
+    client
+        .initialize("model-invocable-skill-test", "0.1")
+        .await
+        .unwrap();
+
+    let (automatic_result, automatic_events) = run_model_invocable_skill_turn(
+        &mut client,
+        TurnInput::new(
+            TurnInputMode::Start,
+            "为这个状态机重新整理领域模型和状态转换",
+        ),
+    )
+    .await;
+    assert_eq!(
+        automatic_result.status,
+        mini_agent_protocol::TurnStatus::Completed
+    );
+    assert!(
+        automatic_result
+            .final_text
+            .as_deref()
+            .unwrap_or_default()
+            .contains("领域模型技能")
+    );
+    assert!(automatic_events.iter().any(|event| matches!(
+        event,
+        Event::SkillsLoaded {
+            phase: SkillLoadPhase::Started,
+            activation: Some(activation),
+            skills,
+        } if activation == "on_demand"
+            && skills.iter().any(|skill| skill.qualified_name.as_deref()
+                == Some(automatic_skill_name.as_str()))
+    )));
+    assert!(automatic_events.iter().any(|event| matches!(
+        event,
+        Event::SkillsLoaded {
+            phase: SkillLoadPhase::Loaded,
+            activation: Some(activation),
+            skills,
+        } if activation == "on_demand"
+            && skills.iter().any(|skill| skill.qualified_name.as_deref()
+                == Some(automatic_skill_name.as_str()))
+    )));
+    {
+        let observations = observations.lock().unwrap();
+        let initial_messages = observations.first().expect("model was not called");
+        let catalog = initial_messages.iter().find_map(|message| match message {
+            Message::Context { text } if text.contains("available_extensions") => Some(text),
+            _ => None,
+        });
+        let catalog = catalog.expect("metadata-first Skill catalog was not injected");
+        assert!(catalog.contains(&format!("\"name\":\"{automatic_skill_name}\"")));
+        assert!(!catalog.contains(&format!("\"name\":\"{manual_skill_name}\"")));
+        assert!(!catalog.contains(&format!("\"name\":\"{writing_skill_name}\"")));
+        assert!(!catalog.contains("MODEL DOMAIN BODY"));
+        assert!(initial_messages.iter().any(|message| matches!(
+            message,
+            Message::Context { text }
+                if text.contains("briefly name the Skill")
+                    && text.contains("Do not wait for the user to enter $skill")
+        )));
+        assert!(
+            observations
+                .iter()
+                .any(|messages| messages.iter().any(|message| matches!(
+                    message,
+                    Message::Tool {
+                        name,
+                        content,
+                        is_error: false,
+                        ..
+                    } if name == "read_file" && content.contains("MODEL DOMAIN BODY")
+                )))
+        );
+    }
+
+    let (unmatched_result, unmatched_events) = run_model_invocable_skill_turn(
+        &mut client,
+        TurnInput::new(TurnInputMode::Start, "回答这个常识问题，不匹配技能"),
+    )
+    .await;
+    assert_eq!(
+        unmatched_result.status,
+        mini_agent_protocol::TurnStatus::Completed
+    );
+    assert!(unmatched_events.iter().all(|event| !matches!(
+        event,
+        Event::SkillsLoaded {
+            activation: Some(activation),
+            ..
+        } if activation == "on_demand"
+    )));
+
+    let mut manual_input = TurnInput::new(TurnInputMode::Start, "手动选择 bro 技能");
+    manual_input.selected_skills = vec![manual_skill_name.clone()];
+    let (manual_result, manual_events) =
+        run_model_invocable_skill_turn(&mut client, manual_input).await;
+    assert_eq!(
+        manual_result.status,
+        mini_agent_protocol::TurnStatus::Completed
+    );
+    assert!(manual_events.iter().any(|event| matches!(
+        event,
+        Event::SkillsLoaded {
+            phase: SkillLoadPhase::Loaded,
+            activation: Some(activation),
+            skills,
+        } if activation == "explicit"
+            && skills.iter().any(|skill| skill.qualified_name.as_deref()
+                == Some(manual_skill_name.as_str()))
+    )));
+    client.shutdown().await.unwrap();
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]

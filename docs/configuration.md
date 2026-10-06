@@ -393,7 +393,10 @@ The environment variable is a comma-separated list of group IDs. For example,
 runtime discovers the builtin root, both user Skill roots, project skills,
 plugin skills, and MCP configuration as separate sources. It exposes only
 bounded metadata in the capability manifest. A selected Skill body is read only
-for its current turn.
+for its current turn. `disable-model-invocation: true` keeps a Skill available
+in the catalog and for explicit activation, but excludes its metadata from the
+model's automatic Skill directory. If the field is absent, the model may select
+the Skill when its task matches.
 Every new WebStudio project stores `pstack` in `builtin_skill_groups`; a
 historical project without the field also defaults to enabled. Removing
 `pstack` disables both `+ pstack` workflow activation and all pstack Skill
@@ -419,6 +422,8 @@ validation stops the turn before the model is called. Skill bodies are not
 written to later turns or to the global system prompt. A turn-local
 `workflow: {kind: "skill_group", id: "pstack", mode: "auto"}` activates
 only group metadata; the model chooses and reads relevant bodies on demand.
+Explicit selection works for Skills with `disable-model-invocation: true`.
+That field controls model selection, not Skill enablement or file-read access.
 
 ### Session-owned long-lived state
 

@@ -1369,6 +1369,12 @@ pub struct AvailableSkill {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
     pub enabled: bool,
+    #[serde(default = "default_model_invocable")]
+    pub model_invocable: bool,
+}
+
+const fn default_model_invocable() -> bool {
+    true
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -1981,7 +1987,7 @@ mod tests {
     }
 
     #[test]
-    fn available_skill_origin_is_optional_and_serializes_as_a_stable_category() {
+    fn available_skill_defaults_model_invocation_for_legacy_and_serializes_metadata() {
         let legacy: AvailableSkill = serde_json::from_value(serde_json::json!({
             "name": "review",
             "qualifiedName": "review",
@@ -2008,10 +2014,24 @@ mod tests {
             origin: Some(SkillOrigin::UserAgents),
             group: None,
             enabled: true,
+            model_invocable: false,
         };
+        let serialized = serde_json::to_value(skill).unwrap();
+        assert_eq!(serialized["origin"], "user_agents");
+        assert_eq!(serialized["modelInvocable"], false);
+
+        let legacy: AvailableSkill = serde_json::from_value(serde_json::json!({
+            "name": "manual",
+            "qualifiedName": "manual",
+            "description": "Manual-only Skill.",
+            "source": "builtin",
+            "enabled": true
+        }))
+        .unwrap();
+        assert!(legacy.model_invocable);
         assert_eq!(
-            serde_json::to_value(skill).unwrap()["origin"],
-            "user_agents"
+            serde_json::to_value(legacy).unwrap()["modelInvocable"],
+            true
         );
     }
 

@@ -77,6 +77,7 @@ struct Skill {
     origin: SkillOrigin,
     group: Option<String>,
     enabled: bool,
+    model_invocable: bool,
     path: PathBuf,
     dependencies: Vec<SkillDependency>,
 }
@@ -95,6 +96,8 @@ struct SkillRootOptions<'a> {
 struct SkillMetadata {
     name: String,
     description: String,
+    #[serde(default, rename = "disable-model-invocation")]
+    disable_model_invocation: bool,
     #[serde(default)]
     dependencies: SkillDependenciesMetadata,
 }
@@ -342,6 +345,7 @@ fn skill_metadata(skill: &Skill, aliases: Vec<String>) -> Value {
         "source": skill.source,
         "origin": skill.origin.as_str(),
         "enabled": skill.enabled,
+        "modelInvocable": skill.model_invocable,
     });
     if !aliases.is_empty() {
         metadata["aliases"] = json!(aliases);
@@ -433,6 +437,7 @@ impl Discovery {
                 origin: skill.origin,
                 group: skill.group.clone(),
                 enabled: skill.enabled,
+                model_invocable: skill.model_invocable,
             })
             .collect()
     }
@@ -678,7 +683,9 @@ impl Discovery {
         let context = format!(
             "Available project extensions (metadata only; this snapshot supersedes earlier catalogs).\n\
              When a task matches an entry, read its listed instruction file with read_file before proceeding. \
-             Resolve relative references from that file's directory.\n\
+             When the match is clear, briefly name the Skill and why you are using it before substantive work. \
+             Do not wait for the user to enter $skill or activate a Skill group. \
+             Read only the instruction files needed for this task. Resolve relative references from each file's directory.\n\
              <available_extensions fingerprint=\"{fingerprint}\">\n{body}</available_extensions>"
         );
         if context.len() > MAX_SKILL_CONTEXT_BYTES {
@@ -693,7 +700,7 @@ impl Discovery {
     fn metadata_catalog(&self) -> Result<String, String> {
         let mut catalog = String::new();
         for skill in &self.skills {
-            if !skill.enabled {
+            if !skill.enabled || !skill.model_invocable {
                 continue;
             }
             catalog.push_str(
@@ -720,6 +727,7 @@ pub struct SkillCatalogEntry {
     pub origin: SkillOrigin,
     pub group: Option<String>,
     pub enabled: bool,
+    pub model_invocable: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

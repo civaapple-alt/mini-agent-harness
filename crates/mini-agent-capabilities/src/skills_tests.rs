@@ -65,6 +65,43 @@ fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
 }
 
 #[test]
+fn model_invocation_defaults_to_enabled_and_manual_skills_stay_explicitly_loadable() {
+    let root = test_root();
+    write_skill(
+        &root.join(".agents/skills/automatic"),
+        "automatic",
+        "Choose this Skill when its task matches.",
+        "AUTOMATIC BODY",
+    );
+    let manual_root = root.join(".agents/skills/manual");
+    fs::create_dir_all(&manual_root).unwrap();
+    fs::write(
+        manual_root.join("SKILL.md"),
+        "---\nname: manual\ndescription: Invoke only when the user selects it.\ndisable-model-invocation: true\n---\nMANUAL BODY\n",
+    )
+    .unwrap();
+
+    let discovery = discover_for_tests(&root, &[]);
+    let catalog = discovery.skill_catalog();
+    let automatic = catalog
+        .iter()
+        .find(|skill| skill.name == "automatic")
+        .unwrap();
+    let manual = catalog.iter().find(|skill| skill.name == "manual").unwrap();
+    let context = discovery.skill_context().unwrap();
+
+    assert!(automatic.model_invocable);
+    assert!(!manual.model_invocable);
+    assert!(context.contains("\"name\":\"automatic\""));
+    assert!(context.contains("\"modelInvocable\":true"));
+    assert!(!context.contains("\"name\":\"manual\""));
+    assert!(!context.contains("MANUAL BODY"));
+    let loaded = discovery.load_skills(&["manual".to_string()]).unwrap();
+    assert_eq!(loaded[0].body, "MANUAL BODY\n");
+    remove_test_root(&root);
+}
+
+#[test]
 fn discovers_skill_when_utf8_character_crosses_instruction_prefix_boundary() {
     let root = test_root();
     let skill_dir = root.join(".agents/skills/boundary");
@@ -322,6 +359,7 @@ fn catalogs_and_loads_selected_skills_with_bounded_activation() {
             origin: SkillOrigin::Project,
             group: None,
             enabled: true,
+            model_invocable: true,
         }
     );
     let loaded = discovery
@@ -427,6 +465,7 @@ fn loads_canonical_and_codex_aliases_once_for_a_pstack_skill() {
             origin: SkillOrigin::BuiltinGroup,
             group: Some("pstack".to_string()),
             enabled: true,
+            model_invocable: true,
             path,
             dependencies: Vec::new(),
         }],
