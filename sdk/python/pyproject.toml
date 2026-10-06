@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mini-agent"
-version = "1.0.0"
+version = "1.1.0"
 description = "Official Python SDK for Mini Agent App Server and Harness"
 readme = "README.md"
 requires-python = ">=3.10"

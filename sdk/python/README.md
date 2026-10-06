@@ -36,25 +36,25 @@ uv build .
 构建文件写入 `sdk/python/dist/`。在 macOS 或 Linux 上从仓库根目录安装 wheel：
 
 ```bash
-python3 -m pip install ./sdk/python/dist/mini_agent-1.0.0-py3-none-any.whl
+python3 -m pip install ./sdk/python/dist/mini_agent-1.1.0-py3-none-any.whl
 ```
 
 Windows PowerShell 使用：
 
 ```powershell
-py -3 -m pip install .\sdk\python\dist\mini_agent-1.0.0-py3-none-any.whl
+py -3 -m pip install .\sdk\python\dist\mini_agent-1.1.0-py3-none-any.whl
 ```
 
 如果当前目录是 `sdk/python`，macOS 或 Linux 使用：
 
 ```bash
-python3 -m pip install ./dist/mini_agent-1.0.0-py3-none-any.whl
+python3 -m pip install ./dist/mini_agent-1.1.0-py3-none-any.whl
 ```
 
 Windows PowerShell 使用：
 
 ```powershell
-py -3 -m pip install .\dist\mini_agent-1.0.0-py3-none-any.whl
+py -3 -m pip install .\dist\mini_agent-1.1.0-py3-none-any.whl
 ```
 
 从仓库根目录直接安装源码，不需要先构建 wheel。在 macOS 或 Linux 上运行：

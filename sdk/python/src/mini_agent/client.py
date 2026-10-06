@@ -297,7 +297,7 @@ class MiniAgentClient:
         self._world_execution_configured = False
         self._session_info: SessionInfo | None = None
         self._client_name = "python-sdk"
-        self._client_version = "1.0.0"
+        self._client_version = "1.1.0"
         self._provider_selection: dict[str, Any] | None = None
         if request_timeout <= 0:
             raise ValueError("request_timeout must be positive")
@@ -971,7 +971,7 @@ class MiniAgentClient:
     async def initialize(
         self,
         client_name: str = "python-sdk",
-        client_version: str = "1.0.0",
+        client_version: str = "1.1.0",
         providers: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Negotiate App Server protocol version 2 and receive capabilities."""
