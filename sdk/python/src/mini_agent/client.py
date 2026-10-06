@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
@@ -320,6 +321,14 @@ class MiniAgentClient:
             exe_path = executable
 
         try:
+            # Keep terminal Ctrl+C scoped to the Gateway/SDK host. It can then
+            # shut this child down through the normal client lifecycle instead
+            # of killing the App Server mid-Turn alongside its parent.
+            process_options: dict[str, Any] = {}
+            if os.name == "nt":
+                process_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                process_options["start_new_session"] = True
             self._proc = await asyncio.create_subprocess_exec(
                 exe_path,
                 stdin=asyncio.subprocess.PIPE,
@@ -328,6 +337,7 @@ class MiniAgentClient:
                 cwd=self.cwd,
                 env=self.env,
                 limit=APP_SERVER_STDIO_LINE_LIMIT,
+                **process_options,
             )
         except OSError as err:
             raise ServerProcessError(

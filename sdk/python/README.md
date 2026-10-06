@@ -81,6 +81,8 @@ SDK 需要 Python 3.10 或更高版本，且运行时不依赖第三方 Python �
 `mini-agent-app-server` 在 `PATH` 中，或设置 `MINI_AGENT_APP_SERVER_PATH`。
 SDK 会启动这个本地子进程，并通过 stdio JSON-RPC 调用它；SDK 与 App Server
 需要使用兼容的发布版本。
+SDK 会把 App Server 放入独立的操作系统进程组/会话，避免终端 Ctrl+C 同时杀死
+Gateway 和 App Server；调用方应通过 `stop()` 结束并回收 SDK 启动的进程。
 
 ## 最小示例
 

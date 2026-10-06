@@ -7,6 +7,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changes
 
+- Isolate SDK-launched App Server subprocesses from the caller's terminal
+  interrupt signal so the Gateway can stop and reap them through the client
+  lifecycle.
 - Correct the GLM Coding Plan Responses Base URL guidance to `/api/v1` and make
   connection probes use a bounded output allowance with reasoning disabled.
 - Compact history after a successful model response reaches the configured
