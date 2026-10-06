@@ -204,7 +204,21 @@ where
             Ok(params) => params,
             Err(error) => return response_error(request.id, error),
         };
-        match self.server.turn_read_action(params.turn_id.clone()).await {
+        if params
+            .tool_call_id
+            .as_ref()
+            .is_some_and(|tool_call_id| tool_call_id.trim().is_empty() || tool_call_id.len() > 256)
+        {
+            return response_error(
+                request.id,
+                JsonRpcError::invalid_params("toolCallId must be non-empty and at most 256 bytes"),
+            );
+        }
+        match self
+            .server
+            .turn_read_action(params.turn_id.clone(), params.tool_call_id.clone())
+            .await
+        {
             Ok(response) => match response.value.clone() {
                 Some(result) => response_action_with(
                     request.id,
@@ -222,11 +236,15 @@ where
                             .outcome
                             .as_ref()
                             .map_or_else(Vec::new, |outcome| outcome.messages.clone()),
-                        items: result.outcome.as_ref().map_or_else(Vec::new, |outcome| {
-                            mini_agent_app_server_protocol::ThreadItem::from_messages(
-                                &outcome.messages,
-                            )
-                        }),
+                        items: if result.recovery_items.is_empty() {
+                            result.outcome.as_ref().map_or_else(Vec::new, |outcome| {
+                                mini_agent_app_server_protocol::ThreadItem::from_messages(
+                                    &outcome.messages,
+                                )
+                            })
+                        } else {
+                            result.recovery_items.clone()
+                        },
                         error: result.error,
                         recovery: result.recovery,
                     },

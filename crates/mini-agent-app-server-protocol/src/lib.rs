@@ -25,6 +25,7 @@ mod thread_item;
 
 pub use thread_item::ItemStatus;
 pub use thread_item::ThreadItem;
+pub use thread_item::project_tool_arguments;
 
 pub const JSONRPC_VERSION: &str = "2.0";
 pub const PROTOCOL_VERSION: u32 = 2;
@@ -1650,18 +1651,23 @@ pub struct ExecutionRecoveryInfo {
     pub uncertain_tool_calls: Vec<UncertainToolCall>,
 }
 
-/// Safe-to-display identity for a tool call awaiting operator reconciliation.
+/// Identity and optional bounded arguments for an uncertain tool call.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UncertainToolCall {
     pub tool_call_id: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnReadParams {
     pub turn_id: TurnId,
+    /// Include bounded arguments for this one uncertain tool call, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

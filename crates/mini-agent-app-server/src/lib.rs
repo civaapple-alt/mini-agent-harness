@@ -410,6 +410,8 @@ pub struct SettledTurn {
     pub outcome: Option<mini_agent_core::RunOutcome>,
     pub error: Option<String>,
     pub recovery: Option<mini_agent_app_server_protocol::ExecutionRecoveryInfo>,
+    /// Bounded activity reconstructed from the active execution checkpoint.
+    pub recovery_items: Vec<mini_agent_app_server_protocol::ThreadItem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -944,7 +946,7 @@ where
     /// Returns a completed turn result retained by the service.
     pub async fn turn_read(&self, turn_id: TurnId) -> Result<SettledTurn, AppServerError> {
         let missing_id = turn_id.clone();
-        self.request_value(self.turn_read_action(turn_id))
+        self.request_value(self.turn_read_action(turn_id, None))
             .await
             .and_then(|result| result.ok_or(AppServerError::TurnNotFound(missing_id)))
     }
@@ -952,9 +954,14 @@ where
     pub(crate) async fn turn_read_action(
         &self,
         turn_id: TurnId,
+        tool_call_id: Option<String>,
     ) -> Result<ActionResponse<Option<SettledTurn>>, ActionFailure> {
-        self.request_action(|reply| Command::ReadTurn { turn_id, reply })
-            .await
+        self.request_action(|reply| Command::ReadTurn {
+            turn_id,
+            tool_call_id,
+            reply,
+        })
+        .await
     }
 
     /// Subscribes to the ordered event stream emitted by the core Thread.

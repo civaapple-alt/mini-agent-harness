@@ -452,7 +452,7 @@ unchanged during recovery.
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
 | `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?, reasoningEffort?}`, optional `operationId`, `operationAttempt`, `operationAttemptKind`, `turnSource` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `reasoningEffort` is a legacy per-turn fallback used only when the Thread has no explicit `reasoningSelection`. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. `turnSource` is bounded metadata; the currently defined value `child_wakeup` marks an automatic parent continuation and does not change the input text. `operationAttemptKind` is child lifecycle metadata (`initial`, `retry`, `follow_up`); it does not change Core execution. |
-| `turn/read` | `turnId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, optional error, and bounded execution recovery metadata. An unsettled Turn with an execution checkpoint returns `in_progress`. |
+| `turn/read` | `turnId`; optional `toolCallId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, optional error, and bounded execution recovery metadata. An unsettled Turn with an execution checkpoint returns `in_progress`; its items are rebuilt from the latest checkpoint and pending tool batch, capped at 256. Projected tool items use the standard bounded, redacted arguments; supplying `toolCallId` additionally includes arguments in recovery metadata only for that matching uncertain call. |
 | `turn/resume` | `threadId`, `turnId`, `checkpointSeq`, stable `requestId` | Explicitly resumes the same logical Turn from the matching persisted execution checkpoint. The request fails if the Turn or checkpoint sequence is stale or any tool call still needs reconciliation. Repeating an accepted request ID is idempotent. |
 | `turn/reconcile` | `threadId`, `turnId`, `checkpointSeq`, `toolCallId`, stable `requestId`, `disposition`, bounded `evidenceSummary`; `result` for `completed` | Records an operator decision for one started tool call with no durable outcome. `completed` supplies a bounded structured result; `not_executed` confirms the effect did not occur and permits a later explicit resume. The tuple `(turnId, checkpointSeq, toolCallId, requestId)` rejects stale decisions and makes an identical retry idempotent. It never resumes automatically. |
 | `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of metadata-only event summaries with `nextCursor`, `oldestSequence`, and `hasGap`. The Session retains at most 512 summaries across App Server restarts. |
@@ -485,7 +485,12 @@ operator verified; `not_executed` records confirmation that retry is safe.
 Neither choice runs a tool. A completed tool batch with recorded outcomes can
 continue using those exact outcomes without rerunning the calls. `turn/read`
 returns bounded status, phase, heartbeat and progress timestamps, checkpoint
-sequence, and recovery reason. `turn/resume` requires the current Turn ID and
+sequence, and recovery reason. For an unsettled Turn, its projected items
+include the current input and activity available from the model-safe checkpoint
+and pending batch; they are not a replacement for canonical settled history.
+A `toolCallId` read includes arguments in recovery metadata only for that call;
+it does not expose arguments for other uncertain calls. Ordinary recovery
+metadata remains identity-only. `turn/resume` requires the current Turn ID and
 checkpoint sequence, then continues that same Turn without creating a new Turn
 or child operation attempt. Resuming an exhausted `max_steps` checkpoint grants
 one additional bounded `max_steps` slice; it does not remove the per-slice

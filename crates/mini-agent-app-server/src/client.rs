@@ -308,8 +308,14 @@ where
     }
 
     pub async fn read_turn(&mut self, turn_id: TurnId) -> Result<TurnReadResult, JsonRpcError> {
-        self.call(METHOD_TURN_READ, TurnReadParams { turn_id })
-            .await
+        self.call(
+            METHOD_TURN_READ,
+            TurnReadParams {
+                turn_id,
+                tool_call_id: None,
+            },
+        )
+        .await
     }
 
     /// Runs a turn through the same request and event path used by a remote

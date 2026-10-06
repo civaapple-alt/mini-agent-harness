@@ -13,7 +13,7 @@ use mini_agent_app_server_protocol::{
 use mini_agent_core::{
     ExecutionJournalEntry, ExecutionJournalSink, ExecutionPhase, SteeringMode, TurnResult,
 };
-use mini_agent_protocol::{Event, EventEnvelope, EventSink, ModelUsage, SkillLoadPhase};
+use mini_agent_protocol::{Event, EventEnvelope, EventSink, Message, ModelUsage, SkillLoadPhase};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -168,6 +168,7 @@ pub(super) enum Command {
     },
     ReadTurn {
         turn_id: TurnId,
+        tool_call_id: Option<String>,
         reply: oneshot::Sender<ActionResult<Option<SettledTurn>>>,
     },
     ReadItems {
@@ -1795,7 +1796,8 @@ pub(super) async fn worker_loop<M>(
                                     recovery: runtime
                                         .as_ref()
                                         .and_then(|state| state.management.execution_state())
-                                        .map(execution_recovery_info),
+                                        .map(|state| execution_recovery_info(state, None)),
+                                    recovery_items: Vec::new(),
                                 },
                             );
                         }
@@ -1813,7 +1815,7 @@ pub(super) async fn worker_loop<M>(
                                 recovery: runtime
                                     .as_ref()
                                     .and_then(|state| state.management.execution_state())
-                                    .map(execution_recovery_info),
+                                    .map(|state| execution_recovery_info(state, None)),
                             };
                             let persistence_error = runtime_actor::persist_turn(
                                 &mut runtime,
@@ -1891,7 +1893,8 @@ pub(super) async fn worker_loop<M>(
                                     recovery: runtime
                                         .as_ref()
                                         .and_then(|state| state.management.execution_state())
-                                        .map(execution_recovery_info),
+                                        .map(|state| execution_recovery_info(state, None)),
+                                    recovery_items: Vec::new(),
                                 },
                             );
                         }
@@ -2136,7 +2139,7 @@ pub(super) async fn worker_loop<M>(
                                         state.status
                                             != mini_agent_capabilities::SessionExecutionStatus::Settled
                                     })
-                                    .map(execution_recovery_info),
+                                    .map(|state| execution_recovery_info(state, None)),
                                 pending_user_question: None,
                             })
                             .map_err(|error| AppServerError::Checkpoint(error.to_string()))
@@ -2199,15 +2202,26 @@ pub(super) async fn worker_loop<M>(
                 }
                 respond_after_revision(&mut runtime, &runtime_revision, reply, receipt, result);
             }
-            Command::ReadTurn { turn_id, reply } => {
-                let recovery = runtime
+            Command::ReadTurn {
+                turn_id,
+                tool_call_id,
+                reply,
+            } => {
+                let execution_state = runtime
                     .as_ref()
                     .and_then(|state| state.management.execution_state())
-                    .filter(|state| state.checkpoint.turn_id == turn_id)
-                    .map(execution_recovery_info);
+                    .filter(|state| state.checkpoint.turn_id == turn_id);
+                let recovery = execution_state
+                    .clone()
+                    .map(|state| execution_recovery_info(state, tool_call_id.as_deref()));
+                let recovery_items = execution_state
+                    .as_ref()
+                    .map(execution_timeline_items)
+                    .unwrap_or_default();
                 let mut result = settled_turns.get(turn_id.as_str()).cloned();
                 if let Some(result) = result.as_mut() {
                     result.recovery = recovery;
+                    result.recovery_items = recovery_items;
                 } else if let Some(recovery) = recovery.filter(|recovery| {
                     recovery.status
                         != mini_agent_app_server_protocol::ExecutionRecoveryStatus::Settled
@@ -2218,6 +2232,7 @@ pub(super) async fn worker_loop<M>(
                         outcome: None,
                         error: None,
                         recovery: Some(recovery),
+                        recovery_items,
                     });
                 }
                 respond(reply, receipt, Ok(result));
@@ -2494,6 +2509,7 @@ fn cancelled_execution_requires_resume(
 
 fn execution_recovery_info(
     state: mini_agent_capabilities::SessionExecutionState,
+    include_tool_call_arguments: Option<&str>,
 ) -> mini_agent_app_server_protocol::ExecutionRecoveryInfo {
     mini_agent_app_server_protocol::ExecutionRecoveryInfo {
         turn_id: state.checkpoint.turn_id,
@@ -2532,8 +2548,142 @@ fn execution_recovery_info(
             .map(|call| mini_agent_app_server_protocol::UncertainToolCall {
                 tool_call_id: call.call.id.clone(),
                 name: call.call.name.clone(),
+                arguments: include_tool_call_arguments
+                    .filter(|call_id| *call_id == call.call.id.as_str())
+                    .map(|_| {
+                        mini_agent_app_server_protocol::project_tool_arguments(&call.call.arguments)
+                    }),
             })
             .collect(),
+    }
+}
+
+fn execution_timeline_items(
+    state: &mini_agent_capabilities::SessionExecutionState,
+) -> Vec<ThreadItem> {
+    const MAX_RECOVERY_TIMELINE_ITEMS: usize = 256;
+
+    let turn_id = state.checkpoint.turn_id.as_str();
+    let messages = &state.checkpoint.messages;
+    let Some(start_index) = messages.iter().rposition(
+        |message| matches!(message, Message::User { text } if text == &state.checkpoint.input.text),
+    ) else {
+        return Vec::new();
+    };
+
+    let mut items = Vec::new();
+    for (message_index, message) in messages.iter().enumerate().skip(start_index) {
+        if matches!(message, Message::Context { .. }) {
+            continue;
+        }
+        let id = format!("{turn_id}:recovery:{message_index}");
+        for item in ThreadItem::from_message_with_id(message, id) {
+            merge_recovery_timeline_item(&mut items, item);
+        }
+    }
+
+    if let Some(batch) = state.pending_batch.as_ref() {
+        let assistant = Message::Assistant {
+            reasoning: batch.intent.reasoning.clone(),
+            text: batch.intent.text.clone(),
+            tool_calls: batch.intent.calls.clone(),
+        };
+        let id = format!("{turn_id}:recovery:step:{}", batch.intent.step);
+        for item in ThreadItem::from_message_with_id(&assistant, id) {
+            merge_recovery_timeline_item(&mut items, item);
+        }
+        for call in &batch.calls {
+            if let Some(outcome) = call.outcome.as_ref() {
+                let tool_result = Message::Tool {
+                    call_id: call.call.id.clone(),
+                    name: call.call.name.clone(),
+                    content: outcome.content.clone(),
+                    is_error: outcome.status.is_error(),
+                    outcome: Some(outcome.status),
+                };
+                for item in ThreadItem::from_message_with_id(&tool_result, call.call.id.clone()) {
+                    merge_recovery_timeline_item(&mut items, item);
+                }
+            } else {
+                mark_recovery_call_in_progress(&mut items, call.call.id.as_str());
+            }
+        }
+    }
+
+    if items.len() <= MAX_RECOVERY_TIMELINE_ITEMS {
+        return items;
+    }
+
+    let initial_user = items.iter().find_map(|item| match item {
+        ThreadItem::UserMessage { .. } => Some(item.clone()),
+        _ => None,
+    });
+    let tail_start = items.len().saturating_sub(MAX_RECOVERY_TIMELINE_ITEMS - 1);
+    let mut bounded = items[tail_start..].to_vec();
+    if let Some(initial_user) = initial_user
+        && !bounded.iter().any(|item| item == &initial_user)
+    {
+        bounded.insert(0, initial_user);
+    }
+    bounded
+}
+
+fn merge_recovery_timeline_item(items: &mut Vec<ThreadItem>, incoming: ThreadItem) {
+    let ThreadItem::ToolCall {
+        id,
+        name,
+        arguments,
+        status,
+        outcome,
+        output,
+    } = incoming
+    else {
+        items.push(incoming);
+        return;
+    };
+
+    if let Some(ThreadItem::ToolCall {
+        name: existing_name,
+        arguments: existing_arguments,
+        status: existing_status,
+        outcome: existing_outcome,
+        output: existing_output,
+        ..
+    }) = items.iter_mut().find(
+        |item| matches!(item, ThreadItem::ToolCall { id: existing_id, .. } if existing_id == &id),
+    ) {
+        if !name.is_empty() {
+            *existing_name = name;
+        }
+        if !arguments.is_null() {
+            *existing_arguments = arguments;
+        }
+        *existing_status = status;
+        if outcome.is_some() {
+            *existing_outcome = outcome;
+        }
+        if output.is_some() {
+            *existing_output = output;
+        }
+        return;
+    }
+
+    items.push(ThreadItem::ToolCall {
+        id,
+        name,
+        arguments,
+        status,
+        outcome,
+        output,
+    });
+}
+
+fn mark_recovery_call_in_progress(items: &mut [ThreadItem], call_id: &str) {
+    if let Some(ThreadItem::ToolCall { status, .. }) = items
+        .iter_mut()
+        .find(|item| matches!(item, ThreadItem::ToolCall { id, .. } if id == call_id))
+    {
+        *status = mini_agent_app_server_protocol::ItemStatus::InProgress;
     }
 }
 
@@ -2661,18 +2811,25 @@ fn handle_running_command<M>(
         }
         Command::ReadTurn {
             turn_id: requested_turn_id,
+            tool_call_id,
             reply,
         } => {
             if requested_turn_id != *turn_id {
                 respond(reply, receipt, Err(AppServerError::Busy));
                 return;
             }
-            let recovery = context
+            let execution_state = context
                 .runtime
                 .as_ref()
                 .and_then(|state| state.management.execution_state())
-                .filter(|state| state.checkpoint.turn_id == requested_turn_id)
-                .map(execution_recovery_info);
+                .filter(|state| state.checkpoint.turn_id == requested_turn_id);
+            let recovery = execution_state
+                .clone()
+                .map(|state| execution_recovery_info(state, tool_call_id.as_deref()));
+            let recovery_items = execution_state
+                .as_ref()
+                .map(execution_timeline_items)
+                .unwrap_or_default();
             respond(
                 reply,
                 receipt,
@@ -2682,6 +2839,7 @@ fn handle_running_command<M>(
                     outcome: None,
                     error: None,
                     recovery,
+                    recovery_items,
                 })),
             );
         }

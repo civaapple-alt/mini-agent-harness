@@ -1314,9 +1314,11 @@ class MiniAgentClient:
         value = result.get("value", result) if isinstance(result, dict) else result
         return value if isinstance(value, dict) else {}
 
-    async def read_turn(self, turn_id: str) -> TurnReadResult:
+    async def read_turn(
+        self, turn_id: str, *, tool_call_id: str | None = None
+    ) -> TurnReadResult:
         """Read settled result and history of a turn."""
-        return await self._read_turn(turn_id)
+        return await self._read_turn(turn_id, tool_call_id=tool_call_id)
 
     async def resume_turn(
         self,
@@ -1389,11 +1391,15 @@ class MiniAgentClient:
         return TurnReconcileResult.from_dict(result)
 
     async def _read_turn(
-        self, turn_id: str, request_timeout: float | None = None
+        self,
+        turn_id: str,
+        request_timeout: float | None = None,
+        tool_call_id: str | None = None,
     ) -> TurnReadResult:
-        res = await self._send_request(
-            "turn/read", {"turnId": turn_id}, timeout=request_timeout
-        )
+        params: dict[str, Any] = {"turnId": turn_id}
+        if tool_call_id is not None:
+            params["toolCallId"] = tool_call_id
+        res = await self._send_request("turn/read", params, timeout=request_timeout)
         return TurnReadResult.from_dict(res)
 
     async def wait_for_turn(

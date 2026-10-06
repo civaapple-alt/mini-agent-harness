@@ -121,16 +121,20 @@ class TurnReconcileDisposition(str, Enum):
 
 @dataclass
 class UncertainToolCall:
-    """Safe identity projection for a tool call awaiting operator review."""
+    """Identity and optional bounded arguments for an uncertain tool call."""
 
     tool_call_id: str
     name: str
+    arguments: Any | None = None
+    _arguments_present: bool = field(default=False, repr=False, compare=False)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> UncertainToolCall:
         return cls(
             tool_call_id=str(data.get("toolCallId", data.get("tool_call_id", ""))),
             name=str(data.get("name", "")),
+            arguments=data.get("arguments"),
+            _arguments_present="arguments" in data,
         )
 
 
@@ -469,7 +473,9 @@ class ModelContextSnapshot:
             context_window_tokens=data.get(
                 "context_window_tokens", data.get("contextWindowTokens")
             ),
-            max_output_tokens=data.get("max_output_tokens", data.get("maxOutputTokens")),
+            max_output_tokens=data.get(
+                "max_output_tokens", data.get("maxOutputTokens")
+            ),
         )
 
 
@@ -728,10 +734,13 @@ class ExecutionRecoveryInfo:
         if self.reason is not None:
             payload["reason"] = self.reason
         if self.uncertain_tool_calls:
-            payload["uncertainToolCalls"] = [
-                {"toolCallId": call.tool_call_id, "name": call.name}
-                for call in self.uncertain_tool_calls
-            ]
+            calls = []
+            for call in self.uncertain_tool_calls:
+                item = {"toolCallId": call.tool_call_id, "name": call.name}
+                if call._arguments_present:
+                    item["arguments"] = call.arguments
+                calls.append(item)
+            payload["uncertainToolCalls"] = calls
         return payload
 
     @classmethod

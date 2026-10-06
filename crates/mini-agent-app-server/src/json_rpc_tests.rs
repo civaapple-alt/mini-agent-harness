@@ -4278,6 +4278,7 @@ async fn exposes_settled_turn_and_thread_checkpoint_over_json_rpc() {
         METHOD_TURN_READ,
         serde_json::json!(TurnReadParams {
             turn_id: turn_id.clone(),
+            tool_call_id: None,
         }),
     )
     .await;

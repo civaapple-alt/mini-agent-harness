@@ -301,6 +301,11 @@ fn project_arguments(arguments: &Value) -> Value {
     }
 }
 
+/// Return the same bounded, redacted argument projection used by ThreadItems.
+pub fn project_tool_arguments(arguments: &Value) -> Value {
+    project_arguments(arguments)
+}
+
 fn project_argument_value(value: &Value, depth: usize, key: Option<&str>) -> Value {
     if key.is_some_and(is_sensitive_key) {
         return Value::String("[REDACTED]".to_string());

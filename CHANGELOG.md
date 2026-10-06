@@ -7,6 +7,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changes
 
+- Let `turn/read` return bounded, redacted arguments for one explicitly selected
+  uncertain tool call so clients can inspect its command before reconciliation.
+- Rebuild up to 256 visible activity items for an unsettled Turn from its
+  execution checkpoint and pending tool batch.
 - Isolate SDK-launched App Server subprocesses from the caller's terminal
   interrupt signal so the Gateway can stop and reap them through the client
   lifecycle.

@@ -139,6 +139,8 @@ App Server history 的读取投影，不是 SDK 的第二个持久化存储。
 `recommended_action` 只给出提示，不会恢复 Turn 或重试工具。未知恢复值保留在
 `raw` 中，并建议调用方检查状态。请读取 `recovery.status.value`，不要再用
 `recovery["status"]` 访问恢复状态。
+调用 `read_turn(turn_id, tool_call_id=...)` 可额外读取指定待核对调用的有界、脱敏参数；
+普通 `read_turn()` 不返回工具参数。
 
 设置 `user_questions=True` 后，App Server 可向客户端发送 `ask_user` 请求。
 通知中的 `typed_user_question` 提供当前问题和选项；客户端用
