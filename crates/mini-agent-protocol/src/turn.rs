@@ -101,6 +101,9 @@ pub struct TurnInput {
     /// Legacy provider reasoning effort retained for older clients.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Internal request identity carried to the checkpoint that applies a steer.
+    #[serde(skip)]
+    pub steer_request_id: Option<String>,
 }
 
 /// Starts a protocol-visible Thread with a stable identity.
@@ -171,6 +174,7 @@ impl TurnInput {
             model_selection: None,
             reasoning_selection: None,
             reasoning_effort: None,
+            steer_request_id: None,
         }
     }
 }

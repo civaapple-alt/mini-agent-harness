@@ -601,10 +601,16 @@ async def test_read_loop_forwards_user_question_notifications_to_thread_stream()
             },
         },
     }
-    assert expected in received
+    forwarded = next(
+        notification
+        for notification in received
+        if notification.get("method") == "user-question/request"
+    )
+    assert {key: forwarded[key] for key in expected} == expected
+    assert forwarded["typed_user_question"].interaction.interaction_id == "uq-1"
     streamed = await queue.get()
     client._release_stream_message(queue, streamed)
-    assert streamed == expected
+    assert {key: streamed[key] for key in expected} == expected
     other_thread_message = await other_thread_queue.get()
     client._release_stream_message(other_thread_queue, other_thread_message)
     assert other_thread_message["type"] == "_client_error"

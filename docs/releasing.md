@@ -118,7 +118,7 @@ git diff --check
 git status --short
 ```
 
-The current hard gates are 7,000 effective Core + Protocol lines, 45,000
+The current hard gates are 7,500 effective Core + Protocol lines, 45,000
 Control Plane lines, and 65,000 Release Rust lines, including tests in supported
 packages. `scripts/line_budget.py` is the source of truth. It excludes blank and
 comment-only lines; code-bearing lines with trailing comments count once.

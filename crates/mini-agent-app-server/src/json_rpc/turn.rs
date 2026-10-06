@@ -247,6 +247,7 @@ where
                         },
                         error: result.error,
                         recovery: result.recovery,
+                        steer_requests: result.steer_requests,
                     },
                 ),
                 None => response_error(
@@ -318,6 +319,19 @@ where
         {
             let result = steer_result_from_control_request(&control_request);
             return response_action_with(request.id, reservation, result);
+        }
+        if reservation.value.is_none() {
+            return action_response(
+                request.id,
+                self.server.submit_steer_request_action(
+                    params.thread_id,
+                    params.turn_id,
+                    request_id,
+                    params.text,
+                ),
+                Clone::clone,
+            )
+            .await;
         }
 
         let submission = self
@@ -427,6 +441,7 @@ fn steer_result_from_control_request(
         reason: (request.status == "pending").then(|| {
             "The request outcome is unresolved; it may or may not have been submitted. Do not automatically resend this requestId.".to_string()
         }),
+        application_status: None,
     }
 }
 
@@ -443,6 +458,7 @@ fn pending_steer_result(
         attempt: None,
         attempt_kind: None,
         reason: Some(reason.to_string()),
+        application_status: None,
     }
 }
 
@@ -465,5 +481,6 @@ fn steer_result_from_submission(
         attempt: None,
         attempt_kind: None,
         reason,
+        application_status: None,
     }
 }

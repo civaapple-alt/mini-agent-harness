@@ -807,6 +807,27 @@ class TurnReconcileResult:
 
 
 @dataclass
+class SteerRequestInfo:
+    """Durable status of one idempotent steering request."""
+
+    turn_id: str
+    request_id: str
+    text: str
+    status: str
+    reason: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SteerRequestInfo:
+        return cls(
+            turn_id=str(data.get("turnId", data.get("turn_id", ""))),
+            request_id=str(data.get("requestId", data.get("request_id", ""))),
+            text=str(data.get("text", "")),
+            status=str(data.get("status", "unknown")),
+            reason=data.get("reason"),
+        )
+
+
+@dataclass
 class TurnReadResult:
     """Settled outcome and message history for a turn."""
 
@@ -819,6 +840,7 @@ class TurnReadResult:
     items: list[ThreadItem] = field(default_factory=list)
     error: str | None = None
     recovery: ExecutionRecoveryInfo | None = None
+    steer_requests: list[SteerRequestInfo] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -838,6 +860,11 @@ class TurnReadResult:
                 if isinstance(val.get("recovery"), dict)
                 else None
             ),
+            steer_requests=[
+                SteerRequestInfo.from_dict(item)
+                for item in val.get("steerRequests", val.get("steer_requests", []))
+                if isinstance(item, dict)
+            ],
             raw=data,
         )
 

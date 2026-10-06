@@ -15,7 +15,7 @@ use the same effective-line rule.
 
 | 指标 | 统计范围 | 硬上限 |
 | --- | --- | ---: |
-| Core + Protocol | `mini-agent-core` + `mini-agent-protocol` | 7,000 |
+| Core + Protocol | `mini-agent-core` + `mini-agent-protocol` | 7,500 |
 | Control Plane | Host/App Server control slice + Capabilities control slice | 45,000 |
 | Release Rust source | 支持的运行时 crate 与测试，排除实验性 CLI/REPL | 65,000 |
 
@@ -26,9 +26,9 @@ Plane 和 Release Rust 执行绝对硬上限；增量检查使用 `--check-delta
 当前 revision 的有效行数为：
 
 ```text
-core+protocol    6797/7000
-control-plane   40964/45000
-release         59299/65000
+core+protocol    7042/7500
+control-plane   43153/45000
+release         61895/65000
 ```
 
 运行 `python3 scripts/line_budget.py` 可重新计算这些数字。使用

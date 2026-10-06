@@ -452,11 +452,11 @@ unchanged during recovery.
 | Method | Parameters | Result / effect |
 | --- | --- | --- |
 | `turn/start` | `threadId`, `input: {mode, text, selectedSkills?, workflow?, reasoningEffort?}`, optional `operationId`, `operationAttempt`, `operationAttemptKind`, `turnSource` | Starts one turn and returns `turnId` and status. Current public modes are `start` and `start_if_idle`; other modes are rejected on this method. `selectedSkills` names up to eight effective skills for this turn. `reasoningEffort` is a legacy per-turn fallback used only when the Thread has no explicit `reasoningSelection`. `workflow` may be `{"kind":"skill_group","id":"pstack","mode":"auto"}` for a turn-local group activation. `turnSource` is bounded metadata; the currently defined value `child_wakeup` marks an automatic parent continuation and does not change the input text. `operationAttemptKind` is child lifecycle metadata (`initial`, `retry`, `follow_up`); it does not change Core execution. |
-| `turn/read` | `turnId`; optional `toolCallId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, optional error, and bounded execution recovery metadata. An unsettled Turn with an execution checkpoint returns `in_progress`; its items are rebuilt from the latest checkpoint and pending tool batch, capped at 256. Projected tool items use the standard bounded, redacted arguments; supplying `toolCallId` additionally includes arguments in recovery metadata only for that matching uncertain call. |
+| `turn/read` | `turnId`; optional `toolCallId` | Returns status, optional `stopReason`, optional `finalText`, step count, bounded messages, projected items, optional error, bounded execution recovery metadata, and steer request statuses for that Turn. An unsettled Turn with an execution checkpoint returns `in_progress`; its items are rebuilt from the latest checkpoint and pending tool batch, capped at 256. Projected tool items use the standard bounded, redacted arguments; supplying `toolCallId` additionally includes arguments in recovery metadata only for that matching uncertain call. |
 | `turn/resume` | `threadId`, `turnId`, `checkpointSeq`, stable `requestId` | Explicitly resumes the same logical Turn from the matching persisted execution checkpoint. The request fails if the Turn or checkpoint sequence is stale or any tool call still needs reconciliation. Repeating an accepted request ID is idempotent. |
 | `turn/reconcile` | `threadId`, `turnId`, `checkpointSeq`, `toolCallId`, stable `requestId`, `disposition`, bounded `evidenceSummary`; `result` for `completed` | Records an operator decision for one started tool call with no durable outcome. `completed` supplies a bounded structured result; `not_executed` confirms the effect did not occur and permits a later explicit resume. The tuple `(turnId, checkpointSeq, toolCallId, requestId)` rejects stale decisions and makes an identical retry idempotent. It never resumes automatically. |
 | `turn/events` | `threadId`; optional `afterSequence`, `limit` (`1..128`) | Returns a bounded replay page of metadata-only event summaries with `nextCursor`, `oldestSequence`, and `hasGap`. The Session retains at most 512 summaries across App Server restarts. |
-| `turn/steer` | `threadId`, `turnId`, `text`, optional bounded `requestId` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. Child control supplies a stable request ID so a replayed accepted steer is idempotent. |
+| `turn/steer` | `threadId`, `turnId`, `text`, optional bounded `requestId` | Sends cooperative steering input to the active turn. The supplied `turnId` must be active. A regular Session steer with a `requestId` is journaled before the server acknowledges it; retrying the same ID and text returns the stored status, while reusing the ID with different text is rejected. `applicationStatus` is `accepted` until the text is added to a later model context, then `applied`; a stop before that boundary persists `unapplied`. Clients should supply a stable request ID and use `turn/read` to resolve a lost acknowledgement. Child control keeps its existing reservation protocol. |
 | `turn/interrupt` | `threadId`, `turnId` | Requests cooperative cancellation and returns `{accepted: true}` when admitted; settlement remains pending until `turn_finished`. |
 
 An oversized `turn/start` input returns `not_submitted` before the server emits or
@@ -467,6 +467,18 @@ retained range is reported by `hasGap` and `oldestSequence`.
 notifications while the turn is running, then use `turn/read` for the settled
 result. Steering and interruption are requests to the runtime; they do not
 force an immediate stop before the runtime reaches a cancellation boundary.
+
+A regular Session steer is an admitted request, not proof that the next model
+request already contains its text. The App Server persists it before returning
+the acknowledgement. Core applies it at a safe boundary between model steps or
+after a complete tool batch, appends it to the same Turn's conversation, and
+records the request ID in the following execution checkpoint. `turn/read` then
+projects `applied`; until that checkpoint it remains `accepted`. If cancellation
+wins first, the App Server drains pending steers and journals them as
+`unapplied` before settling the Turn. The stop path drops the active model
+request future and raises the Host cancellation token so cancellable tools can
+stop while executing. A tool that cannot cancel must still report its actual
+outcome or remain subject to reconciliation after a restart.
 
 The Session checkpoint and execution checkpoint serve different purposes. The
 Session checkpoint stores model context after a Turn settles. New Turns and
@@ -498,6 +510,15 @@ limit. While an execution checkpoint is waiting or needs reconciliation,
 `turn/start` returns `not_submitted` and preserves that checkpoint. The caller
 must resolve unknown tool outcomes and explicitly resume the same Turn before
 starting a new Turn.
+
+Accepted steer requests survive that restart with the execution checkpoint.
+`turn/read` exposes their bounded IDs, text, and status; `turn/events` replay
+does not carry steer text. After unknown tool calls have been reconciled, an
+explicit `turn/resume` requeues each still-accepted steer into the same logical
+Turn. Already-applied requests are identified by their checkpoint IDs and are
+not injected a second time. A stopped Turn reports pending requests as
+`unapplied`; clients must not present an acknowledgement or transport timeout
+as proof that a steer reached model context.
 The App Server records an executor heartbeat every 10 seconds. The Responses
 provider treats 120 seconds without provider data as a stalled request and does
 not retry that silent stream. Recognized transient transport, incomplete-stream,

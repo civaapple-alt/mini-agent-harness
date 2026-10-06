@@ -412,6 +412,7 @@ pub struct SettledTurn {
     pub recovery: Option<mini_agent_app_server_protocol::ExecutionRecoveryInfo>,
     /// Bounded activity reconstructed from the active execution checkpoint.
     pub recovery_items: Vec<mini_agent_app_server_protocol::ThreadItem>,
+    pub steer_requests: Vec<mini_agent_app_server_protocol::SteerRequestInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1073,11 +1074,29 @@ where
         }
         self.request_action(|reply| Command::Start {
             thread_id,
-            request,
+            request: Box::new(request),
             expected_turn_id,
             origin: crate::worker::TurnOrigin::Client,
             turn_source,
             execution_resume: None,
+            reply,
+        })
+        .await
+    }
+
+    pub(crate) async fn submit_steer_request_action(
+        &self,
+        thread_id: ThreadId,
+        turn_id: TurnId,
+        request_id: String,
+        text: String,
+    ) -> Result<ActionResponse<mini_agent_app_server_protocol::TurnSteerResult>, ActionFailure>
+    {
+        self.request_action(|reply| crate::worker::Command::SteerRequest {
+            thread_id,
+            turn_id,
+            request_id,
+            text,
             reply,
         })
         .await
@@ -1090,7 +1109,7 @@ where
         let thread_id = params.thread_id.clone();
         self.request_action(|reply| Command::Start {
             thread_id,
-            request: TurnStart::new(TurnInput::new(TurnInputMode::Start, "")),
+            request: Box::new(TurnStart::new(TurnInput::new(TurnInputMode::Start, ""))),
             expected_turn_id: None,
             origin: crate::worker::TurnOrigin::Client,
             turn_source: Some(mini_agent_protocol::TurnSource::SessionResume),

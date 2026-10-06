@@ -485,6 +485,7 @@ async fn resumes_from_checkpoint_with_the_durable_tool_result_without_replaying_
         next_model_step: 1,
         final_text: String::new(),
         phase: crate::ExecutionPhase::ModelRequest,
+        applied_steer_request_ids: Vec::new(),
     };
     let batch = crate::ExecutionToolBatch {
         intent: crate::ToolBatchIntent {
@@ -513,6 +514,7 @@ async fn resumes_from_checkpoint_with_the_durable_tool_result_without_replaying_
                 execution_context: Some(crate::ExecutionRunContext {
                     turn_id: turn_id.clone(),
                     input,
+                    applied_steer_request_ids: Vec::new(),
                 }),
                 journal: Some(&mut journal),
                 resume: Some((checkpoint, Some(batch))),
@@ -598,6 +600,7 @@ async fn does_not_replay_an_uncertain_side_effecting_tool_call() {
         next_model_step: 1,
         final_text: String::new(),
         phase: crate::ExecutionPhase::ToolBatch,
+        applied_steer_request_ids: Vec::new(),
     };
     let batch = crate::ExecutionToolBatch {
         intent: crate::ToolBatchIntent {
@@ -621,7 +624,11 @@ async fn does_not_replay_an_uncertain_side_effecting_tool_call() {
             &RunControl::new(),
             SteeringMode::StopAtCheckpoint,
             crate::ExecutionRunOptions {
-                execution_context: Some(crate::ExecutionRunContext { turn_id, input }),
+                execution_context: Some(crate::ExecutionRunContext {
+                    turn_id,
+                    input,
+                    applied_steer_request_ids: Vec::new(),
+                }),
                 journal: Some(&mut journal),
                 resume: Some((checkpoint, Some(batch))),
                 ..Default::default()

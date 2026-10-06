@@ -337,6 +337,13 @@ pub(super) fn load_records(
                             .ok_or_else(|| "execution checkpoint is missing phase".to_string())?,
                     )
                     .map_err(|error| format!("invalid execution checkpoint phase: {error}"))?,
+                    applied_steer_request_ids: serde_json::from_value(
+                        record
+                            .get("applied_steer_request_ids")
+                            .cloned()
+                            .unwrap_or_else(|| json!([])),
+                    )
+                    .map_err(|error| format!("invalid applied steer request ids: {error}"))?,
                 };
                 apply_execution_journal_entry(
                     &mut execution_state,
@@ -353,6 +360,8 @@ pub(super) fn load_records(
             | Some("execution_resumed")
             | Some("execution_heartbeat")
             | Some("execution_needs_reconciliation")
+            | Some("execution_steer_accepted")
+            | Some("execution_steer_unapplied")
             | Some("execution_settled")
                 if header_seen =>
             {
@@ -366,9 +375,10 @@ pub(super) fn load_records(
                 let entry: ExecutionJournalEntry = serde_json::from_value(journal_record)
                     .map_err(|error| format!("invalid execution journal record: {error}"))?;
                 let entry_turn_id = execution_entry_turn_id(&entry);
-                if execution_state
-                    .as_ref()
-                    .is_some_and(|state| state.checkpoint.turn_id != entry_turn_id)
+                if !matches!(entry, ExecutionJournalEntry::Checkpoint { .. })
+                    && execution_state
+                        .as_ref()
+                        .is_some_and(|state| state.checkpoint.turn_id != entry_turn_id)
                 {
                     execution_state = None;
                 }
@@ -487,6 +497,8 @@ fn execution_entry_turn_id(entry: &ExecutionJournalEntry) -> TurnId {
     match entry {
         ExecutionJournalEntry::Checkpoint { checkpoint } => checkpoint.turn_id.clone(),
         ExecutionJournalEntry::ToolBatchStarted { batch } => batch.turn_id.clone(),
+        ExecutionJournalEntry::SteerAccepted { turn_id, .. }
+        | ExecutionJournalEntry::SteerUnapplied { turn_id, .. } => turn_id.clone(),
         ExecutionJournalEntry::ToolCallStarted { turn_id, .. }
         | ExecutionJournalEntry::ToolCallFinished { turn_id, .. }
         | ExecutionJournalEntry::ToolBatchSettled { turn_id, .. }
@@ -506,6 +518,28 @@ pub(super) fn apply_execution_journal_entry(
 ) {
     match entry {
         ExecutionJournalEntry::Checkpoint { checkpoint } => {
+            let mut steer_requests = current
+                .take()
+                .map(|state| state.steer_requests)
+                .unwrap_or_default();
+            for request_id in &checkpoint.applied_steer_request_ids {
+                if let Some(request) = steer_requests
+                    .iter_mut()
+                    .find(|request| request.request_id == *request_id)
+                {
+                    request.status = SessionSteerStatus::Applied;
+                    request.reason = None;
+                }
+            }
+            while steer_requests.len() > 64 {
+                let Some(index) = steer_requests
+                    .iter()
+                    .position(|request| request.status != SessionSteerStatus::Accepted)
+                else {
+                    break;
+                };
+                steer_requests.remove(index);
+            }
             *current = Some(SessionExecutionState {
                 phase: checkpoint.phase,
                 checkpoint,
@@ -518,7 +552,51 @@ pub(super) fn apply_execution_journal_entry(
                 pending_user_question: None,
                 resume_requests: HashMap::new(),
                 reconciliation_requests: HashMap::new(),
+                steer_requests,
             });
+        }
+        ExecutionJournalEntry::SteerAccepted {
+            turn_id,
+            request_id,
+            text,
+        } => {
+            if let Some(state) = current.as_mut()
+                && state.checkpoint.turn_id == turn_id
+            {
+                if state.steer_requests.len() >= 64
+                    && let Some(index) = state
+                        .steer_requests
+                        .iter()
+                        .position(|request| request.status != SessionSteerStatus::Accepted)
+                {
+                    state.steer_requests.remove(index);
+                }
+                state.steer_requests.push(SessionSteerRequest {
+                    turn_id,
+                    request_id,
+                    text,
+                    status: SessionSteerStatus::Accepted,
+                    reason: None,
+                });
+                state.last_progress_ms = Some(record_timestamp_ms);
+            }
+        }
+        ExecutionJournalEntry::SteerUnapplied {
+            turn_id,
+            request_id,
+            reason,
+        } => {
+            if let Some(state) = current.as_mut()
+                && let Some(request) = state.steer_requests.iter_mut().find(|request| {
+                    request.turn_id == turn_id
+                        && request.request_id == request_id
+                        && request.status == SessionSteerStatus::Accepted
+                })
+            {
+                request.status = SessionSteerStatus::Unapplied;
+                request.reason = Some(reason);
+                state.last_progress_ms = Some(record_timestamp_ms);
+            }
         }
         ExecutionJournalEntry::ToolBatchStarted { batch } => {
             if let Some(state) = current.as_mut() {

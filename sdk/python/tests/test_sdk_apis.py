@@ -344,6 +344,31 @@ def test_sdk_reads_bounded_execution_recovery_metadata():
     assert turn.recovery.to_dict() == recovery
 
 
+def test_sdk_reads_durable_steer_status_and_accepts_legacy_turn_reads():
+    turn = TurnReadResult.from_dict(
+        {
+            "turnId": "turn-steer",
+            "status": "in_progress",
+            "steerRequests": [
+                {
+                    "turnId": "turn-steer",
+                    "requestId": "steer-1",
+                    "text": "Apply this at the next safe boundary.",
+                    "status": "accepted",
+                    "reason": None,
+                }
+            ],
+        }
+    )
+    legacy = TurnReadResult.from_dict({"turnId": "turn-legacy", "status": "completed"})
+
+    assert turn.steer_requests[0].turn_id == "turn-steer"
+    assert turn.steer_requests[0].request_id == "steer-1"
+    assert turn.steer_requests[0].status == "accepted"
+    assert turn.steer_requests[0].reason is None
+    assert legacy.steer_requests == []
+
+
 def test_sdk_preserves_unknown_recovery_values_and_recommends_inspection():
     recovery = {
         "turnId": "turn-future",

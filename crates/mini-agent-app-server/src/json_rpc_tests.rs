@@ -110,6 +110,59 @@ impl Model for WorldContextScenarioModel {
     }
 }
 
+struct DurableSteerModel {
+    calls: usize,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+    observed: Arc<Mutex<Vec<Vec<Message>>>>,
+}
+
+impl Model for DurableSteerModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        self.calls += 1;
+        if self.calls == 1 {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        self.observed
+            .lock()
+            .unwrap()
+            .push(request.messages.to_vec());
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: format!("response {}", self.calls),
+            tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
+
+struct ObserveMessagesModel(Arc<Mutex<Option<Vec<Message>>>>);
+
+impl Model for ObserveMessagesModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        *self.0.lock().unwrap() = Some(request.messages.to_vec());
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: "resumed with steer".to_string(),
+            tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
+
 #[tokio::test]
 async fn world_state_probe_projection_reaches_the_model_through_app_server() {
     let workspace = crate::tests::test_root("world-context");
@@ -2936,6 +2989,7 @@ async fn turn_resume_continues_the_same_turn_from_a_persisted_execution_checkpoi
                 next_model_step: 1,
                 final_text: String::new(),
                 phase: mini_agent_core::ExecutionPhase::ModelRequest,
+                applied_steer_request_ids: Vec::new(),
             },
         })
         .unwrap();
@@ -3026,6 +3080,160 @@ async fn turn_resume_continues_the_same_turn_from_a_persisted_execution_checkpoi
 }
 
 #[tokio::test]
+async fn durable_steer_is_idempotent_and_stop_marks_unapplied_request() {
+    let root = rpc_root("durable-steer-stop-race");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let thread_id = opened.store.thread_id().to_string();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let mut connection = managed_connection_with_session(
+        DurableSteerModel {
+            calls: 0,
+            entered: entered.clone(),
+            release,
+            observed: observed.clone(),
+        },
+        root.clone(),
+        opened,
+    );
+    initialize_connection(&mut connection, "durable-steer-stop-race").await;
+
+    let started = rpc_result(
+        &mut connection,
+        session_turn_start_request(2, &thread_id, "long model request", None),
+    )
+    .await;
+    let turn_id = started["value"]["turn_id"].as_str().unwrap().to_string();
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("mock model request should be active");
+
+    let params = serde_json::json!({
+        "threadId": thread_id,
+        "turnId": turn_id,
+        "requestId": "steer-stop-race-1",
+        "text": "Use the updated constraint in the next model request.",
+    });
+    let accepted = rpc_call(&mut connection, 3, METHOD_TURN_STEER, params.clone()).await;
+    assert_eq!(accepted["value"]["applicationStatus"], "accepted");
+    assert_eq!(accepted["value"]["duplicate"], false);
+
+    let duplicate = rpc_call(&mut connection, 4, METHOD_TURN_STEER, params).await;
+    assert_eq!(duplicate["value"]["applicationStatus"], "accepted");
+    assert_eq!(duplicate["value"]["duplicate"], true);
+
+    let stopped = rpc_call(
+        &mut connection,
+        5,
+        METHOD_TURN_INTERRUPT,
+        serde_json::json!({"threadId": thread_id, "turnId": turn_id}),
+    )
+    .await;
+    assert_eq!(stopped["value"]["accepted"], true);
+    wait_for_turn_finished_id(&mut connection, &turn_id).await;
+
+    let result = rpc_call(
+        &mut connection,
+        6,
+        METHOD_TURN_READ,
+        serde_json::json!({"turnId": turn_id}),
+    )
+    .await;
+    assert_eq!(result["value"]["steerRequests"][0]["status"], "unapplied");
+    assert_eq!(result["value"]["status"], "cancelled");
+    assert!(observed.lock().unwrap().is_empty());
+
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn accepted_steer_is_applied_once_when_resuming_a_persisted_turn() {
+    let root = rpc_root("durable-steer-resume");
+    let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
+    let session_id = opened.store.session_id().to_string();
+    let thread_id = opened.store.thread_id().to_string();
+    let input = TurnInput::new(TurnInputMode::Start, "continue persisted work");
+    let turn_id = mini_agent_protocol::TurnId::new("turn-steer-resume");
+    let messages = vec![Message::User {
+        text: input.text.clone(),
+    }];
+    let mut journal = opened.store.execution_journal(&messages);
+    let checkpoint_seq = journal
+        .append(mini_agent_core::ExecutionJournalEntry::Checkpoint {
+            checkpoint: mini_agent_core::ExecutionCheckpoint {
+                turn_id: turn_id.clone(),
+                input,
+                messages: messages.clone(),
+                next_model_step: 1,
+                final_text: String::new(),
+                phase: mini_agent_core::ExecutionPhase::ModelRequest,
+                applied_steer_request_ids: Vec::new(),
+            },
+        })
+        .unwrap();
+    journal
+        .accept_steer_request(
+            &turn_id,
+            "steer-resume-1",
+            "Include the persisted steering text after restart.",
+        )
+        .unwrap();
+    journal
+        .append(mini_agent_core::ExecutionJournalEntry::WaitingForContinue {
+            turn_id: turn_id.clone(),
+            reason: "simulated_app_server_restart".to_string(),
+        })
+        .unwrap();
+    drop(journal);
+    drop(opened);
+
+    let resumed =
+        SessionStore::open(&root, SessionStoreRequest::Resume(session_id.clone())).unwrap();
+    let observed = Arc::new(Mutex::new(None));
+    let mut connection = managed_connection_with_session(
+        ObserveMessagesModel(observed.clone()),
+        root.clone(),
+        resumed,
+    );
+    initialize_connection(&mut connection, "durable-steer-resume").await;
+    let result = rpc_call(
+        &mut connection,
+        2,
+        METHOD_TURN_RESUME,
+        serde_json::json!({
+            "threadId": thread_id,
+            "turnId": turn_id,
+            "checkpointSeq": checkpoint_seq,
+            "requestId": "resume-steer-checkpoint-1",
+        }),
+    )
+    .await;
+    assert_eq!(result["value"]["status"], "started");
+    assert_eq!(result["value"]["turn_id"], "turn-steer-resume");
+    wait_for_turn_finished_id(&mut connection, "turn-steer-resume").await;
+
+    let received = observed.lock().unwrap().clone().unwrap();
+    assert!(received.iter().any(|message| matches!(
+        message,
+        Message::User { text }
+            if text == "Include the persisted steering text after restart."
+    )));
+    let read = rpc_call(
+        &mut connection,
+        3,
+        METHOD_TURN_READ,
+        serde_json::json!({"turnId": "turn-steer-resume"}),
+    )
+    .await;
+    assert_eq!(read["value"]["steerRequests"][0]["status"], "applied");
+
+    connection.shutdown().await.unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn turn_reconcile_is_durable_idempotent_and_unblocks_only_the_same_turn() {
     let root = rpc_root("execution-checkpoint-reconcile");
     let opened = SessionStore::open(&root, SessionStoreRequest::New).unwrap();
@@ -3046,6 +3254,7 @@ async fn turn_reconcile_is_durable_idempotent_and_unblocks_only_the_same_turn() 
                 next_model_step: 1,
                 final_text: String::new(),
                 phase: mini_agent_core::ExecutionPhase::ToolBatch,
+                applied_steer_request_ids: Vec::new(),
             },
         })
         .unwrap();

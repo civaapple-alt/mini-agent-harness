@@ -2266,13 +2266,16 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
     release.notify_one();
 
     let mut statuses = Vec::new();
-    for _ in 0..24 {
-        if let Event::TurnFinished { status } = events.recv().await.unwrap().event {
+    while statuses.len() < 2 {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+            .await
+            .expect("queued follow-up should settle after cancellation")
+            .unwrap()
+            .event;
+        if let Event::TurnFinished { status } = event {
             statuses.push(status);
-            match statuses.len() {
-                1 | 2 => release.notify_one(),
-                3 => break,
-                _ => {}
+            if statuses.len() == 1 {
+                release.notify_one();
             }
         }
     }
@@ -2280,7 +2283,6 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
         statuses,
         [
             mini_agent_protocol::TurnStatus::Cancelled,
-            mini_agent_protocol::TurnStatus::Completed,
             mini_agent_protocol::TurnStatus::Completed,
         ]
     );

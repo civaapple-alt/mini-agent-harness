@@ -78,6 +78,7 @@ fn retained_bytes(input: &TurnInput) -> usize {
         .saturating_add(model_bytes)
         .saturating_add(reasoning_bytes)
         .saturating_add(input.reasoning_effort.as_ref().map_or(0, String::capacity))
+        .saturating_add(input.steer_request_id.as_ref().map_or(0, String::capacity))
 }
 
 impl Default for PendingInputQueue {
@@ -121,7 +122,7 @@ impl PendingInputQueue {
         let queued_bytes = inputs
             .iter()
             .map(retained_bytes)
-            .fold(0usize, usize::saturating_add);
+            .fold(0, usize::saturating_add);
         let actual = queued_bytes.saturating_add(input_bytes);
         if actual > MAX_PENDING_INPUT_BYTES {
             return Err(InputQueueError::ByteLimit {
@@ -139,6 +140,22 @@ impl PendingInputQueue {
 
     pub fn take_follow_up(&self) -> Option<TurnInput> {
         self.take_matching(|input| input.mode == TurnInputMode::FollowUp)
+    }
+
+    pub fn cancel_steers(&self) -> Vec<TurnInput> {
+        let Ok(mut inputs) = self.inputs.lock() else {
+            return Vec::new();
+        };
+        let mut cancelled = Vec::new();
+        inputs.retain(|pending| {
+            if pending.mode == TurnInputMode::Steer {
+                cancelled.push(pending.clone());
+                false
+            } else {
+                true
+            }
+        });
+        cancelled
     }
 
     pub fn has_steer(&self) -> bool {

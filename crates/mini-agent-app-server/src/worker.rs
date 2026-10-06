@@ -124,12 +124,19 @@ pub(super) enum Command {
     Runtime(RuntimeRequest),
     Start {
         thread_id: ThreadId,
-        request: TurnStart,
+        request: Box<TurnStart>,
         expected_turn_id: Option<TurnId>,
         origin: TurnOrigin,
         turn_source: Option<mini_agent_protocol::TurnSource>,
         execution_resume: Option<mini_agent_app_server_protocol::TurnResumeParams>,
         reply: oneshot::Sender<ActionResult<TurnSubmission>>,
+    },
+    SteerRequest {
+        thread_id: ThreadId,
+        turn_id: TurnId,
+        request_id: String,
+        text: String,
+        reply: oneshot::Sender<ActionResult<mini_agent_app_server_protocol::TurnSteerResult>>,
     },
     Reconcile {
         params: mini_agent_app_server_protocol::TurnReconcileParams,
@@ -465,6 +472,7 @@ struct RunningCommandContext<'a, M> {
     runtime_status: &'a RuntimeStatusHandle,
     notifications: &'a broadcast::Sender<RuntimeNotification>,
     stopping: &'a Arc<AtomicBool>,
+    execution_journal: Option<&'a mut mini_agent_capabilities::SessionExecutionJournal>,
 }
 
 impl ThreadListener {
@@ -858,15 +866,44 @@ pub(super) async fn worker_loop<M>(
                 }
                 respond(reply, receipt, result);
             }
+            Command::SteerRequest {
+                thread_id,
+                turn_id,
+                request_id,
+                text,
+                reply,
+            } => {
+                let existing = runtime
+                    .as_ref()
+                    .filter(|state| state.management.thread_id() == thread_id)
+                    .and_then(|state| state.management.execution_state())
+                    .and_then(|state| {
+                        state
+                            .steer_requests
+                            .into_iter()
+                            .find(|request| request.request_id == request_id)
+                    });
+                let result = match existing {
+                    Some(request) if request.turn_id == turn_id && request.text == text => {
+                        Ok(steer_request_result(&request, true))
+                    }
+                    Some(_) => Err(AppServerError::Checkpoint(
+                        "steer request id was already used for different content".to_string(),
+                    )),
+                    None => Err(AppServerError::NoActiveTurn),
+                };
+                respond(reply, receipt, result);
+            }
             Command::Start {
                 thread_id,
-                mut request,
+                request,
                 expected_turn_id,
                 origin,
                 turn_source,
                 execution_resume: resume_request,
                 reply,
             } => {
+                let mut request = *request;
                 if let Some(state) = runtime.as_ref() {
                     match state.management.session_control_state_if_persisted() {
                         Ok(Some(control))
@@ -976,6 +1013,7 @@ pub(super) async fn worker_loop<M>(
                 }
 
                 let mut execution_resume = None;
+                let mut resume_has_pending_steers = false;
                 let mut turn_source = turn_source;
                 if let Some(resume_request) = resume_request {
                     if resume_request.thread_id != thread_id {
@@ -1018,6 +1056,33 @@ pub(super) async fn worker_loop<M>(
                         Ok(mini_agent_capabilities::ExecutionResumeReservation::Accepted(
                             state,
                         )) => {
+                            let pending_steers = state
+                                .steer_requests
+                                .iter()
+                                .filter(|steer| {
+                                    steer.turn_id == state.checkpoint.turn_id
+                                        && steer.status
+                                            == mini_agent_capabilities::SessionSteerStatus::Accepted
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            let requeued = pending_steers.iter().try_for_each(|steer| {
+                                control.submit_steer(
+                                    TurnInput::new(TurnInputMode::Steer, steer.text.clone()),
+                                    Some(steer.request_id.clone()),
+                                )
+                            });
+                            if let Err(error) = requeued {
+                                control.cancel_pending_steers();
+                                respond(
+                                    reply,
+                                    receipt,
+                                    Err(AppServerError::InputQueue(error.to_string())),
+                                );
+                                threads.insert(thread);
+                                continue;
+                            }
+                            resume_has_pending_steers = !pending_steers.is_empty();
                             request.input = state.checkpoint.input.clone();
                             if let Some(runtime) = runtime.as_ref() {
                                 turn_source = runtime
@@ -1143,6 +1208,7 @@ pub(super) async fn worker_loop<M>(
                 }
 
                 let mut next_input = Some(request.input);
+                let mut next_steer_request_ids = Vec::new();
                 let mut operation_id = request.operation_id.clone();
                 let operation_group_id = request.operation_group_id.clone();
                 let execution_mode = request.execution_mode.clone();
@@ -1560,16 +1626,22 @@ pub(super) async fn worker_loop<M>(
                         tokens_used: 0,
                         execution_progress,
                     };
-                    let journal = execution_journal
-                        .as_mut()
-                        .map(|journal| journal as &mut dyn ExecutionJournalSink);
+                    let mut turn_execution_journal = execution_journal.clone();
                     let is_execution_resume = execution_resume.is_some();
+                    let applied_steer_request_ids = if is_execution_resume {
+                        execution_resume
+                            .as_ref()
+                            .map(|(checkpoint, _)| checkpoint.applied_steer_request_ids.clone())
+                            .unwrap_or_default()
+                    } else {
+                        std::mem::take(&mut next_steer_request_ids)
+                    };
                     let mut turn = Box::pin(
                         thread.run_turn_with_events_and_preflight_and_journal_resume(
                             input,
                             &mut sink,
                             &control,
-                            if is_child_task {
+                            if is_child_task || (is_execution_resume && resume_has_pending_steers) {
                                 SteeringMode::ContinueSameTurn
                             } else {
                                 SteeringMode::StopAtCheckpoint
@@ -1577,8 +1649,11 @@ pub(super) async fn worker_loop<M>(
                             mini_agent_core::TurnExecutionOptions {
                                 prelude: &skill_prelude,
                                 preflight_error: skill_error.as_deref(),
-                                journal,
+                                journal: turn_execution_journal
+                                    .as_mut()
+                                    .map(|journal| journal as &mut dyn ExecutionJournalSink),
                                 resume: execution_resume.take(),
+                                applied_steer_request_ids,
                             },
                         ),
                     );
@@ -1620,6 +1695,7 @@ pub(super) async fn worker_loop<M>(
                                         runtime_status: &runtime_status,
                                         notifications: &notifications,
                                         stopping: &stopping,
+                                        execution_journal: execution_journal.as_mut(),
                                     },
                                 );
                             },
@@ -1636,6 +1712,11 @@ pub(super) async fn worker_loop<M>(
                             },
                         }
                     };
+                    let turn_was_cancelled = matches!(
+                        &turn_result,
+                        Ok(result)
+                            if result.status == mini_agent_protocol::TurnStatus::Cancelled
+                    ) || stopping.load(Ordering::Acquire);
                     drop(turn);
                     if let Some(heartbeat_task) = heartbeat_task {
                         heartbeat_task.abort();
@@ -1789,7 +1870,7 @@ pub(super) async fn worker_loop<M>(
                             settled_turns.insert(
                                 result.id.as_str().to_string(),
                                 SettledTurn {
-                                    id: result.id,
+                                    id: result.id.clone(),
                                     status: result.status,
                                     outcome: Some(result.outcome),
                                     error: persistence_error,
@@ -1798,6 +1879,16 @@ pub(super) async fn worker_loop<M>(
                                         .and_then(|state| state.management.execution_state())
                                         .map(|state| execution_recovery_info(state, None)),
                                     recovery_items: Vec::new(),
+                                    steer_requests: runtime
+                                        .as_ref()
+                                        .and_then(|state| state.management.execution_state())
+                                        .map(|state| {
+                                            project_steer_requests(
+                                                &state.steer_requests,
+                                                &result.id,
+                                            )
+                                        })
+                                        .unwrap_or_default(),
                                 },
                             );
                         }
@@ -1816,6 +1907,7 @@ pub(super) async fn worker_loop<M>(
                                     .as_ref()
                                     .and_then(|state| state.management.execution_state())
                                     .map(|state| execution_recovery_info(state, None)),
+                                steer_requests: Vec::new(),
                             };
                             let persistence_error = runtime_actor::persist_turn(
                                 &mut runtime,
@@ -1895,6 +1987,13 @@ pub(super) async fn worker_loop<M>(
                                         .and_then(|state| state.management.execution_state())
                                         .map(|state| execution_recovery_info(state, None)),
                                     recovery_items: Vec::new(),
+                                    steer_requests: runtime
+                                        .as_ref()
+                                        .and_then(|state| state.management.execution_state())
+                                        .map(|state| {
+                                            project_steer_requests(&state.steer_requests, &turn_id)
+                                        })
+                                        .unwrap_or_default(),
                                 },
                             );
                         }
@@ -2018,9 +2117,26 @@ pub(super) async fn worker_loop<M>(
                             settled.error.as_deref(),
                         );
                     }
-                    next_input = control
-                        .take_steer_input()
-                        .or_else(|| control.take_follow_up_input());
+                    if turn_was_cancelled {
+                        control.cancel_pending_steers();
+                        if let Some(journal) = execution_journal.as_mut()
+                            && let Err(error) = journal.mark_pending_steers_unapplied(
+                                &turn_id,
+                                "the Turn stopped before this steer reached a model-context boundary",
+                            )
+                        {
+                            eprintln!("warning: failed to persist unapplied steer status: {error}");
+                        }
+                    }
+                    let next_steer = (!turn_was_cancelled)
+                        .then(|| control.take_steer_input())
+                        .flatten();
+                    next_steer_request_ids = next_steer
+                        .as_ref()
+                        .and_then(|pending| pending.steer_request_id.clone())
+                        .into_iter()
+                        .collect();
+                    next_input = next_steer.or_else(|| control.take_follow_up_input());
                     if next_input.is_some() {
                         let session_allows_continuation = runtime.as_mut().is_none_or(|state| {
                             state
@@ -2207,10 +2323,15 @@ pub(super) async fn worker_loop<M>(
                 tool_call_id,
                 reply,
             } => {
-                let execution_state = runtime
+                let session_execution = runtime
                     .as_ref()
-                    .and_then(|state| state.management.execution_state())
-                    .filter(|state| state.checkpoint.turn_id == turn_id);
+                    .and_then(|state| state.management.execution_state());
+                let steer_requests = session_execution
+                    .as_ref()
+                    .map(|state| project_steer_requests(&state.steer_requests, &turn_id))
+                    .unwrap_or_default();
+                let execution_state =
+                    session_execution.filter(|state| state.checkpoint.turn_id == turn_id);
                 let recovery = execution_state
                     .clone()
                     .map(|state| execution_recovery_info(state, tool_call_id.as_deref()));
@@ -2222,6 +2343,7 @@ pub(super) async fn worker_loop<M>(
                 if let Some(result) = result.as_mut() {
                     result.recovery = recovery;
                     result.recovery_items = recovery_items;
+                    result.steer_requests = steer_requests;
                 } else if let Some(recovery) = recovery.filter(|recovery| {
                     recovery.status
                         != mini_agent_app_server_protocol::ExecutionRecoveryStatus::Settled
@@ -2233,6 +2355,7 @@ pub(super) async fn worker_loop<M>(
                         error: None,
                         recovery: Some(recovery),
                         recovery_items,
+                        steer_requests,
                     });
                 }
                 respond(reply, receipt, Ok(result));
@@ -2698,6 +2821,84 @@ fn project_turn_result(result: &TurnResult) -> TurnReadResult {
         items: mini_agent_app_server_protocol::ThreadItem::from_messages(&result.outcome.messages),
         error: None,
         recovery: None,
+        steer_requests: Vec::new(),
+    }
+}
+
+fn protocol_steer_status(
+    status: mini_agent_capabilities::SessionSteerStatus,
+) -> mini_agent_app_server_protocol::SteerRequestStatus {
+    match status {
+        mini_agent_capabilities::SessionSteerStatus::Accepted => {
+            mini_agent_app_server_protocol::SteerRequestStatus::Accepted
+        }
+        mini_agent_capabilities::SessionSteerStatus::Applied => {
+            mini_agent_app_server_protocol::SteerRequestStatus::Applied
+        }
+        mini_agent_capabilities::SessionSteerStatus::Unapplied => {
+            mini_agent_app_server_protocol::SteerRequestStatus::Unapplied
+        }
+    }
+}
+
+fn project_steer_requests(
+    requests: &[mini_agent_capabilities::SessionSteerRequest],
+    turn_id: &TurnId,
+) -> Vec<mini_agent_app_server_protocol::SteerRequestInfo> {
+    requests
+        .iter()
+        .filter(|request| request.turn_id == *turn_id)
+        .map(|request| mini_agent_app_server_protocol::SteerRequestInfo {
+            turn_id: request.turn_id.clone(),
+            request_id: request.request_id.clone(),
+            text: request.text.clone(),
+            status: protocol_steer_status(request.status),
+            reason: request.reason.clone(),
+        })
+        .collect()
+}
+
+fn steer_request_result(
+    request: &mini_agent_capabilities::SessionSteerRequest,
+    duplicate: bool,
+) -> mini_agent_app_server_protocol::TurnSteerResult {
+    use mini_agent_app_server_protocol::{SteerRequestStatus, TurnSteerAction};
+    use mini_agent_capabilities::SessionSteerStatus;
+    mini_agent_app_server_protocol::TurnSteerResult {
+        status: match request.status {
+            SessionSteerStatus::Accepted | SessionSteerStatus::Applied => "steered",
+            SessionSteerStatus::Unapplied => "unapplied",
+        }
+        .to_string(),
+        application_status: Some(match request.status {
+            SessionSteerStatus::Accepted => SteerRequestStatus::Accepted,
+            SessionSteerStatus::Applied => SteerRequestStatus::Applied,
+            SessionSteerStatus::Unapplied => SteerRequestStatus::Unapplied,
+        }),
+        turn_id: Some(request.turn_id.clone()),
+        duplicate,
+        request_action: Some(TurnSteerAction::Steer),
+        operation_id: None,
+        attempt: None,
+        attempt_kind: None,
+        reason: request.reason.clone(),
+    }
+}
+
+fn not_submitted_steer_result(
+    turn_id: TurnId,
+    reason: impl Into<String>,
+) -> mini_agent_app_server_protocol::TurnSteerResult {
+    mini_agent_app_server_protocol::TurnSteerResult {
+        status: "not_submitted".to_string(),
+        application_status: None,
+        turn_id: Some(turn_id),
+        duplicate: false,
+        request_action: Some(mini_agent_app_server_protocol::TurnSteerAction::Steer),
+        operation_id: None,
+        attempt: None,
+        attempt_kind: None,
+        reason: Some(reason.into()),
     }
 }
 
@@ -2707,7 +2908,7 @@ fn handle_running_command<M>(
     active_thread_id: &ThreadId,
     turn_id: &TurnId,
     deferred_goal_verifications: &mut VecDeque<Command>,
-    context: RunningCommandContext<'_, M>,
+    mut context: RunningCommandContext<'_, M>,
 ) where
     M: Model + 'static,
 {
@@ -2764,6 +2965,115 @@ fn handle_running_command<M>(
             };
             respond(reply, receipt, result);
         }
+        Command::SteerRequest {
+            thread_id,
+            turn_id: requested_turn_id,
+            request_id,
+            text,
+            reply,
+        } => {
+            if thread_id != *active_thread_id {
+                respond(
+                    reply,
+                    receipt,
+                    Ok(not_submitted_steer_result(
+                        requested_turn_id,
+                        "the target Turn is no longer active; refresh Session state before retrying",
+                    )),
+                );
+                return;
+            }
+            let Some(journal) = context.execution_journal.as_deref_mut() else {
+                respond(
+                    reply,
+                    receipt,
+                    Ok(not_submitted_steer_result(
+                        requested_turn_id,
+                        "durable steer requests require a persisted Session",
+                    )),
+                );
+                return;
+            };
+            if let Some(previous) = journal.steer_request(&request_id) {
+                if previous.turn_id != requested_turn_id || previous.text != text {
+                    respond(
+                        reply,
+                        receipt,
+                        Err(AppServerError::Checkpoint(
+                            "steer request id was already used for different content".to_string(),
+                        )),
+                    );
+                } else {
+                    respond(reply, receipt, Ok(steer_request_result(&previous, true)));
+                }
+                return;
+            }
+            if requested_turn_id != *turn_id {
+                respond(
+                    reply,
+                    receipt,
+                    Ok(not_submitted_steer_result(
+                        requested_turn_id,
+                        "the target Turn is no longer active; refresh Session state before retrying",
+                    )),
+                );
+                return;
+            }
+            if context.stopping.load(Ordering::Acquire)
+                || control.cancellation_token().load(Ordering::Acquire)
+            {
+                respond(
+                    reply,
+                    receipt,
+                    Ok(not_submitted_steer_result(
+                        requested_turn_id,
+                        "the Turn is stopping; this steer was not accepted",
+                    )),
+                );
+                return;
+            }
+            let reservation =
+                match journal.accept_steer_request(&requested_turn_id, &request_id, &text) {
+                    Ok(reservation) => reservation,
+                    Err(error) => {
+                        respond(reply, receipt, Err(AppServerError::Checkpoint(error)));
+                        return;
+                    }
+                };
+            let (request, duplicate) = match reservation {
+                mini_agent_capabilities::SteerRequestReservation::Accepted(request) => {
+                    let input = TurnInput::new(TurnInputMode::Steer, text);
+                    match control.submit_steer(input, Some(request_id.clone())) {
+                        Ok(()) => (request, false),
+                        Err(error) => {
+                            let reason = format!("steer could not enter the active queue: {error}");
+                            let _ = journal.append(ExecutionJournalEntry::SteerUnapplied {
+                                turn_id: requested_turn_id.clone(),
+                                request_id,
+                                reason: reason.clone(),
+                            });
+                            let request = mini_agent_capabilities::SessionSteerRequest {
+                                status: mini_agent_capabilities::SessionSteerStatus::Unapplied,
+                                reason: Some(reason),
+                                ..request
+                            };
+                            (request, false)
+                        }
+                    }
+                }
+                mini_agent_capabilities::SteerRequestReservation::Duplicate(request) => {
+                    (request, true)
+                }
+            };
+            if !duplicate {
+                runtime_actor::advance_revision(context.runtime, context.runtime_revision);
+            }
+            respond(
+                reply,
+                receipt,
+                Ok(steer_request_result(&request, duplicate)),
+            );
+        }
         Command::Reconcile { reply, .. } => {
             respond(reply, receipt, Err(AppServerError::Busy));
         }
@@ -2779,6 +3089,15 @@ fn handle_running_command<M>(
             let result = if request.turn_id == *turn_id {
                 context.stopping.store(true, Ordering::Release);
                 control.request_cancel();
+                control.cancel_pending_steers();
+                if let Some(journal) = context.execution_journal.as_deref_mut()
+                    && let Err(error) = journal.mark_pending_steers_unapplied(
+                        turn_id,
+                        "the Turn was stopped before this steer reached a model-context boundary",
+                    )
+                {
+                    eprintln!("warning: failed to persist unapplied steer status: {error}");
+                }
                 let checkpoint_seq = context.runtime_status.lock().unwrap().checkpoint_seq;
                 status::publish(
                     context.runtime_status,
@@ -2830,6 +3149,12 @@ fn handle_running_command<M>(
                 .as_ref()
                 .map(execution_timeline_items)
                 .unwrap_or_default();
+            let steer_requests = context
+                .runtime
+                .as_ref()
+                .and_then(|state| state.management.execution_state())
+                .map(|state| project_steer_requests(&state.steer_requests, &requested_turn_id))
+                .unwrap_or_default();
             respond(
                 reply,
                 receipt,
@@ -2840,6 +3165,7 @@ fn handle_running_command<M>(
                     error: None,
                     recovery,
                     recovery_items,
+                    steer_requests,
                 })),
             );
         }

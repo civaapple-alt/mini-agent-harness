@@ -10,6 +10,7 @@
 
 当前相关决策：
 
+- [长 Turn 纠偏与 Session 恢复可信性](implemented/architecture/2026-10-06-long-turn-steer-and-session-recovery.zh.md)
 - [项目 Skill 可编辑性、来源与模型调用](implemented/feature/2026-10-06-skill-write-origin-and-model-invocation.zh.md)
 - [macOS 开发环境能力探测](implemented/feature/2026-10-06-macos-world-state-capabilities.zh.md)
 - [重启后的未结 Turn 活动投影](implemented/bug-fix/2026-10-06-unsettled-turn-activity-projection.zh.md)
@@ -133,6 +134,7 @@ graph LR
 
 ### Implemented
 
+- [长 Turn 纠偏与 Session 恢复可信性](implemented/architecture/2026-10-06-long-turn-steer-and-session-recovery.zh.md)
 - [项目 Skill 可编辑性、来源与模型调用](implemented/feature/2026-10-06-skill-write-origin-and-model-invocation.zh.md)
 - [macOS 开发环境能力探测](implemented/feature/2026-10-06-macos-world-state-capabilities.zh.md)
 - [重启后的未结 Turn 活动投影](implemented/bug-fix/2026-10-06-unsettled-turn-activity-projection.zh.md)

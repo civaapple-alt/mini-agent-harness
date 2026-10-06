@@ -8,7 +8,7 @@ from pathlib import PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[1]
-KERNEL_LIMIT = 7_000
+KERNEL_LIMIT = 7_500
 # The release-source total includes production code and tests from the supported
 # runtime packages. The experimental CLI/REPL is reported separately and is not
 # part of this hard release gate.

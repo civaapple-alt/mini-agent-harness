@@ -1222,6 +1222,8 @@ pub enum TurnSteerAction {
 pub struct TurnSteerResult {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_status: Option<SteerRequestStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
     #[serde(default)]
     pub duplicate: bool,
@@ -1669,6 +1671,25 @@ pub struct ExecutionRecoveryInfo {
     pub uncertain_tool_calls: Vec<UncertainToolCall>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SteerRequestStatus {
+    Accepted,
+    Applied,
+    Unapplied,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SteerRequestInfo {
+    pub turn_id: TurnId,
+    pub request_id: String,
+    pub text: String,
+    pub status: SteerRequestStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// Identity and optional bounded arguments for an uncertain tool call.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1701,6 +1722,8 @@ pub struct TurnReadResult {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<ExecutionRecoveryInfo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steer_requests: Vec<SteerRequestInfo>,
 }
 
 /// A lifecycle notification for one ThreadItem becoming visible.

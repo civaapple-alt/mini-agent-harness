@@ -265,6 +265,33 @@ pub struct SessionExecutionState {
     pub resume_requests: HashMap<String, u64>,
     #[serde(default)]
     pub reconciliation_requests: HashMap<String, SessionReconciliationRequest>,
+    #[serde(default)]
+    pub steer_requests: Vec<SessionSteerRequest>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionSteerStatus {
+    Accepted,
+    Applied,
+    Unapplied,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSteerRequest {
+    pub turn_id: TurnId,
+    pub request_id: String,
+    pub text: String,
+    pub status: SessionSteerStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SteerRequestReservation {
+    Accepted(SessionSteerRequest),
+    Duplicate(SessionSteerRequest),
 }
 
 #[derive(Clone)]
@@ -3565,6 +3592,7 @@ impl ExecutionJournalSink for SessionExecutionJournal {
                     "next_model_step": checkpoint.next_model_step,
                     "final_text": checkpoint.final_text,
                     "phase": checkpoint.phase,
+                    "applied_steer_request_ids": checkpoint.applied_steer_request_ids,
                     "message_mode": message_mode,
                     "messages": messages,
                 })
@@ -3610,6 +3638,108 @@ impl ExecutionJournalSink for SessionExecutionJournal {
 }
 
 impl SessionExecutionJournal {
+    pub fn accept_steer_request(
+        &mut self,
+        turn_id: &TurnId,
+        request_id: &str,
+        text: &str,
+    ) -> Result<SteerRequestReservation, String> {
+        if request_id.trim().is_empty() || request_id.len() > 192 {
+            return Err("steer request id must be non-empty and at most 192 bytes".into());
+        }
+        if text.trim().is_empty() || text.len() > 30 * 1024 {
+            return Err("steer text must be non-empty and at most 30720 bytes".into());
+        }
+        let current = self
+            .execution_state()
+            .ok_or_else(|| "no durable execution checkpoint is available".to_string())?;
+        if let Some(previous) = current
+            .steer_requests
+            .iter()
+            .find(|request| request.request_id == request_id)
+        {
+            return if previous.turn_id == *turn_id && previous.text == text {
+                Ok(SteerRequestReservation::Duplicate(previous.clone()))
+            } else {
+                Err("steer request id was already used for different content".into())
+            };
+        }
+        if current.checkpoint.turn_id != *turn_id
+            || current.status != SessionExecutionStatus::Running
+        {
+            return Err("steer request does not match an active durable Turn".into());
+        }
+        if current
+            .steer_requests
+            .iter()
+            .filter(|request| request.status == SessionSteerStatus::Accepted)
+            .count()
+            >= 16
+        {
+            return Err("too many steer requests are waiting for application".into());
+        }
+        if current.steer_requests.len() >= 64
+            && current
+                .steer_requests
+                .iter()
+                .all(|request| request.status == SessionSteerStatus::Accepted)
+        {
+            return Err("steer request history is full".into());
+        }
+        self.append(ExecutionJournalEntry::SteerAccepted {
+            turn_id: turn_id.clone(),
+            request_id: request_id.to_string(),
+            text: text.to_string(),
+        })?;
+        Ok(SteerRequestReservation::Accepted(SessionSteerRequest {
+            turn_id: turn_id.clone(),
+            request_id: request_id.to_string(),
+            text: text.to_string(),
+            status: SessionSteerStatus::Accepted,
+            reason: None,
+        }))
+    }
+
+    pub fn steer_request(&self, request_id: &str) -> Option<SessionSteerRequest> {
+        self.execution_state
+            .lock()
+            .unwrap()
+            .as_ref()?
+            .steer_requests
+            .iter()
+            .find(|request| request.request_id == request_id)
+            .cloned()
+    }
+
+    pub fn mark_pending_steers_unapplied(
+        &mut self,
+        turn_id: &TurnId,
+        reason: &str,
+    ) -> Result<Vec<SessionSteerRequest>, String> {
+        let pending = self
+            .execution_state()
+            .filter(|state| state.checkpoint.turn_id == *turn_id)
+            .map(|state| {
+                state
+                    .steer_requests
+                    .into_iter()
+                    .filter(|request| {
+                        request.turn_id == *turn_id
+                            && request.status == SessionSteerStatus::Accepted
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for request in &pending {
+            self.append(ExecutionJournalEntry::SteerUnapplied {
+                turn_id: turn_id.clone(),
+                request_id: request.request_id.clone(),
+                reason: reason.to_string(),
+            })?;
+        }
+        Ok(pending)
+    }
+
     pub fn execution_state(&self) -> Option<SessionExecutionState> {
         self.execution_state.lock().unwrap().clone()
     }
@@ -3738,6 +3868,8 @@ fn execution_entry_turn_id(entry: &ExecutionJournalEntry) -> TurnId {
         | ExecutionJournalEntry::Resumed { turn_id, .. }
         | ExecutionJournalEntry::Heartbeat { turn_id, .. }
         | ExecutionJournalEntry::NeedsReconciliation { turn_id, .. }
+        | ExecutionJournalEntry::SteerAccepted { turn_id, .. }
+        | ExecutionJournalEntry::SteerUnapplied { turn_id, .. }
         | ExecutionJournalEntry::Settled { turn_id } => turn_id.clone(),
     }
 }
@@ -3863,11 +3995,13 @@ mod tests {
                         model_selection: None,
                         reasoning_selection: None,
                         reasoning_effort: None,
+                        steer_request_id: None,
                     },
                     messages,
                     next_model_step: 1,
                     final_text: String::new(),
                     phase: ExecutionPhase::ToolBatch,
+                    applied_steer_request_ids: Vec::new(),
                 },
             })
             .unwrap();
@@ -4070,11 +4204,13 @@ mod tests {
                         model_selection: None,
                         reasoning_selection: None,
                         reasoning_effort: None,
+                        steer_request_id: None,
                     },
                     messages,
                     next_model_step: 1,
                     final_text: String::new(),
                     phase: ExecutionPhase::ModelRequest,
+                    applied_steer_request_ids: Vec::new(),
                 },
             })
             .unwrap();
@@ -4663,11 +4799,13 @@ mod tests {
                         model_selection: None,
                         reasoning_selection: None,
                         reasoning_effort: None,
+                        steer_request_id: None,
                     },
                     messages: messages.clone(),
                     next_model_step: 1,
                     final_text: String::new(),
                     phase: ExecutionPhase::ModelRequest,
+                    applied_steer_request_ids: Vec::new(),
                 },
             })
             .unwrap();

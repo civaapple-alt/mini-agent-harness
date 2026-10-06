@@ -493,7 +493,7 @@ impl<M: Model> Harness<M> {
     ) -> Result<RunOutcome, HarnessError<M::Error>> {
         let crate::ExecutionRunOptions {
             tool_context,
-            execution_context,
+            mut execution_context,
             mut journal,
             resume: execution_resume,
         } = options;
@@ -538,6 +538,7 @@ impl<M: Model> Harness<M> {
                             next_model_step: 1,
                             final_text: String::new(),
                             phase: ExecutionPhase::ModelRequest,
+                            applied_steer_request_ids: execution.applied_steer_request_ids.clone(),
                         },
                     },
                 )
@@ -625,6 +626,7 @@ impl<M: Model> Harness<M> {
                             next_model_step: step.saturating_add(1),
                             final_text: final_text.clone(),
                             phase: ExecutionPhase::ModelRequest,
+                            applied_steer_request_ids: execution.applied_steer_request_ids.clone(),
                         },
                     },
                 )
@@ -636,7 +638,16 @@ impl<M: Model> Harness<M> {
         let mut last_tool_batch: Option<Vec<(String, serde_json::Value, String)>> = None;
 
         loop {
-            match self.control_action(&mut final_text, step, control, steering_mode, observer)? {
+            match self.control_action(
+                &mut final_text,
+                step,
+                control,
+                steering_mode,
+                execution_context
+                    .as_mut()
+                    .map(|execution| &mut execution.applied_steer_request_ids),
+                observer,
+            )? {
                 ControlAction::Proceed => {}
                 ControlAction::ContinueTurn => continue,
                 ControlAction::Finish(outcome) => return Ok(outcome),
@@ -671,6 +682,7 @@ impl<M: Model> Harness<M> {
                             next_model_step: step,
                             final_text: final_text.clone(),
                             phase: ExecutionPhase::ModelRequest,
+                            applied_steer_request_ids: execution.applied_steer_request_ids.clone(),
                         },
                     },
                 )
@@ -702,8 +714,24 @@ impl<M: Model> Harness<M> {
                         reasoning_effort: self.reasoning_effort.as_deref(),
                     };
                     let model_context = self.model.context_snapshot(request.model_selection);
-                    let result = self.model.respond(request, &mut model_events).await;
-                    result.map(|response| (response, model_events.timing(), model_context))
+                    let result = control
+                        .until_cancelled(self.model.respond(request, &mut model_events))
+                        .await;
+                    match result {
+                        Ok(result) => {
+                            result.map(|response| (response, model_events.timing(), model_context))
+                        }
+                        Err(()) => {
+                            control.take_cancel_requested();
+                            return Ok(finish(
+                                std::mem::take(&mut final_text),
+                                self.session.messages().to_vec(),
+                                step,
+                                StopReason::Cancelled,
+                                observer,
+                            ));
+                        }
+                    }
                 };
                 match model_response {
                     Ok(response) => break response,
@@ -728,6 +756,9 @@ impl<M: Model> Harness<M> {
                                             next_model_step: step,
                                             final_text: final_text.clone(),
                                             phase: ExecutionPhase::ModelRequest,
+                                            applied_steer_request_ids: execution
+                                                .applied_steer_request_ids
+                                                .clone(),
                                         },
                                     },
                                 )
@@ -809,6 +840,9 @@ impl<M: Model> Harness<M> {
                     step,
                     control,
                     steering_mode,
+                    execution_context
+                        .as_mut()
+                        .map(|execution| &mut execution.applied_steer_request_ids),
                     observer,
                 )? {
                     ControlAction::Proceed => {}
@@ -820,6 +854,16 @@ impl<M: Model> Harness<M> {
                     self.session.messages().to_vec(),
                     step,
                     StopReason::Completed,
+                    observer,
+                ));
+            }
+
+            if control.take_cancel_requested() {
+                return Ok(finish(
+                    std::mem::take(&mut final_text),
+                    self.session.messages().to_vec(),
+                    step,
+                    StopReason::Cancelled,
                     observer,
                 ));
             }
@@ -875,6 +919,7 @@ impl<M: Model> Harness<M> {
                             next_model_step: step.saturating_add(1),
                             final_text: final_text.clone(),
                             phase: ExecutionPhase::ModelRequest,
+                            applied_steer_request_ids: execution.applied_steer_request_ids.clone(),
                         },
                     },
                 )
@@ -893,7 +938,16 @@ impl<M: Model> Harness<M> {
                 let _ = self.append_context(LOOP_WARNING_TEXT);
             }
 
-            match self.control_action(&mut final_text, step, control, steering_mode, observer)? {
+            match self.control_action(
+                &mut final_text,
+                step,
+                control,
+                steering_mode,
+                execution_context
+                    .as_mut()
+                    .map(|execution| &mut execution.applied_steer_request_ids),
+                observer,
+            )? {
                 ControlAction::Proceed => {}
                 ControlAction::ContinueTurn => continue,
                 ControlAction::Finish(outcome) => return Ok(outcome),
@@ -911,6 +965,7 @@ impl<M: Model> Harness<M> {
         step: usize,
         control: &RunControl,
         steering_mode: SteeringMode,
+        applied_steer_request_ids: Option<&mut Vec<String>>,
         observer: &mut O,
     ) -> Result<ControlAction, HarnessError<M::Error>> {
         if control.take_cancel_requested() {
@@ -923,10 +978,16 @@ impl<M: Model> Harness<M> {
             )));
         }
         if steering_mode == SteeringMode::ContinueSameTurn
-            && let Some(input) = control.take_steer_input()
+            && let Some(pending) = control.take_steer_input()
         {
-            if let Err(limit) = self.append_user_input(input.text) {
+            let request_id = pending.steer_request_id;
+            if let Err(limit) = self.append_user_input(pending.text) {
                 return Err(fail_limit(limit, observer));
+            }
+            if let (Some(request_id), Some(applied)) = (request_id, applied_steer_request_ids)
+                && !applied.contains(&request_id)
+            {
+                applied.push(request_id);
             }
             final_text.clear();
             return Ok(ControlAction::ContinueTurn);

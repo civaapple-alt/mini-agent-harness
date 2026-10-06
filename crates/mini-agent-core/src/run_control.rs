@@ -1,7 +1,12 @@
 use mini_agent_protocol::TurnInput;
+use std::future::Future;
+use std::future::poll_fn;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::task::Poll;
+use std::task::Waker;
 
 use crate::input::InputQueueError;
 use crate::input::PendingInputQueue;
@@ -22,6 +27,7 @@ pub enum SteeringMode {
 pub struct RunControl {
     steer_requested: Arc<AtomicBool>,
     cancel_requested: Arc<AtomicBool>,
+    cancel_waker: Arc<Mutex<Option<Waker>>>,
     pending_inputs: PendingInputQueue,
 }
 
@@ -37,6 +43,9 @@ impl RunControl {
     /// Requests cancellation at the next safe boundary of the active turn.
     pub fn request_cancel(&self) {
         self.cancel_requested.store(true, Ordering::Release);
+        if let Some(waker) = self.cancel_waker.lock().unwrap().take() {
+            waker.wake();
+        }
     }
 
     pub fn clear_cancel(&self) {
@@ -53,7 +62,16 @@ impl RunControl {
     }
 
     pub fn submit(&self, input: TurnInput) -> Result<(), InputQueueError> {
+        self.submit_steer(input, None)
+    }
+
+    pub fn submit_steer(
+        &self,
+        mut input: TurnInput,
+        request_id: Option<String>,
+    ) -> Result<(), InputQueueError> {
         let is_steer = input.mode == mini_agent_protocol::TurnInputMode::Steer;
+        input.steer_request_id = request_id;
         self.pending_inputs.submit(input)?;
         if is_steer {
             self.request_steer();
@@ -67,6 +85,27 @@ impl RunControl {
             self.clear_steer();
         }
         input
+    }
+
+    pub fn cancel_pending_steers(&self) -> Vec<TurnInput> {
+        let cancelled = self.pending_inputs.cancel_steers();
+        self.clear_steer();
+        cancelled
+    }
+
+    pub(crate) async fn until_cancelled<F: Future>(&self, future: F) -> Result<F::Output, ()> {
+        let mut future = Box::pin(future);
+        poll_fn(|context| {
+            if self.cancel_requested.load(Ordering::Acquire) {
+                return Poll::Ready(Err(()));
+            }
+            *self.cancel_waker.lock().unwrap() = Some(context.waker().clone());
+            if self.cancel_requested.load(Ordering::Acquire) {
+                return Poll::Ready(Err(()));
+            }
+            future.as_mut().poll(context).map(Ok)
+        })
+        .await
     }
 
     pub fn take_follow_up_input(&self) -> Option<TurnInput> {

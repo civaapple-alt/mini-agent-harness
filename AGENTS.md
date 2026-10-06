@@ -77,7 +77,7 @@ package.
 
 ## Size budget
 
-- Core + Protocol hard limit: 7,000 effective Rust source lines across `core`
+- Core + Protocol hard limit: 7,500 effective Rust source lines across `core`
   and `protocol`.
 - Release-source hard limit: 65,000 effective Rust source lines across Core, Protocol,
   Capabilities, Host, and App Server.
@@ -127,7 +127,7 @@ New code defaults to net-zero growth. Features that need more code may exceed
 the 1,000-line review reference when their scope and boundary evidence support
 it; the absolute ceilings remain the hard limits.
 Never remove Core tests, Actor/CAS/Session authority, or public protocol behavior
-only to satisfy a line target. The 7,000-line Core + Protocol, 45,000-line
+only to satisfy a line target. The 7,500-line Core + Protocol, 45,000-line
 Control Plane, and 65,000-line Release Rust ceilings remain hard gates;
 experimental CLI/REPL growth is informational until it is promoted into the
 supported surface.

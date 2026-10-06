@@ -293,6 +293,7 @@ impl<M: Model> Thread<M> {
                 preflight_error,
                 journal: None,
                 resume: None,
+                applied_steer_request_ids: Vec::new(),
             },
         )
         .await
@@ -333,6 +334,7 @@ impl<M: Model> Thread<M> {
             preflight_error,
             journal,
             resume: execution_resume,
+            applied_steer_request_ids,
         } = options;
         let id = if let Some((checkpoint, _)) = execution_resume.as_ref() {
             if self.status == ThreadStatus::Closed {
@@ -400,6 +402,7 @@ impl<M: Model> Thread<M> {
                     execution_context: Some(ExecutionRunContext {
                         turn_id: id.clone(),
                         input: input.clone(),
+                        applied_steer_request_ids,
                     }),
                     journal,
                     resume: execution_resume,

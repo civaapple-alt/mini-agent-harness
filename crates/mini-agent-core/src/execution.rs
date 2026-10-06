@@ -21,6 +21,8 @@ pub struct ExecutionCheckpoint {
     pub next_model_step: usize,
     pub final_text: String,
     pub phase: ExecutionPhase,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applied_steer_request_ids: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -64,6 +66,7 @@ pub struct ExecutionToolBatch {
 pub struct ExecutionRunContext {
     pub turn_id: TurnId,
     pub input: TurnInput,
+    pub applied_steer_request_ids: Vec<String>,
 }
 
 /// Optional Host-owned state supplied when Core continues one logical Turn.
@@ -81,6 +84,7 @@ pub struct TurnExecutionOptions<'p, 'j> {
     pub preflight_error: Option<&'p str>,
     pub journal: Option<&'j mut dyn ExecutionJournalSink>,
     pub resume: Option<(ExecutionCheckpoint, Option<ExecutionToolBatch>)>,
+    pub applied_steer_request_ids: Vec<String>,
 }
 
 /// A bounded journal update emitted by the Core loop to its persistence owner.
@@ -89,6 +93,16 @@ pub struct TurnExecutionOptions<'p, 'j> {
 pub enum ExecutionJournalEntry {
     Checkpoint {
         checkpoint: ExecutionCheckpoint,
+    },
+    SteerAccepted {
+        turn_id: TurnId,
+        request_id: String,
+        text: String,
+    },
+    SteerUnapplied {
+        turn_id: TurnId,
+        request_id: String,
+        reason: String,
     },
     ToolBatchStarted {
         batch: ToolBatchIntent,

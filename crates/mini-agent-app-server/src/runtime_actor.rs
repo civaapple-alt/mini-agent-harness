@@ -1293,14 +1293,14 @@ fn schedule_goal_turn(
         .commands
         .try_send(crate::worker::Command::Start {
             thread_id: state.management.thread_id(),
-            request: TurnStart::new(TurnInput::new(
+            request: Box::new(TurnStart::new(TurnInput::new(
                 TurnInputMode::StartIfIdle,
                 mini_agent_host::goal_turn_prompt(
                     &goal.objective,
                     goal.current_milestone,
                     goal.total_milestones,
                 ),
-            )),
+            ))),
             expected_turn_id: None,
             origin: crate::worker::TurnOrigin::Goal {
                 goal_id: goal.goal_id.clone(),

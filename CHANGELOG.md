@@ -7,6 +7,7 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changes
 
+- Raise the Core + Protocol effective Rust source hard limit to 7,500 lines.
 - Add an optional Skill `origin` category to the bounded discovery catalog,
   capability manifest, and `skills/list` response while keeping legacy
   `source` and `group` fields and accepting responses without `origin`.
@@ -21,6 +22,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   uncertain tool call so clients can inspect its command before reconciliation.
 - Rebuild up to 256 visible activity items for an unsettled Turn from its
   execution checkpoint and pending tool batch.
+- Persist bounded Session steer requests before acknowledging them, deduplicate
+  retries by request ID, expose accepted/applied/unapplied state through
+  `turn/read`, cancel the active model future and cancellable tools on stop, and
+  requeue only unapplied accepted steer requests after an explicit Turn resume.
 - Isolate SDK-launched App Server subprocesses from the caller's terminal
   interrupt signal so the Gateway can stop and reap them through the client
   lifecycle.
