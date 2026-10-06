@@ -22,8 +22,8 @@ use serde_json::Value;
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
@@ -86,6 +86,118 @@ fn session_turn_start_request(
             turn_source,
         }),
     )
+}
+
+struct WorldContextScenarioModel {
+    observed_messages: Arc<Mutex<Option<Vec<Message>>>>,
+}
+
+impl Model for WorldContextScenarioModel {
+    type Error = Infallible;
+
+    async fn respond<'a>(
+        &'a mut self,
+        request: ModelRequest<'a>,
+        _events: &'a mut (dyn ModelEventSink + Send),
+    ) -> Result<ModelResponse, Self::Error> {
+        *self.observed_messages.lock().unwrap() = Some(request.messages.to_vec());
+        Ok(ModelResponse {
+            reasoning: String::new(),
+            text: "environment received".to_string(),
+            tool_calls: Vec::new(),
+            usage: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn world_state_probe_projection_reaches_the_model_through_app_server() {
+    let workspace = crate::tests::test_root("world-context");
+    std::fs::write(workspace.join("scene.blend"), "fixture").unwrap();
+    let world = mini_agent_host::WorldState::detect_with_roots(
+        &workspace,
+        Vec::new(),
+        SecurityPreset::Default,
+        ApprovalPolicy::Automatic,
+        SandboxKind::Native,
+    );
+    let expected_context = world.model_context().unwrap();
+    let expected_status = world.status_json();
+    assert!(expected_context.contains("<project_kinds>blender</project_kinds>"));
+    assert!(expected_context.contains("python3 -m pip"));
+
+    let observed_messages = Arc::new(Mutex::new(None));
+    let mut harness = Harness::new(
+        WorldContextScenarioModel {
+            observed_messages: Arc::clone(&observed_messages),
+        },
+        ToolRouter::default(),
+        HarnessConfig::default(),
+    );
+    harness
+        .restore_history(vec![Message::Context {
+            text: expected_context.clone(),
+        }])
+        .unwrap();
+    let server = AppServer::new(
+        ThreadStart::new(ThreadId::new("thread-1")),
+        Thread::new(ThreadId::new("initial"), harness),
+    );
+    let management = RuntimeManagementService::new(
+        server.clone(),
+        None,
+        world,
+        Vec::new(),
+        0,
+        Vec::new(),
+        ApprovalController::with_preset(ApprovalPolicy::Automatic, Default::default()),
+    );
+    let services = RuntimeServices::new(
+        management,
+        ThreadSettingsService::new(),
+        ThreadGoalRequestProcessor::new(
+            workspace.clone(),
+            crate::goal_service::GoalLimits::default(),
+        ),
+    )
+    .unwrap();
+    let connection = AppServerConnection::new(server).with_runtime_services(services);
+    let mut client = crate::LocalAppServerClient::new(connection);
+    client.initialize("world-context", "0").await.unwrap();
+    let projection = client.world_state().await.unwrap();
+    assert_eq!(projection.context, expected_context);
+    assert_eq!(
+        projection.status["project_kinds"],
+        serde_json::json!(["blender"])
+    );
+    assert_eq!(projection.status, expected_status);
+
+    client
+        .start_turn(
+            ThreadId::new("thread-1"),
+            TurnInput::new(TurnInputMode::Start, "inspect the project environment"),
+        )
+        .await
+        .unwrap();
+    loop {
+        let event = client.next_event().await.unwrap();
+        if matches!(event.event, mini_agent_protocol::Event::TurnFinished { .. }) {
+            break;
+        }
+    }
+    assert!(
+        observed_messages
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|messages| messages.iter().any(|message| matches!(
+                message,
+                Message::Context { text } if text == &expected_context
+            )))
+    );
+
+    client.shutdown().await.unwrap();
+    std::fs::remove_dir_all(workspace).unwrap();
 }
 
 #[tokio::test]

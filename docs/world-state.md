@@ -12,6 +12,34 @@ access scope, approval policy, sandbox kind, and a fixed command catalog. It
 does not include environment values, command output, provider credentials, or
 an unbounded directory scan.
 
+### Local environment detection
+
+Host checks a fixed command catalog against `PATH`. On macOS it also checks
+`brew`, `swift`, `swiftc`, `xcrun`, and `xcodebuild`. A command found on `PATH`
+is normally reported as available when it is an executable file. `xcodebuild`
+must additionally complete `xcodebuild -version` within two seconds, so the
+Command Line Tools placeholder does not imply a full Xcode installation.
+
+When `python3` is present, Host runs `python3 -m pip --version` with a two-second
+deadline and no network access. The `python3 -m pip` capability is unavailable
+when the module is missing, the command fails, or the deadline expires. Host
+does not install packages.
+
+Blender is detected either as a `blender` executable on `PATH` or at the fixed
+macOS CLI locations `/Applications/Blender.app/Contents/MacOS/Blender` and
+`~/Applications/Blender.app/Contents/MacOS/Blender`. Host does not search other
+application directories. The bounded `available_applications` status and model
+context include the resolved CLI path, including when Blender is available
+only through an application bundle. A `.blend` file directly inside the
+primary or associated workspace root adds the `blender` project marker;
+nested directories are not scanned. The marker check inspects at most 128 root
+entries.
+
+These checks describe local capabilities only. They do not install software,
+grant tool permissions, or expand the existing execution sandbox. `world/state`
+and `world/refresh` expose the same bounded projection; no separate RPC method
+is added.
+
 The App Server exposes the current projection through `world/state`. A client
 can request `world/refresh` after the workspace or available commands change.
 `world/set_execution` updates the access scope and approval policy through the

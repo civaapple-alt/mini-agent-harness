@@ -1233,7 +1233,7 @@ fn write_builtin_skill(builtin_root: &Path, name: &str, description: &str, body:
     .unwrap();
 }
 
-fn test_root(label: &str) -> PathBuf {
+pub(crate) fn test_root(label: &str) -> PathBuf {
     static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
