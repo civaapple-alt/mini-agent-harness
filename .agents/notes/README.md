@@ -10,6 +10,11 @@
 
 当前相关决策：
 
+- [项目 Skill 可编辑性、来源与模型调用](implemented/feature/2026-10-06-skill-write-origin-and-model-invocation.zh.md)
+- [macOS 开发环境能力探测](implemented/feature/2026-10-06-macos-world-state-capabilities.zh.md)
+- [重启后的未结 Turn 活动投影](implemented/bug-fix/2026-10-06-unsettled-turn-activity-projection.zh.md)
+- [SDK 与 App Server 子进程信号隔离](implemented/process/2026-10-06-isolate-app-server-process-signals.zh.md)
+- [Responses 供应商预设与连接探测](implemented/feature/2026-10-06-responses-provider-probes.zh.md)
 - [上下文字节硬限制与模型快照](implemented/architecture/2026-10-05-context-waterline-safety-and-model-snapshot.zh.md)
 - [Token 水位驱动的上下文压缩与字节上限解耦](proposed/architecture/2026-10-05-token-aware-context-compaction-waterline.zh.md)
 - [Session V2 恢复、来源清单与执行边界](proposed/architecture/2026-10-03-v2-session-recovery-context-and-shell.zh.md)
@@ -128,6 +133,11 @@ graph LR
 
 ### Implemented
 
+- [项目 Skill 可编辑性、来源与模型调用](implemented/feature/2026-10-06-skill-write-origin-and-model-invocation.zh.md)
+- [macOS 开发环境能力探测](implemented/feature/2026-10-06-macos-world-state-capabilities.zh.md)
+- [重启后的未结 Turn 活动投影](implemented/bug-fix/2026-10-06-unsettled-turn-activity-projection.zh.md)
+- [SDK 与 App Server 子进程信号隔离](implemented/process/2026-10-06-isolate-app-server-process-signals.zh.md)
+- [Responses 供应商预设与连接探测](implemented/feature/2026-10-06-responses-provider-probes.zh.md)
 - [Session 超长工具输出恢复、模型耗时与 Plan Mode 工具约束](implemented/architecture/2026-10-01-context-engineering-session-recovery-and-plan-tools.zh.md)
 - [Rust 有效行数硬上限调整为 7,000 / 45,000 / 65,000](implemented/process/2026-10-01-line-budget-ceilings.zh.md)
 - [Web Studio 会话上下文可视化与缓存友好注入](implemented/process/2026-09-30-web-studio-session-context-visibility.zh.md)
