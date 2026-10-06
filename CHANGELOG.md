@@ -10,6 +10,8 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 - Detect macOS development commands, validate `python3 -m pip` and `xcodebuild`
   with bounded local probes, and expose Blender's resolved CLI path and root
   `.blend` project marker through World State.
+- Allow Skill roots inside configured write roots to follow normal write and
+  approval policy while keeping external Skill roots read-only.
 - Let `turn/read` return bounded, redacted arguments for one explicitly selected
   uncertain tool call so clients can inspect its command before reconciliation.
 - Rebuild up to 256 visible activity items for an unsettled Turn from its

@@ -399,12 +399,13 @@ historical project without the field also defaults to enabled. Removing
 `pstack` disables both `+ pstack` workflow activation and all pstack Skill
 namespaces for that project after its runtime restarts.
 
-每个已启用 Skill 的根目录同时作为受信任的只读目录。模型可以在当前 Turn
-中通过 `read_file` 按需查看该目录下的 `SKILL.md`、`references/`、`scripts/`、
-`assets/` 和其他说明文件；这些文件不会在发现阶段递归加载。Skill 目录的
-读取仍受 `read_file` 分页、UTF-8 和当前 Turn 64 KiB Skill 读取总量限制约束。
-这个只读授权不包含写入或执行：`apply_patch` 仍使用工作区写入边界，脚本仍需
-通过 `shell`、approval policy 和 sandbox。
+每个已启用 Skill 的根目录都会作为受信任的读取根加入工具 Workspace。模型可以
+在当前 Turn 中通过 `read_file` 按需查看该目录下的 `SKILL.md`、`references/`、
+`scripts/`、`assets/` 和其他说明文件；这些文件不会在发现阶段递归加载。Skill
+目录读取仍受 `read_file` 分页、UTF-8 和当前 Turn 64 KiB 读取总量限制约束。
+项目工作区或显式配置的写入根内的 Skill 文件仍按普通文件的写入范围和审批策略处理；
+其他工作区外 Skill 根保持只读。读取授权不会自动执行脚本，脚本仍需通过 `shell`、
+approval policy 和 sandbox。
 
 Use the `selectedSkills` field on `turn/start` to activate skills explicitly.
 The canonical pstack name is `pstack:how`; `pstack-plugin:how` is accepted as

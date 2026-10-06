@@ -650,7 +650,7 @@ impl Workspace {
         self.session_read_roots
             .iter()
             .any(|root| path.starts_with(root))
-            || self.skill_read_roots.allows(path)
+            || (self.skill_read_roots.allows(path) && !self.is_write_path(path))
             || (self
                 .extra_read_roots
                 .iter()

@@ -549,13 +549,13 @@ activation uses `activation: "explicit"`; ordinary metadata-first Turns use
 `activation: "on_demand"`. The event carries the same Thread/Turn identity,
 Core sequence, and bounded `itemId` as other `turn/event` notifications.
 
-启用 Skill 的根目录由 Host 作为受信任的只读根加入工具 Workspace。全局 Skill 在
+启用 Skill 的根目录由 Host 作为受信任的读取根加入工具 Workspace。全局 Skill 在
 metadata 中使用受控的 `.mini-agent/skills/...` 或 `.agents/skills/...` 逻辑位置，
 Host 会把它解析到已授权的实际根目录；模型可以在需要时用现有 `read_file` 查看
-该 Skill 目录内的关联文档、脚本源码或其他文本
-资源；App Server 不递归预加载这些文件，也不把资源路径加入 capability manifest。
-当前 Turn 的 Skill 目录读取结果合计不超过 64 KiB。这个授权不改变写入、Shell
-执行或审批边界。
+该 Skill 目录内的关联文档、脚本源码或其他文本资源。App Server 不递归预加载这些
+文件，也不把资源路径加入 capability manifest。当前 Turn 的 Skill 目录读取结果
+合计不超过 64 KiB。项目工作区或显式配置的写入根内的 Skill 文件仍按普通写入边界与
+审批策略处理；其他工作区外的 Skill 根保持只读。读取授权不改变 Shell 执行或审批边界。
 
 The capability manifest returned by `initialize` contains
 `builtinSkillGroups` and `availableSkills`. Each available-skill entry contains

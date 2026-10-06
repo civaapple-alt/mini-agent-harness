@@ -632,7 +632,7 @@ fn read_file_accepts_configured_extension_roots() {
 }
 
 #[test]
-fn enabled_skill_roots_are_readable_without_approval_but_not_writable() {
+fn external_enabled_skill_roots_are_readable_without_approval_but_not_writable() {
     let root = test_root();
     let skill_root = test_root();
     fs::create_dir_all(skill_root.join("references")).unwrap();
@@ -643,7 +643,22 @@ fn enabled_skill_roots_are_readable_without_approval_but_not_writable() {
     )
     .unwrap();
     fs::write(skill_root.join("scripts/check.py"), "print('check')\n").unwrap();
-    let workspace = skill_workspace(root.clone(), skill_root.clone());
+    let approval = ApprovalController::with_callback(ApprovalPolicy::Automatic, |_| {
+        panic!("external Skill writes must be rejected before requesting approval")
+    });
+    approval.set_policy(SecurityPolicy::for_preset(SecurityPreset::FullMachine));
+    let workspace = Arc::new(
+        Workspace::with_read_roots_and_skill_roots(
+            root.clone(),
+            approval,
+            Vec::new(),
+            Vec::new(),
+            SkillReadRoots::from_paths(vec![skill_root.clone()]),
+            Vec::new(),
+            SandboxKind::Native,
+        )
+        .unwrap(),
+    );
     let read = ReadFile(Arc::clone(&workspace));
     let path = skill_root.join("references/patterns.md");
     let request = ToolExecutionRequest::new(
@@ -685,6 +700,59 @@ fn enabled_skill_roots_are_readable_without_approval_but_not_writable() {
     assert_eq!(fs::read_to_string(&path).unwrap(), "reference pattern\n");
 
     remove_test_root(&skill_root);
+    remove_test_root(&root);
+}
+
+#[test]
+fn workspace_skill_roots_follow_project_write_admission() {
+    let root = test_root();
+    let skill_root = root.join(".agents/skills/blender-modeling");
+    let scripts = skill_root.join("scripts");
+    fs::create_dir_all(&scripts).unwrap();
+    fs::write(scripts.join("measure.py"), "old\n").unwrap();
+    fs::write(scripts.join("remove.py"), "remove me\n").unwrap();
+    let workspace = Arc::new(
+        Workspace::with_read_roots_and_skill_roots(
+            root.clone(),
+            approval_controller(ApprovalPolicy::Interactive, ApprovalOutcome::Approved),
+            Vec::new(),
+            Vec::new(),
+            SkillReadRoots::from_paths(vec![skill_root]),
+            Vec::new(),
+            SandboxKind::Native,
+        )
+        .unwrap(),
+    );
+    let patch = ApplyPatch(workspace);
+    let patch_text = "*** Begin Patch\n\
+*** Update File: .agents/skills/blender-modeling/scripts/measure.py\n\
+@@\n-old\n+updated\n\
+*** Add File: .agents/skills/blender-modeling/scripts/new.py\n\
++created\n\
+*** Delete File: .agents/skills/blender-modeling/scripts/remove.py\n\
+*** End Patch";
+    let request = ToolExecutionRequest::new(
+        "workspace-skill-edit",
+        "apply_patch",
+        json!({"patch": patch_text}),
+    );
+
+    assert!(matches!(
+        patch.admission(&request).unwrap(),
+        ToolAdmission::ApprovalRequired { .. }
+    ));
+    patch.execute(&json!({"patch": patch_text})).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(scripts.join("measure.py")).unwrap(),
+        "updated\n"
+    );
+    assert_eq!(
+        fs::read_to_string(scripts.join("new.py")).unwrap(),
+        "created\n"
+    );
+    assert!(!scripts.join("remove.py").exists());
+
     remove_test_root(&root);
 }
 
