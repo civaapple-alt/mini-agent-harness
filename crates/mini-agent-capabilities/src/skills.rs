@@ -785,7 +785,19 @@ fn read_instruction_prefix(path: &Path) -> Result<String, String> {
     let read = file
         .read(&mut buf)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    String::from_utf8(buf[..read].to_vec()).map_err(|_| format!("{} is not UTF-8", path.display()))
+    match String::from_utf8(buf[..read].to_vec()) {
+        Ok(content) => Ok(content),
+        Err(error) if error.utf8_error().error_len().is_none() => {
+            // The fixed-size prefix can end in the middle of a UTF-8 code
+            // point in the Skill body. The frontmatter is complete before
+            // this boundary, so keep the valid prefix and ignore the cut
+            // trailing character.
+            let valid_up_to = error.utf8_error().valid_up_to();
+            String::from_utf8(error.into_bytes()[..valid_up_to].to_vec())
+                .map_err(|_| format!("{} is not UTF-8", path.display()))
+        }
+        Err(_) => Err(format!("{} is not UTF-8", path.display())),
+    }
 }
 
 fn read_bounded(path: &Path) -> Result<String, String> {

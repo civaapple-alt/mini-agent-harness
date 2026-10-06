@@ -48,6 +48,30 @@ fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
 }
 
 #[test]
+fn discovers_skill_when_utf8_character_crosses_instruction_prefix_boundary() {
+    let root = test_root();
+    let skill_dir = root.join(".agents/skills/boundary");
+    fs::create_dir_all(&skill_dir).unwrap();
+    let frontmatter = "---\nname: boundary\ndescription: Boundary test.\n---\n";
+    let padding_len = super::MAX_INSTRUCTION_FRONTMATTER_BYTES - frontmatter.len() - 2;
+    let body = format!("{}中 body", "x".repeat(padding_len));
+    let content = format!("{frontmatter}{body}");
+    assert!(content.len() > super::MAX_INSTRUCTION_FRONTMATTER_BYTES);
+    assert!(std::str::from_utf8(content.as_bytes()).is_ok());
+    fs::write(skill_dir.join("SKILL.md"), content).unwrap();
+
+    let discovery = discover_for_tests(&root, &[]);
+
+    assert_eq!(discovery.skill_names(), ["boundary"]);
+    assert!(
+        discovery.diagnostics().is_empty(),
+        "{:?}",
+        discovery.diagnostics()
+    );
+    remove_test_root(&root);
+}
+
+#[test]
 fn activates_typed_skill_dependencies_without_enabling_providers() {
     let root = test_root();
     write_skill_with_dependencies(
