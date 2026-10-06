@@ -7,6 +7,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changes
 
+- Expose the managed App Server PID and bounded per-method JSON-RPC aggregates
+  from `MiniAgentClient`. Add confirmed graceful-stop results and optional
+  stderr diagnostics for App Server JSON-RPC read, parse, dispatch, queue,
+  serialization, and write stages without changing protocol V2.
 - Raise the Core + Protocol effective Rust source hard limit to 7,500 lines.
 - Add an optional Skill `origin` category to the bounded discovery catalog,
   capability manifest, and `skills/list` response while keeping legacy

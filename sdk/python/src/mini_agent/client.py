@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
 from typing import Any, Literal, Self
@@ -26,6 +27,7 @@ from mini_agent.errors import (
     TurnTimeoutError,
 )
 from mini_agent.events import parse_event
+from mini_agent.rpc_metrics import RpcMetrics
 from mini_agent.types import (
     DEFAULT_BUILTIN_TOOLS,
     BackgroundTask,
@@ -280,6 +282,8 @@ class MiniAgentClient:
         self._stderr_task: asyncio.Task[None] | None = None
         self._next_id: int = 1
         self._pending_requests: dict[int, asyncio.Future[Any]] = {}
+        self._pending_rpc_methods: dict[int, str] = {}
+        self._rpc_metrics = RpcMetrics()
         self._event_queues: list[asyncio.Queue[dict[str, Any]]] = []
         self._event_queue_threads: dict[asyncio.Queue[dict[str, Any]], str] = {}
         self._event_queue_bytes: dict[asyncio.Queue[dict[str, Any]], int] = {}
@@ -348,9 +352,55 @@ class MiniAgentClient:
         self._stderr_task = asyncio.create_task(self._stderr_loop())
         logger.debug("mini-agent-app-server started (PID: %d)", self._proc.pid)
 
-    async def stop(self) -> None:
-        """Gracefully stop the server process."""
+    async def stop(self, *, force: bool = True, timeout: float = 1.0) -> bool:
+        """Stop the server and report whether process exit was confirmed.
+
+        ``force=False`` closes stdin and waits for the App Server to finish its
+        normal EOF shutdown path. The client remains attached to the process
+        when exit is not confirmed, allowing its owner to avoid starting a
+        second writer for the same Session.
+        """
         process = self._proc
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        if process and process.returncode is None:
+            if process.stdin and not process.stdin.is_closing():
+                try:
+                    process.stdin.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+            try:
+                await asyncio.wait_for(process.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                if not force:
+                    return False
+            except Exception:  # noqa: BLE001
+                if process.returncode is None:
+                    return False
+            if force and process.returncode is None:
+                try:
+                    process.terminate()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    try:
+                        process.kill()
+                        await asyncio.wait_for(process.wait(), timeout=timeout)
+                    except Exception:  # noqa: BLE001
+                        return False
+                except Exception:  # noqa: BLE001
+                    return False
+                if process.returncode is None:
+                    try:
+                        process.kill()
+                        await asyncio.wait_for(process.wait(), timeout=timeout)
+                    except Exception:  # noqa: BLE001
+                        return False
+        if process and process.returncode is None:
+            return False
+
         for queue in self._event_queues:
             self._enqueue_stream_message(
                 queue,
@@ -359,25 +409,6 @@ class MiniAgentClient:
                     "message": "App Server stopped before stream settlement",
                 },
             )
-        # 1. Terminate/kill the child process first so stdout/stderr receive EOF immediately
-        if process and process.returncode is None:
-            if process.stdin and not process.stdin.is_closing():
-                try:
-                    process.stdin.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
-            try:
-                process.terminate()
-            except Exception:  # noqa: BLE001, S110
-                pass
-            try:
-                await asyncio.wait_for(process.wait(), timeout=1.0)
-            except (asyncio.TimeoutError, Exception):  # noqa: BLE001
-                try:
-                    process.kill()
-                    await asyncio.wait_for(process.wait(), timeout=1.0)
-                except Exception:  # noqa: BLE001, S110
-                    pass
 
         # 2. Cancel and wait for reader/stderr tasks
         for task in (self._reader_task, self._stderr_task):
@@ -393,6 +424,7 @@ class MiniAgentClient:
             if not fut.done():
                 fut.set_exception(RuntimeError("App Server stopped"))
         self._pending_requests.clear()
+        self._pending_rpc_methods.clear()
 
         # Process.wait() reaps the child but does not always close the
         # Proactor pipe transport on Windows before pytest closes its loop.
@@ -409,11 +441,24 @@ class MiniAgentClient:
         self._proc = None
         self._reader_task = None
         self._stderr_task = None
+        return True
 
     @property
     def is_running(self) -> bool:
         """Return True if the underlying mini-agent-app-server subprocess is active."""
         return self._proc is not None and self._proc.returncode is None
+
+    @property
+    def process_id(self) -> int | None:
+        """PID of this client's live App Server subprocess, if it is running."""
+        if self.is_running and self._proc is not None:
+            return self._proc.pid
+        return None
+
+    @property
+    def rpc_metrics(self) -> dict[str, Any]:
+        """Bounded JSON-RPC aggregates without request or response payloads."""
+        return self._rpc_metrics.snapshot(len(self._pending_requests))
 
     async def restart(self) -> dict[str, Any]:
         """Restart the process, resuming its durable Session when available."""
@@ -463,37 +508,67 @@ class MiniAgentClient:
             "method": method,
             "params": params if params is not None else {},
         }
+        serialization_started = time.perf_counter_ns()
         data = json.dumps(payload) + "\n"
+        encoded_data = data.encode("utf-8")
+        serialization_ms = (time.perf_counter_ns() - serialization_started) / 1_000_000
+        self._rpc_metrics.request_started(method, len(encoded_data), serialization_ms)
 
         loop = asyncio.get_running_loop()
         request_timeout = self.request_timeout if timeout is None else timeout
         deadline = loop.time() + request_timeout
         future: asyncio.Future[Any] = loop.create_future()
         self._pending_requests[req_id] = future
+        self._pending_rpc_methods[req_id] = method
 
         logger.debug(
             ">>> SEND: %s",
             json.dumps(_redact_secrets(payload), ensure_ascii=False),
         )
         try:
+            write_started = time.perf_counter_ns()
             await asyncio.wait_for(
-                self._write_request(data), timeout=max(0, deadline - loop.time())
+                self._write_request(encoded_data),
+                timeout=max(0, deadline - loop.time()),
             )
-            return await asyncio.wait_for(
+            self._rpc_metrics.request_written(
+                method, (time.perf_counter_ns() - write_started) / 1_000_000
+            )
+            result = await asyncio.wait_for(
                 future, timeout=max(0, deadline - loop.time())
             )
+            self._rpc_metrics.request_finished(
+                method,
+                (time.perf_counter_ns() - serialization_started) / 1_000_000,
+                success=True,
+            )
+            return result
         except asyncio.TimeoutError as err:
+            self._rpc_metrics.request_finished(
+                method,
+                (time.perf_counter_ns() - serialization_started) / 1_000_000,
+                success=False,
+                timeout=True,
+            )
             raise AppServerRequestTimeoutError(method, request_timeout) from err
+        except Exception:
+            self._rpc_metrics.request_finished(
+                method,
+                (time.perf_counter_ns() - serialization_started) / 1_000_000,
+                success=False,
+            )
+            raise
         finally:
             # The reader normally removes completed requests. On a timeout or
             # transport failure there is no response left to correlate.
             if self._pending_requests.get(req_id) is future:
                 self._pending_requests.pop(req_id, None)
+            self._pending_rpc_methods.pop(req_id, None)
 
-    async def _write_request(self, data: str) -> None:
+    async def _write_request(self, data: bytes) -> None:
         """Write one bounded JSON-RPC request with the same timeout budget."""
         assert self._proc and self._proc.stdin
-        self._proc.stdin.write(data.encode("utf-8"))
+        self._proc.stdin.write(data)
         await self._proc.stdin.drain()
 
     async def _send_notification(
@@ -508,10 +583,35 @@ class MiniAgentClient:
             "method": method,
             "params": params if params is not None else {},
         }
+        serialization_started = time.perf_counter_ns()
         data = json.dumps(payload) + "\n"
+        encoded_data = data.encode("utf-8")
+        serialization_ms = (time.perf_counter_ns() - serialization_started) / 1_000_000
+        write_started = time.perf_counter_ns()
         logger.debug(">>> NOTIFY: %s", data.strip())
-        self._proc.stdin.write(data.encode("utf-8"))
+        self._proc.stdin.write(encoded_data)
         await self._proc.stdin.drain()
+        self._rpc_metrics.notification_sent(
+            method,
+            len(encoded_data),
+            serialization_ms,
+            (time.perf_counter_ns() - write_started) / 1_000_000,
+        )
+
+    async def _call_notification_handler(
+        self, method: str, notification: dict[str, Any]
+    ) -> None:
+        if self.notification_handler is None:
+            return
+        started = time.perf_counter_ns()
+        try:
+            await self.notification_handler(notification)
+        except Exception:
+            logger.exception("Runtime notification handler failed")
+        finally:
+            self._rpc_metrics.notification_handler_finished(
+                method, (time.perf_counter_ns() - started) / 1_000_000
+            )
 
     async def _read_loop(self) -> None:
         """Background loop reading JSONL lines from server stdout."""
@@ -534,16 +634,24 @@ class MiniAgentClient:
                 continue
 
             logger.debug("<<< RECV: %s", line)
+            decode_started = time.perf_counter_ns()
             try:
                 msg = json.loads(line)
             except json.JSONDecodeError:
                 logger.warning("Failed to decode JSON from server: %s", line)
                 continue
+            decode_ms = (time.perf_counter_ns() - decode_started) / 1_000_000
 
             # 1. Correlated response (has id)
             if "id" in msg and msg["id"] is not None:
                 req_id = msg["id"]
+                rpc_method = self._pending_rpc_methods.get(req_id)
+                if rpc_method:
+                    self._rpc_metrics.response_read(
+                        rpc_method, len(line_bytes), decode_ms
+                    )
                 future = self._pending_requests.pop(req_id, None)
+                self._pending_rpc_methods.pop(req_id, None)
                 if future and not future.done():
                     if "error" in msg:
                         err = msg["error"]
@@ -561,6 +669,7 @@ class MiniAgentClient:
             elif "method" in msg:
                 method = msg["method"]
                 params = msg.get("params", {})
+                handler_started = time.perf_counter_ns()
 
                 if method == "turn/event":
                     for q in self._event_queues:
@@ -572,10 +681,9 @@ class MiniAgentClient:
                             continue
                         self._enqueue_stream_message(q, params)
                     if self.notification_handler is not None:
-                        try:
-                            await self.notification_handler({"type": "event", **params})
-                        except Exception:
-                            logger.exception("Runtime notification handler failed")
+                        await self._call_notification_handler(
+                            method, {"type": "event", **params}
+                        )
 
                 elif method == "approval/request":
                     await self._publish_approval(params, "requested")
@@ -626,8 +734,16 @@ class MiniAgentClient:
                             continue
                         self._enqueue_stream_message(q, notification)
                     if self.notification_handler is not None:
-                        asyncio.create_task(self.notification_handler(notification))
+                        asyncio.create_task(
+                            self._call_notification_handler(method, notification)
+                        )
                     logger.debug("Received server notification: %s", method)
+                self._rpc_metrics.notification_received(
+                    method,
+                    len(line_bytes),
+                    decode_ms,
+                    (time.perf_counter_ns() - handler_started) / 1_000_000,
+                )
 
         # A reader failure/EOF must not leave a live-looking client around.
         # Otherwise a later stop or request can wait on a dead pipe until the

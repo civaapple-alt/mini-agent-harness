@@ -149,6 +149,26 @@ App Server history 的读取投影，不是 SDK 的第二个持久化存储。
 演示命名 Session 中的 `ask_user` 交互，以及重启后处理待答问题和未解决执行检查点的方式。
 它展示 SDK 机制，不实现比价、邮件或日程等领域个人助理功能。
 
+## 进程和 JSON-RPC 指标
+
+`MiniAgentClient.process_id` 返回当前 App Server PID；进程未运行时返回 `None`。
+`rpc_metrics` 返回该 Client 从启动以来的请求数、错误和超时数、JSON 字节数、待处理
+请求数，以及 JSON 序列化、stdin 写入、响应解码、通知分发和回调时间。统计按 RPC 方法
+聚合，不保存请求或响应正文。方法名最多保留 64 种，其余方法合并到 `other`。
+
+`latency_p50_ms` 和 `latency_p95_ms` 使用固定延迟桶估算。延迟超过 5 秒的尾部桶不报告
+分位值，因此页面会显示 `—`，不会把更长延迟误报为 5 秒。
+
+调用 `stop(force=False, timeout=3.0)` 会关闭标准输入并等待 App Server 自行退出。方法
+返回 `False` 时，SDK 保留原进程引用。调用方应阻止该 Session 启动第二个 App Server，
+直到通过 PID 确认原进程退出。默认的 `stop()` 允许 SDK 在优雅停止超时后结束进程。
+
+需要检查 App Server 内部 JSON-RPC 阶段时，在启动 SDK 前设置
+`MINI_AGENT_JSON_RPC_DIAGNOSTICS=1`。App Server 会向标准错误写入经过清理的方法名，
+以及 `read_us`、`parse_us`、`dispatch_us`、`queue_us`、`serialize_us`、`write_us` 和
+字节数。`read_us` 包含等待下一行输入的时间。记录不包含请求正文，也不会改变 JSON-RPC
+协议或通知顺序。
+
 ## 审批与通知
 
 `approval_handler` 接收尚未由运行时结算的审批请求，并必须返回

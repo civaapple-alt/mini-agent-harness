@@ -10,6 +10,7 @@
 
 当前相关决策：
 
+- [SDK 资源观测与 App Server JSON-RPC 诊断](implemented/architecture/2026-10-07-sdk-resource-observability-and-rpc-diagnostics.zh.md)
 - [长 Turn 纠偏与 Session 恢复可信性](implemented/architecture/2026-10-06-long-turn-steer-and-session-recovery.zh.md)
 - [项目 Skill 可编辑性、来源与模型调用](implemented/feature/2026-10-06-skill-write-origin-and-model-invocation.zh.md)
 - [macOS 开发环境能力探测](implemented/feature/2026-10-06-macos-world-state-capabilities.zh.md)
@@ -134,6 +135,7 @@ graph LR
 
 ### Implemented
 
+- [SDK 资源观测与 App Server JSON-RPC 诊断](implemented/architecture/2026-10-07-sdk-resource-observability-and-rpc-diagnostics.zh.md)
 - [长 Turn 纠偏与 Session 恢复可信性](implemented/architecture/2026-10-06-long-turn-steer-and-session-recovery.zh.md)
 - [项目 Skill 可编辑性、来源与模型调用](implemented/feature/2026-10-06-skill-write-origin-and-model-invocation.zh.md)
 - [macOS 开发环境能力探测](implemented/feature/2026-10-06-macos-world-state-capabilities.zh.md)

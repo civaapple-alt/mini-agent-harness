@@ -1,5 +1,7 @@
 use super::*;
 use mini_agent_protocol::{ThreadId, TurnId};
+use std::sync::OnceLock;
+use std::time::Instant;
 use tokio::io::AsyncBufRead;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
@@ -194,7 +196,7 @@ where
     let initialized = connection.initialized_flag();
     let mut question_events = user_questions.subscribe();
     let connection = std::sync::Arc::new(Mutex::new(connection));
-    let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel();
+    let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel::<QueuedMessage>();
     let mut request_tasks = JoinSet::new();
     let mut line = String::new();
     loop {
@@ -203,14 +205,7 @@ where
                 let Some(outgoing) = outgoing else {
                     break;
                 };
-                match outgoing {
-                    OutgoingMessage::Response(response) => {
-                        write_json_line(&mut writer, &response).await?;
-                    }
-                    OutgoingMessage::Notification(notification) => {
-                        write_json_line(&mut writer, &notification).await?;
-                    }
-                }
+                write_queued_message(&mut writer, outgoing).await?;
             }
             event = next_event_notification_optional(&mut events) => {
                 let notification = match event {
@@ -218,9 +213,7 @@ where
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
-                outgoing_tx
-                    .send(OutgoingMessage::Notification(notification))
-                    .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                enqueue_notification(&outgoing_tx, notification)?;
             }
             event = next_runtime_notification(&mut runtime_events) => {
                 let notification = match event {
@@ -228,9 +221,7 @@ where
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => continue,
                 };
-                outgoing_tx
-                    .send(OutgoingMessage::Notification(notification))
-                    .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                enqueue_notification(&outgoing_tx, notification)?;
             }
             event = approval.next_event() => {
                 let (method, params) = match event {
@@ -296,9 +287,7 @@ where
                     }
                 };
                 let notification = JsonRpcRequest::notification(method, Some(params));
-                outgoing_tx
-                    .send(OutgoingMessage::Notification(notification))
-                    .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                enqueue_notification(&outgoing_tx, notification)?;
             }
             event = user_questions.next_event(&mut question_events), if user_questions_enabled => {
                 let event = match event {
@@ -319,40 +308,50 @@ where
                         interaction: event.interaction,
                     }).expect("user question notification is serializable")),
                 );
-                outgoing_tx.send(OutgoingMessage::Notification(notification))
-                    .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                enqueue_notification(&outgoing_tx, notification)?;
             }
-            read = read_bounded_line(&mut reader, &mut line) => {
+            read = async {
+                let started = Instant::now();
+                let result = read_bounded_line(&mut reader, &mut line).await;
+                (result, started.elapsed().as_micros())
+            } => {
+                let (read, read_us) = read;
                 let read = read?;
                 if read == 0 {
                     // A peer may close stdin immediately after initialize.
                     // Flush responses already queued by the inline handshake
                     // before ending the writer loop.
                     while let Ok(outgoing) = outgoing_rx.try_recv() {
-                        match outgoing {
-                            OutgoingMessage::Response(response) => {
-                                write_json_line(&mut writer, &response).await?;
-                            }
-                            OutgoingMessage::Notification(notification) => {
-                                write_json_line(&mut writer, &notification).await?;
-                            }
-                        }
+                        write_queued_message(&mut writer, outgoing).await?;
                     }
                     break;
                 }
                 let input = std::mem::take(&mut line);
-                let request = match serde_json::from_str::<JsonRpcRequest>(input.trim()) {
+                let parse_started = Instant::now();
+                let parsed_request = serde_json::from_str::<JsonRpcRequest>(input.trim());
+                let parse_us = parse_started.elapsed().as_micros();
+                let mut timings = RequestStageTimes {
+                    read_us,
+                    parse_us,
+                    ..RequestStageTimes::default()
+                };
+                let request = match parsed_request {
                     Ok(request) => request,
                     Err(error) => {
-                        outgoing_tx
-                            .send(OutgoingMessage::Response(response_error(
+                        enqueue_response(
+                            &outgoing_tx,
+                            response_error(
                                 None,
                                 JsonRpcError::parse_error(error.to_string()),
-                            ).expect("parse errors always have a response")))
-                            .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                            )
+                            .expect("parse errors always have a response"),
+                            "parse_error".to_string(),
+                            timings,
+                        )?;
                         continue;
                     }
                 };
+                let request_method = request.method.clone();
 
                 // Initialization is deliberately ordered before any spawned
                 // request. This preserves the JSON-RPC handshake even when
@@ -361,11 +360,11 @@ where
                 if request.method == METHOD_INITIALIZE
                     || !initialized.load(std::sync::atomic::Ordering::Acquire)
                 {
+                    let dispatch_started = Instant::now();
                     let response = connection.lock().await.handle_request(request).await;
+                    timings.dispatch_us = dispatch_started.elapsed().as_micros();
                     if let Some(response) = response {
-                        outgoing_tx
-                            .send(OutgoingMessage::Response(response))
-                            .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                        enqueue_response(&outgoing_tx, response, request_method, timings)?;
                     }
                     continue;
                 }
@@ -378,13 +377,13 @@ where
                     && initialized.load(std::sync::atomic::Ordering::Acquire)
                 {
                     let notification = request.id.is_none();
+                    let dispatch_started = Instant::now();
                     if let Some(response) =
                         AppServerConnection::<M>::approval_response_fast_path(&approval, request)
                             .filter(|_| !notification)
                     {
-                        outgoing_tx
-                            .send(OutgoingMessage::Response(response))
-                            .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                        timings.dispatch_us = dispatch_started.elapsed().as_micros();
+                        enqueue_response(&outgoing_tx, response, request_method, timings)?;
                     }
                     continue;
                 }
@@ -394,11 +393,12 @@ where
                     && user_questions_enabled
                 {
                     let notification = request.id.is_none();
+                    let dispatch_started = Instant::now();
                     if let Some(response) = AppServerConnection::<M>::user_question_response_fast_path(&user_questions, request)
                         .filter(|_| !notification)
                     {
-                        outgoing_tx.send(OutgoingMessage::Response(response))
-                            .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))?;
+                        timings.dispatch_us = dispatch_started.elapsed().as_micros();
+                        enqueue_response(&outgoing_tx, response, request_method, timings)?;
                     }
                     continue;
                 }
@@ -406,9 +406,16 @@ where
                 let connection = connection.clone();
                 let outgoing_tx = outgoing_tx.clone();
                 request_tasks.spawn(async move {
+                    let dispatch_started = Instant::now();
                     let response = connection.lock().await.handle_request(request).await;
+                    timings.dispatch_us = dispatch_started.elapsed().as_micros();
                     if let Some(response) = response {
-                        let _ = outgoing_tx.send(OutgoingMessage::Response(response));
+                        let _ = enqueue_response(
+                            &outgoing_tx,
+                            response,
+                            request_method,
+                            timings,
+                        );
                     }
                 });
             }
@@ -481,6 +488,112 @@ enum OutgoingMessage {
     Notification(JsonRpcRequest),
 }
 
+#[derive(Clone, Copy, Default)]
+struct RequestStageTimes {
+    read_us: u128,
+    parse_us: u128,
+    dispatch_us: u128,
+}
+
+struct QueuedMessage {
+    message: OutgoingMessage,
+    method: String,
+    queued_at: Instant,
+    request_times: RequestStageTimes,
+}
+
+fn enqueue_outgoing(
+    sender: &mpsc::UnboundedSender<QueuedMessage>,
+    message: OutgoingMessage,
+    method: String,
+    request_times: RequestStageTimes,
+) -> Result<(), std::io::Error> {
+    sender
+        .send(QueuedMessage {
+            message,
+            method,
+            queued_at: Instant::now(),
+            request_times,
+        })
+        .map_err(|_| std::io::Error::other("JSON-RPC writer stopped"))
+}
+
+fn enqueue_response(
+    sender: &mpsc::UnboundedSender<QueuedMessage>,
+    response: JsonRpcResponse,
+    method: String,
+    request_times: RequestStageTimes,
+) -> Result<(), std::io::Error> {
+    enqueue_outgoing(
+        sender,
+        OutgoingMessage::Response(response),
+        method,
+        request_times,
+    )
+}
+
+fn enqueue_notification(
+    sender: &mpsc::UnboundedSender<QueuedMessage>,
+    notification: JsonRpcRequest,
+) -> Result<(), std::io::Error> {
+    let method = notification.method.clone();
+    enqueue_outgoing(
+        sender,
+        OutgoingMessage::Notification(notification),
+        method,
+        RequestStageTimes::default(),
+    )
+}
+
+async fn write_queued_message<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    queued: QueuedMessage,
+) -> Result<(), std::io::Error> {
+    let queue_us = queued.queued_at.elapsed().as_micros();
+    let (serialized_us, write_us, bytes) = match queued.message {
+        OutgoingMessage::Response(response) => write_json_line_timed(writer, &response).await?,
+        OutgoingMessage::Notification(notification) => {
+            write_json_line_timed(writer, &notification).await?
+        }
+    };
+    if json_rpc_diagnostics_enabled() {
+        eprintln!(
+            "mini_agent_json_rpc method={} read_us={} parse_us={} dispatch_us={} queue_us={} serialize_us={} write_us={} bytes={}",
+            diagnostic_method(&queued.method),
+            queued.request_times.read_us,
+            queued.request_times.parse_us,
+            queued.request_times.dispatch_us,
+            queue_us,
+            serialized_us,
+            write_us,
+            bytes,
+        );
+    }
+    Ok(())
+}
+
+fn json_rpc_diagnostics_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("MINI_AGENT_JSON_RPC_DIAGNOSTICS")
+            .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"))
+    })
+}
+
+fn diagnostic_method(method: &str) -> String {
+    method
+        .chars()
+        .take(128)
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || "._/-".contains(character) {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 fn approval_path_scope(
     access: mini_agent_app_server_protocol::AccessScope,
     paths: Vec<String>,
@@ -530,11 +643,27 @@ async fn write_json_line<W: AsyncWrite + Unpin, T: serde::Serialize>(
     writer: &mut W,
     value: &T,
 ) -> Result<(), std::io::Error> {
+    write_json_line_timed(writer, value).await.map(|_| ())
+}
+
+async fn write_json_line_timed<W: AsyncWrite + Unpin, T: serde::Serialize>(
+    writer: &mut W,
+    value: &T,
+) -> Result<(u128, u128, usize), std::io::Error> {
+    let serialize_started = Instant::now();
     let encoded =
         serde_json::to_vec(value).map_err(|error| std::io::Error::other(error.to_string()))?;
+    let serialize_us = serialize_started.elapsed().as_micros();
+    let byte_count = encoded.len() + 1;
+    let write_started = Instant::now();
     writer.write_all(&encoded).await?;
     writer.write_all(b"\n").await?;
-    writer.flush().await
+    writer.flush().await?;
+    Ok((
+        serialize_us,
+        write_started.elapsed().as_micros(),
+        byte_count,
+    ))
 }
 
 #[cfg(test)]
