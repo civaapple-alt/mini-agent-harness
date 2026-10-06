@@ -29,15 +29,7 @@ pub(super) fn discover_skill_root(
         if !skill_path.exists() {
             continue;
         }
-        match parse_instruction(
-            &skill_path,
-            boundary,
-            workspace,
-            options.source,
-            options.group,
-            options.enabled,
-            options.location_prefix,
-        ) {
+        match parse_instruction(&skill_path, boundary, workspace, options) {
             Ok(skill) => insert_skill(skill, options.overrides, skills, diagnostics),
             Err(error) => diagnostics.push(error),
         }
@@ -83,10 +75,7 @@ fn parse_instruction(
     path: &Path,
     boundary: &Path,
     workspace: &Path,
-    source: &str,
-    group: Option<&str>,
-    enabled: bool,
-    location_prefix: Option<&str>,
+    options: SkillRootOptions<'_>,
 ) -> Result<Skill, String> {
     let path = path
         .canonicalize()
@@ -139,7 +128,8 @@ fn parse_instruction(
         .into_iter()
         .map(|dependency| parse_skill_dependency(dependency, &path))
         .collect::<Result<Vec<_>, _>>()?;
-    let location = location_prefix
+    let location = options
+        .location_prefix
         .map(|prefix| format!("{prefix}/{}/SKILL.md", metadata.name))
         .unwrap_or_else(|| {
             path.strip_prefix(workspace)
@@ -151,9 +141,10 @@ fn parse_instruction(
         name: metadata.name,
         description,
         location,
-        source: source.to_string(),
-        group: group.map(str::to_string),
-        enabled,
+        source: options.source.to_string(),
+        origin: options.origin,
+        group: options.group.map(str::to_string),
+        enabled: options.enabled,
         path,
         dependencies,
     })

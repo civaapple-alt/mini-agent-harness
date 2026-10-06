@@ -464,6 +464,7 @@ async fn skills_list_refreshes_project_discovery_after_runtime_start() {
             .any(|skill| {
                 skill["name"] == "installed-during-runtime"
                     && skill["source"] == "project"
+                    && skill["origin"] == "project"
                     && skill["enabled"] == true
             })
     );

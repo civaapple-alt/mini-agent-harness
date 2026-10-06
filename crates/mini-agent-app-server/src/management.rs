@@ -816,6 +816,23 @@ impl RuntimeManagementState {
                     aliases: skill.aliases,
                     description: skill.description,
                     source: skill.source,
+                    origin: Some(match skill.origin {
+                        mini_agent_capabilities::SkillOrigin::BuiltinGroup => {
+                            mini_agent_app_server_protocol::SkillOrigin::BuiltinGroup
+                        }
+                        mini_agent_capabilities::SkillOrigin::UserAgents => {
+                            mini_agent_app_server_protocol::SkillOrigin::UserAgents
+                        }
+                        mini_agent_capabilities::SkillOrigin::UserMiniAgent => {
+                            mini_agent_app_server_protocol::SkillOrigin::UserMiniAgent
+                        }
+                        mini_agent_capabilities::SkillOrigin::Project => {
+                            mini_agent_app_server_protocol::SkillOrigin::Project
+                        }
+                        mini_agent_capabilities::SkillOrigin::Plugin => {
+                            mini_agent_app_server_protocol::SkillOrigin::Plugin
+                        }
+                    }),
                     group: skill.group,
                     enabled: skill.enabled,
                 })

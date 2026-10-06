@@ -37,6 +37,23 @@ fn discovers_project_plugin_and_mcp_metadata_without_loading_bodies() {
     let context = discovery.skill_context().unwrap();
 
     assert_eq!(discovery.mcp_server_labels(), ["deploy.tools/local"]);
+    let catalog = discovery.skill_catalog();
+    assert_eq!(
+        catalog
+            .iter()
+            .find(|skill| skill.name == "review")
+            .unwrap()
+            .origin,
+        SkillOrigin::Project
+    );
+    assert_eq!(
+        catalog
+            .iter()
+            .find(|skill| skill.name == "deploy")
+            .unwrap()
+            .origin,
+        SkillOrigin::Plugin
+    );
     assert!(context.contains(".agents/skills/review/SKILL.md"));
     assert!(context.contains(".agents/plugins/deploy/skills/deploy/SKILL.md"));
     assert!(!context.contains("MUST LOAD ON DEMAND"));
@@ -302,6 +319,7 @@ fn catalogs_and_loads_selected_skills_with_bounded_activation() {
             aliases: Vec::new(),
             description: "Review Rust changes.".to_string(),
             source: "project".to_string(),
+            origin: SkillOrigin::Project,
             group: None,
             enabled: true,
         }
@@ -406,6 +424,7 @@ fn loads_canonical_and_codex_aliases_once_for_a_pstack_skill() {
             description: "Explain the selected subsystem.".to_string(),
             location: "how/SKILL.md".to_string(),
             source: "builtin".to_string(),
+            origin: SkillOrigin::BuiltinGroup,
             group: Some("pstack".to_string()),
             enabled: true,
             path,
@@ -460,6 +479,18 @@ fn discovers_builtin_and_global_skill_roots_with_fixed_precedence() {
         "Review from the project.",
         "PROJECT REVIEW",
     );
+    write_skill(
+        &home.join(".mini-agent/skills/personal-mini-agent"),
+        "personal-mini-agent",
+        "Mini Agent user Skill.",
+        "MINI PERSONAL",
+    );
+    write_skill(
+        &home.join(".agents/skills/personal-agents"),
+        "personal-agents",
+        "Agent Skills user Skill.",
+        "AGENTS PERSONAL",
+    );
 
     let discovery = super::discover_with_roots(
         &workspace,
@@ -473,6 +504,39 @@ fn discovers_builtin_and_global_skill_roots_with_fixed_precedence() {
         .find(|skill| skill.qualified_name == "review")
         .expect("the highest-priority review Skill should remain");
     assert_eq!(review.source, "project");
+    assert_eq!(review.origin, SkillOrigin::Project);
+    assert_eq!(
+        catalog
+            .iter()
+            .find(|skill| skill.name == "how")
+            .unwrap()
+            .origin,
+        SkillOrigin::BuiltinGroup
+    );
+    assert_eq!(
+        catalog
+            .iter()
+            .find(|skill| skill.name == "personal-mini-agent")
+            .unwrap()
+            .origin,
+        SkillOrigin::UserMiniAgent
+    );
+    assert_eq!(
+        catalog
+            .iter()
+            .find(|skill| skill.name == "personal-agents")
+            .unwrap()
+            .origin,
+        SkillOrigin::UserAgents
+    );
+    let public_catalog = serde_json::to_value(&catalog).unwrap();
+    assert!(
+        public_catalog
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|skill| { skill.get("location").is_none() && skill.get("path").is_none() })
+    );
     assert!(
         discovery
             .diagnostics()

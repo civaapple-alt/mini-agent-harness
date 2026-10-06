@@ -1365,8 +1365,20 @@ pub struct AvailableSkill {
     pub description: String,
     pub source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<SkillOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
     pub enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillOrigin {
+    BuiltinGroup,
+    UserAgents,
+    UserMiniAgent,
+    Project,
+    Plugin,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -1966,6 +1978,41 @@ mod tests {
         assert!(result.get("request").is_none());
         assert!(result.get("response").is_none());
         assert!(result["connectionTest"].get("apiKey").is_none());
+    }
+
+    #[test]
+    fn available_skill_origin_is_optional_and_serializes_as_a_stable_category() {
+        let legacy: AvailableSkill = serde_json::from_value(serde_json::json!({
+            "name": "review",
+            "qualifiedName": "review",
+            "aliases": [],
+            "description": "Review changes.",
+            "source": "user",
+            "enabled": true
+        }))
+        .unwrap();
+        assert_eq!(legacy.origin, None);
+        assert!(
+            serde_json::to_value(&legacy)
+                .unwrap()
+                .get("origin")
+                .is_none()
+        );
+
+        let skill = AvailableSkill {
+            name: "review".to_string(),
+            qualified_name: "review".to_string(),
+            aliases: Vec::new(),
+            description: "Review changes.".to_string(),
+            source: "user".to_string(),
+            origin: Some(SkillOrigin::UserAgents),
+            group: None,
+            enabled: true,
+        };
+        assert_eq!(
+            serde_json::to_value(skill).unwrap()["origin"],
+            "user_agents"
+        );
     }
 
     #[test]

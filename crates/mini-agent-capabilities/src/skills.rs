@@ -74,14 +74,17 @@ struct Skill {
     description: String,
     location: String,
     source: String,
+    origin: SkillOrigin,
     group: Option<String>,
     enabled: bool,
     path: PathBuf,
     dependencies: Vec<SkillDependency>,
 }
 
+#[derive(Clone, Copy)]
 struct SkillRootOptions<'a> {
     source: &'a str,
+    origin: SkillOrigin,
     group: Option<&'a str>,
     enabled: bool,
     overrides: bool,
@@ -117,6 +120,29 @@ struct SkillDependencyMetadata {
 pub enum SkillDependency {
     BuiltinTool(String),
     McpServer(String),
+}
+
+/// The bounded, non-path source classification for a discovered Skill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillOrigin {
+    BuiltinGroup,
+    UserAgents,
+    UserMiniAgent,
+    Project,
+    Plugin,
+}
+
+impl SkillOrigin {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::BuiltinGroup => "builtin_group",
+            Self::UserAgents => "user_agents",
+            Self::UserMiniAgent => "user_mini_agent",
+            Self::Project => "project",
+            Self::Plugin => "plugin",
+        }
+    }
 }
 
 /// The bounded metadata produced when a discovered Skill is explicitly
@@ -220,6 +246,7 @@ fn discover_with_roots_at(
                 &workspace,
                 SkillRootOptions {
                     source: "builtin",
+                    origin: SkillOrigin::BuiltinGroup,
                     group: Some(group),
                     enabled: true,
                     overrides: false,
@@ -237,6 +264,7 @@ fn discover_with_roots_at(
             &workspace,
             SkillRootOptions {
                 source: "user",
+                origin: SkillOrigin::UserMiniAgent,
                 group: None,
                 enabled: true,
                 overrides: true,
@@ -253,6 +281,7 @@ fn discover_with_roots_at(
             &workspace,
             SkillRootOptions {
                 source: "user",
+                origin: SkillOrigin::UserAgents,
                 group: None,
                 enabled: true,
                 overrides: true,
@@ -268,6 +297,7 @@ fn discover_with_roots_at(
         &workspace,
         SkillRootOptions {
             source: "project",
+            origin: SkillOrigin::Project,
             group: None,
             enabled: true,
             overrides: true,
@@ -310,6 +340,7 @@ fn skill_metadata(skill: &Skill, aliases: Vec<String>) -> Value {
         "description": skill.description,
         "location": skill.location,
         "source": skill.source,
+        "origin": skill.origin.as_str(),
         "enabled": skill.enabled,
     });
     if !aliases.is_empty() {
@@ -399,6 +430,7 @@ impl Discovery {
                 aliases: skill_aliases_for(skill, &self.skills),
                 description: skill.description.clone(),
                 source: skill.source.clone(),
+                origin: skill.origin,
                 group: skill.group.clone(),
                 enabled: skill.enabled,
             })
@@ -685,6 +717,7 @@ pub struct SkillCatalogEntry {
     pub aliases: Vec<String>,
     pub description: String,
     pub source: String,
+    pub origin: SkillOrigin,
     pub group: Option<String>,
     pub enabled: bool,
 }

@@ -71,6 +71,7 @@ fn load_plugin(
         workspace,
         SkillRootOptions {
             source,
+            origin: SkillOrigin::Plugin,
             group: None,
             enabled: true,
             overrides: false,

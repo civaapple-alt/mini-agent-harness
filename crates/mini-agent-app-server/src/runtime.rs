@@ -420,6 +420,23 @@ pub fn capability_manifest_to_protocol(
                 aliases: skill.aliases.clone(),
                 description: skill.description.clone(),
                 source: skill.source.clone(),
+                origin: Some(match skill.origin {
+                    mini_agent_capabilities::SkillOrigin::BuiltinGroup => {
+                        mini_agent_app_server_protocol::SkillOrigin::BuiltinGroup
+                    }
+                    mini_agent_capabilities::SkillOrigin::UserAgents => {
+                        mini_agent_app_server_protocol::SkillOrigin::UserAgents
+                    }
+                    mini_agent_capabilities::SkillOrigin::UserMiniAgent => {
+                        mini_agent_app_server_protocol::SkillOrigin::UserMiniAgent
+                    }
+                    mini_agent_capabilities::SkillOrigin::Project => {
+                        mini_agent_app_server_protocol::SkillOrigin::Project
+                    }
+                    mini_agent_capabilities::SkillOrigin::Plugin => {
+                        mini_agent_app_server_protocol::SkillOrigin::Plugin
+                    }
+                }),
                 group: skill.group.clone(),
                 enabled: skill.enabled,
             })

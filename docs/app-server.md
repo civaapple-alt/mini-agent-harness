@@ -560,7 +560,10 @@ Host 会把它解析到已授权的实际根目录；模型可以在需要时用
 The capability manifest returned by `initialize` contains
 `builtinSkillGroups` and `availableSkills`. Each available-skill entry contains
 only `name`, `qualifiedName`, compatibility `aliases`, `description`, `source`,
-`group`, and `enabled`. The manifest does not expose skill paths or bodies.
+optional `origin`, optional `group`, and `enabled`. `origin` classifies the
+catalog entry as `builtin_group`, `user_agents`, `user_mini_agent`, `project`,
+or `plugin`; clients must tolerate older responses that omit it. The manifest
+does not expose skill paths or bodies.
 
 #### Child operations and Session notebook
 

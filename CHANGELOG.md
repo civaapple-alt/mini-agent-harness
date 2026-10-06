@@ -7,6 +7,9 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ### Changes
 
+- Add an optional Skill `origin` category to the bounded discovery catalog,
+  capability manifest, and `skills/list` response while keeping legacy
+  `source` and `group` fields and accepting responses without `origin`.
 - Detect macOS development commands, validate `python3 -m pip` and `xcodebuild`
   with bounded local probes, and expose Blender's resolved CLI path and root
   `.blend` project marker through World State.
