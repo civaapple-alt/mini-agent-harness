@@ -11,6 +11,9 @@ No changes yet.
 
 ### Changes
 
+- Keep the Python SDK compatible with Python 3.10 while preserving the client
+  subtype returned by async context manager entry, without a new runtime
+  dependency.
 - Expose the managed App Server PID and bounded per-method JSON-RPC aggregates
   from `MiniAgentClient`. Add confirmed graceful-stop results and optional
   stderr diagnostics for App Server JSON-RPC read, parse, dispatch, queue,

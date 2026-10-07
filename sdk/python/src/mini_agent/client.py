@@ -16,7 +16,7 @@ import sys
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
-from typing import Any, Literal, Self
+from typing import Any, Literal, TypeVar
 
 from mini_agent.approval_logging import approval_log_fields
 from mini_agent.errors import (
@@ -69,6 +69,7 @@ from mini_agent.types import (
 )
 
 logger = logging.getLogger("mini_agent")
+_ClientSelf = TypeVar("_ClientSelf", bound="MiniAgentClient")
 
 
 def _signal_app_server(process: Any, signal_number: int) -> None:
@@ -325,7 +326,8 @@ class MiniAgentClient:
             raise ValueError("request_timeout must be positive")
         self.request_timeout = request_timeout
 
-    async def __aenter__(self) -> Self:
+    # Keep Python 3.10 support without adding a typing_extensions runtime dependency.
+    async def __aenter__(self: _ClientSelf) -> _ClientSelf:  # noqa: PYI019
         await self.start()
         return self
 
