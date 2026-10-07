@@ -49,7 +49,7 @@ Control Plane 把一次模型调用变成一个能够管理的任务：
 | Host | 组装提示与运行环境，按顺序做工具准入、审批和执行协调 |
 | Capabilities | 提供模型、工作区、进程、沙箱及其他具体能力 |
 | App Server | 管理 Thread、Turn、Goal、Session、Actor/CAS、持久状态、恢复与 JSON-RPC |
-| SDK、Gateway、Web Studio | 连接服务端、传递控制请求、呈现有界状态和事件投影 |
+| SDK、Gateway、Web Studio | 连接服务端、传递控制请求，并呈现有界状态、事件和资源诊断 |
 
 Control Plane 负责**运行的身份和生命周期**：当前是哪个 Thread、哪个 Turn 正在运行、操作是否等待审批、哪些状态已写入 Session、哪些未知结果需要核对。
 
@@ -58,6 +58,8 @@ Control Plane 负责**运行的身份和生命周期**：当前是哪个 Thread�
 如果终端和浏览器各自实现模型循环，恢复、审批和历史就会分裂成两套语义。Mini Agent 让 CLI 和 Web Studio 调用同一个 App Server：CLI 适合本地运行和脚本；Web Studio 适合观察长任务、控制子任务和处理审批。界面可以缓存投影以便显示，但不能因此成为执行、授权或 Session 历史的第二个权威来源。
 
 这也给故障边界一个清楚的归属：浏览器断线意味着界面暂时看不到新事件；它不意味着 Turn 已停止。Gateway 重连之后应从 App Server 的事件和持久状态恢复，不能重复提交同一条输入。
+
+运行资源指标帮助诊断进程和通信状况，但不代表任务已经完成，也不能替代授权判断。执行状态和工具结果仍以运行时记录为准。
 
 ## 带着这张图继续读
 

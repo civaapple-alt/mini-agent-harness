@@ -58,6 +58,8 @@ Core 的 `ToolRouter` 只按名称解析工具并维持有界循环。Protocol h
 
 工具运行时使用所选配置执行副作用。以 Shell 为例，Docker 必须被明确选中；如果 Docker 不可用，执行会失败，不会自动退回 Native。Native Shell 使用当前操作系统用户的权限，Docker 提供面向本地开发的隔离，但两者都不承诺抵御恶意代码攻击主机、Docker daemon 或内核。文件工具的 workspace 根限制也不等同于进程沙箱。
 
+技能文件也遵循同一套文件访问边界：工作区里的项目技能可以按普通写入规则维护，工作区外的个人技能保持只读。读取技能说明不等于运行其中的脚本；实际执行仍要经过工具准入和运行时限制。
+
 所以“有 sandbox 配置”不能被简化成“模型代码被隔离”。审查一个工具调用时，应同时看准入边界和最终执行的 ToolRuntime 配置。
 
 ## 结果回到模型之前仍受限制
@@ -65,6 +67,8 @@ Core 的 `ToolRouter` 只按名称解析工具并维持有界循环。Protocol h
 每个模型步骤最多接受 8 个工具调用，单条结果默认最多向模型内联 16 KiB。较大的 Host 结果会保存为 Session artifact，并返回有界预览和分页读取句柄；如果持久化失败，系统也会明确返回被截断的预览和错误，而不是假装完整结果仍可读取。
 
 工具生命周期状态和结构化 outcome 分开保存。Studio 可以据此区分“等待审批”“被准入层 defer”“执行失败”和“成功但输出被截断”，无需根据错误字符串猜权限或执行结果。重连后，App Server 的 ThreadItem、审批请求和执行记录才是状态依据。
+
+取消一组工具调用时，运行时不会再启动后续操作，并保留已经开始的操作结果。若执行结果尚不明确，用户仍需核对实际状态；停止请求本身不能证明副作用没有发生。
 
 ## 用一组问题读工具路径
 
@@ -80,7 +84,7 @@ Core 的 `ToolRouter` 只按名称解析工具并维持有界循环。Protocol h
 
 ## 代码与规范入口
 
-- [默认工具面与准入顺序](../../harness-tool-surface.md)、[审批与 App Server 协议](../../app-server.md)、[Shell 与上下文限制](../../limits.md)。
+- [默认工具面与准入顺序](../../harness-tool-surface.md)、[审批与 App Server 协议](../../app-server.md)、[配置与 Skill 写入边界](../../configuration.md#skills)、[Shell 与上下文限制](../../limits.md)。
 - Core 执行工具批次：[crates/mini-agent-core/src/tool_batch_executor.rs](../../../crates/mini-agent-core/src/tool_batch_executor.rs)。
 - Host 准入和审批协调：[crates/mini-agent-host/src/tool_orchestrator.rs](../../../crates/mini-agent-host/src/tool_orchestrator.rs)。
 - Web 审批桥接入口（相对 `mini-agent-web` 根目录）：`server/routes/agent_ws.py`、`server/routes/agent_turns.py`、`sdk/python/src/mini_agent/client.py`。
