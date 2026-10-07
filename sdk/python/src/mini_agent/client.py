@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -68,6 +69,26 @@ from mini_agent.types import (
 )
 
 logger = logging.getLogger("mini_agent")
+
+
+def _signal_app_server(process: Any, signal_number: int) -> None:
+    """Signal the isolated App Server process group, falling back to its root."""
+    process_id = getattr(process, "pid", None)
+    if os.name != "nt" and isinstance(process_id, int) and process_id > 1:
+        try:
+            os.killpg(process_id, signal_number)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            logger.debug("Unable to signal App Server process group", exc_info=True)
+    try:
+        if signal_number == getattr(signal, "SIGKILL", None):
+            process.kill()
+        else:
+            process.terminate()
+    except Exception:  # noqa: BLE001, S110
+        pass
 
 DEFAULT_REQUEST_TIMEOUT_SECS = 30.0
 APP_SERVER_PROTOCOL_VERSION = 2
@@ -378,23 +399,20 @@ class MiniAgentClient:
                 if process.returncode is None:
                     return False
             if force and process.returncode is None:
-                try:
-                    process.terminate()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+                _signal_app_server(process, signal.SIGTERM)
                 try:
                     await asyncio.wait_for(process.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
+                    _signal_app_server(process, signal.SIGKILL)
                     try:
-                        process.kill()
                         await asyncio.wait_for(process.wait(), timeout=timeout)
                     except Exception:  # noqa: BLE001
                         return False
                 except Exception:  # noqa: BLE001
                     return False
                 if process.returncode is None:
+                    _signal_app_server(process, signal.SIGKILL)
                     try:
-                        process.kill()
                         await asyncio.wait_for(process.wait(), timeout=timeout)
                     except Exception:  # noqa: BLE001
                         return False
@@ -750,15 +768,12 @@ class MiniAgentClient:
         # generic request timeout, which is the source of long "stopping"
         # states after a transport error.
         if getattr(process, "returncode", None) is None:
-            try:
-                process.terminate()
-            except Exception:  # noqa: BLE001, S110
-                pass
+            _signal_app_server(process, signal.SIGTERM)
             try:
                 await asyncio.wait_for(process.wait(), timeout=1.0)
             except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+                _signal_app_server(process, signal.SIGKILL)
                 try:
-                    process.kill()
                     await asyncio.wait_for(process.wait(), timeout=1.0)
                 except Exception:  # noqa: BLE001, S110
                     pass

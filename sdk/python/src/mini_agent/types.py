@@ -48,6 +48,7 @@ KnownToolOutcome = Literal[
     "needs_approval",
     "deferred",
     "retryable",
+    "cancelled",
 ]
 # The wire is forward-compatible. Keep unknown server values instead of
 # pretending they are one of the currently known outcomes.

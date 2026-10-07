@@ -1025,7 +1025,7 @@ async def test_advanced_thread_and_workflow_apis(tmp_path: Path):
         # 1. Initialize
         init_res = await client.initialize()
         assert init_res.get("protocolVersion") == 2
-        assert init_res.get("serverVersion") == "1.0.0"
+        assert init_res.get("serverVersion") == "1.1.0"
 
         # 2. Thread lifecycle
         tid1 = await client.start_thread()

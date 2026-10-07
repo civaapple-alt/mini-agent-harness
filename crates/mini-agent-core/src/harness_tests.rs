@@ -2144,6 +2144,236 @@ fn turn_atomic_trimming_drops_assistant_and_tool_groups_together() {
     }
 }
 
+#[tokio::test]
+async fn cancellation_after_model_tool_calls_closes_every_call_without_starting_tools() {
+    struct CountingTool(Arc<AtomicUsize>);
+    impl ToolHandler for CountingTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "count".to_string(),
+                description: "Count executions".to_string(),
+                parameters: json!({"type": "object"}),
+            }
+        }
+    }
+    impl ToolRuntime for CountingTool {
+        fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok("executed".to_string())
+        }
+    }
+
+    struct CancelAfterToolResponse {
+        control: RunControl,
+        events: Vec<Event>,
+    }
+    impl Observer for CancelAfterToolResponse {
+        fn observe(&mut self, event: &Event) {
+            self.events.push(event.clone());
+            if matches!(event, Event::ModelResponded { tool_calls, .. } if !tool_calls.is_empty()) {
+                self.control.request_cancel();
+            }
+        }
+    }
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let model = ScriptedModel {
+        responses: VecDeque::from([ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![
+                ToolCall {
+                    id: "call-cancelled-1".to_string(),
+                    name: "count".to_string(),
+                    arguments: json!({}),
+                },
+                ToolCall {
+                    id: "call-cancelled-2".to_string(),
+                    name: "count".to_string(),
+                    arguments: json!({}),
+                },
+            ],
+            usage: None,
+        }]),
+    };
+    let mut harness = Harness::new(
+        model,
+        ToolRouter::new(vec![Box::new(CountingTool(Arc::clone(&calls)))]),
+        HarnessConfig::default(),
+    );
+    let control = RunControl::new();
+    let mut observer = CancelAfterToolResponse {
+        control: control.clone(),
+        events: Vec::new(),
+    };
+
+    let outcome = harness
+        .run_with_control("stop before tools", &mut observer, &control)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Cancelled);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    for call_id in ["call-cancelled-1", "call-cancelled-2"] {
+        assert!(outcome.messages.iter().any(|message| matches!(
+            message,
+            Message::Tool { call_id: result_id, outcome: Some(ToolExecutionStatus::Cancelled), .. }
+                if result_id == call_id
+        )));
+    }
+    let started = observer
+        .events
+        .iter()
+        .filter(|event| matches!(event, Event::ToolStarted { .. }))
+        .count();
+    let finished = observer
+        .events
+        .iter()
+        .filter(|event| matches!(event, Event::ToolFinished { .. }))
+        .count();
+    assert_eq!(started, 0);
+    assert_eq!(finished, 2);
+}
+
+#[tokio::test]
+async fn cancellation_between_tools_keeps_first_result_and_skips_the_rest() {
+    struct CancelOnFirstCall {
+        control: RunControl,
+        calls: Arc<AtomicUsize>,
+    }
+    impl ToolHandler for CancelOnFirstCall {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "cancel_on_first".to_string(),
+                description: "Cancel after the first tool call".to_string(),
+                parameters: json!({"type": "object"}),
+            }
+        }
+    }
+    impl ToolRuntime for CancelOnFirstCall {
+        fn execute(&self, _arguments: &Value) -> Result<String, ToolError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            if call == 0 {
+                self.control.request_cancel();
+                Ok("first call completed".to_string())
+            } else {
+                Ok("unexpected execution".to_string())
+            }
+        }
+    }
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let control = RunControl::new();
+    let model = ScriptedModel {
+        responses: VecDeque::from([ModelResponse {
+            reasoning: String::new(),
+            text: String::new(),
+            tool_calls: vec![
+                ToolCall {
+                    id: "call-first".to_string(),
+                    name: "cancel_on_first".to_string(),
+                    arguments: json!({}),
+                },
+                ToolCall {
+                    id: "call-second".to_string(),
+                    name: "cancel_on_first".to_string(),
+                    arguments: json!({}),
+                },
+            ],
+            usage: None,
+        }]),
+    };
+    let mut harness = Harness::new(
+        model,
+        ToolRouter::new(vec![Box::new(CancelOnFirstCall {
+            control: control.clone(),
+            calls: Arc::clone(&calls),
+        })]),
+        HarnessConfig::default(),
+    );
+    let mut events = RecordingObserver::default();
+
+    let outcome = harness
+        .run_with_control("cancel remaining tools", &mut events, &control)
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Cancelled);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(outcome.messages.iter().any(|message| matches!(
+        message,
+        Message::Tool { call_id, content, outcome: Some(ToolExecutionStatus::Completed), .. }
+            if call_id == "call-first" && content == "first call completed"
+    )));
+    assert!(outcome.messages.iter().any(|message| matches!(
+        message,
+        Message::Tool { call_id, outcome: Some(ToolExecutionStatus::Cancelled), .. }
+            if call_id == "call-second"
+    )));
+    assert!(!events.0.iter().any(|event| matches!(
+        event,
+        Event::ToolStarted { call } if call.id == "call-second"
+    )));
+}
+
+#[tokio::test]
+async fn cancellation_drops_a_pending_model_request_immediately() {
+    struct DropFlag(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    struct NeverModel {
+        started: Option<tokio::sync::oneshot::Sender<()>>,
+        dropped: Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl Model for NeverModel {
+        type Error = Infallible;
+
+        async fn respond<'a>(
+            &'a mut self,
+            _request: ModelRequest<'a>,
+            _events: &'a mut (dyn ModelEventSink + Send),
+        ) -> Result<ModelResponse, Self::Error> {
+            let _drop_flag = DropFlag(Arc::clone(&self.dropped));
+            if let Some(started) = self.started.take() {
+                let _ = started.send(());
+            }
+            std::future::pending().await
+        }
+    }
+
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let control = RunControl::new();
+    let model = NeverModel {
+        started: Some(started_tx),
+        dropped: Arc::clone(&dropped),
+    };
+    let mut harness = Harness::new(model, ToolRouter::default(), HarnessConfig::default());
+    let task_control = control.clone();
+    let task = tokio::spawn(async move {
+        harness
+            .run_with_control("wait forever", &mut (), &task_control)
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(1), started_rx)
+        .await
+        .unwrap()
+        .unwrap();
+
+    control.request_cancel();
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(1), task)
+        .await
+        .expect("cancelled model request should settle within one second")
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(outcome.stop_reason, StopReason::Cancelled);
+    assert!(dropped.load(Ordering::SeqCst));
+}
+
 #[derive(Default)]
 struct RecordingObserver(Vec<Event>);
 

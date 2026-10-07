@@ -465,8 +465,10 @@ retained range is reported by `hasGap` and `oldestSequence`.
 
 `turn/start` is asynchronous. Clients should render `turn/event` and Item
 notifications while the turn is running, then use `turn/read` for the settled
-result. Steering and interruption are requests to the runtime; they do not
-force an immediate stop before the runtime reaches a cancellation boundary.
+result. Steering is applied at a safe boundary. Interruption signals the
+active run control directly: Core drops its pending local model future without
+waiting for provider completion, then settles the Turn. This does not guarantee
+that the remote provider stops computing.
 
 A regular Session steer is an admitted request, not proof that the next model
 request already contains its text. The App Server persists it before returning
@@ -477,8 +479,11 @@ projects `applied`; until that checkpoint it remains `accepted`. If cancellation
 wins first, the App Server drains pending steers and journals them as
 `unapplied` before settling the Turn. The stop path drops the active model
 request future and raises the Host cancellation token so cancellable tools can
-stop while executing. A tool that cannot cancel must still report its actual
-outcome or remain subject to reconciliation after a restart.
+stop while executing. Core checks cancellation before each tool in a batch;
+calls whose tool runtime was not invoked receive a `cancelled` outcome and a
+matching tool result for their `callId`. Started calls retain their actual
+outcome. A tool that cannot cancel must still report its actual outcome or
+remain subject to reconciliation after a restart.
 
 The Session checkpoint and execution checkpoint serve different purposes. The
 Session checkpoint stores model context after a Turn settles. New Turns and

@@ -64,6 +64,23 @@ pub(super) fn execute_tool_batch<O: Observer>(
     let mut context_injections = Vec::new();
     let mut replan_after_injection = false;
     for call in calls {
+        if control.is_cancel_requested() {
+            record_tool_result(
+                &call,
+                ToolExecutionOutcome::cancelled(
+                    "Turn cancelled before this tool call started; the call was not executed.",
+                ),
+                max_output_bytes,
+                session,
+                observer,
+                turn_id,
+                step,
+                journal,
+                &mut executed,
+            )?;
+            continue;
+        }
+
         if let Some(turn_id) = turn_id {
             crate::execution::append_if_present(
                 journal,
@@ -83,7 +100,11 @@ pub(super) fn execute_tool_batch<O: Observer>(
         }
         .with_known_context_injections(session.context_injections())
         .with_cancellation(control.cancellation_token());
-        let outcome = if replan_after_injection {
+        let outcome = if control.is_cancel_requested() {
+            ToolExecutionOutcome::cancelled(
+                "Turn cancelled before this tool call executed; the call was not run.",
+            )
+        } else if replan_after_injection {
             ToolExecutionOutcome::deferred(
                 "Host added workspace instructions. Review them, then retry the remaining operation.",
             )
@@ -93,39 +114,17 @@ pub(super) fn execute_tool_batch<O: Observer>(
         replan_after_injection |= !outcome.context_messages.is_empty();
         context_messages.extend(outcome.context_messages.iter().cloned());
         context_injections.extend(outcome.context_injections.iter().cloned());
-        let is_error = outcome.status.is_error();
-        let content = outcome.content.clone();
-        let truncated = outcome.output_truncated || content.len() > max_output_bytes;
-        let content = truncate_utf8(content, max_output_bytes);
-
-        observer.observe(&Event::ToolFinished {
-            call_id: call.id.clone(),
-            name: call.name.clone(),
-            arguments: call.arguments.clone(),
-            content: content.clone(),
-            is_error,
-            truncated,
-            outcome: Some(outcome.status),
-        });
-        if let Some(turn_id) = turn_id {
-            crate::execution::append_if_present(
-                journal,
-                crate::ExecutionJournalEntry::ToolCallFinished {
-                    turn_id: turn_id.clone(),
-                    step,
-                    call_id: call.id.clone(),
-                    outcome: outcome.clone(),
-                },
-            )?;
-        }
-        session.push(mini_agent_protocol::Message::Tool {
-            call_id: call.id,
-            name: call.name.clone(),
-            content: content.clone(),
-            is_error,
-            outcome: Some(outcome.status),
-        });
-        executed.push((call.name, call.arguments, content));
+        record_tool_result(
+            &call,
+            outcome,
+            max_output_bytes,
+            session,
+            observer,
+            turn_id,
+            step,
+            journal,
+            &mut executed,
+        )?;
     }
     let candidate_injections = std::mem::take(&mut context_injections);
     for (index, text) in context_messages.into_iter().enumerate() {
@@ -169,8 +168,8 @@ pub(super) fn recover_tool_batch<O: Observer>(
     let mut context_messages = Vec::new();
     let mut context_injections = Vec::new();
     for call in batch.calls {
-        let outcome = if let Some(outcome) = call.outcome {
-            outcome
+        let (outcome, started) = if let Some(outcome) = call.outcome {
+            (outcome, call.started)
         } else {
             crate::execution::append_if_present(
                 journal,
@@ -183,12 +182,13 @@ pub(super) fn recover_tool_batch<O: Observer>(
             .map_err(ToolBatchRecoveryError::Journal)?;
             let request = recovery_request(&call.call, context, control)
                 .with_known_context_injections(session.context_injections());
-            tools.execute_outcome(&request)
+            (tools.execute_outcome(&request), true)
         };
         append_recovered_call(
             &intent,
             call.call,
             outcome,
+            started,
             max_output_bytes,
             session,
             observer,
@@ -235,6 +235,7 @@ fn append_recovered_call<O: Observer>(
     intent: &crate::ToolBatchIntent,
     call: ToolCall,
     outcome: ToolExecutionOutcome,
+    started: bool,
     max_output_bytes: usize,
     session: &mut SessionState,
     observer: &mut O,
@@ -250,16 +251,9 @@ fn append_recovered_call<O: Observer>(
     let is_error = outcome.status.is_error();
     let truncated = outcome.output_truncated || content.len() > max_output_bytes;
     let content = truncate_utf8(content, max_output_bytes);
-    observer.observe(&Event::ToolStarted { call: call.clone() });
-    observer.observe(&Event::ToolFinished {
-        call_id: call.id.clone(),
-        name: call.name.clone(),
-        arguments: call.arguments.clone(),
-        content: content.clone(),
-        is_error,
-        truncated,
-        outcome: Some(outcome.status),
-    });
+    if started {
+        observer.observe(&Event::ToolStarted { call: call.clone() });
+    }
     crate::execution::append_if_present(
         journal,
         crate::ExecutionJournalEntry::ToolCallFinished {
@@ -270,6 +264,15 @@ fn append_recovered_call<O: Observer>(
         },
     )
     .map_err(ToolBatchRecoveryError::Journal)?;
+    observer.observe(&Event::ToolFinished {
+        call_id: call.id.clone(),
+        name: call.name.clone(),
+        arguments: call.arguments.clone(),
+        content: content.clone(),
+        is_error,
+        truncated,
+        outcome: Some(outcome.status),
+    });
     session.push(mini_agent_protocol::Message::Tool {
         call_id: call.id,
         name: call.name.clone(),
@@ -278,6 +281,53 @@ fn append_recovered_call<O: Observer>(
         outcome: Some(outcome.status),
     });
     executed.push((call.name, call.arguments, content));
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_tool_result<O: Observer>(
+    call: &ToolCall,
+    outcome: ToolExecutionOutcome,
+    max_output_bytes: usize,
+    session: &mut SessionState,
+    observer: &mut O,
+    turn_id: Option<&TurnId>,
+    step: usize,
+    journal: &mut Option<&mut dyn crate::ExecutionJournalSink>,
+    executed: &mut Vec<(String, serde_json::Value, String)>,
+) -> Result<(), String> {
+    if let Some(turn_id) = turn_id {
+        crate::execution::append_if_present(
+            journal,
+            crate::ExecutionJournalEntry::ToolCallFinished {
+                turn_id: turn_id.clone(),
+                step,
+                call_id: call.id.clone(),
+                outcome: outcome.clone(),
+            },
+        )?;
+    }
+    let is_error = outcome.status.is_error();
+    let content = outcome.content.clone();
+    let truncated = outcome.output_truncated || content.len() > max_output_bytes;
+    let content = truncate_utf8(content, max_output_bytes);
+    observer.observe(&Event::ToolFinished {
+        call_id: call.id.clone(),
+        name: call.name.clone(),
+        arguments: call.arguments.clone(),
+        content: content.clone(),
+        is_error,
+        truncated,
+        outcome: Some(outcome.status),
+    });
+    session.push(mini_agent_protocol::Message::Tool {
+        call_id: call.id.clone(),
+        name: call.name.clone(),
+        content: content.clone(),
+        is_error,
+        outcome: Some(outcome.status),
+    });
+    executed.push((call.name.clone(), call.arguments.clone(), content));
     Ok(())
 }
 

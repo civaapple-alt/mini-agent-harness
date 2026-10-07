@@ -217,6 +217,12 @@ await client.set_goal("Review the repository and report verified findings.")
 rules, Plan locks, tool availability, sandbox checks, or high-risk approval.
 An accepted `interrupt_turn()` request also does not mean that the Turn is
 settled. Continue streaming or call `read_turn()` until the terminal result.
+Core cancels its pending model future immediately when the interrupt reaches
+the run loop; a provider may continue remote work after the local request is
+closed. `MiniAgentClient.stop(force=True)` first tries the App Server's normal
+EOF shutdown, then sends termination signals to the isolated POSIX process
+group if it does not exit. Its Boolean result reports confirmed process exit,
+not just that shutdown was requested.
 
 `fork_thread()` creates an in-process logical branch. `fork_session()` creates
 an independent Session from a complete checkpoint. Neither copy an in-flight

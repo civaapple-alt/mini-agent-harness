@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import os
+import signal
+import sys
+
 import pytest
 from mini_agent import MiniAgentClient
+from mini_agent import client as client_module
 from mini_agent.rpc_metrics import MAX_RPC_METHODS, RpcMetrics
 
 
@@ -89,3 +95,83 @@ async def test_process_id_and_graceful_stop_keep_unconfirmed_process_attached():
     assert await client.stop(force=False, timeout=0.1) is False
     assert client.is_running
     assert process.terminated is False
+
+
+@pytest.mark.asyncio
+async def test_forced_stop_signals_the_isolated_app_server_process_group(monkeypatch):
+    class FakeStdin:
+        def __init__(self):
+            self.closed = False
+
+        def is_closing(self):
+            return self.closed
+
+        def close(self):
+            self.closed = True
+
+    class FakeProcess:
+        def __init__(self):
+            self.pid = 5678
+            self.returncode = None
+            self.stdin = FakeStdin()
+            self.exited = asyncio.Event()
+
+        async def wait(self):
+            await self.exited.wait()
+
+        def terminate(self):
+            raise AssertionError("POSIX shutdown should target the process group")
+
+        def kill(self):
+            raise AssertionError("POSIX shutdown should target the process group")
+
+    process = FakeProcess()
+    signals = []
+
+    def signal_group(process_group_id, signal_number):
+        assert process_group_id == process.pid
+        signals.append(signal_number)
+        if signal_number == signal.SIGKILL:
+            process.returncode = -signal.SIGKILL
+            process.exited.set()
+
+    monkeypatch.setattr(client_module.os, "killpg", signal_group)
+    client = MiniAgentClient()
+    client._proc = process
+
+    assert await client.stop(force=True, timeout=0.01) is True
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert client.process_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+async def test_process_group_signal_stops_nested_app_server_child(tmp_path):
+    marker = tmp_path / "nested-child-survived"
+    child = (
+        "import pathlib,sys,time; time.sleep(0.5); "
+        "pathlib.Path(sys.argv[1]).write_text('alive')"
+    )
+    parent = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-c',sys.argv[2],sys.argv[1]]); "
+        "time.sleep(30)"
+    )
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        parent,
+        str(marker),
+        child,
+        start_new_session=True,
+    )
+    try:
+        await asyncio.sleep(0.05)
+        client_module._signal_app_server(process, signal.SIGTERM)
+        await asyncio.wait_for(process.wait(), timeout=1.0)
+        await asyncio.sleep(0.6)
+        assert not marker.exists()
+    finally:
+        if process.returncode is None:
+            client_module._signal_app_server(process, signal.SIGKILL)
+            await asyncio.wait_for(process.wait(), timeout=1.0)

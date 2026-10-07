@@ -37,13 +37,26 @@ PowerShell 7 and confirm `pwsh` is on `PATH` before using shell tools.
 
 The shell tool runs in the App Server's blocking tool boundary. Current
 Windows native runs attach the PowerShell process tree to a Job Object. A
-`turn/interrupt` request first publishes a host-local cancellation token, so a
-running shell is terminated before the normal worker command is consumed. The
-stop request should therefore settle before the shell's 120-second deadline;
-if it does not, inspect the runtime status and App Server stderr for a process
-termination failure. Steering an active Turn is admitted directly into the
-bounded control queue and may be acknowledged before the current shell
-checkpoint returns.
+`turn/interrupt` request publishes a host-local cancellation token; Core races
+it against the active model future and drops that local future without waiting
+for a long reasoning response. The provider may continue remote computation
+after the local request is cancelled. A running cancellable tool receives the
+same signal. Before each next call in a tool batch, Core checks cancellation,
+records calls that never started as `cancelled`, and keeps the real result for
+calls that did start. This closes every model `callId` without claiming that
+an uncertain side effect did not happen.
+
+Steering an active Turn is admitted directly into the bounded control queue and
+may be acknowledged before the current tool checkpoint returns. Stop takes
+precedence over a steer that has not reached a later model context. For
+macOS/Linux Ctrl+C, the Gateway first rejects new Turns and issues interrupts,
+then uses one shared 10-second window to collect terminal events and
+authoritative Turn/checkpoint reads. An unresolved Turn remains recoverable;
+the Gateway does not replay it. SDK shutdown then closes the isolated App
+Server process group, with up to 5 seconds for graceful and forced cleanup.
+If a manual Stop remains unresolved, inspect runtime status and App Server
+stderr, then reconnect and let recovery read the persisted Turn rather than
+resending the prompt or a tool call.
 
 ## A noninteractive tool call is denied
 

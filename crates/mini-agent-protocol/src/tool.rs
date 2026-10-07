@@ -223,6 +223,7 @@ pub enum ToolExecutionStatus {
     NeedsApproval,
     Deferred,
     Retryable,
+    Cancelled,
 }
 
 impl ToolExecutionStatus {
@@ -303,6 +304,16 @@ impl ToolExecutionOutcome {
     pub fn retryable(content: impl Into<String>) -> Self {
         Self {
             status: ToolExecutionStatus::Retryable,
+            content: content.into(),
+            output_truncated: false,
+            context_messages: Vec::new(),
+            context_injections: Vec::new(),
+        }
+    }
+
+    pub fn cancelled(content: impl Into<String>) -> Self {
+        Self {
+            status: ToolExecutionStatus::Cancelled,
             content: content.into(),
             output_truncated: false,
             context_messages: Vec::new(),

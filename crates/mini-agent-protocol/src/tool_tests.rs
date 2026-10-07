@@ -24,6 +24,7 @@ fn execution_statuses_round_trip_without_collapsing_policy() {
         ToolExecutionStatus::NeedsApproval,
         ToolExecutionStatus::Deferred,
         ToolExecutionStatus::Retryable,
+        ToolExecutionStatus::Cancelled,
     ] {
         let outcome = ToolExecutionOutcome {
             status,

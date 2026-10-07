@@ -858,16 +858,6 @@ impl<M: Model> Harness<M> {
                 ));
             }
 
-            if control.take_cancel_requested() {
-                return Ok(finish(
-                    std::mem::take(&mut final_text),
-                    self.session.messages().to_vec(),
-                    step,
-                    StopReason::Cancelled,
-                    observer,
-                ));
-            }
-
             if let Some(execution) = execution_context.as_ref() {
                 crate::execution::append_if_present(
                     &mut journal,

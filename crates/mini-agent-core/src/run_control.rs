@@ -127,4 +127,8 @@ impl RunControl {
     pub(super) fn take_cancel_requested(&self) -> bool {
         self.cancel_requested.swap(false, Ordering::AcqRel)
     }
+
+    pub(crate) fn is_cancel_requested(&self) -> bool {
+        self.cancel_requested.load(Ordering::Acquire)
+    }
 }

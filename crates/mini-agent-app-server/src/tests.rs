@@ -2433,6 +2433,56 @@ async fn interrupt_reaches_a_synchronous_tool_before_the_request_timeout() {
 }
 
 #[tokio::test]
+async fn interrupt_cancels_a_pending_model_request_without_waiting_for_provider() {
+    let release = Arc::new(Notify::new());
+    let server = server(BlockingModel { release });
+    let mut events = server.subscribe();
+    let turn_id = match server
+        .turn_start_for(
+            ThreadId::new("thread-1"),
+            TurnStart::new(TurnInput::new(TurnInputMode::Start, "long model request")),
+        )
+        .await
+        .unwrap()
+    {
+        TurnSubmission::Started { turn_id } => turn_id,
+        other => panic!("unexpected submission: {other:?}"),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while !matches!(
+            events.recv().await.unwrap().event,
+            Event::ModelStarted { .. }
+        ) {}
+    })
+    .await
+    .expect("the never-released model request should start");
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        server.turn_cancel_for(ThreadId::new("thread-1"), TurnCancel::new(turn_id.clone())),
+    )
+    .await
+    .expect("interrupt admission should not wait for the model")
+    .unwrap();
+
+    let finished = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if let Event::TurnFinished { status } = events.recv().await.unwrap().event {
+                break status;
+            }
+        }
+    })
+    .await
+    .expect("cancellation should settle without provider completion");
+    assert_eq!(finished, mini_agent_protocol::TurnStatus::Cancelled);
+    assert_eq!(
+        server.turn_read(turn_id).await.unwrap().status,
+        mini_agent_protocol::TurnStatus::Cancelled
+    );
+}
+
+#[tokio::test]
 async fn rejects_idle_steer_and_cancel_without_starting_a_second_loop() {
     let server = server(DoneModel);
     assert_eq!(
