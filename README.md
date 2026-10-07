@@ -39,10 +39,10 @@ agent runtime = thin Agent Loop + thick Control Plane
 ### 使用发布包
 
 从 [GitHub Releases](https://github.com/civaapple-alt/mini-agent-harness/releases)
-下载对应平台的归档并校验 `.sha256`。本分支之后创建的版本归档会包含
-`mini-agent` 和 `mini-agent-app-server`；使用 Python SDK 或 Web Studio 时，将两者
-都放入 `PATH`。已发布的 v1.0.0 归档早于此打包变更，只包含 CLI。支持 Linux
-x86_64、macOS x86_64、macOS arm64 和 Windows x86_64。
+下载对应平台的归档并校验 `.sha256`。v1.1.0 起，平台归档提供
+`mini-agent-app-server`，供 Python SDK 和 Web Studio 启动；需要交互式 CLI 时仍可从源码
+构建。v1.0.0 归档只包含 CLI，不含 App Server。支持 Linux x86_64、macOS x86_64、
+macOS arm64 和 Windows x86_64。
 
 ### 从源码构建
 

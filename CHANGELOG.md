@@ -5,6 +5,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
 
 ## [Unreleased]
 
+No changes yet.
+
+## [1.1.0] - 2026-10-07
+
 ### Changes
 
 - Expose the managed App Server PID and bounded per-method JSON-RPC aggregates
@@ -48,7 +52,10 @@ All notable changes to Mini Agent Harness are documented here. The project follo
   `scheduled_task`, and clarify its delay-marker behavior.
 - Maintain the Python SDK, its documentation and tests, and generic App Server
   Cookbook examples in Harness. Release the SDK wheel/sdist and package the
-  App Server beside the CLI for future releases.
+  App Server executable for Python SDK and Web Studio use.
+- Ship App Server-only platform archives for the SDK and Web Studio; keep the
+  interactive CLI available to source builders without including it in release
+  archives.
 
 ## [1.0.0] - 2026-10-04
 

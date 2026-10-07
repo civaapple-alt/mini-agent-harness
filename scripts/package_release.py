@@ -17,9 +17,8 @@ ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Package Mini Agent CLI and App Server release binaries"
+        description="Package the Mini Agent App Server release binary"
     )
-    parser.add_argument("--binary", required=True, type=pathlib.Path)
     parser.add_argument("--app-server-binary", required=True, type=pathlib.Path)
     parser.add_argument("--target", required=True)
     parser.add_argument("--version", required=True)
@@ -28,7 +27,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def package_release(
-    binary: pathlib.Path,
     app_server_binary: pathlib.Path,
     target: str,
     version: str,
@@ -36,8 +34,6 @@ def package_release(
 ) -> tuple[pathlib.Path, pathlib.Path]:
     if not SEMVER.fullmatch(version):
         raise ValueError(f"version is not strict SemVer: {version}")
-    if not binary.is_file():
-        raise ValueError(f"release binary does not exist: {binary}")
     if not app_server_binary.is_file():
         raise ValueError(f"App Server binary does not exist: {app_server_binary}")
     for name in PUBLIC_FILES:
@@ -45,7 +41,7 @@ def package_release(
             raise ValueError(f"release input does not exist: {ROOT / name}")
 
     output.mkdir(parents=True, exist_ok=True)
-    package_name = f"mini-agent-v{version}-{target}"
+    package_name = f"mini-agent-app-server-v{version}-{target}"
     windows = "windows" in target
     archive = output / f"{package_name}{'.zip' if windows else '.tar.gz'}"
     checksum = archive.with_name(f"{archive.name}.sha256")
@@ -53,10 +49,7 @@ def package_release(
         raise ValueError(f"release output already exists: {archive}")
 
     suffix = ".exe" if windows else ""
-    members = [
-        (binary, f"mini-agent{suffix}", 0o755),
-        (app_server_binary, f"mini-agent-app-server{suffix}", 0o755),
-    ]
+    members = [(app_server_binary, f"mini-agent-app-server{suffix}", 0o755)]
     members.extend((ROOT / name, name, 0o644) for name in PUBLIC_FILES)
     if windows:
         write_zip(archive, package_name, members)
@@ -117,7 +110,6 @@ def main() -> int:
     arguments = parse_args()
     try:
         archive, checksum = package_release(
-            arguments.binary,
             arguments.app_server_binary,
             arguments.target,
             arguments.version,

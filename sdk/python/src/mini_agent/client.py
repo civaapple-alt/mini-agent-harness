@@ -90,6 +90,7 @@ def _signal_app_server(process: Any, signal_number: int) -> None:
     except Exception:  # noqa: BLE001, S110
         pass
 
+
 DEFAULT_REQUEST_TIMEOUT_SECS = 30.0
 APP_SERVER_PROTOCOL_VERSION = 2
 STREAM_EVENT_QUEUE_LIMIT = 512

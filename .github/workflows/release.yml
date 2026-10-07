@@ -47,22 +47,18 @@ jobs:
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            binary: mini-agent
             app_server_binary: mini-agent-app-server
           - name: macos-x86_64
             os: macos-14
             target: x86_64-apple-darwin
-            binary: mini-agent
             app_server_binary: mini-agent-app-server
           - name: macos-aarch64
             os: macos-14
             target: aarch64-apple-darwin
-            binary: mini-agent
             app_server_binary: mini-agent-app-server
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary: mini-agent.exe
             app_server_binary: mini-agent-app-server.exe
     steps:
       - uses: actions/checkout@v4
@@ -72,17 +68,17 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - name: Build
-        run: cargo build --release --locked -p mini-agent-cli -p mini-agent-app-server --target ${{ matrix.target }}
+        run: cargo build --release --locked -p mini-agent-app-server --target ${{ matrix.target }}
       - name: Package
-        run: python scripts/package_release.py --binary target/${{ matrix.target }}/release/${{ matrix.binary }} --app-server-binary target/${{ matrix.target }}/release/${{ matrix.app_server_binary }} --target ${{ matrix.target }} --version ${{ needs.verify.outputs.version }} --output dist
+        run: python scripts/package_release.py --app-server-binary target/${{ matrix.target }}/release/${{ matrix.app_server_binary }} --target ${{ matrix.target }} --version ${{ needs.verify.outputs.version }} --output dist
       - uses: actions/upload-artifact@v4
         with:
-          name: mini-agent-${{ matrix.name }}
+          name: mini-agent-app-server-${{ matrix.name }}
           path: |
-            dist/mini-agent-*.tar.gz
-            dist/mini-agent-*.tar.gz.sha256
-            dist/mini-agent-*.zip
-            dist/mini-agent-*.zip.sha256
+            dist/mini-agent-app-server-*.tar.gz
+            dist/mini-agent-app-server-*.tar.gz.sha256
+            dist/mini-agent-app-server-*.zip
+            dist/mini-agent-app-server-*.zip.sha256
           if-no-files-found: error
 
   build-python-sdk:
@@ -133,10 +129,10 @@ jobs:
           tag_name: ${{ needs.verify.outputs.tag }}
           generate_release_notes: true
           files: |
-            mini-agent-*.tar.gz
-            mini-agent-*.tar.gz.sha256
-            mini-agent-*.zip
-            mini-agent-*.zip.sha256
+            mini-agent-app-server-*.tar.gz
+            mini-agent-app-server-*.tar.gz.sha256
+            mini-agent-app-server-*.zip
+            mini-agent-app-server-*.zip.sha256
             mini_agent-*.whl
             mini_agent-*.tar.gz
             SHA256SUMS

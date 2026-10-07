@@ -8,17 +8,17 @@ Agent Loop、Session history、授权 grant 或恢复策略。
 
 SDK 由 `mini-agent-harness` 仓库维护，不发布到 PyPI。历史 `1.0.0` wheel 附在
 [`mini-agent-web` v1.0.0 GitHub Release](https://github.com/civaapple-alt/mini-agent-web/releases/tag/v1.0.0)；
-后续版本的 wheel 和 sdist 附在 Harness Release。下载对应版本的 wheel，进入保存该文件
+从 `1.1.0` 起，wheel 和 sdist 附在 Harness Release。下载对应版本的 wheel，进入保存该文件
 的目录后安装。在 macOS 或 Linux 上运行：
 
 ```bash
-python3 -m pip install ./mini_agent-1.0.0-py3-none-any.whl
+python3 -m pip install ./mini_agent-1.1.0-py3-none-any.whl
 ```
 
 Windows PowerShell 运行：
 
 ```powershell
-py -3 -m pip install .\mini_agent-1.0.0-py3-none-any.whl
+py -3 -m pip install .\mini_agent-1.1.0-py3-none-any.whl
 ```
 
 从仓库根目录构建当前 Harness 源码的 wheel 和 sdist：

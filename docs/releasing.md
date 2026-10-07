@@ -32,9 +32,10 @@ replace the existing release assets.
 
 The Python SDK is versioned and released with Harness. The companion
 `mini-agent-web` repository has its own Gateway/frontend release version and
-pins a compatible released SDK wheel in `uv.lock`; its release does not build
-or publish SDK source. The historical SDK 1.0.0 wheel remains attached to the
-Web v1.0.0 release. New SDK artifacts are attached to Harness releases.
+uses a sibling Harness checkout as an editable SDK source during development.
+Its GitHub Release does not attach SDK artifacts. The historical SDK 1.0.0
+wheel remains attached to the Web v1.0.0 release; new SDK artifacts are
+attached to Harness releases.
 
 ## Before changing the version
 
@@ -67,7 +68,7 @@ Use strict SemVer and the `v` prefix for the Git tag:
 
 ```sh
 rg -n '^version = |mini-agent-core = ' Cargo.toml crates/*/Cargo.toml
-rg -n '^## \[(Unreleased|1\.0\.0)\]' CHANGELOG.md
+rg -n '^## \[(Unreleased|1\.1\.0)\]' CHANGELOG.md
 ```
 
 Keep `Unreleased` at the top. Move the completed entries into the dated
@@ -83,7 +84,8 @@ release is prepared:
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 python3 scripts/line_budget.py
-cargo build --release --locked -p mini-agent-cli -p mini-agent-app-server
+python3 scripts/test_package_release.py
+cargo build --release --locked -p mini-agent-app-server
 python3 scripts/check_sdk_version.py
 uv sync --project sdk/python --locked --group dev
 uv run --project sdk/python --locked ruff check sdk/python/src sdk/python/tests cookbook/python-demo
@@ -98,17 +100,29 @@ Run affected package tests locally. The full workspace test matrix is evidence
 from CI; do not run `cargo test --workspace` locally without explicit approval.
 The release tag must point to the commit whose CI matrix passed.
 
-Exercise the built binary without contacting a provider:
+The release archive contains the App Server used by the SDK and Web Studio.
+Verify it through the SDK without contacting a provider:
 
 ```sh
-./target/release/mini-agent --version
+MINI_AGENT_APP_SERVER_PATH="$PWD/target/release/mini-agent-app-server" uv run --project sdk/python --locked python - <<'PY'
+import asyncio
+from mini_agent import MiniAgentClient
+
+async def main():
+    async with MiniAgentClient() as client:
+        result = await client.initialize()
+        print(result["serverVersion"])
+
+asyncio.run(main())
+PY
 ```
 
-On Windows, use the equivalent `target\\release\\mini-agent.exe` commands.
+On Windows, point `MINI_AGENT_APP_SERVER_PATH` at the extracted
+`mini-agent-app-server.exe` before running the SDK initialization check.
 The Windows environment also needs PowerShell 7 (`pwsh`) for shell-tool
 coverage. Do not use a paid provider call as a release gate unless it has been
-explicitly authorized; the workspace tests and binary version check are the
-default release checks.
+explicitly authorized; the workspace tests and SDK initialization check are
+the default release checks.
 
 Review the package inputs before tagging:
 
@@ -129,10 +143,11 @@ practical; this is review guidance rather than a hard limit. Run
 `python3 scripts/line_budget.py --base <merge-base> --check-delta --json` to
 report the increment and check all three absolute hard limits.
 
-Each platform archive contains both `mini-agent` and `mini-agent-app-server`,
-plus `README.md`, `LICENSE`, and `CHANGELOG.md`. `scripts/package_release.py`
-creates deterministic archives and their `.sha256` files. The SDK release job
-also builds a wheel and sdist and publishes their `SHA256SUMS` file.
+Each platform archive contains `mini-agent-app-server` plus `README.md`,
+`LICENSE`, and `CHANGELOG.md`; it does not include the interactive CLI.
+`scripts/package_release.py` creates deterministic archives named
+`mini-agent-app-server-v<version>-<target>` and their `.sha256` files. The SDK
+release job also builds a wheel and sdist and publishes their `SHA256SUMS` file.
 
 ## Commit and tag
 
@@ -141,7 +156,7 @@ must point at the exact commit that passed local review and CI:
 
 ```sh
 git status --short
-git add Cargo.toml Cargo.lock crates/*/Cargo.toml README.md CHANGELOG.md docs scripts/line_budget.py
+git add Cargo.toml Cargo.lock README.md CHANGELOG.md docs/releasing.md sdk/python/README.md .github/workflows/release.yml scripts/package_release.py scripts/test_package_release.py
 git commit -m "release: prepare v<version>"
 git push origin main
 git tag -a v<version> -m "Release v<version>"
@@ -162,9 +177,9 @@ The workflow:
 
 1. checks that the tag is strict SemVer and exactly matches the root Cargo
    version;
-2. builds the CLI and App Server for Linux x86_64, macOS x86_64, macOS arm64,
-   and Windows x86_64;
-3. packages both executables with the public release files;
+2. builds the App Server for Linux x86_64, macOS x86_64, macOS arm64, and
+   Windows x86_64;
+3. packages the App Server with the public release files;
 4. builds the Python SDK wheel and sdist and verifies all downloaded checksums;
 5. publishes the GitHub Release and generated release notes.
 
@@ -177,35 +192,44 @@ tag, not for publishing a different commit under the same tag.
 
 After the workflow succeeds, open the
 [Harness Releases page](https://github.com/civaapple-alt/mini-agent-harness/releases)
-and verify that the new release contains all four platform archives and matching
-`.sha256` files, the Python wheel and sdist, and `SHA256SUMS`. The existing
-v1.0.0 release predates the SDK and App Server packaging changes. Download at
-least one archive from each operating system family when possible.
+and verify that the new release contains all four App Server platform archives
+and matching `.sha256` files, the Python wheel and sdist, and `SHA256SUMS`.
+The existing v1.0.0 release contains only CLI archives; v1.1.0 is the first
+release whose platform archives are intended for SDK and Web Studio use.
+Download at least one archive from each operating system family when possible.
 
 On macOS/Linux:
 
 ```sh
-shasum -a 256 -c mini-agent-v<version>-<target>.tar.gz.sha256
-tar -xzf mini-agent-v<version>-<target>.tar.gz
-./mini-agent-v<version>-<target>/mini-agent --version
+shasum -a 256 -c mini-agent-app-server-v<version>-<target>.tar.gz.sha256
+tar -xzf mini-agent-app-server-v<version>-<target>.tar.gz
+MINI_AGENT_APP_SERVER_PATH="$PWD/mini-agent-app-server-v<version>-<target>/mini-agent-app-server" uv run --project sdk/python --locked python - <<'PY'
+import asyncio
+from mini_agent import MiniAgentClient
+
+async def main():
+    async with MiniAgentClient() as client:
+        result = await client.initialize()
+        print(result["serverVersion"])
+
+asyncio.run(main())
+PY
 ```
 
 On Windows PowerShell:
 
 ```powershell
-Get-FileHash .\\mini-agent-v<version>-x86_64-pc-windows-msvc.zip -Algorithm SHA256
-Expand-Archive .\\mini-agent-v<version>-x86_64-pc-windows-msvc.zip .\\mini-agent-v<version>
-.\\mini-agent-v<version>\\mini-agent.exe --version
+Get-FileHash .\\mini-agent-app-server-v<version>-x86_64-pc-windows-msvc.zip -Algorithm SHA256
+Expand-Archive .\\mini-agent-app-server-v<version>-x86_64-pc-windows-msvc.zip .\\mini-agent-app-server-v<version>
 ```
 
-Also verify that the extracted archive contains the `mini-agent-app-server`
-binary. It speaks JSON-RPC over stdio and is launched by the SDK; it is not a
-standalone interactive command.
-
-Confirm that `--version` reports the tagged version. Then announce the release with a
-short summary, supported platforms, upgrade instructions, and known
-limitations. Link to the GitHub Release rather than attaching unverified
-builds elsewhere.
+On Windows, install the matching SDK wheel, set
+`$env:MINI_AGENT_APP_SERVER_PATH` to the extracted
+`mini-agent-app-server.exe`, and run the same `initialize()` check. Confirm the
+archive contains only the App Server executable and public files, and that
+`serverVersion` matches the tag. Then announce the release with a short summary,
+supported platforms, upgrade instructions, and known limitations. Link to the
+GitHub Release rather than attaching unverified builds elsewhere.
 
 ## Rollback and follow-up
 
