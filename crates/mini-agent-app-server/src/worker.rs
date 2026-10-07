@@ -2038,9 +2038,6 @@ pub(super) async fn worker_loop<M>(
                         goal_budget_exhausted =
                             goal.status == mini_agent_host::GoalStatus::BudgetLimited;
                     }
-                    if let Some(event) = sink.take_pending_finish() {
-                        sink.send_event(event);
-                    }
                     if let Some(goal_id) = goal_id {
                         if goal_turn_completed && !goal_budget_exhausted && !timeout_requested {
                             let settled =
@@ -2084,6 +2081,12 @@ pub(super) async fn worker_loop<M>(
                         }
                     }
                     runtime_actor::advance_revision(&mut runtime, &runtime_revision);
+                    // A terminal event lets clients issue follow-up mutations
+                    // against the settled Turn. Publish it only after its
+                    // persisted Turn and Goal state have visible revisions.
+                    if let Some(event) = sink.take_pending_finish() {
+                        sink.send_event(event);
+                    }
                     let current_status = runtime_status.lock().unwrap().clone();
                     let should_publish_terminal = matches!(
                         current_status.phase,

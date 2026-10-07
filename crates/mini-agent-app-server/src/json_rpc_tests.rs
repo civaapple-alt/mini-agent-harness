@@ -2693,8 +2693,8 @@ async fn rejects_thread_settings_updates_while_goal_turn_is_running() {
     );
 
     release.notify_one();
-    wait_for_turn_finished(&mut connection).await;
     wait_for_goal_status(&mut connection, "blocked").await;
+    wait_for_turn_finished(&mut connection).await;
     let cleared = rpc_call(
         &mut connection,
         4,
