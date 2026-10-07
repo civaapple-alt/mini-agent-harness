@@ -682,12 +682,14 @@ async fn rpc_result<M: Model + Send + 'static>(
     connection: &mut AppServerConnection<M>,
     request: JsonRpcRequest,
 ) -> Value {
-    connection
-        .handle_request(request)
-        .await
-        .unwrap()
-        .result
-        .unwrap()
+    let method = request.method.clone();
+    let response = connection.handle_request(request).await.unwrap();
+    response.result.unwrap_or_else(|| {
+        panic!(
+            "JSON-RPC method {method} returned an error: {:?}",
+            response.error
+        )
+    })
 }
 
 async fn rpc_call<M: Model + Send + 'static>(
@@ -782,6 +784,36 @@ async fn wait_for_turn_finished_id<M: Model + Send + 'static>(
             break;
         }
     }
+}
+
+async fn wait_for_thread_idle<M: Model + Send + 'static>(
+    connection: &mut AppServerConnection<M>,
+    thread_id: &str,
+) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut request_id = 100;
+        loop {
+            let response = connection
+                .handle_request(JsonRpcRequest::request(
+                    request_id,
+                    METHOD_THREAD_READ,
+                    serde_json::json!({"threadId": thread_id}),
+                ))
+                .await
+                .unwrap();
+            request_id += 1;
+            if response
+                .result
+                .as_ref()
+                .is_some_and(|result| result["value"]["status"] == "idle")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("thread should become idle after TurnFinished");
 }
 
 #[derive(Clone, Copy)]
@@ -2118,7 +2150,7 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
     );
     initialize_connection(&mut connection, "session-fork-retry-test").await;
 
-    let _ = rpc_result(
+    let started = rpc_result(
         &mut connection,
         JsonRpcRequest::request(
             2,
@@ -2137,8 +2169,10 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
         ),
     )
     .await;
+    let turn_id = started["value"]["turn_id"].as_str().unwrap();
     wait_for_turn_finished(&mut connection).await;
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+    wait_for_thread_idle(&mut connection, &source_thread_id).await;
 
     let params = serde_json::json!({
         "sourceThreadId": source_thread_id,
@@ -2147,8 +2181,16 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
         "operationId": "child:forked-rpc-thread",
         "operationAttempt": 1
     });
-    let first = rpc_call(&mut connection, 3, METHOD_SESSION_FORK, params.clone()).await;
-    let retry = rpc_call(&mut connection, 4, METHOD_SESSION_FORK, params).await;
+    let settled = rpc_call(
+        &mut connection,
+        3,
+        METHOD_TURN_READ,
+        serde_json::json!({"turnId": turn_id}),
+    )
+    .await;
+    assert_eq!(settled["value"]["status"], "completed");
+    let first = rpc_call(&mut connection, 4, METHOD_SESSION_FORK, params.clone()).await;
+    let retry = rpc_call(&mut connection, 5, METHOD_SESSION_FORK, params).await;
     assert_eq!(first["value"]["method"], "exact");
     assert_eq!(retry["value"]["sessionId"], first["value"]["sessionId"]);
     assert_eq!(
@@ -2165,7 +2207,7 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
 
     let conflict = connection
         .handle_request(JsonRpcRequest::request(
-            5,
+            6,
             METHOD_SESSION_FORK,
             serde_json::json!({
                 "sourceThreadId": source_thread_id,
@@ -2184,8 +2226,11 @@ async fn session_fork_retry_reuses_persisted_result_before_core_preparation() {
     assert_eq!(data["childThreadId"], "forked-rpc-thread");
     assert_eq!(data["requestedContextPolicy"], "compact");
     assert_eq!(data["existingContextPolicy"], "exact");
-    assert_eq!(data["actionId"], 4);
-    assert_eq!(data["actionSequence"], 4);
+    assert_eq!(data["actionId"], retry["actionId"].as_u64().unwrap() + 1);
+    assert_eq!(
+        data["actionSequence"],
+        retry["actionSequence"].as_u64().unwrap() + 1
+    );
     connection.shutdown().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }

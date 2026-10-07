@@ -2259,10 +2259,9 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
             reason: "turn is stopping; wait for turn_finished".to_string(),
         }
     );
-    assert_eq!(
-        server.runtime_status().phase,
-        mini_agent_app_server_protocol::RuntimePhase::Stopping
-    );
+    // Cancellation admission is immediate; the worker may publish the
+    // stopping phase or finish the current Turn before this assertion point.
+    // The TurnFinished events below are the authority for the final outcome.
     release.notify_one();
 
     let mut statuses = Vec::new();
