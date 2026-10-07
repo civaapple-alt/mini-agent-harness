@@ -2285,10 +2285,15 @@ async fn routes_follow_up_steer_and_cancel_while_turn_is_running() {
             mini_agent_protocol::TurnStatus::Completed,
         ]
     );
-    assert_eq!(
-        server.runtime_status().phase,
-        mini_agent_app_server_protocol::RuntimePhase::Completed
-    );
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while server.runtime_status().phase
+            != mini_agent_app_server_protocol::RuntimePhase::Completed
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("runtime status should settle after the terminal TurnFinished event");
 }
 
 #[tokio::test]
